@@ -9,7 +9,8 @@ import {
   sendBadRequest,
   sendServerError,
   sendNotFound,
-  sendConflict
+  sendConflict,
+  sendActiveStructureLevels
 } from '../view/hrOrgStructureView.js';
 
 const router = express.Router();
@@ -224,6 +225,20 @@ router.get('/', async (req, res) => {
     });
   } catch (error) {
     sendServerError(res, req, 'Failed to fetch organization structures', error);
+  }
+});
+
+/**
+ * @route   GET /api/hr-org-structures/active/levels
+ * @desc    Get levels of the active organization structure
+ * @access  Public
+ */
+router.get('/active/levels', async (req, res) => {
+  try {
+    const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels();
+    sendActiveStructureLevels(res, req, structureWithLevels);
+  } catch (error) {
+    sendServerError(res, req, 'Failed to fetch active structure levels', error);
   }
 });
 

@@ -296,6 +296,72 @@ class HrOrgStructureModel {
   }
 
   /**
+   * Get the active organization structure
+   * @returns {Promise<Object|null>} Active organization structure or null
+   */
+  static async findActive() {
+    try {
+      const query = `SELECT 
+        s.STRUCTURE_ID,
+        s.ENTERPRISE_ID,
+        e.ENTERPRISE_NAME,
+        s.STRUCTURE_CODE,
+        s.STRUCTURE_NAME,
+        s.STRUCTURE_TYPE,
+        s.DESCRIPTION,
+        s.IS_ACTIVE,
+        s.CREATED_BY,
+        s.CREATED_DATE,
+        s.LAST_UPDATED_BY,
+        s.LAST_UPDATED_DATE,
+        s.LAST_UPDATE_LOGIN
+      FROM ${this.TABLE_NAME} s
+      LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+      WHERE s.IS_ACTIVE = 'Y'
+      ORDER BY s.CREATED_DATE DESC
+      FETCH FIRST 1 ROWS ONLY`;
+
+      const result = await this.executeQuery(query, []);
+      
+      if (result.rows && result.rows.length > 0) {
+        return result.rows[0];
+      }
+      return null;
+    } catch (error) {
+      console.error('Error in findActive:', error);
+      throw new Error(`Failed to fetch active organization structure: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get levels for the active organization structure
+   * @returns {Promise<Object|null>} Object with structure info and levels array, or null if no active structure
+   */
+  static async getActiveStructureLevels() {
+    try {
+      const activeStructure = await this.findActive();
+      
+      if (!activeStructure) {
+        return null;
+      }
+
+      // Fetch associated levels
+      const levels = await HrOrgHierarchyLevelModel.findAll({
+        structureId: activeStructure.structure_id || activeStructure.STRUCTURE_ID,
+        isActive: true // Only get active levels
+      });
+
+      return {
+        ...activeStructure,
+        levels: levels
+      };
+    } catch (error) {
+      console.error('Error in getActiveStructureLevels:', error);
+      throw new Error(`Failed to fetch active structure levels: ${error.message}`);
+    }
+  }
+
+  /**
    * Create a new organization structure
    * @param {Object} data - Organization structure data
    * @param {string} userId - User ID for audit fields

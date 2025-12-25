@@ -10,6 +10,7 @@ import businessUnitController from './feature/business_units/controller/business
 import departmentController from './feature/departments/controller/departmentController.js';
 import hrOrgHierarchyLevelController from './feature/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
 import hrOrgStructureController from './feature/hr_org_structures/controller/hrOrgStructureController.js';
+import orgUnitController from './feature/org_units/controller/orgUnitController.js';
 import structureLevelController from './feature/structure_levels/controller/structureLevelController.js';
 import enterpriseController from './feature/enterprises/controller/enterpriseController.js';
 
@@ -38,8 +39,12 @@ app.use('/api/enterprises', enterpriseController);
 // HR Organization Hierarchy Level routes
 app.use('/api/hr-org-hierarchy-levels', hrOrgHierarchyLevelController);
 
-// HR Organization Structure routes
+// HR Organization Structure routes (mounted first so specific routes like /active/levels match before parameterized routes)
 app.use('/api/hr-org-structures', hrOrgStructureController);
+
+// Org Units routes (structure-centric, mounted after structure routes)
+// Routes: /api/hr-org-structures/:structureId, /api/hr-org-structures/:structureId/levels, etc.
+app.use('/api/hr-org-structures', orgUnitController);
 
 // Structure Level routes
 app.use('/api/structure-levels', structureLevelController);
@@ -113,10 +118,18 @@ app.use((req, res) => {
       'DELETE /api/hr-org-hierarchy-levels/:id',
       'GET    /api/hr-org-structures',
       'GET    /api/hr-org-structures/:id',
+      'GET    /api/hr-org-structures/active/levels',
       'POST   /api/hr-org-structures',
       'PUT    /api/hr-org-structures/:id',
       'PATCH  /api/hr-org-structures/:id',
       'DELETE /api/hr-org-structures/:id',
+      'GET    /api/hr-org-structures/:structureId',
+      'GET    /api/hr-org-structures/:structureId/levels',
+      'GET    /api/hr-org-structures/:structureId/org-units',
+      'GET    /api/hr-org-structures/:structureId/org-units/parents',
+      'POST   /api/hr-org-structures/:structureId/org-units',
+      'PUT    /api/hr-org-structures/:structureId/org-units/:orgUnitId',
+      'GET    /api/hr-org-structures/:structureId/org-units/tree',
       'GET    /api/structure-levels',
       'GET    /api/structure-levels/:id',
       'POST   /api/structure-levels',

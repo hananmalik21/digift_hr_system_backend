@@ -365,3 +365,37 @@ export function sendConflict(res, req, message = 'Conflict', errorDetails = null
   res.status(409).json(response);
 }
 
+/**
+ * Send active structure with levels
+ * @param {Object} res - Express response object
+ * @param {Object} req - Express request object
+ * @param {Object|null} structureWithLevels - Structure object with levels array or null
+ */
+export function sendActiveStructureLevels(res, req, structureWithLevels) {
+  const startTime = req._startTime || Date.now();
+  const executionTime = Date.now() - startTime;
+
+  if (!structureWithLevels) {
+    return res.status(404).json({
+      success: false,
+      error: 'No active organization structure found',
+      meta: generateBaseMetadata(req, {
+        execution_time: `${executionTime}ms`,
+        error_code: 'NOT_FOUND'
+      })
+    });
+  }
+
+  const convertedStructure = convertKeysToSnakeCase(structureWithLevels);
+  
+  res.json({
+    success: true,
+    meta: generateBaseMetadata(req, {
+      execution_time: `${executionTime}ms`,
+      structure_id: convertedStructure.structure_id || structureWithLevels.STRUCTURE_ID,
+      levels_count: convertedStructure.levels ? convertedStructure.levels.length : 0
+    }),
+    data: convertedStructure
+  });
+}
+
