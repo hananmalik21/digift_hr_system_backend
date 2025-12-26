@@ -39,4 +39,4 @@ COPY . .
 EXPOSE 3000
 
 # Start command (adjust if your entry file is different)
-CMD ["node", "api-server.js"]
+CMD ["node", "index.js"]
