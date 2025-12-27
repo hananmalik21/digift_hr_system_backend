@@ -86,3 +86,56 @@ export function generatePageNumbers(currentPage, totalPages, maxPages = 7) {
   return pages;
 }
 
+/**
+ * Convert object keys to UPPERCASE
+ * Handles nested objects and arrays recursively
+ * @param {*} obj - Object, array, or primitive value to transform
+ * @returns {*} - Transformed object with UPPERCASE keys
+ */
+export function toUpperCaseKeys(obj) {
+  // Handle null and undefined
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(item => toUpperCaseKeys(item));
+  }
+
+  // Handle primitive types
+  if (typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Handle Date objects
+  if (obj instanceof Date) {
+    return obj;
+  }
+
+  // Handle objects
+  const transformed = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      transformed[key.toUpperCase()] = toUpperCaseKeys(obj[key]);
+    }
+  }
+  return transformed;
+}
+
+// export function toUpperCaseKeys(obj) {
+//   if (obj === null || obj === undefined) return obj;
+//   if (Array.isArray(obj)) return obj.map(item => toUpperCaseKeys(item));
+//   if (typeof obj !== 'object') return obj;
+//   if (obj instanceof Date) return obj;
+
+//   const transformed = {};
+//   for (const key in obj) {
+//     if (Object.prototype.hasOwnProperty.call(obj, key)) {
+//       transformed[key.toUpperCase()] = toUpperCaseKeys(obj[key]);
+//     }
+//   }
+//   return transformed;
+// }
+
+

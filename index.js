@@ -13,6 +13,13 @@ import hrOrgStructureController from './feature/hr_org_structures/controller/hrO
 import orgUnitController from './feature/org_units/controller/orgUnitController.js';
 import structureLevelController from './feature/structure_levels/controller/structureLevelController.js';
 import enterpriseController from './feature/enterprises/controller/enterpriseController.js';
+import jobFamilyController from './feature/job_families/controller/jobFamilyController.js';
+import gradeController from './feature/grades/controller/grades_controller.js';
+import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
+
+
+
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,9 +56,19 @@ app.use('/api/hr-org-structures', orgUnitController);
 // Structure Level routes
 app.use('/api/structure-levels', structureLevelController);
 
-// Enterprise-scoped HR Organization Hierarchy Level routes
-// Mount at root to access /enterprises/:enterpriseId/org-structures/:structureId/levels
 app.use('/', hrOrgHierarchyLevelController);
+
+
+app.use('/api/grades', gradeController);
+
+
+app.use('/api/job-families', jobFamilyController);
+
+
+app.use('/api/job-levels', jobLevelsController);
+
+
+
 
 // Initialize database pool on startup
 await createPool();
