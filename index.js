@@ -16,6 +16,8 @@ import enterpriseController from './feature/enterprises/controller/enterpriseCon
 import jobFamilyController from './feature/job_families/controller/jobFamilyController.js';
 import gradeController from './feature/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
+import positionsController from './feature/positions/controller/positions_controller.js';
+
 
 
 
@@ -66,6 +68,9 @@ app.use('/api/job-families', jobFamilyController);
 
 
 app.use('/api/job-levels', jobLevelsController);
+
+
+app.use('/api/positions', positionsController);
 
 
 
