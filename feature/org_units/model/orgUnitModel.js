@@ -529,8 +529,49 @@ class OrgUnitModel {
 
         await connection.execute(insertQuery, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
-        // Return freshly created record including parent info
-        return await this.findById(orgUnitId, structureId);
+        // Query the freshly created record using the same transaction connection
+        // This ensures we can see the uncommitted insert
+        const selectQuery = `SELECT 
+          ou.ORG_UNIT_ID,
+          ou.ORG_STRUCTURE_ID,
+          ou.ENTERPRISE_ID,
+          ou.LEVEL_CODE,
+          ou.ORG_UNIT_CODE,
+          ou.ORG_UNIT_NAME_EN,
+          ou.ORG_UNIT_NAME_AR,
+          ou.PARENT_ORG_UNIT_ID,
+          ou.IS_ACTIVE,
+          ou.MANAGER_NAME,
+          ou.MANAGER_EMAIL,
+          ou.MANAGER_PHONE,
+          ou.LOCATION,
+          ou.CITY,
+          ou.ADDRESS,
+          ou.DESCRIPTION,
+          ou.CREATED_BY,
+          ou.CREATED_DATE,
+          ou.LAST_UPDATED_BY,
+          ou.LAST_UPDATED_DATE,
+          ou.LAST_UPDATE_LOGIN,
+          p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
+          p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
+          p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE
+        FROM ${this.TABLE_NAME} ou
+        LEFT JOIN ${this.TABLE_NAME} p
+          ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+        WHERE ou.ORG_UNIT_ID = :1 AND ou.ORG_STRUCTURE_ID = :2`;
+
+        const selectResult = await connection.execute(selectQuery, [orgUnitId, structureId], {
+          outFormat: oracledb.OUT_FORMAT_OBJECT
+        });
+
+        if (!selectResult.rows || selectResult.rows.length === 0) {
+          throw new Error(`Failed to retrieve created org unit with ID ${orgUnitId}`);
+        }
+
+        // Convert keys and attach parent_unit object
+        const row = this.convertKeysToSnakeCase(selectResult.rows[0]);
+        return this.attachParentUnit(row);
       });
     } catch (error) {
       console.error('Error in create:', error);

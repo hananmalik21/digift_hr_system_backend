@@ -127,6 +127,10 @@ export function sendOrgUnit(res, req, orgUnit) {
  * Send created response
  */
 export function sendCreated(res, req, orgUnit) {
+  if (!orgUnit) {
+    return sendError(res, req, 'Failed to create org unit: No data returned', 500, 'INTERNAL_SERVER_ERROR');
+  }
+
   const startTime = req._startTime || Date.now();
   const executionTime = Date.now() - startTime;
 
@@ -136,7 +140,7 @@ export function sendCreated(res, req, orgUnit) {
     success: true,
     meta: generateBaseMetadata(req, {
       execution_time: `${executionTime}ms`,
-      org_unit_id: convertedOrgUnit.org_unit_id || orgUnit.ORG_UNIT_ID,
+      org_unit_id: convertedOrgUnit?.org_unit_id || orgUnit?.ORG_UNIT_ID || null,
       action: 'created',
       count: 1,
       total: 1,
