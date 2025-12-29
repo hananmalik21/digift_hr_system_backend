@@ -144,42 +144,36 @@ export function sendBadRequest(res, req, errors) {
   res.status(400).json({
     success: false,
     error: 'Validation failed',
-    errors: errorMessages,
-    meta: generateBaseMetadata(req, {
-      error_code: 'VALIDATION_ERROR',
-      error_count: errorMessages.length
-    })
+    error_details: {
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      type: 'ValidationError',
+      validation_errors: errorMessages
+    }
   });
 }
 
 export function sendServerError(res, req, message, error = null) {
-  const start = req?._startTime || Date.now();
-  const executionTime = Date.now() - start;
-
   res.status(500).json({
     success: false,
     error: message || 'Internal server error',
-    meta: generateBaseMetadata(req || {}, {
-      error_code: 'INTERNAL_SERVER_ERROR',
-      execution_time: `${executionTime}ms`,
-      ...(process.env.NODE_ENV !== 'production' && error
-        ? { error_details: { message: error.message, stack: error.stack } }
-        : {})
-    })
+    error_details: {
+      message: error?.message || message || 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR',
+      type: 'Error',
+      stack: error?.stack
+    }
   });
 }
 
 export function sendConflict(res, req, message = 'Conflict', details = null) {
-  const response = {
+  res.status(409).json({
     success: false,
     error: message,
-    meta: generateBaseMetadata(req, { error_code: 'CONFLICT' })
-  };
-
-  if (details) {
-    if (details.constraint) response.meta.constraint = details.constraint;
-    if (details.columns) response.meta.columns = details.columns;
-  }
-
-  res.status(409).json(response);
+    error_details: {
+      message: message,
+      code: 'CONFLICT',
+      type: 'ConflictError'
+    }
+  });
 }

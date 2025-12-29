@@ -1,5 +1,6 @@
 import db from '../../../config/db.js';
 import oracledb from 'oracledb';
+import { DatabaseError } from '../../../utils/errors/index.js';
 
 /**
  * Company Model
@@ -344,8 +345,24 @@ class CompanyModel {
       }
       return null;
     } catch (error) {
-      console.error('Error in findById:', error);
-      throw new Error(`Failed to fetch company: ${error.message}`);
+      // Wrap Oracle errors in DatabaseError
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
+      }
+      
+      // If it's already a DatabaseError, re-throw it
+      if (error instanceof DatabaseError) {
+        throw error;
+      }
+      
+      // For other errors, wrap in DatabaseError
+      throw new DatabaseError(
+        'Failed to fetch company',
+        error
+      );
     }
   }
 
@@ -485,75 +502,24 @@ class CompanyModel {
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
-      console.error('Error in create:', error);
-      
-      // Handle Oracle constraint violations
-      const isUniqueConstraint = 
-        error.errorNum === 1 || 
-        error.code === 1 ||
-        error.message?.includes('ORA-00001') || 
-        error.message?.includes('unique constraint') ||
-        (error.message && /unique constraint/i.test(error.message));
-      
-      if (isUniqueConstraint) {
-        const constraintMatch = error.message?.match(/\(([A-Z_][A-Z0-9_.]+)\)/);
-        const constraintName = constraintMatch ? constraintMatch[1] : 'UNKNOWN';
-        
-        const columnMatch = error.message?.match(/columns?\s*\(([^)]+)\)/i);
-        const columns = columnMatch ? columnMatch[1] : 'COMPANY_CODE';
-        
-        const userMessage = `A company with the same ${columns} already exists.`;
-        
-        const constraintError = new Error(userMessage);
-        constraintError.errorNum = 1;
-        constraintError.code = 'UNIQUE_CONSTRAINT_VIOLATION';
-        constraintError.statusCode = 409;
-        constraintError.constraint = constraintName;
-        constraintError.columns = columns;
-        constraintError.userMessage = userMessage;
-        throw constraintError;
+      // Wrap Oracle errors in DatabaseError
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
       }
       
-      // Handle foreign key constraint violations
-      if (error.errorNum === 2291 || error.message?.includes('ORA-02291') || error.message?.includes('integrity constraint') && error.message?.includes('parent key not found')) {
-        const constraintError = new Error(`Referenced record does not exist.`);
-        constraintError.errorNum = 2291;
-        constraintError.code = 'FOREIGN_KEY_CONSTRAINT';
-        constraintError.statusCode = 400;
-        constraintError.userMessage = 'The referenced record does not exist.';
-        throw constraintError;
+      // If it's already a DatabaseError, re-throw it
+      if (error instanceof DatabaseError) {
+        throw error;
       }
       
-      // Handle not null constraint violations
-      if (error.errorNum === 1400 || error.message?.includes('ORA-01400') || error.message?.includes('cannot insert NULL')) {
-        const constraintError = new Error(`Required field cannot be null.`);
-        constraintError.errorNum = 1400;
-        constraintError.code = 'NOT_NULL_CONSTRAINT';
-        constraintError.statusCode = 400;
-        constraintError.userMessage = 'One or more required fields are missing or null.';
-        throw constraintError;
-      }
-      
-      // Handle check constraint violations (e.g., STATUS values)
-      if (error.errorNum === 2290 || error.message?.includes('ORA-02290') || error.message?.includes('check constraint')) {
-        const constraintMatch = error.message?.match(/\(([A-Z_][A-Z0-9_.]+)\)/);
-        const constraintName = constraintMatch ? constraintMatch[1] : 'UNKNOWN';
-        
-        let userMessage = 'Invalid value provided. Please check the field values.';
-        if (constraintName.includes('STATUS')) {
-          userMessage = 'Invalid STATUS value. Valid values may be: ACTIVE, INACTIVE, SUSPENDED, or check database constraints.';
-        }
-        
-        const constraintError = new Error(userMessage);
-        constraintError.errorNum = 2290;
-        constraintError.code = 'CHECK_CONSTRAINT_VIOLATION';
-        constraintError.statusCode = 400;
-        constraintError.constraint = constraintName;
-        constraintError.userMessage = userMessage;
-        throw constraintError;
-      }
-      
-      throw new Error(`Failed to create company: ${error.message}`);
+      // For other errors, wrap in DatabaseError
+      throw new DatabaseError(
+        'Failed to create company',
+        error
+      );
     }
   }
 
@@ -750,65 +716,24 @@ class CompanyModel {
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
-      console.error('Error in update:', error);
-      
-      // Handle Oracle constraint violations
-      const isUniqueConstraint = 
-        error.errorNum === 1 || 
-        error.code === 1 ||
-        error.message?.includes('ORA-00001') || 
-        error.message?.includes('unique constraint') ||
-        (error.message && /unique constraint/i.test(error.message));
-      
-      if (isUniqueConstraint) {
-        const constraintMatch = error.message?.match(/\(([A-Z_][A-Z0-9_.]+)\)/);
-        const constraintName = constraintMatch ? constraintMatch[1] : 'UNKNOWN';
-        
-        const columnMatch = error.message?.match(/columns?\s*\(([^)]+)\)/i);
-        const columns = columnMatch ? columnMatch[1] : 'COMPANY_CODE';
-        
-        const userMessage = `A company with the same ${columns} already exists.`;
-        
-        const constraintError = new Error(userMessage);
-        constraintError.errorNum = 1;
-        constraintError.code = 'UNIQUE_CONSTRAINT_VIOLATION';
-        constraintError.statusCode = 409;
-        constraintError.constraint = constraintName;
-        constraintError.columns = columns;
-        constraintError.userMessage = userMessage;
-        throw constraintError;
+      // Wrap Oracle errors in DatabaseError
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
       }
       
-      // Handle foreign key constraint violations
-      if (error.errorNum === 2291 || error.message?.includes('ORA-02291') || error.message?.includes('integrity constraint') && error.message?.includes('parent key not found')) {
-        const constraintError = new Error(`Referenced record does not exist.`);
-        constraintError.errorNum = 2291;
-        constraintError.code = 'FOREIGN_KEY_CONSTRAINT';
-        constraintError.statusCode = 400;
-        constraintError.userMessage = 'The referenced record does not exist.';
-        throw constraintError;
+      // If it's already a DatabaseError, re-throw it
+      if (error instanceof DatabaseError) {
+        throw error;
       }
       
-      // Handle check constraint violations (e.g., STATUS values)
-      if (error.errorNum === 2290 || error.message?.includes('ORA-02290') || error.message?.includes('check constraint')) {
-        const constraintMatch = error.message?.match(/\(([A-Z_][A-Z0-9_.]+)\)/);
-        const constraintName = constraintMatch ? constraintMatch[1] : 'UNKNOWN';
-        
-        let userMessage = 'Invalid value provided. Please check the field values.';
-        if (constraintName.includes('STATUS')) {
-          userMessage = 'Invalid STATUS value. Valid values may be: ACTIVE, INACTIVE, SUSPENDED, or check database constraints.';
-        }
-        
-        const constraintError = new Error(userMessage);
-        constraintError.errorNum = 2290;
-        constraintError.code = 'CHECK_CONSTRAINT_VIOLATION';
-        constraintError.statusCode = 400;
-        constraintError.constraint = constraintName;
-        constraintError.userMessage = userMessage;
-        throw constraintError;
-      }
-      
-      throw new Error(`Failed to update company: ${error.message}`);
+      // For other errors, wrap in DatabaseError
+      throw new DatabaseError(
+        'Failed to update company',
+        error
+      );
     }
   }
 
@@ -873,20 +798,24 @@ class CompanyModel {
       console.log(`Hard delete successful for company ID: ${companyId}, rows affected: ${result.rowsAffected}`);
       return { success: true };
     } catch (error) {
-      console.error('Error in hardDelete:', error);
-      
-      // Handle foreign key constraint violation
-      if (error.errorNum === 2292 || error.message?.includes('ORA-02292') || error.message?.includes('integrity constraint')) {
-        const constraintName = error.message?.match(/\(([^)]+)\)/)?.[1] || 'UNKNOWN';
-        const constraintError = new Error(`Cannot delete company: This company is referenced by other records in the database.`);
-        constraintError.errorNum = 2292;
-        constraintError.code = 'FOREIGN_KEY_CONSTRAINT';
-        constraintError.constraint = constraintName;
-        constraintError.suggestion = 'Use soft delete (?soft=true) to deactivate this company instead of permanently deleting it.';
-        throw constraintError;
+      // Wrap Oracle errors in DatabaseError
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
       }
       
-      throw new Error(`Failed to delete company: ${error.message}`);
+      // If it's already a DatabaseError, re-throw it
+      if (error instanceof DatabaseError) {
+        throw error;
+      }
+      
+      // For other errors, wrap in DatabaseError
+      throw new DatabaseError(
+        'Failed to delete company',
+        error
+      );
     }
   }
 }

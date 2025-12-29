@@ -145,19 +145,17 @@ export function sendBadRequest(res, req, errors) {
   res.status(400).json({
     success: false,
     error: 'Validation failed',
-    errors: errorMessages,
-    meta: generateBaseMetadata(req, {
-      error_code: 'VALIDATION_ERROR',
-      error_count: errorMessages.length
-    })
+    error_details: {
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      type: 'ValidationError',
+      validation_errors: errorMessages
+    }
   });
 }
 
 export function sendServerError(res, req, message, error = null) {
   if (error) console.error('Server error:', error);
-
-  const startTime = req?._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
 
   let errorCode = 'INTERNAL_SERVER_ERROR';
   let statusCode = 500;
@@ -168,40 +166,26 @@ export function sendServerError(res, req, message, error = null) {
     message = error.message || 'Cannot delete: Record is referenced by other records';
   }
 
-  const response = {
+  res.status(statusCode).json({
     success: false,
     error: message || 'Internal server error',
-    meta: generateBaseMetadata(req || {}, {
-      error_code: errorCode,
-      execution_time: `${executionTime}ms`
-    })
-  };
-
-  if (process.env.NODE_ENV !== 'production' && error) {
-    response.meta.error_details = {
-      message: error.message,
-      code: error.code || error.errorNum,
-      constraint: error.constraint,
-      stack: error.stack
-    };
-  }
-
-  res.status(statusCode).json(response);
+    error_details: {
+      message: error?.message || message || 'Internal server error',
+      code: errorCode,
+      type: 'Error',
+      stack: error?.stack
+    }
+  });
 }
 
 export function sendConflict(res, req, message = 'Conflict', errorDetails = null) {
-  const response = {
+  res.status(409).json({
     success: false,
     error: message,
-    meta: generateBaseMetadata(req, {
-      error_code: 'CONFLICT'
-    })
-  };
-
-  if (errorDetails) {
-    if (errorDetails.constraint) response.meta.constraint = errorDetails.constraint;
-    if (errorDetails.columns) response.meta.columns = errorDetails.columns;
-  }
-
-  res.status(409).json(response);
+    error_details: {
+      message: message,
+      code: 'CONFLICT',
+      type: 'ConflictError'
+    }
+  });
 }

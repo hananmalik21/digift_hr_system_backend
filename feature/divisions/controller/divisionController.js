@@ -5,12 +5,10 @@ import {
   sendDivision,
   sendCreated,
   sendUpdated,
-  sendDeleted,
-  sendBadRequest,
-  sendServerError,
-  sendNotFound,
-  sendConflict
+  sendDeleted
 } from '../view/divisionView.js';
+import { ValidationError, NotFoundError, DatabaseError } from '../../../utils/errors/index.js';
+import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
 const router = express.Router();
 
@@ -105,95 +103,91 @@ function getUserId(req) {
  * @query   page_size - Number of items per page (default: 10, max: 100)
  * @access  Public
  */
-router.get('/', async (req, res) => {
-  try {
-    const filters = {};
-    const appliedFilters = {};
-    
-    if (req.query.division_id) {
-      filters.divisionId = parseInt(req.query.division_id);
-      if (isNaN(filters.divisionId)) {
-        return sendBadRequest(res, req, 'Invalid DIVISION_ID format');
-      }
-      appliedFilters.division_id = filters.divisionId;
+router.get('/', asyncHandler(async (req, res) => {
+  const filters = {};
+  const appliedFilters = {};
+  
+  if (req.query.division_id) {
+    filters.divisionId = parseInt(req.query.division_id);
+    if (isNaN(filters.divisionId)) {
+      throw new ValidationError('Invalid DIVISION_ID format');
     }
-    
-    if (req.query.company_id) {
-      filters.companyId = parseInt(req.query.company_id);
-      if (isNaN(filters.companyId)) {
-        return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-      }
-      appliedFilters.company_id = filters.companyId;
-    }
-
-    if (req.query.org_structure_id) {
-      filters.orgStructureId = parseInt(req.query.org_structure_id);
-      if (isNaN(filters.orgStructureId)) {
-        return sendBadRequest(res, req, 'Invalid ORG_STRUCTURE_ID format');
-      }
-      appliedFilters.org_structure_id = filters.orgStructureId;
-    }
-
-    if (req.query.status) {
-      filters.status = req.query.status.toUpperCase();
-      appliedFilters.status = filters.status;
-    }
-
-    // Search parameter - searches across division name, code, and company name
-    if (req.query.search) {
-      filters.search = req.query.search;
-      appliedFilters.search = filters.search;
-    }
-
-    // Parse pagination parameters
-    let page = 1;
-    let pageSize = 10;
-    
-    if (req.query.page !== undefined) {
-      const parsedPage = parseInt(req.query.page);
-      if (isNaN(parsedPage) || parsedPage < 1) {
-        return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
-      }
-      page = parsedPage;
-    }
-    
-    if (req.query.page_size !== undefined || req.query.limit !== undefined) {
-      const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
-      if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-        return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
-      }
-      pageSize = Math.min(100, parsedPageSize);
-    }
-
-    // Add pagination to filters
-    filters.pagination = {
-      page,
-      pageSize
-    };
-
-    const result = await DivisionModel.findAll(filters);
-    
-    // Calculate pagination metadata
-    const totalCount = result.total || result.length;
-    const totalPages = Math.ceil(totalCount / pageSize);
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-    
-    sendDivisionList(res, req, result.divisions || result, { 
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-      total: totalCount,
-      pagination: {
-        page,
-        pageSize,
-        totalPages,
-        hasNext,
-        hasPrevious
-      }
-    });
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch divisions', error);
+    appliedFilters.division_id = filters.divisionId;
   }
-});
+  
+  if (req.query.company_id) {
+    filters.companyId = parseInt(req.query.company_id);
+    if (isNaN(filters.companyId)) {
+      throw new ValidationError('Invalid COMPANY_ID format');
+    }
+    appliedFilters.company_id = filters.companyId;
+  }
+
+  if (req.query.org_structure_id) {
+    filters.orgStructureId = parseInt(req.query.org_structure_id);
+    if (isNaN(filters.orgStructureId)) {
+      throw new ValidationError('Invalid ORG_STRUCTURE_ID format');
+    }
+    appliedFilters.org_structure_id = filters.orgStructureId;
+  }
+
+  if (req.query.status) {
+    filters.status = req.query.status.toUpperCase();
+    appliedFilters.status = filters.status;
+  }
+
+  // Search parameter - searches across division name, code, and company name
+  if (req.query.search) {
+    filters.search = req.query.search;
+    appliedFilters.search = filters.search;
+  }
+
+  // Parse pagination parameters
+  let page = 1;
+  let pageSize = 10;
+  
+  if (req.query.page !== undefined) {
+    const parsedPage = parseInt(req.query.page);
+    if (isNaN(parsedPage) || parsedPage < 1) {
+      throw new ValidationError('Invalid page number. Must be a positive integer.');
+    }
+    page = parsedPage;
+  }
+  
+  if (req.query.page_size !== undefined || req.query.limit !== undefined) {
+    const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
+    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
+      throw new ValidationError('Invalid page_size. Must be a positive integer.');
+    }
+    pageSize = Math.min(100, parsedPageSize);
+  }
+
+  // Add pagination to filters
+  filters.pagination = {
+    page,
+    pageSize
+  };
+
+  const result = await DivisionModel.findAll(filters);
+  
+  // Calculate pagination metadata
+  const totalCount = result.total || result.length;
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const hasNext = page < totalPages;
+  const hasPrevious = page > 1;
+  
+  sendDivisionList(res, req, result.divisions || result, { 
+    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
+    total: totalCount,
+    pagination: {
+      page,
+      pageSize,
+      totalPages,
+      hasNext,
+      hasPrevious
+    }
+  });
+}));
 
 /**
  * @route   GET /api/divisions/:id
@@ -201,20 +195,19 @@ router.get('/', async (req, res) => {
  * @param   id - Division ID
  * @access  Public
  */
-router.get('/:id', async (req, res) => {
-  try {
-    const divisionId = parseInt(req.params.id);
-    
-    if (isNaN(divisionId)) {
-      return sendBadRequest(res, req, 'Invalid DIVISION_ID format');
-    }
-
-    const division = await DivisionModel.findById(divisionId);
-    sendDivision(res, req, division);
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch division', error);
+router.get('/:id', asyncHandler(async (req, res) => {
+  const divisionId = parseInt(req.params.id);
+  
+  if (isNaN(divisionId)) {
+    throw new ValidationError('Invalid DIVISION_ID format');
   }
-});
+
+  const division = await DivisionModel.findById(divisionId);
+  if (!division) {
+    throw new NotFoundError('Division not found');
+  }
+  sendDivision(res, req, division);
+}));
 
 /**
  * @route   POST /api/divisions
@@ -222,38 +215,23 @@ router.get('/:id', async (req, res) => {
  * @body    { COMPANY_ID, DIVISION_NAME_EN, ... } - ORG_STRUCTURE_ID and ORG_STRUCTURE_NAME will be fetched from company
  * @access  Public
  */
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
+  const data = req.body;
+  const errors = validateDivisionData(data, false);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  const userId = getUserId(req);
   try {
-    const data = req.body;
-    const errors = validateDivisionData(data, false);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    const userId = getUserId(req);
     const newDivision = await DivisionModel.create(data, userId);
     sendCreated(res, req, newDivision);
   } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'NOT_NULL_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'CHECK_CONSTRAINT_VIOLATION' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to create division', error);
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
   }
-});
+}));
 
 /**
  * @route   PUT /api/divisions/:id
@@ -262,47 +240,35 @@ router.post('/', async (req, res) => {
  * @body    { COMPANY_ID?, DIVISION_NAME_EN?, STATUS?, ... }
  * @access  Public
  */
-router.put('/:id', async (req, res) => {
+router.put('/:id', asyncHandler(async (req, res) => {
+  const divisionId = parseInt(req.params.id);
+  
+  if (isNaN(divisionId)) {
+    throw new ValidationError('Invalid DIVISION_ID format');
+  }
+
+  const data = req.body;
+  const errors = validateDivisionData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if division exists
+  const existingDivision = await DivisionModel.findById(divisionId);
+  if (!existingDivision) {
+    throw new NotFoundError('Division not found');
+  }
+
+  const userId = getUserId(req);
   try {
-    const divisionId = parseInt(req.params.id);
-    
-    if (isNaN(divisionId)) {
-      return sendBadRequest(res, req, 'Invalid DIVISION_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateDivisionData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if division exists
-    const existingDivision = await DivisionModel.findById(divisionId);
-    if (!existingDivision) {
-      return sendDivision(res, req, null);
-    }
-
-    const userId = getUserId(req);
     const updatedDivision = await DivisionModel.update(divisionId, data, userId);
     sendUpdated(res, req, updatedDivision);
   } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'CHECK_CONSTRAINT_VIOLATION' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update division', error);
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
   }
-});
+}));
 
 /**
  * @route   PATCH /api/divisions/:id
@@ -311,47 +277,35 @@ router.put('/:id', async (req, res) => {
  * @body    Partial update fields
  * @access  Public
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', asyncHandler(async (req, res) => {
+  const divisionId = parseInt(req.params.id);
+  
+  if (isNaN(divisionId)) {
+    throw new ValidationError('Invalid DIVISION_ID format');
+  }
+
+  const data = req.body;
+  const errors = validateDivisionData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if division exists
+  const existingDivision = await DivisionModel.findById(divisionId);
+  if (!existingDivision) {
+    throw new NotFoundError('Division not found');
+  }
+
+  const userId = getUserId(req);
   try {
-    const divisionId = parseInt(req.params.id);
-    
-    if (isNaN(divisionId)) {
-      return sendBadRequest(res, req, 'Invalid DIVISION_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateDivisionData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if division exists
-    const existingDivision = await DivisionModel.findById(divisionId);
-    if (!existingDivision) {
-      return sendDivision(res, req, null);
-    }
-
-    const userId = getUserId(req);
     const updatedDivision = await DivisionModel.update(divisionId, data, userId);
     sendUpdated(res, req, updatedDivision);
   } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'CHECK_CONSTRAINT_VIOLATION' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update division', error);
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
   }
-});
+}));
 
 /**
  * @route   DELETE /api/divisions/:id
@@ -362,58 +316,51 @@ router.patch('/:id', async (req, res) => {
  * @query   auto_fallback - Set to 'true' to automatically fallback to soft delete if hard delete fails
  * @access  Public
  */
-router.delete('/:id', async (req, res) => {
-  try {
-    const divisionId = parseInt(req.params.id);
-    
-    if (isNaN(divisionId)) {
-      return sendBadRequest(res, req, 'Invalid DIVISION_ID format');
-    }
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const divisionId = parseInt(req.params.id);
+  
+  if (isNaN(divisionId)) {
+    throw new ValidationError('Invalid DIVISION_ID format');
+  }
 
-    // Check if division exists
-    const existingDivision = await DivisionModel.findById(divisionId);
-    if (!existingDivision) {
-      return sendDivision(res, req, null);
-    }
+  // Check if division exists
+  const existingDivision = await DivisionModel.findById(divisionId);
+  if (!existingDivision) {
+    throw new NotFoundError('Division not found');
+  }
 
-    const userId = getUserId(req);
-    const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-    const isSoftDelete = req.query.soft === 'true' || req.query.soft === '1';
+  const userId = getUserId(req);
+  const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
+  const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
 
-    // Default to soft delete unless explicitly requesting hard delete
-    if (isHardDelete) {
-      // Try hard delete first, fallback to soft delete if constraint violation
-      try {
-        await DivisionModel.hardDelete(divisionId);
-        sendDeleted(res, req, 'Division permanently deleted', divisionId);
-      } catch (deleteError) {
-        // If hard delete fails due to foreign key constraint, provide detailed error
-        if (deleteError.code === 'FOREIGN_KEY_CONSTRAINT' || deleteError.errorNum === 2292) {
-          // Check if user wants automatic fallback or detailed error
-          const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
-          
-          if (autoFallback) {
-            // Automatically fallback to soft delete
-            await DivisionModel.softDelete(divisionId, userId);
-            sendDeleted(res, req, 'Division deactivated (cannot permanently delete due to existing references)', divisionId);
-          } else {
-            // Return detailed error with reference information
-            throw deleteError;
-          }
+  // Default to soft delete unless explicitly requesting hard delete
+  if (isHardDelete) {
+    // Try hard delete first, fallback to soft delete if constraint violation
+    try {
+      await DivisionModel.hardDelete(divisionId);
+      sendDeleted(res, req, 'Division permanently deleted', divisionId);
+    } catch (deleteError) {
+      // If hard delete fails due to foreign key constraint, provide detailed error
+      if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
+        if (autoFallback) {
+          // Automatically fallback to soft delete
+          await DivisionModel.softDelete(divisionId, userId);
+          sendDeleted(res, req, 'Division deactivated (cannot permanently delete due to existing references)', divisionId);
         } else {
-          // Re-throw other errors
+          // Return detailed error with reference information
           throw deleteError;
         }
+      } else {
+        // Re-throw other errors
+        throw deleteError;
       }
-    } else {
-      // Default to soft delete
-      await DivisionModel.softDelete(divisionId, userId);
-      sendDeleted(res, req, 'Division deactivated (soft delete)', divisionId);
     }
-  } catch (error) {
-    sendServerError(res, req, 'Failed to delete division', error);
+  } else {
+    // Default to soft delete
+    await DivisionModel.softDelete(divisionId, userId);
+    sendDeleted(res, req, 'Division deactivated (soft delete)', divisionId);
   }
-});
+}));
 
 export default router;
 

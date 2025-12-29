@@ -69,8 +69,12 @@ export function sendBadRequest(res, req, errors) {
   res.status(400).json({
     success: false,
     error: 'Validation failed',
-    errors: arr,
-    meta: meta(req, { error_code: 'VALIDATION_ERROR', error_count: arr.length })
+    error_details: {
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      type: 'ValidationError',
+      validation_errors: arr
+    }
   });
 }
 
@@ -78,7 +82,11 @@ export function sendConflict(res, req, message, details = null) {
   res.status(409).json({
     success: false,
     error: message,
-    meta: meta(req, { error_code: 'CONFLICT', ...(details?.columns ? { columns: details.columns } : {}) })
+    error_details: {
+      message: message,
+      code: 'CONFLICT',
+      type: 'ConflictError'
+    }
   });
 }
 
@@ -86,11 +94,11 @@ export function sendServerError(res, req, message, error = null) {
   res.status(500).json({
     success: false,
     error: message || 'Internal server error',
-    meta: meta(req, {
-      error_code: 'INTERNAL_SERVER_ERROR',
-      ...(process.env.NODE_ENV !== 'production' && error
-        ? { error_details: { message: error.message } }
-        : {})
-    })
+    error_details: {
+      message: error?.message || message || 'Internal server error',
+      code: 'INTERNAL_SERVER_ERROR',
+      type: 'Error',
+      stack: error?.stack
+    }
   });
 }

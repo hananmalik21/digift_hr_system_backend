@@ -169,25 +169,22 @@ export function sendUpdated(res, req, orgUnit) {
 
 /**
  * Send error response
+ * NOTE: This should be replaced with centralized error handling (throwing errors)
+ * Keeping for backward compatibility but removing metadata
  */
 export function sendError(res, req, message, statusCode = 500, errorCode = 'INTERNAL_SERVER_ERROR', details = null) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const errorResponse = {
     success: false,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      error_code: errorCode
-    }),
-    data: {
-      error_code: errorCode,
-      message: message
+    error: message,
+    error_details: {
+      message: message,
+      code: errorCode,
+      type: 'Error'
     }
   };
 
   if (details) {
-    errorResponse.data.details = details;
+    errorResponse.error_details.details = details;
   }
 
   res.status(statusCode).json(errorResponse);
@@ -195,12 +192,20 @@ export function sendError(res, req, message, statusCode = 500, errorCode = 'INTE
 
 /**
  * Send bad request error
+ * NOTE: Should use ValidationError and throw instead
  */
 export function sendBadRequest(res, req, errors) {
   const errorMessages = Array.isArray(errors) ? errors : [errors];
   
-  sendError(res, req, 'Validation failed', 400, 'VALIDATION_ERROR', {
-    errors: errorMessages
+  res.status(400).json({
+    success: false,
+    error: 'Validation failed',
+    error_details: {
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      type: 'ValidationError',
+      validation_errors: errorMessages
+    }
   });
 }
 
@@ -251,16 +256,45 @@ export function sendServerError(res, req, message, error = null) {
 
 /**
  * Send not found error
+ * NOTE: Should use NotFoundError and throw instead
  */
 export function sendNotFound(res, req, message = 'Resource not found') {
-  sendError(res, req, message, 404, 'NOT_FOUND');
+  res.status(404).json({
+    success: false,
+    error: message,
+    error_details: {
+      message: message,
+      code: 'NOT_FOUND',
+      type: 'NotFoundError'
+    }
+  });
 }
 
 /**
  * Send conflict error
+ * NOTE: Should use ConflictError and throw instead
  */
 export function sendConflict(res, req, message = 'Conflict', errorDetails = null) {
-  sendError(res, req, message, 409, 'CONFLICT', errorDetails);
+  const response = {
+    success: false,
+    error: message,
+    error_details: {
+      message: message,
+      code: 'CONFLICT',
+      type: 'ConflictError'
+    }
+  };
+
+  if (errorDetails) {
+    if (errorDetails.constraint) {
+      response.error_details.constraint = errorDetails.constraint;
+    }
+    if (errorDetails.columns) {
+      response.error_details.columns = errorDetails.columns;
+    }
+  }
+
+  res.status(409).json(response);
 }
 
 /**

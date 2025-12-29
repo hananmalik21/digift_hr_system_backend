@@ -5,12 +5,10 @@ import {
   sendCompany,
   sendCreated,
   sendUpdated,
-  sendDeleted,
-  sendBadRequest,
-  sendServerError,
-  sendNotFound,
-  sendConflict
+  sendDeleted
 } from '../view/companyView.js';
+import { ValidationError, NotFoundError, DatabaseError, ConflictError } from '../../../utils/errors/index.js';
+import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
 const router = express.Router();
 
@@ -138,18 +136,17 @@ function getUserId(req) {
  * @query   page_size - Number of items per page (default: 10, max: 100)
  * @access  Public
  */
-router.get('/', async (req, res) => {
-  try {
-    const filters = {};
-    const appliedFilters = {};
-    
-    if (req.query.company_id) {
-      filters.companyId = parseInt(req.query.company_id);
-      if (isNaN(filters.companyId)) {
-        return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-      }
-      appliedFilters.company_id = filters.companyId;
+router.get('/', asyncHandler(async (req, res) => {
+  const filters = {};
+  const appliedFilters = {};
+  
+  if (req.query.company_id) {
+    filters.companyId = parseInt(req.query.company_id);
+    if (isNaN(filters.companyId)) {
+      throw new ValidationError('Invalid COMPANY_ID format');
     }
+    appliedFilters.company_id = filters.companyId;
+  }
     
     // Search parameter - searches across company name, code, and registration number
     if (req.query.search) {
@@ -182,63 +179,60 @@ router.get('/', async (req, res) => {
       appliedFilters.is_active = filters.isActive;
     }
 
-    if (req.query.org_structure_id) {
-      filters.orgStructureId = parseInt(req.query.org_structure_id);
-      if (isNaN(filters.orgStructureId)) {
-        return sendBadRequest(res, req, 'Invalid ORG_STRUCTURE_ID format');
-      }
-      appliedFilters.org_structure_id = filters.orgStructureId;
+  if (req.query.org_structure_id) {
+    filters.orgStructureId = parseInt(req.query.org_structure_id);
+    if (isNaN(filters.orgStructureId)) {
+      throw new ValidationError('Invalid ORG_STRUCTURE_ID format');
     }
+    appliedFilters.org_structure_id = filters.orgStructureId;
+  }
 
     // Parse pagination parameters
     let page = 1;
     let pageSize = 10;
     
-    if (req.query.page !== undefined) {
-      const parsedPage = parseInt(req.query.page);
-      if (isNaN(parsedPage) || parsedPage < 1) {
-        return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
-      }
-      page = parsedPage;
+  if (req.query.page !== undefined) {
+    const parsedPage = parseInt(req.query.page);
+    if (isNaN(parsedPage) || parsedPage < 1) {
+      throw new ValidationError('Invalid page number. Must be a positive integer.');
     }
-    
-    if (req.query.page_size !== undefined || req.query.limit !== undefined) {
-      const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
-      if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-        return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
-      }
-      pageSize = Math.min(100, parsedPageSize); // Cap at 100
-    }
-
-    // Add pagination to filters
-    filters.pagination = {
-      page,
-      pageSize
-    };
-
-    const result = await CompanyModel.findAll(filters);
-    
-    // Calculate pagination metadata
-    const totalCount = result.total || result.length;
-    const totalPages = Math.ceil(totalCount / pageSize);
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-    
-    sendCompanyList(res, req, result.companies || result, { 
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-      total: totalCount,
-      pagination: {
-        page,
-        pageSize,
-        totalPages,
-        hasNext,
-        hasPrevious
-      }
-    });
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch companies', error);
+    page = parsedPage;
   }
-});
+  
+  if (req.query.page_size !== undefined || req.query.limit !== undefined) {
+    const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
+    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
+      throw new ValidationError('Invalid page_size. Must be a positive integer.');
+    }
+    pageSize = Math.min(100, parsedPageSize); // Cap at 100
+  }
+
+  // Add pagination to filters
+  filters.pagination = {
+    page,
+    pageSize
+  };
+
+  const result = await CompanyModel.findAll(filters);
+  
+  // Calculate pagination metadata
+  const totalCount = result.total || result.length;
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const hasNext = page < totalPages;
+  const hasPrevious = page > 1;
+  
+  sendCompanyList(res, req, result.companies || result, { 
+    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
+    total: totalCount,
+    pagination: {
+      page,
+      pageSize,
+      totalPages,
+      hasNext,
+      hasPrevious
+    }
+  });
+}));
 
 /**
  * @route   GET /api/companies/:id
@@ -246,20 +240,19 @@ router.get('/', async (req, res) => {
  * @param   id - Company ID
  * @access  Public
  */
-router.get('/:id', async (req, res) => {
-  try {
-    const companyId = parseInt(req.params.id);
-    
-    if (isNaN(companyId)) {
-      return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-    }
-
-    const company = await CompanyModel.findById(companyId);
-    sendCompany(res, req, company);
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch company', error);
+router.get('/:id', asyncHandler(async (req, res) => {
+  const companyId = parseInt(req.params.id);
+  
+  if (isNaN(companyId)) {
+    throw new ValidationError('Invalid COMPANY_ID format');
   }
-});
+
+  const company = await CompanyModel.findById(companyId);
+  if (!company) {
+    throw new NotFoundError('Company not found');
+  }
+  sendCompany(res, req, company);
+}));
 
 /**
  * @route   POST /api/companies
@@ -267,38 +260,24 @@ router.get('/:id', async (req, res) => {
  * @body    { COMPANY_CODE, COMPANY_NAME_EN, ORG_STRUCTURE_ID, LAST_UPDATE_LOGIN, STATUS?, COMPANY_NAME_AR?, LEGAL_NAME_EN?, ... }
  * @access  Public
  */
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
+  const data = req.body;
+  const errors = validateCompanyData(data, false);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  const userId = getUserId(req);
   try {
-    const data = req.body;
-    const errors = validateCompanyData(data, false);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    const userId = getUserId(req);
     const newCompany = await CompanyModel.create(data, userId);
     sendCreated(res, req, newCompany);
   } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'NOT_NULL_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'CHECK_CONSTRAINT_VIOLATION' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to create company', error);
+    // Database errors from model are already wrapped in DatabaseError
+    // Just re-throw them
+    throw error;
   }
-});
+}));
 
 /**
  * @route   PUT /api/companies/:id
@@ -353,47 +332,35 @@ router.put('/:id', async (req, res) => {
  * @body    Partial update fields
  * @access  Public
  */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', asyncHandler(async (req, res) => {
+  const companyId = parseInt(req.params.id);
+  
+  if (isNaN(companyId)) {
+    throw new ValidationError('Invalid COMPANY_ID format');
+  }
+
+  const data = req.body;
+  const errors = validateCompanyData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if company exists
+  const existingCompany = await CompanyModel.findById(companyId);
+  if (!existingCompany) {
+    throw new NotFoundError('Company not found');
+  }
+
+  const userId = getUserId(req);
   try {
-    const companyId = parseInt(req.params.id);
-    
-    if (isNaN(companyId)) {
-      return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateCompanyData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if company exists
-    const existingCompany = await CompanyModel.findById(companyId);
-    if (!existingCompany) {
-      return sendCompany(res, req, null);
-    }
-
-    const userId = getUserId(req);
     const updatedCompany = await CompanyModel.update(companyId, data, userId);
     sendUpdated(res, req, updatedCompany);
   } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'CHECK_CONSTRAINT_VIOLATION' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update company', error);
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
   }
-});
+}));
 
 /**
  * @route   DELETE /api/companies/:id
@@ -404,57 +371,50 @@ router.patch('/:id', async (req, res) => {
  * @query   auto_fallback - Set to 'true' to automatically fallback to soft delete if hard delete fails
  * @access  Public
  */
-router.delete('/:id', async (req, res) => {
-  try {
-    const companyId = parseInt(req.params.id);
-    
-    if (isNaN(companyId)) {
-      return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-    }
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const companyId = parseInt(req.params.id);
+  
+  if (isNaN(companyId)) {
+    throw new ValidationError('Invalid COMPANY_ID format');
+  }
 
-    // Check if company exists
-    const existingCompany = await CompanyModel.findById(companyId);
-    if (!existingCompany) {
-      return sendCompany(res, req, null);
-    }
+  // Check if company exists
+  const existingCompany = await CompanyModel.findById(companyId);
+  if (!existingCompany) {
+    throw new NotFoundError('Company not found');
+  }
 
-    const userId = getUserId(req);
-    const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-    const isSoftDelete = req.query.soft === 'true' || req.query.soft === '1';
+  const userId = getUserId(req);
+  const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
+  const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
 
-    // Default to soft delete unless explicitly requesting hard delete
-    if (isHardDelete) {
-      // Try hard delete first, fallback to soft delete if constraint violation
-      try {
-        await CompanyModel.hardDelete(companyId);
-        sendDeleted(res, req, 'Company permanently deleted', companyId);
-      } catch (deleteError) {
-        // If hard delete fails due to foreign key constraint, provide detailed error
-        if (deleteError.code === 'FOREIGN_KEY_CONSTRAINT' || deleteError.errorNum === 2292) {
-          // Check if user wants automatic fallback or detailed error
-          const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
-          
-          if (autoFallback) {
-            // Automatically fallback to soft delete
-            await CompanyModel.softDelete(companyId, userId);
-            sendDeleted(res, req, 'Company deactivated (cannot permanently delete due to existing references)', companyId);
-          } else {
-            // Return detailed error with reference information
-            throw deleteError;
-          }
+  // Default to soft delete unless explicitly requesting hard delete
+  if (isHardDelete) {
+    // Try hard delete first, fallback to soft delete if constraint violation
+    try {
+      await CompanyModel.hardDelete(companyId);
+      sendDeleted(res, req, 'Company permanently deleted', companyId);
+    } catch (deleteError) {
+      // If hard delete fails due to foreign key constraint, provide detailed error
+      if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
+        if (autoFallback) {
+          // Automatically fallback to soft delete
+          await CompanyModel.softDelete(companyId, userId);
+          sendDeleted(res, req, 'Company deactivated (cannot permanently delete due to existing references)', companyId);
         } else {
-          // Re-throw other errors
+          // Return detailed error with reference information
           throw deleteError;
         }
+      } else {
+        // Re-throw other errors
+        throw deleteError;
       }
-    } else {
-      // Default to soft delete
-      await CompanyModel.softDelete(companyId, userId);
-      sendDeleted(res, req, 'Company deactivated (soft delete)', companyId);
     }
-  } catch (error) {
-    sendServerError(res, req, 'Failed to delete company', error);
+  } else {
+    // Default to soft delete
+    await CompanyModel.softDelete(companyId, userId);
+    sendDeleted(res, req, 'Company deactivated (soft delete)', companyId);
   }
-});
+}));
 
 export default router;

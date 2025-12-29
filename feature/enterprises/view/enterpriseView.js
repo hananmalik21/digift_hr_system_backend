@@ -242,11 +242,12 @@ export function sendBadRequest(res, req, errors) {
   res.status(400).json({
     success: false,
     error: 'Validation failed',
-    errors: errorMessages,
-    meta: generateBaseMetadata(req, {
-      error_code: 'VALIDATION_ERROR',
-      error_count: errorMessages.length
-    })
+    error_details: {
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      type: 'ValidationError',
+      validation_errors: errorMessages
+    }
   });
 }
 
@@ -280,32 +281,16 @@ export function sendServerError(res, req, message, error = null) {
     message = error.message || 'Cannot delete: Record is referenced by other records';
   }
 
-  // Include more details in development mode
   const errorResponse = {
     success: false,
     error: message || 'Internal server error',
-    meta: generateBaseMetadata(req || {}, {
-      error_code: errorCode,
-      execution_time: `${executionTime}ms`
-    })
+    error_details: {
+      message: error?.message || message || 'Internal server error',
+      code: errorCode,
+      type: 'Error',
+      stack: error?.stack
+    }
   };
-
-  // Add reference information for foreign key constraint errors
-  if (error && error.references) {
-    errorResponse.references = error.references;
-    errorResponse.suggestion = error.suggestion || 'Use soft delete to deactivate this record instead.';
-    errorResponse.constraint = error.constraint;
-  }
-
-  // In development, include error details
-  if (process.env.NODE_ENV !== 'production' && error) {
-    errorResponse.meta.error_details = {
-      message: error.message,
-      code: error.code || error.errorNum,
-      constraint: error.constraint,
-      stack: error.stack
-    };
-  }
 
   res.status(statusCode).json(errorResponse);
 }
@@ -320,9 +305,11 @@ export function sendUnauthorized(res, req, message = 'Unauthorized') {
   res.status(401).json({
     success: false,
     error: message,
-    meta: generateBaseMetadata(req, {
-      error_code: 'UNAUTHORIZED'
-    })
+    error_details: {
+      message: message,
+      code: 'UNAUTHORIZED',
+      type: 'Error'
+    }
   });
 }
 
@@ -336,9 +323,11 @@ export function sendNotFound(res, req, message = 'Resource not found') {
   res.status(404).json({
     success: false,
     error: message,
-    meta: generateBaseMetadata(req, {
-      error_code: 'NOT_FOUND'
-    })
+    error_details: {
+      message: message,
+      code: 'NOT_FOUND',
+      type: 'NotFoundError'
+    }
   });
 }
 
@@ -352,9 +341,11 @@ export function sendConflict(res, req, message = 'Conflict') {
   res.status(409).json({
     success: false,
     error: message,
-    meta: generateBaseMetadata(req, {
-      error_code: 'CONFLICT'
-    })
+    error_details: {
+      message: message,
+      code: 'CONFLICT',
+      type: 'ConflictError'
+    }
   });
 }
 

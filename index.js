@@ -17,8 +17,7 @@ import jobFamilyController from './feature/job_families/controller/jobFamilyCont
 import gradeController from './feature/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
 import positionsController from './feature/positions/controller/positions_controller.js';
-
-
+import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
 
@@ -92,78 +91,14 @@ app.get('/health', (req, res) => {
 
 
 // ==========================================
-// 📌 404 HANDLER
+// 📌 404 HANDLER (must be before error middleware)
 // ==========================================
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Endpoint not found',
-    path: req.path,
-    availableEndpoints: [
-      'GET    /health',
-      'GET    /api/companies',
-      'GET    /api/companies/:id',
-      'POST   /api/companies',
-      'PUT    /api/companies/:id',
-      'PATCH  /api/companies/:id',
-      'DELETE /api/companies/:id',
-      'GET    /api/divisions',
-      'GET    /api/divisions/:id',
-      'POST   /api/divisions',
-      'PUT    /api/divisions/:id',
-      'PATCH  /api/divisions/:id',
-      'DELETE /api/divisions/:id',
-      'GET    /api/business-units',
-      'GET    /api/business-units/:id',
-      'POST   /api/business-units',
-      'PUT    /api/business-units/:id',
-      'PATCH  /api/business-units/:id',
-      'DELETE /api/business-units/:id',
-      'GET    /api/departments',
-      'GET    /api/departments/:id',
-      'POST   /api/departments',
-      'PUT    /api/departments/:id',
-      'PATCH  /api/departments/:id',
-      'DELETE /api/departments/:id',
-      'GET    /api/enterprises',
-      'GET    /api/enterprises/:id',
-      'POST   /api/enterprises',
-      'PUT    /api/enterprises/:id',
-      'PATCH  /api/enterprises/:id',
-      'DELETE /api/enterprises/:id',
-      'GET    /api/hr-org-hierarchy-levels',
-      'GET    /api/hr-org-hierarchy-levels/:id',
-      'POST   /api/hr-org-hierarchy-levels',
-      'POST   /api/hr-org-hierarchy-levels/bulk',
-      'PUT    /api/hr-org-hierarchy-levels/:id',
-      'PATCH  /api/hr-org-hierarchy-levels/:id',
-      'DELETE /api/hr-org-hierarchy-levels/:id',
-      'GET    /api/hr-org-structures',
-      'GET    /api/hr-org-structures/:id',
-      'GET    /api/hr-org-structures/active/levels',
-      'POST   /api/hr-org-structures',
-      'PUT    /api/hr-org-structures/:id',
-      'PATCH  /api/hr-org-structures/:id',
-      'DELETE /api/hr-org-structures/:id',
-      'GET    /api/hr-org-structures/:structureId',
-      'GET    /api/hr-org-structures/:structureId/levels',
-      'GET    /api/hr-org-structures/:structureId/org-units',
-      'GET    /api/hr-org-structures/:structureId/org-units/parents',
-      'POST   /api/hr-org-structures/:structureId/org-units',
-      'PUT    /api/hr-org-structures/:structureId/org-units/:orgUnitId',
-      'GET    /api/hr-org-structures/:structureId/org-units/tree',
-      'GET    /api/structure-levels',
-      'GET    /api/structure-levels/:id',
-      'POST   /api/structure-levels',
-      'PUT    /api/structure-levels/:id',
-      'PATCH  /api/structure-levels/:id',
-      'DELETE /api/structure-levels/:id',
-      'GET    /enterprises/:enterpriseId/org-structures/:structureId/levels',
-      'PUT    /enterprises/:enterpriseId/org-structures/:structureId/levels/reorder',
-      'POST   /org-structures/onboard-enterprise-hierarchy'
-    ]
-  });
-});
+app.use(notFoundHandler);
+
+// ==========================================
+// 📌 ERROR HANDLING MIDDLEWARE (must be last)
+// ==========================================
+app.use(errorMiddleware);
 
 // ==========================================
 // 📌 START SERVER
