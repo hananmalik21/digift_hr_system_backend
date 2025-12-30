@@ -66,9 +66,10 @@ export function sendDeleted(res, req, message, id) {
 
 export function sendBadRequest(res, req, errors) {
   const arr = Array.isArray(errors) ? errors : [errors];
+  const firstError = arr.length > 0 ? arr[0] : 'Validation failed';
   res.status(400).json({
     success: false,
-    error: 'Validation failed',
+    error: firstError,
     error_details: {
       message: 'Validation failed',
       code: 'VALIDATION_ERROR',

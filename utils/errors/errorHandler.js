@@ -38,8 +38,15 @@ export function formatErrorResponse(err, req = null) {
   }
 
   // Add specific error properties based on error type
+  let userMessage = err.userMessage || err.message;
+  
   if (err instanceof ValidationError && err.errors) {
     errorDetails.validation_errors = err.errors;
+    // Use the first validation error as the user message
+    const errorArray = Array.isArray(err.errors) ? err.errors : [err.errors];
+    if (errorArray.length > 0) {
+      userMessage = errorArray[0];
+    }
   }
 
   if (err instanceof DatabaseError) {
@@ -57,7 +64,7 @@ export function formatErrorResponse(err, req = null) {
   // Build response object (no meta field)
   const response = {
     success: false,
-    error: err.userMessage || err.message, // User-friendly message
+    error: userMessage, // User-friendly message (first validation error for ValidationError)
     error_details: errorDetails // Technical details
   };
 

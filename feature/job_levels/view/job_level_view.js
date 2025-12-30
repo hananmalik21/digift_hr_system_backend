@@ -140,10 +140,11 @@ export function sendDeleted(res, req, message = 'Job level deleted successfully'
 
 export function sendBadRequest(res, req, errors) {
   const messages = Array.isArray(errors) ? errors : [errors];
+  const firstError = messages.length > 0 ? messages[0] : 'Validation failed';
 
   res.status(400).json({
     success: false,
-    error: 'Validation failed',
+    error: firstError,
     error_details: {
       message: 'Validation failed',
       code: 'VALIDATION_ERROR',
