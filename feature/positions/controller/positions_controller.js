@@ -9,7 +9,8 @@ import {
   sendDeleted,
   sendBadRequest,
   sendServerError,
-  sendConflict
+  sendConflict,
+  sendReportingRelationships
 } from '../view/position_view.js';
 
 const router = express.Router();
@@ -169,6 +170,41 @@ router.get('/', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/positions/reporting-relationships
+ * Returns hierarchical tree structure showing which positions report to which positions
+ * Query parameters:
+ *   - position_id (optional): Filter to show subtree starting from this specific position
+ *   - hierarchy (optional, default: true): If true, show full hierarchy; if false, only direct reports
+ */
+router.get('/reporting-relationships', async (req, res) => {
+  try {
+    let positionId = null;
+    
+    // Only process position_id if it's explicitly provided and has a value
+    if ('position_id' in req.query) {
+      const paramValue = req.query.position_id;
+      // Skip if it's undefined, null, or empty string
+      if (paramValue != null && paramValue !== '') {
+        const numValue = Number(paramValue);
+        // Check if it's a valid number and integer
+        if (!isNaN(numValue) && Number.isInteger(numValue) && numValue > 0) {
+          positionId = numValue;
+        } else {
+          return sendBadRequest(res, req, 'position_id must be a valid positive integer');
+        }
+      }
+    }
+
+    const includeHierarchy = req.query.hierarchy !== 'false' && req.query.hierarchy !== '0';
+
+    const relationships = await PositionsModel.findReportingRelationships(positionId, includeHierarchy);
+    
+    return sendReportingRelationships(res, req, relationships);
+  } catch (error) {
+    return sendServerError(res, req, 'Failed to fetch reporting relationships', error);
+  }
+});
 
 /**
  * GET /api/positions/:id

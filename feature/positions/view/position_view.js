@@ -103,3 +103,15 @@ export function sendServerError(res, req, message, error = null) {
     }
   });
 }
+
+export function sendReportingRelationships(res, req, data) {
+  const relationships = Array.isArray(data) ? data : [];
+  
+  res.json({
+    success: true,
+    meta: meta(req, {
+      count: relationships.length
+    }),
+    data: relationships
+  });
+}

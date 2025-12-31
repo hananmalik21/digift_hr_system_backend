@@ -633,6 +633,111 @@ class PositionsModel {
       return { success: true };
     });
   }
+
+  // ----------------------------
+  // FIND REPORTING RELATIONSHIPS (Hierarchical Tree)
+  // ----------------------------
+  static async findReportingRelationships(positionId = null, includeHierarchy = true) {
+    // Validate positionId if provided
+    let validatedId = null;
+    if (positionId !== null && positionId !== undefined && positionId !== '') {
+      // Additional check: if it's a string, make sure it's not just whitespace
+      if (typeof positionId === 'string' && positionId.trim() === '') {
+        validatedId = null;
+      } else {
+        validatedId = this.intOptional(positionId, 'position_id', { min: 1 });
+        if (!validatedId) return [];
+      }
+    }
+
+    // Build query to get all positions with their reporting relationships
+    let sql = this.selectBase();
+    const binds = [];
+
+    // Always get all positions to build the complete tree structure
+    // We'll filter by positionId in JavaScript if needed
+    sql += ` ORDER BY p.REPORTS_TO_POSITION_ID NULLS FIRST, p.POSITION_ID`;
+
+    const r = await this.executeQuery(sql, binds);
+    let allPositions = this.shapeMany(r.rows || []);
+
+    // If specific position_id is provided, filter to get that position and all its descendants
+    if (validatedId !== null) {
+      const rootPosition = allPositions.find((pos) => pos.position_id === validatedId);
+      if (!rootPosition) return [];
+
+      // Get all descendants of this position
+      const descendants = new Set([validatedId]);
+      let foundNew = true;
+      while (foundNew) {
+        foundNew = false;
+        for (const pos of allPositions) {
+          if (pos.reports_to_position_id && descendants.has(pos.reports_to_position_id) && !descendants.has(pos.position_id)) {
+            descendants.add(pos.position_id);
+            foundNew = true;
+          }
+        }
+      }
+
+      // Filter to only include the root position and its descendants
+      allPositions = allPositions.filter((pos) => descendants.has(pos.position_id));
+    }
+
+    // Build hierarchical tree structure
+    const buildTree = (parentId, level = 0) => {
+      const children = allPositions.filter((pos) => {
+        const reportsToId = pos.reports_to_position_id;
+        if (parentId === null) {
+          return reportsToId === null || reportsToId === undefined;
+        }
+        return reportsToId === parentId;
+      });
+
+      if (!includeHierarchy && level > 0) {
+        // If hierarchy is false, only return direct children (no recursion)
+        return children.map((pos) => ({
+          position_id: pos.position_id,
+          position_code: pos.position_code,
+          position_title_en: pos.position_title_en,
+          position_title_ar: pos.position_title_ar,
+          status: pos.status,
+          reports_to: pos.reports_to,
+          direct_reports: [],
+        }));
+      }
+
+      return children.map((pos) => ({
+        position_id: pos.position_id,
+        position_code: pos.position_code,
+        position_title_en: pos.position_title_en,
+        position_title_ar: pos.position_title_ar,
+        status: pos.status,
+        reports_to: pos.reports_to,
+        direct_reports: buildTree(pos.position_id, level + 1),
+      }));
+    };
+
+    // If positionId is provided, return subtree starting from that position
+    if (validatedId !== null) {
+      const rootPosition = allPositions.find((pos) => pos.position_id === validatedId);
+      if (!rootPosition) return [];
+
+      return [
+        {
+          position_id: rootPosition.position_id,
+          position_code: rootPosition.position_code,
+          position_title_en: rootPosition.position_title_en,
+          position_title_ar: rootPosition.position_title_ar,
+          status: rootPosition.status,
+          reports_to: rootPosition.reports_to,
+          direct_reports: buildTree(rootPosition.position_id, 0),
+        },
+      ];
+    }
+
+    // Otherwise, return all root positions with their subtrees
+    return buildTree(null, 0);
+  }
 }
 
 export default PositionsModel;
