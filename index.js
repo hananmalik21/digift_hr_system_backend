@@ -20,6 +20,7 @@ import positionsController from './feature/positions/controller/positions_contro
 import shiftController from './feature/shifts/controller/shiftController.js';
 import workPatternController from './feature/work_patterns/controller/workPatternController.js';
 import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
+import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
@@ -82,6 +83,9 @@ app.use('/api/tm/work-patterns', workPatternController);
 
 // Work Schedules routes
 app.use('/api/tm/work-schedules', workScheduleController);
+
+// Schedule Assignments routes
+app.use('/api/tm/schedule-assignments', scheduleAssignmentController);
 
 
 

@@ -123,6 +123,11 @@ export class DatabaseError extends AppError {
       return 'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.';
     }
 
+    // Mutating table error (trigger reading from same table being modified)
+    if (errorNum === 4091 || message.includes('ORA-04091')) {
+      return 'Cannot update schedule assignment due to a database constraint conflict. The assignment may overlap with existing assignments. Please verify the dates and try again, or contact support if the issue persists.';
+    }
+
     // Default database error
     return 'A database error occurred. Please try again later.';
   }
@@ -138,6 +143,7 @@ export class DatabaseError extends AppError {
 
     if (errorNum === 1 || message.includes('ORA-00001')) return 409; // Conflict
     if (errorNum === 20001 || message.includes('ORA-20001')) return 409; // Conflict - Schedule overlap
+    if (errorNum === 4091 || message.includes('ORA-04091')) return 409; // Conflict - Mutating table (overlap check)
     if (errorNum === 2291 || message.includes('ORA-02291')) return 400; // Bad Request
     if (errorNum === 2292 || message.includes('ORA-02292')) return 409; // Conflict
     if (errorNum === 1400 || message.includes('ORA-01400')) return 400; // Bad Request
@@ -157,6 +163,7 @@ export class DatabaseError extends AppError {
 
     if (errorNum === 1 || message.includes('ORA-00001')) return 'UNIQUE_CONSTRAINT_VIOLATION';
     if (errorNum === 20001 || message.includes('ORA-20001')) return 'SCHEDULE_OVERLAP_CONFLICT';
+    if (errorNum === 4091 || message.includes('ORA-04091')) return 'SCHEDULE_OVERLAP_CONFLICT';
     if (errorNum === 2291 || message.includes('ORA-02291')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 2292 || message.includes('ORA-02292')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 1400 || message.includes('ORA-01400')) return 'NOT_NULL_CONSTRAINT';
