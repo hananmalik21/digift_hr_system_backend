@@ -2,6 +2,14 @@ import { AppError } from './AppError.js';
 import { ValidationError } from './ValidationError.js';
 import { DatabaseError } from './DatabaseError.js';
 
+/**
+ * Generate a unique request ID
+ * @returns {string} Request ID
+ */
+function generateRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
 
 /**
  * Centralized Error Handler
@@ -61,11 +69,15 @@ export function formatErrorResponse(err, req = null) {
     }
   }
 
-  // Build response object (no meta field)
+  // Build response object with meta and error structure
   const response = {
     success: false,
-    error: userMessage, // User-friendly message (first validation error for ValidationError)
-    error_details: errorDetails // Technical details
+    meta: {},
+    error: {
+      code: err.code || 'ERROR',
+      message: userMessage, // User-friendly message
+      details: errorDetails // Technical details
+    }
   };
 
   return {

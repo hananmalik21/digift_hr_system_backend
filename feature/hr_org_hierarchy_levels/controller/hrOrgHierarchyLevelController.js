@@ -215,9 +215,6 @@ router.post('/bulk', async (req, res) => {
       success: true,
       message: 'Hierarchy levels created successfully',
       meta: {
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        request_id: req.headers['x-request-id'] || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         execution_time: `${executionTime}ms`,
         structure_id: structureId,
         count: createdLevels.length,
@@ -533,9 +530,6 @@ router.post('/org-structures/onboard-enterprise-hierarchy', async (req, res) => 
       success: true,
       data: result,
       meta: {
-        version: '1.0.0',
-        timestamp: new Date().toISOString(),
-        request_id: req.headers['x-request-id'] || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         execution_time: `${executionTime}ms`,
         action: 'onboarded'
       }

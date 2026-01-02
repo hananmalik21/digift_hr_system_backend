@@ -23,9 +23,6 @@ function generateRequestId() {
 
 function generateBaseMetadata(req, additionalMeta = {}) {
   return {
-    version: API_VERSION,
-    timestamp: new Date().toISOString(),
-    request_id: req.headers['x-request-id'] || generateRequestId(),
     ...additionalMeta
   };
 }

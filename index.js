@@ -17,6 +17,9 @@ import jobFamilyController from './feature/job_families/controller/jobFamilyCont
 import gradeController from './feature/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
 import positionsController from './feature/positions/controller/positions_controller.js';
+import shiftController from './feature/shifts/controller/shiftController.js';
+import workPatternController from './feature/work_patterns/controller/workPatternController.js';
+import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
@@ -70,6 +73,15 @@ app.use('/api/job-levels', jobLevelsController);
 
 
 app.use('/api/positions', positionsController);
+
+// Shifts routes
+app.use('/api/tm/shifts', shiftController);
+
+// Work Patterns routes
+app.use('/api/tm/work-patterns', workPatternController);
+
+// Work Schedules routes
+app.use('/api/tm/work-schedules', workScheduleController);
 
 
 
