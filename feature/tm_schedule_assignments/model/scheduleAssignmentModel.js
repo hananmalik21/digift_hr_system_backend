@@ -322,7 +322,16 @@ class ScheduleAssignmentModel {
           });
 
           if (overlap) {
-            throw new DatabaseError('SCHEDULE_OVERLAP_CONFLICT', { overlap });
+            // Create a proper conflict error
+            const conflictError = {
+              errorNum: 20001,
+              message: 'Schedule assignment overlaps with an existing assignment',
+              code: 'ORA-20001'
+            };
+            throw new DatabaseError(
+              'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.',
+              conflictError
+            );
           }
         }
 
@@ -383,14 +392,39 @@ class ScheduleAssignmentModel {
         throw error;
       }
 
-      if (error?.errorNum !== undefined || String(error?.message || '').includes('ORA-')) {
+      // Log the error for debugging
+      console.error('Error in create schedule assignment:', {
+        error,
+        errorType: typeof error,
+        errorNum: error?.errorNum,
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack
+      });
+
+      // Check if it's an Oracle error
+      const isOracleError = error?.errorNum !== undefined || 
+                           error?.code?.includes('ORA-') ||
+                           String(error?.message || '').includes('ORA-') ||
+                           String(error?.message || '').includes('unique constraint') ||
+                           String(error?.message || '').includes('already exists');
+
+      if (isOracleError) {
+        // Ensure we have a proper Oracle error object
+        const oracleError = {
+          errorNum: error.errorNum || (String(error?.message || '').includes('ORA-00001') ? 1 : undefined),
+          message: error.message || String(error),
+          code: error.code || (String(error?.message || '').match(/ORA-\d{5}/)?.[0])
+        };
+        
         const ora = this.extractOraCode(error);
         throw new DatabaseError(
-          ora ? `${ora}: ${error.message}` : (error.message || 'Oracle database error'),
-          error
+          ora ? `${ora}: ${error.message || String(error)}` : (error.message || 'Oracle database error'),
+          oracleError
         );
       }
 
+      // For other errors, wrap them properly
       throw new DatabaseError('Failed to create schedule assignment', error);
     }
   }

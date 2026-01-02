@@ -3,24 +3,25 @@ import { ValidationError } from './ValidationError.js';
 import { DatabaseError } from './DatabaseError.js';
 
 /**
- * Generate a unique request ID
- * @returns {string} Request ID
- */
-function generateRequestId() {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-
-/**
  * Centralized Error Handler
  * Formats error responses consistently across all APIs
  * 
+ * Required Error Response Format:
+ * {
+ *   "status": false,
+ *   "message": "<user friendly error message>",
+ *   "error": {
+ *     "code": "<APP_ERROR_CODE or HTTP_CODE_NAME>",
+ *     "details": <object|array|string|null>,
+ *     "stack": <only in non-production>
+ *   }
+ * }
+ * 
  * @param {Error} err - Error object
  * @param {Object} req - Express request object
- * @returns {Object} Formatted error response
+ * @param {Object} res - Express response object
  */
-export function formatErrorResponse(err, req = null) {
-
+export function sendErrorResponse(err, req, res) {
   // If error is not an AppError, wrap it
   if (!(err instanceof AppError)) {
     err = new AppError(
@@ -29,37 +30,39 @@ export function formatErrorResponse(err, req = null) {
       'INTERNAL_ERROR',
       err.message || 'Unknown error'
     );
-    // Preserve original error
-    err.originalError = err;
   }
 
-  // Build error details object
-  const errorDetails = {
-    message: err.technicalMessage || err.message,
-    code: err.code,
-    type: err.name || 'Error',
-  };
-
-  // Add stack trace
-  if (err.stack) {
-    errorDetails.stack = err.stack;
-  }
-
-  // Add specific error properties based on error type
-  let userMessage = err.userMessage || err.message;
+  // Get user-friendly message
+  let userMessage = err.userMessage || err.message || 'An error occurred';
   
+  // Build error details object
+  let errorDetails = null;
+
+  // Handle ValidationError with validation errors array
   if (err instanceof ValidationError && err.errors) {
-    errorDetails.validation_errors = err.errors;
-    // Use the first validation error as the user message
     const errorArray = Array.isArray(err.errors) ? err.errors : [err.errors];
-    if (errorArray.length > 0) {
+    errorDetails = errorArray;
+    // Use the first validation error as the user message if message is generic
+    if (errorArray.length > 0 && (userMessage === 'Validation failed' || !userMessage)) {
       userMessage = errorArray[0];
     }
   }
 
+  // Handle DatabaseError with specific details
   if (err instanceof DatabaseError) {
-    errorDetails.oracle_code = err.oracleCode;
-    errorDetails.error_num = err.errorNum;
+    errorDetails = {};
+    if (err.oracleCode) {
+      errorDetails.oracle_code = err.oracleCode;
+    }
+    if (err.errorNum !== undefined) {
+      errorDetails.error_num = err.errorNum;
+    }
+    if (err.constraint) {
+      errorDetails.constraint = err.constraint;
+    }
+    if (err.columns) {
+      errorDetails.columns = err.columns;
+    }
     if (err.oracleError) {
       errorDetails.original_error = {
         message: err.oracleError.message,
@@ -67,39 +70,34 @@ export function formatErrorResponse(err, req = null) {
         code: err.oracleError.code
       };
     }
+    // If no details were added, set to null
+    if (Object.keys(errorDetails).length === 0) {
+      errorDetails = null;
+    }
   }
 
-  // Build response object with meta and error structure
+  // Build error object
+  const errorObject = {
+    code: err.code || 'INTERNAL_ERROR',
+    details: errorDetails
+  };
+
+  // Add stack trace only in non-production
+  if (process.env.NODE_ENV !== 'production' && err.stack) {
+    errorObject.stack = err.stack;
+  }
+
+  // Build and send response
   const response = {
-    success: false,
-    meta: {},
-    error: {
-      code: err.code || 'ERROR',
-      message: userMessage, // User-friendly message
-      details: errorDetails // Technical details
-    }
+    status: false,
+    message: userMessage,
+    error: errorObject
   };
 
-  return {
-    statusCode: err.statusCode || 500,
-    response
-  };
-}
-
-/**
- * Send error response
- * Logs error and sends formatted response
- * 
- * @param {Error} err - Error object
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export function sendErrorResponse(err, req, res) {
   // Log error to console for server-side debugging
   console.error('\n❌ Error occurred:');
   console.error('Error Type:', err.name || 'Error');
-  console.error('User Message:', err.userMessage || err.message);
-  console.error('Technical Message:', err.technicalMessage || err.message);
+  console.error('User Message:', userMessage);
   console.error('Status Code:', err.statusCode || 500);
   console.error('Error Code:', err.code);
   
@@ -115,8 +113,27 @@ export function sendErrorResponse(err, req, res) {
     console.error('Original Message:', err.oracleError.message);
   }
 
-  // Format and send error response
-  const { statusCode, response } = formatErrorResponse(err, req);
-  res.status(statusCode).json(response);
+  // Send formatted error response
+  res.status(err.statusCode || 500).json(response);
+}
+
+/**
+ * Format error response (kept for backward compatibility, but not used in new format)
+ * @deprecated Use sendErrorResponse directly
+ */
+export function formatErrorResponse(err, req = null) {
+  // This function is kept for backward compatibility
+  // but the new format is handled directly in sendErrorResponse
+  return {
+    statusCode: err.statusCode || 500,
+    response: {
+      status: false,
+      message: err.userMessage || err.message || 'An error occurred',
+      error: {
+        code: err.code || 'INTERNAL_ERROR',
+        details: null
+      }
+    }
+  };
 }
 

@@ -1,16 +1,9 @@
 import express from 'express';
 import EnterpriseModel from '../model/enterpriseModel.js';
-import {
-  sendEnterpriseList,
-  sendEnterprise,
-  sendCreated,
-  sendUpdated,
-  sendDeleted,
-  sendBadRequest,
-  sendServerError,
-  sendNotFound,
-  sendConflict
-} from '../view/enterpriseView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
+import { ValidationError, NotFoundError, ConflictError, DatabaseError } from '../../../utils/errors/index.js';
+import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
 const router = express.Router();
 
@@ -72,42 +65,45 @@ function getUserId(req) {
  * @query   isActive - Filter by active status (true/false)
  * @access  Public
  */
-router.get('/', async (req, res) => {
-  try {
-    const filters = {};
-    const appliedFilters = {};
-    
-    if (req.query.enterprise_id) {
-      filters.enterpriseId = parseInt(req.query.enterprise_id);
-      if (isNaN(filters.enterpriseId)) {
-        return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-      }
-      appliedFilters.enterprise_id = filters.enterpriseId;
+router.get('/', asyncHandler(async (req, res) => {
+  const filters = {};
+  const appliedFilters = {};
+  
+  if (req.query.enterprise_id) {
+    filters.enterpriseId = parseInt(req.query.enterprise_id);
+    if (isNaN(filters.enterpriseId)) {
+      throw new ValidationError('Invalid ENTERPRISE_ID format');
     }
-    
-    if (req.query.enterprise_code) {
-      filters.enterpriseCode = req.query.enterprise_code;
-      appliedFilters.enterprise_code = filters.enterpriseCode;
-    }
-
-    if (req.query.isActive !== undefined) {
-      filters.isActive = req.query.isActive === 'true' || req.query.isActive === '1';
-      appliedFilters.is_active = filters.isActive;
-    }
-
-    const enterprises = await EnterpriseModel.findAll(filters);
-    
-    // Get total count for metadata
-    const totalCount = enterprises.length;
-    
-    sendEnterpriseList(res, req, enterprises, { 
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-      total: totalCount
-    });
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch enterprises', error);
+    appliedFilters.enterprise_id = filters.enterpriseId;
   }
-});
+  
+  if (req.query.enterprise_code) {
+    filters.enterpriseCode = req.query.enterprise_code;
+    appliedFilters.enterprise_code = filters.enterpriseCode;
+  }
+
+  if (req.query.isActive !== undefined) {
+    filters.isActive = req.query.isActive === 'true' || req.query.isActive === '1';
+    appliedFilters.is_active = filters.isActive;
+  }
+
+  const enterprises = await EnterpriseModel.findAll(filters);
+  
+  // Get total count for metadata
+  const totalCount = enterprises.length;
+  
+  // Convert keys to lowercase snake_case
+  const convertedEnterprises = toLowerCaseKeys(enterprises);
+  
+  sendList(res, {
+    message: 'Enterprises fetched successfully',
+    data: convertedEnterprises,
+    meta: {
+      ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
+      total: totalCount
+    }
+  });
+}));
 
 /**
  * @route   GET /api/enterprises/:id
@@ -115,20 +111,26 @@ router.get('/', async (req, res) => {
  * @param   id - Enterprise ID
  * @access  Public
  */
-router.get('/:id', async (req, res) => {
-  try {
-    const enterpriseId = parseInt(req.params.id);
-    
-    if (isNaN(enterpriseId)) {
-      return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-    }
-
-    const enterprise = await EnterpriseModel.findById(enterpriseId);
-    sendEnterprise(res, req, enterprise);
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch enterprise', error);
+router.get('/:id', asyncHandler(async (req, res) => {
+  const enterpriseId = parseInt(req.params.id);
+  
+  if (isNaN(enterpriseId)) {
+    throw new ValidationError('Invalid ENTERPRISE_ID format');
   }
-});
+
+  const enterprise = await EnterpriseModel.findById(enterpriseId);
+  if (!enterprise) {
+    throw new NotFoundError('Enterprise not found');
+  }
+  
+  // Convert keys to lowercase snake_case
+  const convertedEnterprise = toLowerCaseKeys(enterprise);
+  
+  sendSuccess(res, {
+    message: 'Enterprise fetched successfully',
+    data: convertedEnterprise
+  });
+}));
 
 /**
  * @route   POST /api/enterprises
@@ -136,31 +138,35 @@ router.get('/:id', async (req, res) => {
  * @body    { ENTERPRISE_CODE, ENTERPRISE_NAME, IS_ACTIVE?, LAST_UPDATE_LOGIN? }
  * @access  Public
  */
-router.post('/', async (req, res) => {
-  try {
-    const data = req.body;
-    const errors = validateEnterpriseData(data, false);
+router.post('/', asyncHandler(async (req, res) => {
+  const data = req.body;
+  const errors = validateEnterpriseData(data, false);
 
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if enterprise code already exists
-    const existingEnterprise = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
-    if (existingEnterprise) {
-      return sendConflict(res, req, `Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
-    }
-
-    const userId = getUserId(req);
-    const newEnterprise = await EnterpriseModel.create(data, userId);
-    sendCreated(res, req, newEnterprise);
-  } catch (error) {
-    if (error.message?.includes('already exists')) {
-      return sendConflict(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to create enterprise', error);
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
   }
-});
+
+  // Check if enterprise code already exists
+  const existingEnterprise = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
+  if (existingEnterprise) {
+    throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
+  }
+
+  const userId = getUserId(req);
+  try {
+    const newEnterprise = await EnterpriseModel.create(data, userId);
+    // Convert keys to lowercase snake_case
+    const convertedEnterprise = toLowerCaseKeys(newEnterprise);
+    
+    sendCreated(res, {
+      message: 'Enterprise created successfully',
+      data: convertedEnterprise
+    });
+  } catch (error) {
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
+  }
+}));
 
 /**
  * @route   PUT /api/enterprises/:id
@@ -169,45 +175,49 @@ router.post('/', async (req, res) => {
  * @body    { ENTERPRISE_CODE?, ENTERPRISE_NAME?, IS_ACTIVE?, LAST_UPDATE_LOGIN? }
  * @access  Public
  */
-router.put('/:id', async (req, res) => {
-  try {
-    const enterpriseId = parseInt(req.params.id);
-    
-    if (isNaN(enterpriseId)) {
-      return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateEnterpriseData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if enterprise exists
-    const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-    if (!existingEnterprise) {
-      return sendEnterprise(res, req, null);
-    }
-
-    // If updating enterprise code, check if it conflicts with another enterprise
-    if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.enterprise_code) {
-      const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
-      if (codeExists) {
-        return sendConflict(res, req, `Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
-      }
-    }
-
-    const userId = getUserId(req);
-    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
-    sendUpdated(res, req, updatedEnterprise);
-  } catch (error) {
-    if (error.message?.includes('already exists')) {
-      return sendConflict(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to update enterprise', error);
+router.put('/:id', asyncHandler(async (req, res) => {
+  const enterpriseId = parseInt(req.params.id);
+  
+  if (isNaN(enterpriseId)) {
+    throw new ValidationError('Invalid ENTERPRISE_ID format');
   }
-});
+
+  const data = req.body;
+  const errors = validateEnterpriseData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if enterprise exists
+  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
+  if (!existingEnterprise) {
+    throw new NotFoundError('Enterprise not found');
+  }
+
+  // If updating enterprise code, check if it conflicts with another enterprise
+  if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.ENTERPRISE_CODE) {
+    const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
+    if (codeExists) {
+      throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
+    }
+  }
+
+  const userId = getUserId(req);
+  try {
+    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
+    // Convert keys to lowercase snake_case
+    const convertedEnterprise = toLowerCaseKeys(updatedEnterprise);
+    
+    sendUpdated(res, {
+      message: 'Enterprise updated successfully',
+      data: convertedEnterprise
+    });
+  } catch (error) {
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
+  }
+}));
 
 /**
  * @route   PATCH /api/enterprises/:id
@@ -216,45 +226,49 @@ router.put('/:id', async (req, res) => {
  * @body    Partial update fields
  * @access  Public
  */
-router.patch('/:id', async (req, res) => {
-  try {
-    const enterpriseId = parseInt(req.params.id);
-    
-    if (isNaN(enterpriseId)) {
-      return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateEnterpriseData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if enterprise exists
-    const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-    if (!existingEnterprise) {
-      return sendEnterprise(res, req, null);
-    }
-
-    // If updating enterprise code, check if it conflicts with another enterprise
-    if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.enterprise_code) {
-      const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
-      if (codeExists) {
-        return sendConflict(res, req, `Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
-      }
-    }
-
-    const userId = getUserId(req);
-    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
-    sendUpdated(res, req, updatedEnterprise);
-  } catch (error) {
-    if (error.message?.includes('already exists')) {
-      return sendConflict(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to update enterprise', error);
+router.patch('/:id', asyncHandler(async (req, res) => {
+  const enterpriseId = parseInt(req.params.id);
+  
+  if (isNaN(enterpriseId)) {
+    throw new ValidationError('Invalid ENTERPRISE_ID format');
   }
-});
+
+  const data = req.body;
+  const errors = validateEnterpriseData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if enterprise exists
+  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
+  if (!existingEnterprise) {
+    throw new NotFoundError('Enterprise not found');
+  }
+
+  // If updating enterprise code, check if it conflicts with another enterprise
+  if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.ENTERPRISE_CODE) {
+    const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
+    if (codeExists) {
+      throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
+    }
+  }
+
+  const userId = getUserId(req);
+  try {
+    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
+    // Convert keys to lowercase snake_case
+    const convertedEnterprise = toLowerCaseKeys(updatedEnterprise);
+    
+    sendUpdated(res, {
+      message: 'Enterprise updated successfully',
+      data: convertedEnterprise
+    });
+  } catch (error) {
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
+  }
+}));
 
 /**
  * @route   DELETE /api/enterprises/:id
@@ -265,58 +279,60 @@ router.patch('/:id', async (req, res) => {
  * @query   auto_fallback - Set to 'true' to automatically fallback to soft delete if hard delete fails
  * @access  Public
  */
-router.delete('/:id', async (req, res) => {
-  try {
-    const enterpriseId = parseInt(req.params.id);
-    
-    if (isNaN(enterpriseId)) {
-      return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-    }
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const enterpriseId = parseInt(req.params.id);
+  
+  if (isNaN(enterpriseId)) {
+    throw new ValidationError('Invalid ENTERPRISE_ID format');
+  }
 
-    // Check if enterprise exists
-    const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-    if (!existingEnterprise) {
-      return sendEnterprise(res, req, null);
-    }
+  // Check if enterprise exists
+  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
+  if (!existingEnterprise) {
+    throw new NotFoundError('Enterprise not found');
+  }
 
-    const userId = getUserId(req);
-    const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-    const isSoftDelete = req.query.soft === 'true' || req.query.soft === '1';
+  const userId = getUserId(req);
+  const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
+  const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
 
-    // Default to soft delete unless explicitly requesting hard delete
-    if (isHardDelete) {
-      // Try hard delete first, fallback to soft delete if constraint violation
-      try {
-        await EnterpriseModel.hardDelete(enterpriseId);
-        sendDeleted(res, req, 'Enterprise permanently deleted', enterpriseId);
-      } catch (deleteError) {
-        // If hard delete fails due to foreign key constraint, provide detailed error
-        if (deleteError.code === 'FOREIGN_KEY_CONSTRAINT' || deleteError.errorNum === 2292) {
-          // Check if user wants automatic fallback or detailed error
-          const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
-          
-          if (autoFallback) {
-            // Automatically fallback to soft delete
-            await EnterpriseModel.softDelete(enterpriseId, userId);
-            sendDeleted(res, req, 'Enterprise deactivated (cannot permanently delete due to existing references)', enterpriseId);
-          } else {
-            // Return detailed error with reference information
-            throw deleteError;
-          }
+  // Default to soft delete unless explicitly requesting hard delete
+  if (isHardDelete) {
+    // Try hard delete first, fallback to soft delete if constraint violation
+    try {
+      await EnterpriseModel.hardDelete(enterpriseId);
+      sendDeleted(res, {
+        message: 'Enterprise permanently deleted',
+        data: enterpriseId
+      });
+    } catch (deleteError) {
+      // If hard delete fails due to foreign key constraint, provide detailed error
+      if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
+        if (autoFallback) {
+          // Automatically fallback to soft delete
+          await EnterpriseModel.softDelete(enterpriseId, userId);
+          sendDeleted(res, {
+            message: 'Enterprise deactivated (cannot permanently delete due to existing references)',
+            data: enterpriseId
+          });
         } else {
-          // Re-throw other errors
+          // Return detailed error with reference information
           throw deleteError;
         }
+      } else {
+        // Re-throw other errors
+        throw deleteError;
       }
-    } else {
-      // Default to soft delete
-      await EnterpriseModel.softDelete(enterpriseId, userId);
-      sendDeleted(res, req, 'Enterprise deactivated (soft delete)', enterpriseId);
     }
-  } catch (error) {
-    sendServerError(res, req, 'Failed to delete enterprise', error);
+  } else {
+    // Default to soft delete
+    await EnterpriseModel.softDelete(enterpriseId, userId);
+    sendDeleted(res, {
+      message: 'Enterprise deactivated (soft delete)',
+      data: enterpriseId
+    });
   }
-});
+}));
 
 export default router;
 

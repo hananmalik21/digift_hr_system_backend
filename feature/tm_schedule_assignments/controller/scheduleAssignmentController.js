@@ -1,13 +1,8 @@
 import express from 'express';
 import ScheduleAssignmentModel from '../model/scheduleAssignmentModel.js';
 import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
-import {
-  sendScheduleAssignmentList,
-  sendScheduleAssignment,
-  sendCreated,
-  sendUpdated,
-  sendDeleted
-} from '../view/scheduleAssignmentView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -214,7 +209,19 @@ router.post('/', asyncHandler(async (req, res) => {
   }
 
   const newAssignment = await ScheduleAssignmentModel.create(upperCaseData, userId);
-  sendCreated(res, req, newAssignment);
+  
+  // Map DEPARTMENT_ID back to org_unit_id in response
+  if (newAssignment.department_id !== undefined && newAssignment.department_id !== null) {
+    newAssignment.org_unit_id = newAssignment.department_id;
+  }
+  
+  // Convert keys to lowercase snake_case
+  const convertedAssignment = toLowerCaseKeys(newAssignment);
+  
+  sendCreated(res, {
+    message: 'Schedule assignment created successfully',
+    data: convertedAssignment
+  });
 }));
 
 /**
@@ -307,9 +314,22 @@ router.get('/', asyncHandler(async (req, res) => {
     return assignment;
   });
 
-  sendScheduleAssignmentList(res, req, assignments, {
-    pagination: { page, pageSize, totalPages, hasNext, hasPrevious },
-    total
+  // Convert keys to lowercase snake_case
+  const convertedAssignments = toLowerCaseKeys(assignments);
+  
+  sendList(res, {
+    message: 'Schedule assignments fetched successfully',
+    data: convertedAssignments,
+    meta: {
+      pagination: {
+        page,
+        pageSize,
+        total: total,
+        totalPages,
+        hasNext,
+        hasPrevious
+      }
+    }
   });
 }));
 
@@ -341,7 +361,13 @@ router.get('/:schedule_assignment_id', asyncHandler(async (req, res) => {
     assignment.org_unit_id = assignment.department_id;
   }
 
-  sendScheduleAssignment(res, req, assignment);
+  // Convert keys to lowercase snake_case
+  const convertedAssignment = toLowerCaseKeys(assignment);
+  
+  sendSuccess(res, {
+    message: 'Schedule assignment fetched successfully',
+    data: convertedAssignment
+  });
 }));
 
 /**
@@ -429,7 +455,13 @@ router.patch('/:schedule_assignment_id', asyncHandler(async (req, res) => {
     updatedAssignment.org_unit_id = updatedAssignment.department_id;
   }
 
-  sendUpdated(res, req, updatedAssignment);
+  // Convert keys to lowercase snake_case
+  const convertedAssignment = toLowerCaseKeys(updatedAssignment);
+  
+  sendUpdated(res, {
+    message: 'Schedule assignment updated successfully',
+    data: convertedAssignment
+  });
 }));
 
 /**
@@ -453,7 +485,10 @@ router.delete('/:schedule_assignment_id', asyncHandler(async (req, res) => {
   }
 
   await ScheduleAssignmentModel.delete(scheduleAssignmentId, tenantId);
-  sendDeleted(res, req, scheduleAssignmentId);
+  sendDeleted(res, {
+    message: 'Schedule assignment deleted successfully',
+    data: scheduleAssignmentId
+  });
 }));
 
 export default router;

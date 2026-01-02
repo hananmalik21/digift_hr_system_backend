@@ -10,13 +10,8 @@ import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
 import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
-import {
-  sendWorkScheduleList,
-  sendWorkSchedule,
-  sendCreated,
-  sendUpdated,
-  sendLinesUpdated
-} from '../view/workScheduleView.js';
+import { sendCreated, sendUpdated, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -245,7 +240,13 @@ router.post('/', asyncHandler(async (req, res) => {
   const upperCaseData = convertToUpperCase(data);
 
   const newSchedule = await WorkScheduleModel.create(upperCaseData, userId);
-  sendCreated(res, req, newSchedule);
+  // Convert keys to lowercase snake_case
+  const convertedSchedule = toLowerCaseKeys(newSchedule);
+  
+  sendCreated(res, {
+    message: 'Work schedule created successfully',
+    data: convertedSchedule
+  });
 }));
 
 /**
@@ -303,9 +304,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
 
-  sendWorkScheduleList(res, req, result.workSchedules, {
-    pagination: { page, pageSize, totalPages, hasNext, hasPrevious },
-    total
+  // Convert keys to lowercase snake_case
+  const convertedSchedules = toLowerCaseKeys(result.workSchedules);
+  
+  sendList(res, {
+    message: 'Work schedules fetched successfully',
+    data: convertedSchedules,
+    meta: {
+      pagination: {
+        page,
+        pageSize,
+        total: total,
+        totalPages,
+        hasNext,
+        hasPrevious
+      }
+    }
   });
 }));
 
@@ -322,7 +336,17 @@ router.get('/:work_schedule_id', asyncHandler(async (req, res) => {
   if (isNaN(tenantId)) throw new ValidationError('Invalid tenant_id format');
 
   const workSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
-  sendWorkSchedule(res, req, workSchedule);
+  if (!workSchedule) {
+    throw new NotFoundError('Work schedule not found');
+  }
+  
+  // Convert keys to lowercase snake_case
+  const convertedSchedule = toLowerCaseKeys(workSchedule);
+  
+  sendSuccess(res, {
+    message: 'Work schedule fetched successfully',
+    data: convertedSchedule
+  });
 }));
 
 /**
@@ -373,7 +397,13 @@ router.put('/:work_schedule_id', asyncHandler(async (req, res) => {
   const upperCaseData = convertToUpperCase(data);
 
   const updatedSchedule = await WorkScheduleModel.update(workScheduleId, tenantId, upperCaseData, userId);
-  sendUpdated(res, req, updatedSchedule);
+  // Convert keys to lowercase snake_case
+  const convertedSchedule = toLowerCaseKeys(updatedSchedule);
+  
+  sendUpdated(res, {
+    message: 'Work schedule updated successfully',
+    data: convertedSchedule
+  });
 }));
 
 /**
@@ -444,7 +474,10 @@ router.put('/:work_schedule_id/lines', asyncHandler(async (req, res) => {
   const upperCaseData = convertToUpperCase(data);
 
   await WorkScheduleModel.updateLines(workScheduleId, tenantId, upperCaseData.WEEKLY_LINES, userId);
-  sendLinesUpdated(res, req, workScheduleId);
+  sendUpdated(res, {
+    message: 'Work schedule lines updated successfully',
+    data: { work_schedule_id: workScheduleId }
+  });
 }));
 
 export default router;

@@ -53,6 +53,8 @@ export class DatabaseError extends AppError {
           'TM_WORK_SCHEDULES_U1': 'A work schedule with this code already exists for this tenant.',
           'TM_WORK_SCHEDULES_PK': 'This work schedule already exists.',
           'TM_WORK_SCHEDULE_LINES_U1': 'A day of week already exists for this work schedule.',
+          'TM_SCHEDULE_ASSIGNMENTS_U1': 'A schedule assignment already exists for this combination.',
+          'TM_SCHEDULE_ASSIGNMENTS_PK': 'This schedule assignment already exists.',
           'COMPANIES_U1': 'A company with this code already exists.',
           'COMPANIES_PK': 'This company already exists.',
           'ENTERPRISES_U1': 'An enterprise with this code already exists.',
@@ -76,6 +78,9 @@ export class DatabaseError extends AppError {
         }
         if (constraintName.includes('WORK_SCHEDULE_LINES') && (constraintName.includes('U') || constraintName.includes('UK'))) {
           return 'A day of week already exists for this work schedule.';
+        }
+        if (constraintName.includes('SCHEDULE_ASSIGNMENTS') && (constraintName.includes('U') || constraintName.includes('UK'))) {
+          return 'A schedule assignment already exists for this combination. Please check for duplicate assignments.';
         }
         if (constraintName.includes('COMPANIES') && (constraintName.includes('U') || constraintName.includes('UK'))) {
           return 'A company with this code already exists.';

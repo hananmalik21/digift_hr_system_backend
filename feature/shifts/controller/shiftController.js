@@ -1,13 +1,8 @@
 import express from 'express';
 import ShiftModel from '../model/shiftModel.js';
 import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
-import {
-  sendShiftList,
-  sendShift,
-  sendCreated,
-  sendUpdated,
-  sendDeleted
-} from '../view/shiftView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -147,7 +142,13 @@ router.post('/', asyncHandler(async (req, res) => {
   
   try {
     const newShift = await ShiftModel.create(upperCaseData, userId);
-    sendCreated(res, req, newShift);
+    // Convert keys to lowercase snake_case
+    const convertedShift = toLowerCaseKeys(newShift);
+    
+    sendCreated(res, {
+      message: 'Shift created successfully',
+      data: convertedShift
+    });
   } catch (error) {
     throw error;
   }
@@ -221,15 +222,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
   
-  sendShiftList(res, req, result.shifts || [], { 
-    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-    total: totalCount,
-    pagination: {
-      page,
-      pageSize,
-      totalPages,
-      hasNext,
-      hasPrevious
+  // Convert keys to lowercase snake_case
+  const shifts = toLowerCaseKeys(result.shifts || []);
+  
+  sendList(res, {
+    message: 'Shifts fetched successfully',
+    data: shifts,
+    meta: {
+      ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
+      pagination: {
+        page,
+        pageSize,
+        total: totalCount,
+        totalPages,
+        hasNext,
+        hasPrevious
+      }
     }
   });
 }));
@@ -262,7 +270,14 @@ router.get('/:shift_id', asyncHandler(async (req, res) => {
   if (!shift) {
     throw new NotFoundError('Shift not found');
   }
-  sendShift(res, req, shift);
+  
+  // Convert keys to lowercase snake_case
+  const convertedShift = toLowerCaseKeys(shift);
+  
+  sendSuccess(res, {
+    message: 'Shift fetched successfully',
+    data: convertedShift
+  });
 }));
 
 /**
@@ -325,7 +340,13 @@ router.put('/:shift_id', asyncHandler(async (req, res) => {
   
   try {
     const updatedShift = await ShiftModel.update(shiftId, tenantId, upperCaseData, userId);
-    sendUpdated(res, req, updatedShift);
+    // Convert keys to lowercase snake_case
+    const convertedShift = toLowerCaseKeys(updatedShift);
+    
+    sendUpdated(res, {
+      message: 'Shift updated successfully',
+      data: convertedShift
+    });
   } catch (error) {
     throw error;
   }
@@ -372,14 +393,20 @@ router.delete('/:shift_id', asyncHandler(async (req, res) => {
   if (isHardDelete) {
     try {
       await ShiftModel.hardDelete(shiftId, tenantId);
-      sendDeleted(res, req, 'Shift permanently deleted', shiftId);
+      sendDeleted(res, {
+        message: 'Shift permanently deleted',
+        data: shiftId
+      });
     } catch (deleteError) {
       throw deleteError;
     }
   } else {
     // Default to soft delete
     await ShiftModel.softDelete(shiftId, tenantId, userId);
-    sendDeleted(res, req, 'Shift deactivated (soft delete)', shiftId);
+    sendDeleted(res, {
+      message: 'Shift deactivated (soft delete)',
+      data: shiftId
+    });
   }
 }));
 

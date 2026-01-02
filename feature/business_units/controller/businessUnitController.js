@@ -1,12 +1,7 @@
 import express from 'express';
 import BusinessUnitModel from '../model/businessUnitModel.js';
-import {
-  sendBusinessUnitList,
-  sendBusinessUnit,
-  sendCreated,
-  sendUpdated,
-  sendDeleted
-} from '../view/businessUnitView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -186,15 +181,22 @@ router.get('/', async (req, res) => {
     const hasNext = page < totalPages;
     const hasPrevious = page > 1;
     
-    sendBusinessUnitList(res, req, result.businessUnits || result, { 
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-      total: totalCount,
-      pagination: {
-        page,
-        pageSize,
-        totalPages,
-        hasNext,
-        hasPrevious
+    // Convert keys to lowercase snake_case
+    const businessUnits = toLowerCaseKeys(result.businessUnits || result);
+    
+    sendList(res, {
+      message: 'Business units fetched successfully',
+      data: businessUnits,
+      meta: {
+        ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
+        pagination: {
+          page,
+          pageSize,
+          total: totalCount,
+          totalPages,
+          hasNext,
+          hasPrevious
+        }
       }
     });
   } catch (error) {

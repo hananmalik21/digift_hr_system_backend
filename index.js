@@ -97,11 +97,15 @@ console.log('✅ Database pool initialized');
 // ==========================================
 // 📌 HEALTH CHECK ENDPOINT
 // ==========================================
+import { sendSuccess } from './utils/response.js';
+
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
+  sendSuccess(res, {
     message: 'API Server is running',
-    timestamp: new Date().toISOString()
+    data: {
+      status: 'OK',
+      timestamp: new Date().toISOString()
+    }
   });
 });
 

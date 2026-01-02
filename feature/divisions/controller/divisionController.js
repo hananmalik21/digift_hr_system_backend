@@ -1,12 +1,7 @@
 import express from 'express';
 import DivisionModel from '../model/divisionModel.js';
-import {
-  sendDivisionList,
-  sendDivision,
-  sendCreated,
-  sendUpdated,
-  sendDeleted
-} from '../view/divisionView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -176,15 +171,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
   
-  sendDivisionList(res, req, result.divisions || result, { 
-    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-    total: totalCount,
-    pagination: {
-      page,
-      pageSize,
-      totalPages,
-      hasNext,
-      hasPrevious
+  // Convert keys to lowercase snake_case
+  const divisions = toLowerCaseKeys(result.divisions || result);
+  
+  sendList(res, {
+    message: 'Divisions fetched successfully',
+    data: divisions,
+    meta: {
+      ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
+      pagination: {
+        page,
+        pageSize,
+        total: totalCount,
+        totalPages,
+        hasNext,
+        hasPrevious
+      }
     }
   });
 }));
@@ -206,7 +208,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!division) {
     throw new NotFoundError('Division not found');
   }
-  sendDivision(res, req, division);
+  
+  // Convert keys to lowercase snake_case
+  const convertedDivision = toLowerCaseKeys(division);
+  
+  sendSuccess(res, {
+    message: 'Division fetched successfully',
+    data: convertedDivision
+  });
 }));
 
 /**
@@ -226,7 +235,13 @@ router.post('/', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const newDivision = await DivisionModel.create(data, userId);
-    sendCreated(res, req, newDivision);
+    // Convert keys to lowercase snake_case
+    const convertedDivision = toLowerCaseKeys(newDivision);
+    
+    sendCreated(res, {
+      message: 'Division created successfully',
+      data: convertedDivision
+    });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError
     throw error;
@@ -263,7 +278,13 @@ router.put('/:id', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const updatedDivision = await DivisionModel.update(divisionId, data, userId);
-    sendUpdated(res, req, updatedDivision);
+    // Convert keys to lowercase snake_case
+    const convertedDivision = toLowerCaseKeys(updatedDivision);
+    
+    sendUpdated(res, {
+      message: 'Division updated successfully',
+      data: convertedDivision
+    });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError
     throw error;
@@ -300,7 +321,13 @@ router.patch('/:id', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const updatedDivision = await DivisionModel.update(divisionId, data, userId);
-    sendUpdated(res, req, updatedDivision);
+    // Convert keys to lowercase snake_case
+    const convertedDivision = toLowerCaseKeys(updatedDivision);
+    
+    sendUpdated(res, {
+      message: 'Division updated successfully',
+      data: convertedDivision
+    });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError
     throw error;
@@ -338,14 +365,20 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     // Try hard delete first, fallback to soft delete if constraint violation
     try {
       await DivisionModel.hardDelete(divisionId);
-      sendDeleted(res, req, 'Division permanently deleted', divisionId);
+      sendDeleted(res, {
+        message: 'Division permanently deleted',
+        data: divisionId
+      });
     } catch (deleteError) {
       // If hard delete fails due to foreign key constraint, provide detailed error
       if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
         if (autoFallback) {
           // Automatically fallback to soft delete
           await DivisionModel.softDelete(divisionId, userId);
-          sendDeleted(res, req, 'Division deactivated (cannot permanently delete due to existing references)', divisionId);
+          sendDeleted(res, {
+            message: 'Division deactivated (cannot permanently delete due to existing references)',
+            data: divisionId
+          });
         } else {
           // Return detailed error with reference information
           throw deleteError;
@@ -358,7 +391,10 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   } else {
     // Default to soft delete
     await DivisionModel.softDelete(divisionId, userId);
-    sendDeleted(res, req, 'Division deactivated (soft delete)', divisionId);
+    sendDeleted(res, {
+      message: 'Division deactivated (soft delete)',
+      data: divisionId
+    });
   }
 }));
 

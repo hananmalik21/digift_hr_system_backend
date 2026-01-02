@@ -1,12 +1,7 @@
 import express from 'express';
 import CompanyModel from '../model/companyModel.js';
-import {
-  sendCompanyList,
-  sendCompany,
-  sendCreated,
-  sendUpdated,
-  sendDeleted
-} from '../view/companyView.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
+import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, DatabaseError, ConflictError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
@@ -221,15 +216,22 @@ router.get('/', asyncHandler(async (req, res) => {
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
   
-  sendCompanyList(res, req, result.companies || result, { 
-    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-    total: totalCount,
-    pagination: {
-      page,
-      pageSize,
-      totalPages,
-      hasNext,
-      hasPrevious
+  // Convert keys to lowercase snake_case
+  const companies = toLowerCaseKeys(result.companies || result);
+  
+  sendList(res, {
+    message: 'Companies fetched successfully',
+    data: companies,
+    meta: {
+      ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
+      pagination: {
+        page,
+        pageSize,
+        total: totalCount,
+        totalPages,
+        hasNext,
+        hasPrevious
+      }
     }
   });
 }));
@@ -251,7 +253,14 @@ router.get('/:id', asyncHandler(async (req, res) => {
   if (!company) {
     throw new NotFoundError('Company not found');
   }
-  sendCompany(res, req, company);
+  
+  // Convert keys to lowercase snake_case
+  const convertedCompany = toLowerCaseKeys(company);
+  
+  sendSuccess(res, {
+    message: 'Company fetched successfully',
+    data: convertedCompany
+  });
 }));
 
 /**
@@ -271,7 +280,13 @@ router.post('/', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const newCompany = await CompanyModel.create(data, userId);
-    sendCreated(res, req, newCompany);
+    // Convert keys to lowercase snake_case
+    const convertedCompany = toLowerCaseKeys(newCompany);
+    
+    sendCreated(res, {
+      message: 'Company created successfully',
+      data: convertedCompany
+    });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError
     // Just re-throw them
@@ -286,44 +301,41 @@ router.post('/', asyncHandler(async (req, res) => {
  * @body    { COMPANY_CODE?, COMPANY_NAME_EN?, STATUS?, ... }
  * @access  Public
  */
-router.put('/:id', async (req, res) => {
-  try {
-    const companyId = parseInt(req.params.id);
-    
-    if (isNaN(companyId)) {
-      return sendBadRequest(res, req, 'Invalid COMPANY_ID format');
-    }
-
-    const data = req.body;
-    const errors = validateCompanyData(data, true);
-
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-
-    // Check if company exists
-    const existingCompany = await CompanyModel.findById(companyId);
-    if (!existingCompany) {
-      return sendCompany(res, req, null);
-    }
-
-    const userId = getUserId(req);
-    const updatedCompany = await CompanyModel.update(companyId, data, userId);
-    sendUpdated(res, req, updatedCompany);
-  } catch (error) {
-    // Handle specific constraint violations
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update company', error);
+router.put('/:id', asyncHandler(async (req, res) => {
+  const companyId = parseInt(req.params.id);
+  
+  if (isNaN(companyId)) {
+    throw new ValidationError('Invalid COMPANY_ID format');
   }
-});
+
+  const data = req.body;
+  const errors = validateCompanyData(data, true);
+
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  // Check if company exists
+  const existingCompany = await CompanyModel.findById(companyId);
+  if (!existingCompany) {
+    throw new NotFoundError('Company not found');
+  }
+
+  const userId = getUserId(req);
+  try {
+    const updatedCompany = await CompanyModel.update(companyId, data, userId);
+    // Convert keys to lowercase snake_case
+    const convertedCompany = toLowerCaseKeys(updatedCompany);
+    
+    sendUpdated(res, {
+      message: 'Company updated successfully',
+      data: convertedCompany
+    });
+  } catch (error) {
+    // Database errors from model are already wrapped in DatabaseError
+    throw error;
+  }
+}));
 
 /**
  * @route   PATCH /api/companies/:id
@@ -355,7 +367,13 @@ router.patch('/:id', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const updatedCompany = await CompanyModel.update(companyId, data, userId);
-    sendUpdated(res, req, updatedCompany);
+    // Convert keys to lowercase snake_case
+    const convertedCompany = toLowerCaseKeys(updatedCompany);
+    
+    sendUpdated(res, {
+      message: 'Company updated successfully',
+      data: convertedCompany
+    });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError
     throw error;
@@ -393,14 +411,20 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     // Try hard delete first, fallback to soft delete if constraint violation
     try {
       await CompanyModel.hardDelete(companyId);
-      sendDeleted(res, req, 'Company permanently deleted', companyId);
+      sendDeleted(res, {
+        message: 'Company permanently deleted',
+        data: companyId
+      });
     } catch (deleteError) {
       // If hard delete fails due to foreign key constraint, provide detailed error
       if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
         if (autoFallback) {
           // Automatically fallback to soft delete
           await CompanyModel.softDelete(companyId, userId);
-          sendDeleted(res, req, 'Company deactivated (cannot permanently delete due to existing references)', companyId);
+          sendDeleted(res, {
+            message: 'Company deactivated (cannot permanently delete due to existing references)',
+            data: companyId
+          });
         } else {
           // Return detailed error with reference information
           throw deleteError;
@@ -413,7 +437,10 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   } else {
     // Default to soft delete
     await CompanyModel.softDelete(companyId, userId);
-    sendDeleted(res, req, 'Company deactivated (soft delete)', companyId);
+    sendDeleted(res, {
+      message: 'Company deactivated (soft delete)',
+      data: companyId
+    });
   }
 }));
 
