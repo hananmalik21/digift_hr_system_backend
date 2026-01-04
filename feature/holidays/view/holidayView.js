@@ -202,20 +202,29 @@ export function sendUpdated(res, req, holiday) {
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {string} message - Success message
- * @param {number} holidayId - Deleted holiday ID
+ * @param {Object|number} holiday - Deleted holiday object or ID (for hard delete)
  */
-export function sendDeleted(res, req, message = 'Holiday deleted successfully', holidayId = null) {
+export function sendDeleted(res, req, message = 'Holiday deleted successfully', holiday = null) {
   const startTime = req._startTime || Date.now();
   const executionTime = Date.now() - startTime;
+
+  // For hard delete, holiday might be just an ID
+  // For soft delete, holiday should be the full object
+  const data = typeof holiday === 'object' && holiday !== null 
+    ? convertKeysToSnakeCase(holiday)
+    : { id: holiday || req.params?.id };
 
   res.json({
     success: true,
     message,
     meta: generateBaseMetadata(req, {
       execution_time: `${executionTime}ms`,
-      holiday_id: holidayId || req.params?.id,
+      holiday_id: typeof holiday === 'object' && holiday !== null 
+        ? (holiday.holiday_id || holiday.HOLIDAY_ID)
+        : (holiday || req.params?.id),
       action: 'deleted'
-    })
+    }),
+    data
   });
 }
 

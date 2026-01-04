@@ -382,14 +382,20 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
   const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
 
+  // Fetch the full holiday object before deletion so we can return it in the response
+  const holidayToDelete = existingHoliday;
+  
   // Default to soft delete unless explicitly requesting hard delete
   if (isHardDelete) {
     // Try hard delete first, fallback to soft delete if constraint violation
     try {
       await HolidayModel.hardDelete(holidayId);
+      // Convert keys to lowercase snake_case
+      const convertedHoliday = toLowerCaseKeys(holidayToDelete);
+      
       sendDeleted(res, {
         message: 'Holiday permanently deleted',
-        data: holidayId
+        data: convertedHoliday
       });
     } catch (deleteError) {
       // If hard delete fails due to foreign key constraint, provide detailed error
@@ -397,9 +403,17 @@ router.delete('/:id', asyncHandler(async (req, res) => {
         if (autoFallback) {
           // Automatically fallback to soft delete
           await HolidayModel.softDelete(holidayId, userId);
+          // Fetch the updated object after soft delete
+          const updatedHoliday = await HolidayModel.findById(holidayId);
+          if (!updatedHoliday) {
+            throw new NotFoundError('Holiday was deactivated but could not be retrieved');
+          }
+          // Convert keys to lowercase snake_case
+          const convertedHoliday = toLowerCaseKeys(updatedHoliday);
+          
           sendDeleted(res, {
             message: 'Holiday deactivated (cannot permanently delete due to existing references)',
-            data: holidayId
+            data: convertedHoliday
           });
         } else {
           // Return detailed error with reference information
@@ -411,11 +425,18 @@ router.delete('/:id', asyncHandler(async (req, res) => {
       }
     }
   } else {
-    // Default to soft delete
+    // Default to soft delete - fetch the updated object after soft delete
     await HolidayModel.softDelete(holidayId, userId);
+    const updatedHoliday = await HolidayModel.findById(holidayId);
+    if (!updatedHoliday) {
+      throw new NotFoundError('Holiday was deactivated but could not be retrieved');
+    }
+    // Convert keys to lowercase snake_case
+    const convertedHoliday = toLowerCaseKeys(updatedHoliday);
+    
     sendDeleted(res, {
       message: 'Holiday deactivated (soft delete)',
-      data: holidayId
+      data: convertedHoliday
     });
   }
 }));

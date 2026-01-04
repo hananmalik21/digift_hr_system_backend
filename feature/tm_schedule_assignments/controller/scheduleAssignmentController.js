@@ -490,11 +490,25 @@ router.delete('/:schedule_assignment_id', asyncHandler(async (req, res) => {
     throw new ValidationError('Invalid tenant_id format');
   }
 
+  // Fetch the full assignment object before deletion so we can return it in the response
+  const assignmentToDelete = await ScheduleAssignmentModel.findById(scheduleAssignmentId, tenantId);
+  if (!assignmentToDelete) {
+    throw new NotFoundError('Schedule assignment not found');
+  }
+  
   await ScheduleAssignmentModel.delete(scheduleAssignmentId, tenantId);
-  // For hard delete, we can't fetch the object since it's deleted, so return the ID
+  
+  // Map DEPARTMENT_ID back to org_unit_id in response
+  if (assignmentToDelete.department_id !== undefined && assignmentToDelete.department_id !== null) {
+    assignmentToDelete.org_unit_id = assignmentToDelete.department_id;
+  }
+  
+  // Convert keys to lowercase snake_case
+  const convertedAssignment = toLowerCaseKeys(assignmentToDelete);
+  
   sendDeleted(res, {
     message: 'Schedule assignment deleted successfully',
-    data: { id: scheduleAssignmentId }
+    data: convertedAssignment
   });
 }));
 
