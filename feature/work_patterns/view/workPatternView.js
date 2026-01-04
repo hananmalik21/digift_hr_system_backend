@@ -87,15 +87,11 @@ export function sendWorkPattern(res, req, workPattern) {
  * @param {Object} workPattern - Created work pattern
  */
 export function sendCreated(res, req, workPattern) {
-  const workPatternId = workPattern.WORK_PATTERN_ID || workPattern.work_pattern_id;
-  
   res.status(201).json({
     success: true,
     meta: generateBaseMetadata(req),
-    data: {
-      id: workPatternId,
-      message: 'Created successfully'
-    }
+    message: 'Work pattern created successfully',
+    data: workPattern
   });
 }
 
@@ -106,15 +102,11 @@ export function sendCreated(res, req, workPattern) {
  * @param {Object} workPattern - Updated work pattern
  */
 export function sendUpdated(res, req, workPattern) {
-  const workPatternId = workPattern.work_pattern_id || workPattern.WORK_PATTERN_ID;
-  
   res.json({
     success: true,
     meta: generateBaseMetadata(req),
-    data: {
-      id: workPatternId,
-      message: 'Updated successfully'
-    }
+    message: 'Work pattern updated successfully',
+    data: workPattern
   });
 }
 
@@ -123,16 +115,20 @@ export function sendUpdated(res, req, workPattern) {
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {string} message - Success message
- * @param {number} workPatternId - Deleted work pattern ID
+ * @param {Object|number} workPattern - Deleted work pattern object or ID (for hard delete)
  */
-export function sendDeleted(res, req, message = 'Work pattern deleted successfully', workPatternId = null) {
+export function sendDeleted(res, req, message = 'Work pattern deleted successfully', workPattern = null) {
+  // For hard delete, workPattern might be just an ID
+  // For soft delete, workPattern should be the full object
+  const data = typeof workPattern === 'object' && workPattern !== null 
+    ? workPattern 
+    : { id: workPattern || req.params?.work_pattern_id };
+  
   res.json({
     success: true,
     meta: generateBaseMetadata(req),
-    data: {
-      id: workPatternId || req.params?.work_pattern_id,
-      message
-    }
+    message,
+    data
   });
 }
 

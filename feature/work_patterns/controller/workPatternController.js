@@ -182,8 +182,14 @@ router.post('/', asyncHandler(async (req, res) => {
   const upperCaseData = convertToUpperCase(data);
   
   try {
-    const newWorkPattern = await WorkPatternModel.create(upperCaseData, userId);
-    sendCreated(res, req, newWorkPattern);
+    const createResult = await WorkPatternModel.create(upperCaseData, userId);
+    // Fetch the full work pattern object after creation
+    const workPatternId = createResult.WORK_PATTERN_ID || createResult.work_pattern_id;
+    const fullWorkPattern = await WorkPatternModel.findById(workPatternId, tenantId);
+    if (!fullWorkPattern) {
+      throw new NotFoundError('Work pattern was created but could not be retrieved');
+    }
+    sendCreated(res, req, fullWorkPattern);
   } catch (error) {
     // Re-throw to let error middleware handle it
     throw error;
@@ -463,14 +469,19 @@ router.delete('/:work_pattern_id', asyncHandler(async (req, res) => {
   if (isHardDelete) {
     try {
       await WorkPatternModel.hardDelete(workPatternId, tenantId);
+      // For hard delete, we can't fetch the object since it's deleted, so pass the ID
       sendDeleted(res, req, 'Work pattern permanently deleted', workPatternId);
     } catch (deleteError) {
       throw deleteError;
     }
   } else {
-    // Default to soft delete
+    // Default to soft delete - fetch the updated object after soft delete
     await WorkPatternModel.softDelete(workPatternId, tenantId, userId);
-    sendDeleted(res, req, 'Work pattern deactivated (soft delete)', workPatternId);
+    const updatedWorkPattern = await WorkPatternModel.findById(workPatternId, tenantId);
+    if (!updatedWorkPattern) {
+      throw new NotFoundError('Work pattern was deactivated but could not be retrieved');
+    }
+    sendDeleted(res, req, 'Work pattern deactivated (soft delete)', updatedWorkPattern);
   }
 }));
 
