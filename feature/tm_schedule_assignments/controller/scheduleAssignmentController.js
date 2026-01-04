@@ -208,15 +208,21 @@ router.post('/', asyncHandler(async (req, res) => {
     delete upperCaseData.ORG_UNIT_ID;
   }
 
-  const newAssignment = await ScheduleAssignmentModel.create(upperCaseData, userId);
+  const createResult = await ScheduleAssignmentModel.create(upperCaseData, userId);
+  // Fetch the full schedule assignment object after creation
+  const assignmentId = createResult.SCHEDULE_ASSIGNMENT_ID || createResult.schedule_assignment_id;
+  const fullAssignment = await ScheduleAssignmentModel.findById(assignmentId, tenantId);
+  if (!fullAssignment) {
+    throw new NotFoundError('Schedule assignment was created but could not be retrieved');
+  }
   
   // Map DEPARTMENT_ID back to org_unit_id in response
-  if (newAssignment.department_id !== undefined && newAssignment.department_id !== null) {
-    newAssignment.org_unit_id = newAssignment.department_id;
+  if (fullAssignment.department_id !== undefined && fullAssignment.department_id !== null) {
+    fullAssignment.org_unit_id = fullAssignment.department_id;
   }
   
   // Convert keys to lowercase snake_case
-  const convertedAssignment = toLowerCaseKeys(newAssignment);
+  const convertedAssignment = toLowerCaseKeys(fullAssignment);
   
   sendCreated(res, {
     message: 'Schedule assignment created successfully',
@@ -485,9 +491,10 @@ router.delete('/:schedule_assignment_id', asyncHandler(async (req, res) => {
   }
 
   await ScheduleAssignmentModel.delete(scheduleAssignmentId, tenantId);
+  // For hard delete, we can't fetch the object since it's deleted, so return the ID
   sendDeleted(res, {
     message: 'Schedule assignment deleted successfully',
-    data: scheduleAssignmentId
+    data: { id: scheduleAssignmentId }
   });
 }));
 

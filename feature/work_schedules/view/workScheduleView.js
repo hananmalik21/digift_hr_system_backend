@@ -72,14 +72,11 @@ export function sendWorkSchedule(res, req, workSchedule) {
  * @param {Object} workSchedule - Created work schedule
  */
 export function sendCreated(res, req, workSchedule) {
-  const workScheduleId = workSchedule.WORK_SCHEDULE_ID || workSchedule.work_schedule_id;
-
   res.status(201).json({
     success: true,
-    data: {
-      id: workScheduleId,
-      message: 'Work schedule created successfully'
-    }
+    meta: generateBaseMetadata(req),
+    message: 'Work schedule created successfully',
+    data: workSchedule
   });
 }
 
@@ -90,14 +87,11 @@ export function sendCreated(res, req, workSchedule) {
  * @param {Object} workSchedule - Updated work schedule
  */
 export function sendUpdated(res, req, workSchedule) {
-  const workScheduleId = workSchedule.work_schedule_id || workSchedule.WORK_SCHEDULE_ID;
-
   res.json({
     success: true,
-    data: {
-      id: workScheduleId,
-      message: 'Work schedule updated successfully'
-    }
+    meta: generateBaseMetadata(req),
+    message: 'Work schedule updated successfully',
+    data: workSchedule
   });
 }
 
@@ -122,15 +116,20 @@ export function sendLinesUpdated(res, req, workScheduleId) {
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {string} message - Success message
- * @param {number} workScheduleId - Deleted work schedule ID
+ * @param {Object|number} workSchedule - Deleted work schedule object or ID (for hard delete)
  */
-export function sendDeleted(res, req, message = 'Work schedule deleted successfully', workScheduleId = null) {
+export function sendDeleted(res, req, message = 'Work schedule deleted successfully', workSchedule = null) {
+  // For hard delete, workSchedule might be just an ID
+  // For soft delete, workSchedule should be the full object
+  const data = typeof workSchedule === 'object' && workSchedule !== null 
+    ? workSchedule 
+    : { id: workSchedule || req.params?.work_schedule_id };
+  
   res.json({
     success: true,
-    data: {
-      id: workScheduleId || req.params?.work_schedule_id,
-      message
-    }
+    meta: generateBaseMetadata(req),
+    message,
+    data
   });
 }
 

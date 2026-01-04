@@ -10,7 +10,7 @@ import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
 import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
-import { sendCreated, sendUpdated, sendList, sendSuccess } from '../../../utils/response.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
@@ -239,9 +239,16 @@ router.post('/', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
 
-  const newSchedule = await WorkScheduleModel.create(upperCaseData, userId);
+  const createResult = await WorkScheduleModel.create(upperCaseData, userId);
+  // Fetch the full work schedule object after creation
+  const workScheduleId = createResult.WORK_SCHEDULE_ID || createResult.work_schedule_id;
+  const fullSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+  if (!fullSchedule) {
+    throw new NotFoundError('Work schedule was created but could not be retrieved');
+  }
+  
   // Convert keys to lowercase snake_case
-  const convertedSchedule = toLowerCaseKeys(newSchedule);
+  const convertedSchedule = toLowerCaseKeys(fullSchedule);
   
   sendCreated(res, {
     message: 'Work schedule created successfully',
@@ -396,9 +403,15 @@ router.put('/:work_schedule_id', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
 
-  const updatedSchedule = await WorkScheduleModel.update(workScheduleId, tenantId, upperCaseData, userId);
+  await WorkScheduleModel.update(workScheduleId, tenantId, upperCaseData, userId);
+  // Fetch the full work schedule object with weekly_lines after update
+  const fullSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+  if (!fullSchedule) {
+    throw new NotFoundError('Work schedule was updated but could not be retrieved');
+  }
+  
   // Convert keys to lowercase snake_case
-  const convertedSchedule = toLowerCaseKeys(updatedSchedule);
+  const convertedSchedule = toLowerCaseKeys(fullSchedule);
   
   sendUpdated(res, {
     message: 'Work schedule updated successfully',
@@ -478,6 +491,78 @@ router.put('/:work_schedule_id/lines', asyncHandler(async (req, res) => {
     message: 'Work schedule lines updated successfully',
     data: { work_schedule_id: workScheduleId }
   });
+}));
+
+/**
+ * @route   DELETE /api/tm/work-schedules/:work_schedule_id
+ * @desc    Delete a work schedule
+ * @param   work_schedule_id - Work Schedule ID
+ * @query   tenant_id (required)
+ * @query   hard - Set to 'true' for permanent deletion (default: soft delete)
+ * @access  Public
+ */
+router.delete('/:work_schedule_id', asyncHandler(async (req, res) => {
+  const workScheduleId = parseInt(req.params.work_schedule_id, 10);
+  
+  if (isNaN(workScheduleId)) {
+    throw new ValidationError('Invalid work_schedule_id format');
+  }
+
+  // tenant_id is required as query param
+  if (!req.query.tenant_id) {
+    throw new ValidationError('tenant_id query parameter is required');
+  }
+  
+  const tenantId = parseInt(req.query.tenant_id, 10);
+  if (isNaN(tenantId)) {
+    throw new ValidationError('Invalid tenant_id format');
+  }
+
+  // Validate that tenant_id exists in enterprise table
+  await validateEnterpriseExists(tenantId);
+
+  // Check if work schedule exists
+  const existingWorkSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+  if (!existingWorkSchedule) {
+    throw new NotFoundError('Work schedule not found');
+  }
+
+  const userId = getUserId(req);
+  const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
+
+  // Fetch the object before deletion so we can return it in the response
+  const workScheduleToDelete = existingWorkSchedule;
+
+  // Default to soft delete unless explicitly requesting hard delete
+  if (isHardDelete) {
+    try {
+      await WorkScheduleModel.hardDelete(workScheduleId, tenantId);
+      // Convert keys to lowercase snake_case
+      const convertedSchedule = toLowerCaseKeys(workScheduleToDelete);
+      
+      sendDeleted(res, {
+        message: 'Work schedule permanently deleted',
+        data: convertedSchedule
+      });
+    } catch (deleteError) {
+      throw deleteError;
+    }
+  } else {
+    // Default to soft delete - fetch the updated object after soft delete
+    await WorkScheduleModel.softDelete(workScheduleId, tenantId, userId);
+    const updatedWorkSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+    if (!updatedWorkSchedule) {
+      throw new NotFoundError('Work schedule was deactivated but could not be retrieved');
+    }
+    
+    // Convert keys to lowercase snake_case
+    const convertedSchedule = toLowerCaseKeys(updatedWorkSchedule);
+    
+    sendDeleted(res, {
+      message: 'Work schedule deactivated (soft delete)',
+      data: convertedSchedule
+    });
+  }
 }));
 
 export default router;

@@ -65,14 +65,10 @@ export function sendScheduleAssignment(res, req, assignment) {
  * @param {Object} assignment - Created schedule assignment
  */
 export function sendCreated(res, req, assignment) {
-  const assignmentId = assignment.SCHEDULE_ASSIGNMENT_ID || assignment.schedule_assignment_id;
-
   res.status(201).json({
     success: true,
-    data: {
-      id: assignmentId,
-      message: 'Schedule assignment created successfully'
-    }
+    message: 'Schedule assignment created successfully',
+    data: assignment
   });
 }
 
@@ -83,14 +79,10 @@ export function sendCreated(res, req, assignment) {
  * @param {Object} assignment - Updated schedule assignment
  */
 export function sendUpdated(res, req, assignment) {
-  const assignmentId = assignment.schedule_assignment_id || assignment.SCHEDULE_ASSIGNMENT_ID;
-
   res.json({
     success: true,
-    data: {
-      id: assignmentId,
-      message: 'Work Schedule Updated successfully'
-    }
+    message: 'Schedule assignment updated successfully',
+    data: assignment
   });
 }
 
@@ -98,15 +90,19 @@ export function sendUpdated(res, req, assignment) {
  * Send deleted response
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
- * @param {number} assignmentId - Deleted schedule assignment ID
+ * @param {Object|number} assignment - Deleted schedule assignment object or ID
  */
-export function sendDeleted(res, req, assignmentId) {
+export function sendDeleted(res, req, assignment) {
+  // For hard delete, assignment might be just an ID
+  // For soft delete, assignment should be the full object
+  const data = typeof assignment === 'object' && assignment !== null 
+    ? assignment 
+    : { id: assignment || req.params?.schedule_assignment_id };
+  
   res.json({
     success: true,
-    data: {
-      id: assignmentId,
-      message: 'Schedule assignment deleted successfully'
-    }
+    message: 'Schedule assignment deleted successfully',
+    data
   });
 }
 
