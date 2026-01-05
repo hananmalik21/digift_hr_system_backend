@@ -251,12 +251,14 @@ class WorkScheduleModel {
 
   static async findAll(filters = {}) {
     try {
-      let countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
+      let countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ws`;
       let dataSql = `SELECT
-        WORK_SCHEDULE_ID, TENANT_ID, SCHEDULE_CODE, SCHEDULE_NAME_EN, SCHEDULE_NAME_AR,
-        WORK_PATTERN_ID, EFFECTIVE_START_DATE, EFFECTIVE_END_DATE, ASSIGNMENT_MODE, STATUS,
-        CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
-      FROM ${this.TABLE_NAME}`;
+        ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
+        ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
+        ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
+        ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
+      FROM ${this.TABLE_NAME} ws
+      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID`;
 
       if (!filters.tenantId) throw new ValidationError('tenant_id is required');
 
@@ -264,12 +266,12 @@ class WorkScheduleModel {
       const binds = [];
       let p = 1;
 
-      conditions.push(`TENANT_ID = :${p}`);
+      conditions.push(`ws.TENANT_ID = :${p}`);
       binds.push(filters.tenantId);
       p++;
 
       if (filters.status) {
-        conditions.push(`STATUS = :${p}`);
+        conditions.push(`ws.STATUS = :${p}`);
         binds.push(filters.status);
         p++;
       }
@@ -277,8 +279,8 @@ class WorkScheduleModel {
       if (filters.search) {
         const v = `%${filters.search}%`;
         conditions.push(`(
-          UPPER(SCHEDULE_CODE) LIKE UPPER(:${p}) OR
-          UPPER(SCHEDULE_NAME_EN) LIKE UPPER(:${p + 1})
+          UPPER(ws.SCHEDULE_CODE) LIKE UPPER(:${p}) OR
+          UPPER(ws.SCHEDULE_NAME_EN) LIKE UPPER(:${p + 1})
         )`);
         binds.push(v, v);
         p += 2;
@@ -286,7 +288,7 @@ class WorkScheduleModel {
 
       if (filters.effectiveOn) {
         const effectiveDate = filters.effectiveOn instanceof Date ? filters.effectiveOn : new Date(filters.effectiveOn);
-        conditions.push(`EFFECTIVE_START_DATE <= :${p} AND (EFFECTIVE_END_DATE IS NULL OR EFFECTIVE_END_DATE >= :${p})`);
+        conditions.push(`ws.EFFECTIVE_START_DATE <= :${p} AND (ws.EFFECTIVE_END_DATE IS NULL OR ws.EFFECTIVE_END_DATE >= :${p})`);
         binds.push(effectiveDate);
         p++;
       }
@@ -294,7 +296,7 @@ class WorkScheduleModel {
       const where = ` WHERE ${conditions.join(' AND ')}`;
       countSql += where;
       dataSql += where;
-      dataSql += ` ORDER BY SCHEDULE_CODE`;
+      dataSql += ` ORDER BY ws.SCHEDULE_CODE`;
 
       const pagination = filters.pagination;
       let total = 0;
@@ -402,9 +404,11 @@ class WorkScheduleModel {
 
       const sql = `SELECT
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
-        ws.WORK_PATTERN_ID, ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
+        ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
+        ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
+      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
       WHERE ws.WORK_SCHEDULE_ID = :1 AND ws.TENANT_ID = :2`;
 
       const res = await db.executeQuery(sql, [workScheduleId, tenantId]);
