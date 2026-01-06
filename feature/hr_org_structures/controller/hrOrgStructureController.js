@@ -396,11 +396,10 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * @route   DELETE /api/hr-org-structures/:id
- * @desc    Soft delete an organization structure (sets IS_ACTIVE = 'N')
+ * @desc    Delete an organization structure
  * @param   id - Structure ID
- * @query   hard - Set to 'true' for permanent deletion
- * @query   soft - Set to 'true' for soft deletion (default behavior)
- * @query   auto_fallback - Set to 'true' to automatically fallback to soft delete if hard delete fails
+ * @query   hard - Set to 'true' for safe hard delete (checks references first)
+ * @query   autofallback - Set to 'true' for force delete (deletes regardless of references)
  * @access  Public
  */
 router.delete('/:id', async (req, res) => {
@@ -417,39 +416,168 @@ router.delete('/:id', async (req, res) => {
       return sendStructure(res, req, null);
     }
 
-    const userId = getUserId(req);
+    // Determine mode
     const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-    const isSoftDelete = req.query.soft === 'true' || req.query.soft === '1';
+    const isAutofallback = req.query.autofallback === 'true' || req.query.autofallback === '1' ||
+                           req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
 
-    // Default to soft delete unless explicitly requesting hard delete
-    if (isHardDelete) {
-      // Try hard delete first, fallback to soft delete if constraint violation
+    // Must specify either hard=true or autofallback=true
+    if (!isHardDelete && !isAutofallback) {
+      return sendBadRequest(res, req, 'Must specify either hard=true (safe hard delete) or autofallback=true (force delete)');
+    }
+
+    // MODE A: hard=true (safe hard delete)
+    if (isHardDelete && !isAutofallback) {
+      // Check for references first
+      const references = await HrOrgStructureModel.getOrgStructureReferences(structureId);
+      
+      if (references.length > 0) {
+        // Has references - block deletion and return error
+        const referenceSummary = references.map(ref => ({
+          table: ref.table,
+          column: ref.column,
+          count: ref.count,
+          description: ref.description
+        }));
+
+        // Build user-friendly message with specific counts
+        const referenceMessages = references.map(ref => {
+          // Extract item name from description (e.g., "Organization units" -> "org unit")
+          let itemName = ref.description.toLowerCase();
+          if (itemName.includes('organization units')) {
+            itemName = ref.count === 1 ? 'org unit' : 'org units';
+          } else if (itemName.includes('positions')) {
+            itemName = ref.count === 1 ? 'position' : 'positions';
+          } else {
+            // Fallback: extract from description
+            itemName = itemName.replace(' are using this structure', '').replace(' is using this structure', '');
+          }
+          return `${ref.count} ${itemName}`;
+        });
+        
+        const userFriendlyMessage = references.length === 1
+          ? `Cannot delete organization structure: This structure has ${referenceMessages[0]}.`
+          : `Cannot delete organization structure: This structure has ${referenceMessages.join(' and ')}.`;
+
+        return res.status(409).json({
+          success: false,
+          message: userFriendlyMessage,
+          error: {
+            code: 'FOREIGN_KEY_CONSTRAINT',
+            message: userFriendlyMessage,
+            references: {
+              reference_summary: referenceSummary
+            }
+          },
+          meta: {
+            structure_id: structureId,
+            execution_time: `${Date.now() - (req._startTime || Date.now())}ms`
+          }
+        });
+      }
+
+      // No references - proceed with hard delete
       try {
         await HrOrgStructureModel.hardDelete(structureId);
-        sendDeleted(res, req, 'Organization structure permanently deleted', structureId);
-      } catch (deleteError) {
-        // If hard delete fails due to foreign key constraint, provide detailed error
-        if (deleteError.code === 'FOREIGN_KEY_CONSTRAINT' || deleteError.errorNum === 2292) {
-          // Check if user wants automatic fallback or detailed error
-          const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
-          
-          if (autoFallback) {
-            // Automatically fallback to soft delete
-            await HrOrgStructureModel.softDelete(structureId, userId);
-            sendDeleted(res, req, 'Organization structure deactivated (cannot permanently delete due to existing references)', structureId);
-          } else {
-            // Return detailed error with reference information
-            throw deleteError;
+        return res.json({
+          success: true,
+          message: 'Organization structure deleted successfully.',
+          data: {
+            structure_id: structureId,
+            mode: 'hard'
+          },
+          meta: {
+            structure_id: structureId,
+            action: 'deleted',
+            execution_time: `${Date.now() - (req._startTime || Date.now())}ms`
           }
-        } else {
-          // Re-throw other errors
-          throw deleteError;
+        });
+      } catch (deleteError) {
+        // Handle Oracle FK errors
+        if (deleteError.errorNum === 2292 || deleteError.message?.includes('ORA-02292') || deleteError.message?.includes('integrity constraint')) {
+          // Re-check references in case they were added between check and delete
+          const references = await HrOrgStructureModel.getOrgStructureReferences(structureId);
+          const referenceSummary = references.map(ref => ({
+            table: ref.table,
+            column: ref.column,
+            count: ref.count,
+            description: ref.description
+          }));
+
+          // Build user-friendly message with specific counts
+          const referenceMessages = references.map(ref => {
+            // Extract item name from description (e.g., "Organization units" -> "org unit")
+            let itemName = ref.description.toLowerCase();
+            if (itemName.includes('organization units')) {
+              itemName = ref.count === 1 ? 'org unit' : 'org units';
+            } else if (itemName.includes('positions')) {
+              itemName = ref.count === 1 ? 'position' : 'positions';
+            } else {
+              // Fallback: extract from description
+              itemName = itemName.replace(' are using this structure', '').replace(' is using this structure', '');
+            }
+            return `${ref.count} ${itemName}`;
+          });
+          
+          const userFriendlyMessage = references.length === 1
+            ? `Cannot delete organization structure: This structure has ${referenceMessages[0]}.`
+            : `Cannot delete organization structure: This structure has ${referenceMessages.join(' and ')}.`;
+
+          return res.status(409).json({
+            success: false,
+            message: userFriendlyMessage,
+            error: {
+              code: 'FOREIGN_KEY_CONSTRAINT',
+              message: userFriendlyMessage,
+              references: {
+                reference_summary: referenceSummary
+              }
+            },
+            meta: {
+              structure_id: structureId,
+              execution_time: `${Date.now() - (req._startTime || Date.now())}ms`
+            }
+          });
         }
+        throw deleteError;
       }
-    } else {
-      // Default to soft delete
-      await HrOrgStructureModel.softDelete(structureId, userId);
-      sendDeleted(res, req, 'Organization structure deactivated (soft delete)', structureId);
+    }
+
+    // MODE B: autofallback=true (force delete)
+    if (isAutofallback) {
+      try {
+        await HrOrgStructureModel.hardDelete(structureId);
+        return res.json({
+          success: true,
+          message: 'Organization structure deleted successfully (autofallback enabled). Related data removed automatically.',
+          data: {
+            structure_id: structureId,
+            mode: 'autofallback'
+          },
+          meta: {
+            structure_id: structureId,
+            action: 'deleted',
+            execution_time: `${Date.now() - (req._startTime || Date.now())}ms`
+          }
+        });
+      } catch (deleteError) {
+        // If autofallback fails, return 500 with original error details
+        console.error(`Force delete failed for structure ${structureId}:`, deleteError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to delete organization structure (autofallback mode).',
+          error: {
+            code: deleteError.code || 'DELETE_FAILED',
+            message: deleteError.message || 'Hard delete failed even with autofallback enabled. Database trigger may not be configured.',
+            original_error: deleteError.message,
+            error_num: deleteError.errorNum
+          },
+          meta: {
+            structure_id: structureId,
+            execution_time: `${Date.now() - (req._startTime || Date.now())}ms`
+          }
+        });
+      }
     }
   } catch (error) {
     sendServerError(res, req, 'Failed to delete organization structure', error);

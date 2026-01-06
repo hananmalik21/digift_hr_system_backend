@@ -267,16 +267,27 @@ export function sendServerError(res, req, message, error = null) {
   if (error && (error.code === 'FOREIGN_KEY_CONSTRAINT' || error.errorNum === 2292)) {
     errorCode = 'FOREIGN_KEY_CONSTRAINT';
     statusCode = 409; // Conflict
-    message = error.message || 'Cannot delete: Record is referenced by other records';
+    message = error.userMessage || error.message || 'Cannot delete: Record is referenced by other records';
   }
 
   const errorResponse = {
     success: false,
     error: message || 'Internal server error',
     error_details: {
-      message: error?.message || message || 'Internal server error',
+      message: error?.userMessage || error?.message || message || 'Internal server error',
       code: errorCode,
       type: 'Error',
+      ...(error?.suggestion && { suggestion: error.suggestion }),
+      ...(error?.references && { 
+        references: error.references,
+        reference_summary: error.referenceSummary || Object.entries(error.references).map(([key, ref]) => ({
+          table: ref.table,
+          column: ref.column,
+          count: ref.count,
+          description: ref.description
+        }))
+      }),
+      ...(error?.constraint && { constraint: error.constraint }),
       stack: error?.stack
     }
   };

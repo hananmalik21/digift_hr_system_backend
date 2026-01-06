@@ -109,9 +109,15 @@ class HrOrgStructureModel {
         s.CREATED_DATE,
         s.LAST_UPDATED_BY,
         s.LAST_UPDATED_DATE,
-        s.LAST_UPDATE_LOGIN
+        s.LAST_UPDATE_LOGIN,
+        NVL(ou_counts.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
       FROM ${this.TABLE_NAME} s
-      LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID`;
+      LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+      LEFT JOIN (
+        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+        FROM ENT.ORG_UNITS
+        GROUP BY ORG_STRUCTURE_ID
+      ) ou_counts ON s.STRUCTURE_ID = ou_counts.ORG_STRUCTURE_ID`;
 
       const conditions = [];
       const bindParams = [];
@@ -173,13 +179,13 @@ class HrOrgStructureModel {
       const result = await this.executeQuery(dataQuery, dataBindParams);
       const structures = result.rows || [];
 
-      // Fetch levels for all structures
+      // Fetch levels for all structures (org_unit_count already included from query)
       if (structures.length > 0) {
         // Extract structure IDs (keys are already converted to lowercase)
         const structureIds = structures.map(s => s.structure_id);
         const levelsByStructure = await HrOrgHierarchyLevelModel.fetchLevelsForStructures(structureIds);
 
-        // Attach levels to each structure
+        // Attach levels to each structure (org_unit_count already in structure object)
         const structuresWithLevels = structures.map(structure => {
           const structureId = structure.structure_id;
           return {
@@ -270,9 +276,16 @@ class HrOrgStructureModel {
         s.CREATED_DATE,
         s.LAST_UPDATED_BY,
         s.LAST_UPDATED_DATE,
-        s.LAST_UPDATE_LOGIN
+        s.LAST_UPDATE_LOGIN,
+        NVL(ou_counts.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
       FROM ${this.TABLE_NAME} s
       LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+      LEFT JOIN (
+        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+        FROM ENT.ORG_UNITS
+        WHERE ORG_STRUCTURE_ID = :1
+        GROUP BY ORG_STRUCTURE_ID
+      ) ou_counts ON s.STRUCTURE_ID = ou_counts.ORG_STRUCTURE_ID
       WHERE s.STRUCTURE_ID = :1`;
 
       const result = await this.executeQuery(query, [structureId]);
@@ -280,7 +293,7 @@ class HrOrgStructureModel {
       if (result.rows && result.rows.length > 0) {
         const structure = result.rows[0];
         
-        // Fetch associated levels
+        // Fetch associated levels (org_unit_count already included from query)
         const levels = await HrOrgHierarchyLevelModel.fetchLevelsForStructure(null, structureId);
         
         return {
@@ -314,9 +327,15 @@ class HrOrgStructureModel {
         s.CREATED_DATE,
         s.LAST_UPDATED_BY,
         s.LAST_UPDATED_DATE,
-        s.LAST_UPDATE_LOGIN
+        s.LAST_UPDATE_LOGIN,
+        NVL(ou_counts.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
       FROM ${this.TABLE_NAME} s
       LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+      LEFT JOIN (
+        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+        FROM ENT.ORG_UNITS
+        GROUP BY ORG_STRUCTURE_ID
+      ) ou_counts ON s.STRUCTURE_ID = ou_counts.ORG_STRUCTURE_ID
       WHERE s.IS_ACTIVE = 'Y'
       ORDER BY s.CREATED_DATE DESC
       FETCH FIRST 1 ROWS ONLY`;
@@ -345,7 +364,7 @@ class HrOrgStructureModel {
         return null;
       }
 
-      // Fetch associated levels
+      // Fetch associated levels (org_unit_count already included from findActive query)
       const levels = await HrOrgHierarchyLevelModel.findAll({
         structureId: activeStructure.structure_id || activeStructure.STRUCTURE_ID,
         isActive: true // Only get active levels
@@ -445,9 +464,16 @@ class HrOrgStructureModel {
           s.CREATED_DATE,
           s.LAST_UPDATED_BY,
           s.LAST_UPDATED_DATE,
-          s.LAST_UPDATE_LOGIN
+          s.LAST_UPDATE_LOGIN,
+          NVL(ou_counts.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
         FROM ${this.TABLE_NAME} s
         LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+        LEFT JOIN (
+          SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+          FROM ENT.ORG_UNITS
+          WHERE ORG_STRUCTURE_ID = :1
+          GROUP BY ORG_STRUCTURE_ID
+        ) ou_counts ON s.STRUCTURE_ID = ou_counts.ORG_STRUCTURE_ID
         WHERE s.STRUCTURE_ID = :1`;
         const selectResult = await connection.execute(selectQuery, [structureId], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
@@ -471,7 +497,7 @@ class HrOrgStructureModel {
           }
         }
 
-        // Return structure with levels
+        // Return structure with levels (org_unit_count already included from query, will be 0 for new structure)
         return {
           ...createdStructure,
           levels: createdLevels
@@ -634,9 +660,16 @@ class HrOrgStructureModel {
           s.CREATED_DATE,
           s.LAST_UPDATED_BY,
           s.LAST_UPDATED_DATE,
-          s.LAST_UPDATE_LOGIN
+          s.LAST_UPDATE_LOGIN,
+          NVL(ou_counts.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
         FROM ${this.TABLE_NAME} s
         LEFT JOIN ENT.ENTERPRISES e ON s.ENTERPRISE_ID = e.ENTERPRISE_ID
+        LEFT JOIN (
+          SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+          FROM ENT.ORG_UNITS
+          WHERE ORG_STRUCTURE_ID = :1
+          GROUP BY ORG_STRUCTURE_ID
+        ) ou_counts ON s.STRUCTURE_ID = ou_counts.ORG_STRUCTURE_ID
         WHERE s.STRUCTURE_ID = :1`;
         const selectResult = await connection.execute(selectQuery, [structureId], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
@@ -734,43 +767,58 @@ class HrOrgStructureModel {
   }
 
   /**
-   * Get referencing records for an organization structure
+   * Get all references to an organization structure
+   * Checks all tables that reference the structure in parallel
+   * Note: HR_ORG_HIERARCHY_LEVELS is excluded as it does not block deletion
    * @param {number} structureId - Structure ID
-   * @returns {Promise<Object>} Information about referencing records
+   * @returns {Promise<Array>} Array of reference objects with table, column, count, and description
    */
-  static async getReferencingRecords(structureId) {
+  static async getOrgStructureReferences(structureId) {
     try {
-      const references = {};
-      
-      // Check HR_ORG_HIERARCHY_LEVELS table
-      try {
-        const levelQuery = `SELECT COUNT(*) AS count FROM ENT.HR_ORG_HIERARCHY_LEVELS WHERE STRUCTURE_ID = :1`;
-        const levelResult = await this.executeQuery(levelQuery, [structureId]);
-        if (levelResult.rows && levelResult.rows.length > 0) {
-          const count = levelResult.rows[0].count || 0;
-          if (count > 0) {
-            references.hr_org_hierarchy_levels = {
-              table: 'ENT.HR_ORG_HIERARCHY_LEVELS',
-              count: count,
-              description: 'Hierarchy levels are using this structure'
-            };
-          }
-        }
-      } catch (err) {
-        console.warn('Could not check HR_ORG_HIERARCHY_LEVELS references:', err.message);
-      }
-      
-      return references;
+      // Check all reference tables in parallel
+      // Note: ENT.HR_ORG_HIERARCHY_LEVELS is not checked as it does not impact deletion
+      const referenceChecks = await Promise.all([
+        // Check ENT.ORG_UNITS (uses ORG_STRUCTURE_ID)
+        this.executeQuery(
+          `SELECT COUNT(*) AS count FROM ENT.ORG_UNITS WHERE ORG_STRUCTURE_ID = :1`,
+          [structureId]
+        ).then(result => ({
+          table: 'ENT.ORG_UNITS',
+          column: 'ORG_STRUCTURE_ID',
+          count: result.rows?.[0]?.count || 0,
+          description: 'Organization units are using this structure'
+        })).catch(err => {
+          console.warn('Could not check ENT.ORG_UNITS references:', err.message);
+          return null;
+        }),
+
+        // Check ENT.POSITIONS (uses ORG_STRUCTURE_ID)
+        this.executeQuery(
+          `SELECT COUNT(*) AS count FROM ENT.POSITIONS WHERE ORG_STRUCTURE_ID = :1`,
+          [structureId]
+        ).then(result => ({
+          table: 'ENT.POSITIONS',
+          column: 'ORG_STRUCTURE_ID',
+          count: result.rows?.[0]?.count || 0,
+          description: 'Positions are using this structure'
+        })).catch(err => {
+          console.warn('Could not check ENT.POSITIONS references:', err.message);
+          return null;
+        })
+      ]);
+
+      // Filter out null results and return only references with count > 0
+      return referenceChecks.filter(ref => ref !== null && ref.count > 0);
     } catch (error) {
-      console.error('Error getting referencing records:', error);
-      return {};
+      console.error('Error getting structure references:', error);
+      return [];
     }
   }
 
   /**
    * Hard delete an organization structure (permanent removal)
    * @param {number} structureId - Structure ID
-   * @returns {Promise<Object>} Success status and reference info if constraint violation
+   * @returns {Promise<Object>} Success status with rows affected
    */
   static async hardDelete(structureId) {
     try {
@@ -790,26 +838,10 @@ class HrOrgStructureModel {
       });
       
       console.log(`Hard delete successful for structure ID: ${structureId}, rows affected: ${result.rowsAffected}`);
-      return { success: true };
+      return { success: true, rowsAffected: result.rowsAffected };
     } catch (error) {
       console.error('Error in hardDelete:', error);
-      
-      // Handle foreign key constraint violation
-      if (error.errorNum === 2292 || error.message?.includes('ORA-02292') || error.message?.includes('integrity constraint')) {
-        // Get information about what's referencing this structure
-        const references = await this.getReferencingRecords(structureId);
-        
-        const constraintName = error.message?.match(/\(([^)]+)\)/)?.[1] || 'UNKNOWN';
-        const constraintError = new Error(`Cannot delete organization structure: This structure is referenced by other records in the database.`);
-        constraintError.errorNum = 2292;
-        constraintError.code = 'FOREIGN_KEY_CONSTRAINT';
-        constraintError.constraint = constraintName;
-        constraintError.references = references;
-        constraintError.suggestion = 'Use soft delete (?soft=true) to deactivate this structure instead of permanently deleting it.';
-        throw constraintError;
-      }
-      
-      throw new Error(`Failed to delete organization structure: ${error.message}`);
+      throw error;
     }
   }
 }
