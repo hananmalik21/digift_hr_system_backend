@@ -1,3 +1,4 @@
+// features/positions/model/positions_model.js
 import db from '../../../config/db.js';
 import oracledb from 'oracledb';
 
@@ -17,40 +18,54 @@ class PositionsModel {
     return out;
   }
 
-  static async executeQuery(sql, bindParams = [], options = {}) {
-    const result = await db.executeQuery(sql, bindParams, {
-      outFormat: oracledb.OUT_FORMAT_OBJECT,
-      ...options,
-    });
-    if (result?.rows) result.rows = this.toLowerCaseKeys(result.rows);
-    return result;
-  }
-
-  static async executeWithTransaction(cb) {
-    let connection;
-    try {
-      connection = await db.getConnection();
-      const out = await cb(connection);
-      await connection.commit();
-      return out;
-    } catch (e) {
-      if (connection?.rollback) {
-        try {
-          await connection.rollback();
-        } catch (_) {}
-      }
-      throw e;
-    } finally {
-      if (connection?.close) {
-        try {
-          await connection.close();
-        } catch (_) {}
-      }
-    }
-  }
-
   static isMissing(v) {
     return v === undefined || v === null || v === '';
+  }
+
+  // Accepts 32-hex or UUID-with-hyphens; returns uppercase hex32
+  static normalizeGuidHex32(v) {
+    return String(v ?? '').trim().replace(/-/g, '').toUpperCase();
+  }
+
+  static isHex32(s) {
+    return typeof s === 'string' && /^[0-9A-F]{32}$/.test(s);
+  }
+
+  static raw16Required(v, field) {
+    if (this.isMissing(v)) {
+      const err = new Error(`${field} is required`);
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const hex = this.normalizeGuidHex32(v);
+    if (!this.isHex32(hex)) {
+      const err = new Error(`${field} must be a valid GUID (32-hex or UUID)`);
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    return Buffer.from(hex, 'hex'); // RAW(16)
+  }
+
+  static raw16Optional(v, field) {
+    if (this.isMissing(v)) return null;
+    const hex = this.normalizeGuidHex32(v);
+    if (!this.isHex32(hex)) {
+      const err = new Error(`${field} must be a valid GUID (32-hex or UUID)`);
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    return Buffer.from(hex, 'hex');
+  }
+
+  static buffersToHexInRow(row) {
+    if (!row) return row;
+    for (const k of Object.keys(row)) {
+      if (Buffer.isBuffer(row[k])) row[k] = row[k].toString('hex').toUpperCase();
+    }
+    return row;
   }
 
   static strRequired(v, field) {
@@ -110,41 +125,73 @@ class PositionsModel {
     return n;
   }
 
-  static async nextId(connection) {
+  static async executeQuery(sql, bindParams = [], options = {}) {
     try {
-      const r = await connection.execute(`SELECT ENT.POSITIONS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`, [], {
+      const result = await db.executeQuery(sql, bindParams, {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
+        ...options,
       });
-      return r.rows[0].NEXT_ID;
-    } catch (_) {
-      const r = await connection.execute(
-        `SELECT NVL(MAX(POSITION_ID),0)+1 AS NEXT_ID FROM ${this.TABLE_NAME}`,
-        [],
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      return r.rows[0].NEXT_ID;
+
+      if (result?.rows) {
+        result.rows = result.rows.map((r) => this.toLowerCaseKeys(this.buffersToHexInRow(r)));
+      }
+      return result;
+    } catch (error) {
+      // helpful debug
+      console.error('SQL Query Error:', error.message);
+      console.error('SQL (first 300):', String(sql).slice(0, 300));
+      console.error('Binds:', bindParams?.map((b) => (Buffer.isBuffer(b) ? b.toString('hex').toUpperCase() : b)));
+      throw error;
+    }
+  }
+
+  static async executeWithTransaction(cb) {
+    let connection;
+    try {
+      connection = await db.getConnection();
+      const out = await cb(connection);
+      await connection.commit();
+      return out;
+    } catch (e) {
+      if (connection?.rollback) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      throw e;
+    } finally {
+      if (connection?.close) {
+        try {
+          await connection.close();
+        } catch (_) {}
+      }
     }
   }
 
   // ----------------------------
   // Org path from org_unit_id (parents)
   // ----------------------------
-  static async fetchOrgPath(orgUnitId) {
-    const id = this.numRequired(orgUnitId, 'org_unit_id');
+  static async fetchOrgPath(orgUnitIdHex32) {
+    if (!orgUnitIdHex32) return [];
+    const id = this.raw16Required(orgUnitIdHex32, 'org_unit_id');
+
+    // NOTE: this traverses up from child -> parent
     const sql = `
       SELECT
-        ou.ORG_UNIT_ID,
+        RAWTOHEX(ou.ORG_UNIT_ID) AS ORG_UNIT_ID,
         ou.ORG_UNIT_NAME_EN,
         ou.ORG_UNIT_NAME_AR,
         ou.LEVEL_CODE,
-        ou.PARENT_ORG_UNIT_ID,
+        RAWTOHEX(ou.PARENT_ORG_UNIT_ID) AS PARENT_ORG_UNIT_ID,
         LEVEL AS HIERARCHY_LEVEL
       FROM ENT.ORG_UNITS ou
       START WITH ou.ORG_UNIT_ID = :1
       CONNECT BY PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
       ORDER BY LEVEL DESC
     `;
+
     const r = await this.executeQuery(sql, [id]);
+
     return (r.rows || []).map((x) => ({
       level_code: x.level_code,
       org_unit_id: x.org_unit_id,
@@ -154,22 +201,22 @@ class PositionsModel {
   }
 
   // ----------------------------
-  // Base SELECT (FIXED: STRUCTURE_NAME)
+  // Base SELECT
   // ----------------------------
   static selectBase() {
     return `
       SELECT
-        p.POSITION_ID,
+        RAWTOHEX(p.POSITION_ID) AS POSITION_ID,
         p.POSITION_CODE,
         p.STATUS,
         p.POSITION_TITLE_EN,
         p.POSITION_TITLE_AR,
 
-        p.ORG_STRUCTURE_ID,
+        RAWTOHEX(p.ORG_STRUCTURE_ID) AS ORG_STRUCTURE_ID,
         os.STRUCTURE_CODE  AS ORG_STRUCTURE_CODE_REF,
         os.STRUCTURE_NAME  AS ORG_STRUCTURE_NAME_REF,
 
-        p.ORG_UNIT_ID,
+        RAWTOHEX(p.ORG_UNIT_ID) AS ORG_UNIT_ID,
         ou.ORG_UNIT_NAME_EN AS ORG_UNIT_NAME_EN_REF,
         ou.ORG_UNIT_NAME_AR AS ORG_UNIT_NAME_AR_REF,
         ou.LEVEL_CODE       AS ORG_UNIT_LEVEL_CODE_REF,
@@ -191,7 +238,6 @@ class PositionsModel {
 
         p.GRADE_ID,
         g.GRADE_NUMBER   AS GRADE_NUMBER_REF,
-     
 
         p.STEP_NO,
         p.NUMBER_OF_POSITIONS,
@@ -202,7 +248,7 @@ class PositionsModel {
         p.BUDGETED_MAX_KD,
         p.ACTUAL_AVG_KD,
 
-        p.REPORTS_TO_POSITION_ID,
+        RAWTOHEX(p.REPORTS_TO_POSITION_ID) AS REPORTS_TO_POSITION_ID,
         rt.POSITION_CODE     AS REPORTS_TO_CODE_REF,
         rt.POSITION_TITLE_EN AS REPORTS_TO_TITLE_EN_REF,
 
@@ -213,26 +259,23 @@ class PositionsModel {
         p.LAST_UPDATE_LOGIN
 
       FROM ${this.TABLE_NAME} p
-      JOIN ENT.HR_ORG_STRUCTURES os ON p.ORG_STRUCTURE_ID = os.STRUCTURE_ID
-      JOIN ENT.ORG_UNITS ou         ON p.ORG_UNIT_ID      = ou.ORG_UNIT_ID
-      JOIN ENT.JOB_FAMILIES jf      ON p.JOB_FAMILY_ID    = jf.JOB_FAMILY_ID
-      JOIN ENT.JOB_LEVELS jl        ON p.JOB_LEVEL_ID     = jl.JOB_LEVEL_ID
-      JOIN ENT.GRADES g             ON p.GRADE_ID         = g.GRADE_ID
-      LEFT JOIN ${this.TABLE_NAME} rt ON p.REPORTS_TO_POSITION_ID = rt.POSITION_ID
+      LEFT JOIN ENT.HR_ORG_STRUCTURES os ON p.ORG_STRUCTURE_ID = os.STRUCTURE_ID
+      LEFT JOIN ENT.ORG_UNITS ou         ON p.ORG_UNIT_ID      = ou.ORG_UNIT_ID
+      JOIN ENT.JOB_FAMILIES jf           ON p.JOB_FAMILY_ID    = jf.JOB_FAMILY_ID
+      JOIN ENT.JOB_LEVELS jl             ON p.JOB_LEVEL_ID     = jl.JOB_LEVEL_ID
+      JOIN ENT.GRADES g                  ON p.GRADE_ID         = g.GRADE_ID
+      LEFT JOIN ${this.TABLE_NAME} rt    ON p.REPORTS_TO_POSITION_ID = rt.POSITION_ID
     `;
   }
 
   static shape(row) {
     if (!row) return null;
 
-    // Parse org_path_json if stored
     let org_path_json = row.org_path_json;
     if (typeof org_path_json === 'string') {
       try {
         org_path_json = JSON.parse(org_path_json);
-      } catch (_) {
-        // keep as string if not valid json
-      }
+      } catch (_) {}
     }
 
     const shaped = {
@@ -265,7 +308,6 @@ class PositionsModel {
       grade: {
         grade_id: row.grade_id,
         grade_number: row.grade_number_ref ?? null,
-
       },
       reports_to: row.reports_to_position_id
         ? {
@@ -316,7 +358,20 @@ class PositionsModel {
       i++;
     }
 
-    const numFilterCols = ['org_structure_id', 'org_unit_id', 'job_family_id', 'job_level_id', 'grade_id'];
+    // GUID filters -> bind RAW(16)
+    if (filters.org_structure_id) {
+      where.push(`p.ORG_STRUCTURE_ID = :${i}`);
+      binds.push(this.raw16Required(filters.org_structure_id, 'org_structure_id'));
+      i++;
+    }
+    if (filters.org_unit_id) {
+      where.push(`p.ORG_UNIT_ID = :${i}`);
+      binds.push(this.raw16Required(filters.org_unit_id, 'org_unit_id'));
+      i++;
+    }
+
+    // numeric filters
+    const numFilterCols = ['job_family_id', 'job_level_id', 'grade_id'];
     for (const f of numFilterCols) {
       if (!this.isMissing(filters[f])) {
         where.push(`p.${f.toUpperCase()} = :${i}`);
@@ -327,22 +382,25 @@ class PositionsModel {
 
     const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
 
-    // Count
     const countSql = `SELECT COUNT(*) AS TOTAL FROM ${this.TABLE_NAME} p${whereSql}`;
     const countR = await this.executeQuery(countSql, [...binds]);
     const total = countR?.rows?.[0]?.total ?? 0;
 
-    // Data
-    let dataSql = this.selectBase() + whereSql + ` ORDER BY p.CREATED_DATE DESC, p.POSITION_ID DESC`;
+    let dataSql = this.selectBase() + whereSql + ` ORDER BY p.CREATED_DATE DESC`;
     const offset = (page - 1) * pageSize;
     dataSql += ` OFFSET :${i} ROWS FETCH NEXT :${i + 1} ROWS ONLY`;
-    const dataBinds = [...binds, offset, pageSize];
 
-    const r = await this.executeQuery(dataSql, dataBinds);
+    const r = await this.executeQuery(dataSql, [...binds, offset, pageSize]);
     const rows = r.rows || [];
 
-    // auto org path from leaf org_unit_id
-    for (const row of rows) row.org_path = await this.fetchOrgPath(row.org_unit_id);
+    // org paths
+    for (const row of rows) {
+      try {
+        row.org_path = await this.fetchOrgPath(row.org_unit_id);
+      } catch (err) {
+        row.org_path = [];
+      }
+    }
 
     return { positions: this.shapeMany(rows), total };
   }
@@ -350,8 +408,8 @@ class PositionsModel {
   // ----------------------------
   // GET BY ID
   // ----------------------------
-  static async findById(positionId) {
-    const id = this.numRequired(positionId, 'position_id');
+  static async findById(positionIdHex32) {
+    const id = this.raw16Required(positionIdHex32, 'position_id');
     const sql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
     const r = await this.executeQuery(sql, [id]);
     if (!r?.rows?.length) return null;
@@ -367,10 +425,8 @@ class PositionsModel {
   static async create(data, userId = 'SYSTEM') {
     const payload = this.toLowerCaseKeys(data);
 
-    // step_no optional -> default 1
     const stepNo = this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 }) ?? 1;
 
-    // salary required and valid
     const minKd = this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd');
     const maxKd = this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd');
     if (minKd > maxKd) {
@@ -382,6 +438,7 @@ class PositionsModel {
 
     const totalPos = this.numOptional(payload.number_of_positions) ?? 1;
     const filled = this.numOptional(payload.filled_positions) ?? 0;
+
     if (filled < 0) {
       const err = new Error('filled_positions must be >= 0');
       err.code = 'VALIDATION_ERROR';
@@ -397,90 +454,95 @@ class PositionsModel {
 
     return await this.executeWithTransaction(async (connection) => {
       try {
-        const id = await this.nextId(connection);
         const now = new Date();
 
-        const insertSql = `INSERT INTO ${this.TABLE_NAME} (
-          POSITION_ID,
-          POSITION_CODE,
-          STATUS,
-          POSITION_TITLE_EN,
-          POSITION_TITLE_AR,
-          ORG_STRUCTURE_ID,
-          ORG_UNIT_ID,
-          ORG_PATH_JSON,
-          COST_CENTER,
-          LOCATION,
-          JOB_FAMILY_ID,
-          JOB_LEVEL_ID,
-          GRADE_ID,
-          STEP_NO,
-          NUMBER_OF_POSITIONS,
-          FILLED_POSITIONS,
-          EMPLOYMENT_TYPE,
-          BUDGETED_MIN_KD,
-          BUDGETED_MAX_KD,
-          ACTUAL_AVG_KD,
-          REPORTS_TO_POSITION_ID,
-          CREATED_BY,
-          CREATED_DATE,
-          LAST_UPDATED_BY,
-          LAST_UPDATED_DATE,
-          LAST_UPDATE_LOGIN
-        ) VALUES (
-          :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13,:14,:15,:16,:17,:18,:19,:20,:21,:22,:23,:24,:25,:26
-        )`;
+        const insertSql = `
+          INSERT INTO ${this.TABLE_NAME} (
+            POSITION_ID,
+            POSITION_CODE,
+            STATUS,
+            POSITION_TITLE_EN,
+            POSITION_TITLE_AR,
+            ORG_STRUCTURE_ID,
+            ORG_UNIT_ID,
+            ORG_PATH_JSON,
+            COST_CENTER,
+            LOCATION,
+            JOB_FAMILY_ID,
+            JOB_LEVEL_ID,
+            GRADE_ID,
+            STEP_NO,
+            NUMBER_OF_POSITIONS,
+            FILLED_POSITIONS,
+            EMPLOYMENT_TYPE,
+            BUDGETED_MIN_KD,
+            BUDGETED_MAX_KD,
+            ACTUAL_AVG_KD,
+            REPORTS_TO_POSITION_ID,
+            CREATED_BY,
+            CREATED_DATE,
+            LAST_UPDATED_BY,
+            LAST_UPDATED_DATE,
+            LAST_UPDATE_LOGIN
+          ) VALUES (
+            SYS_GUID(),
+            :positionCode, :status, :positionTitleEn, :positionTitleAr,
+            :orgStructureId, :orgUnitId, :orgPathJson,
+            :costCenter, :location,
+            :jobFamilyId, :jobLevelId, :gradeId,
+            :stepNo, :numberOfPositions, :filledPositions,
+            :employmentType,
+            :budgetedMinKd, :budgetedMaxKd, :actualAvgKd,
+            :reportsToPositionId,
+            :createdBy, :createdDate, :lastUpdatedBy, :lastUpdatedDate, :lastUpdateLogin
+          )
+          RETURNING POSITION_ID INTO :returnPositionId
+        `;
 
-        const bind = [
-          id,
-          this.strRequired(payload.position_code, 'position_code'),
-          String(payload.status ?? 'ACTIVE').toUpperCase(),
-          this.strRequired(payload.position_title_en, 'position_title_en'),
-          this.strRequired(payload.position_title_ar, 'position_title_ar'),
-          this.numRequired(payload.org_structure_id, 'org_structure_id'),
-          this.numRequired(payload.org_unit_id, 'org_unit_id'),
+        const bindVars = {
+          positionCode: { val: this.strRequired(payload.position_code, 'position_code'), dir: oracledb.BIND_IN },
+          status: { val: String(payload.status ?? 'ACTIVE').toUpperCase(), dir: oracledb.BIND_IN },
+          positionTitleEn: { val: this.strRequired(payload.position_title_en, 'position_title_en'), dir: oracledb.BIND_IN },
+          positionTitleAr: { val: this.strRequired(payload.position_title_ar, 'position_title_ar'), dir: oracledb.BIND_IN },
+          orgStructureId: { val: this.raw16Required(payload.org_structure_id, 'org_structure_id'), dir: oracledb.BIND_IN },
+          orgUnitId: { val: this.raw16Required(payload.org_unit_id, 'org_unit_id'), dir: oracledb.BIND_IN },
+          orgPathJson: { val: payload.org_path_json ? JSON.stringify(payload.org_path_json) : null, dir: oracledb.BIND_IN },
+          costCenter: { val: this.strRequired(payload.cost_center, 'cost_center'), dir: oracledb.BIND_IN },
+          location: { val: this.strRequired(payload.location, 'location'), dir: oracledb.BIND_IN },
+          jobFamilyId: { val: this.numRequired(payload.job_family_id, 'job_family_id'), dir: oracledb.BIND_IN },
+          jobLevelId: { val: this.numRequired(payload.job_level_id, 'job_level_id'), dir: oracledb.BIND_IN },
+          gradeId: { val: this.numRequired(payload.grade_id, 'grade_id'), dir: oracledb.BIND_IN },
+          stepNo: { val: stepNo, dir: oracledb.BIND_IN },
+          numberOfPositions: { val: totalPos, dir: oracledb.BIND_IN },
+          filledPositions: { val: filled, dir: oracledb.BIND_IN },
+          employmentType: { val: this.strRequired(payload.employment_type, 'employment_type'), dir: oracledb.BIND_IN },
+          budgetedMinKd: { val: minKd, dir: oracledb.BIND_IN },
+          budgetedMaxKd: { val: maxKd, dir: oracledb.BIND_IN },
+          actualAvgKd: { val: this.numOptional(payload.actual_avg_kd), dir: oracledb.BIND_IN },
+          reportsToPositionId: { val: this.raw16Optional(payload.reports_to_position_id, 'reports_to_position_id'), dir: oracledb.BIND_IN },
+          createdBy: { val: userId, dir: oracledb.BIND_IN },
+          createdDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
+          lastUpdatedBy: { val: userId, dir: oracledb.BIND_IN },
+          lastUpdatedDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
+          lastUpdateLogin: { val: payload.last_update_login ?? null, dir: oracledb.BIND_IN },
+          returnPositionId: { type: oracledb.BUFFER, dir: oracledb.BIND_OUT, maxSize: 16 }
+        };
 
-          // optional snapshot if user sends it; otherwise null
-          payload.org_path_json ? JSON.stringify(payload.org_path_json) : null,
+        const ins = await connection.execute(insertSql, bindVars, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const newIdBuf = Array.isArray(ins.outBinds.returnPositionId) 
+          ? ins.outBinds.returnPositionId[0] 
+          : ins.outBinds.returnPositionId;
 
-          this.strRequired(payload.cost_center, 'cost_center'),
-          this.strRequired(payload.location, 'location'),
-          this.numRequired(payload.job_family_id, 'job_family_id'),
-          this.numRequired(payload.job_level_id, 'job_level_id'),
-          this.numRequired(payload.grade_id, 'grade_id'),
-          stepNo,
-
-          totalPos,
-          filled,
-
-          this.strRequired(payload.employment_type, 'employment_type'),
-          minKd,
-          maxKd,
-          this.numOptional(payload.actual_avg_kd),
-
-          // optional -> never NaN
-          this.numOptional(payload.reports_to_position_id),
-
-          userId,
-          now,
-          userId,
-          now,
-          payload.last_update_login ?? null,
-        ];
-
-        await connection.execute(insertSql, bind, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        // return created row
         const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-        const rr = await connection.execute(selectSql, [id], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        const row = this.toLowerCaseKeys(rr.rows[0]);
+        const rr = await connection.execute(selectSql, [newIdBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
+        const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
         row.org_path = await this.fetchOrgPath(row.org_unit_id);
+
         return this.shape(row);
       } catch (e) {
         const msg = e?.message || '';
 
-        // unique constraint (position_code)
         if (e.errorNum === 1 || msg.includes('ORA-00001')) {
           const err = new Error('position_code already exists');
           err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
@@ -488,7 +550,6 @@ class PositionsModel {
           throw err;
         }
 
-        // fk
         if (e.errorNum === 2291 || msg.includes('ORA-02291')) {
           const err = new Error(
             'Referenced record does not exist (org_structure_id/org_unit_id/job_family_id/job_level_id/grade_id/reports_to_position_id)'
@@ -498,7 +559,6 @@ class PositionsModel {
           throw err;
         }
 
-        // not null
         if (e.errorNum === 1400 || msg.includes('ORA-01400')) {
           const err = new Error('Missing required fields');
           err.code = 'NOT_NULL_CONSTRAINT';
@@ -506,7 +566,6 @@ class PositionsModel {
           throw err;
         }
 
-        // check constraints (status/step/salary/headcount)
         if (e.errorNum === 2290 || msg.includes('ORA-02290')) {
           const err = new Error('Invalid value (status/step_no/headcount/salary constraints)');
           err.code = 'CHECK_CONSTRAINT_VIOLATION';
@@ -514,7 +573,10 @@ class PositionsModel {
           throw err;
         }
 
-        throw new Error(`Failed to create position: ${msg}`);
+        const err = new Error(`Failed to create position: ${msg}`);
+        err.code = 'INTERNAL_SERVER_ERROR';
+        err.statusCode = 500;
+        throw err;
       }
     });
   }
@@ -522,8 +584,8 @@ class PositionsModel {
   // ----------------------------
   // UPDATE
   // ----------------------------
-  static async update(positionId, data, userId = 'SYSTEM') {
-    const id = this.numRequired(positionId, 'position_id');
+  static async update(positionIdHex32, data, userId = 'SYSTEM') {
+    const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     const payload = this.toLowerCaseKeys(data);
 
     return await this.executeWithTransaction(async (connection) => {
@@ -542,8 +604,8 @@ class PositionsModel {
       if (payload.position_title_en !== undefined) add('POSITION_TITLE_EN', this.strRequired(payload.position_title_en, 'position_title_en'));
       if (payload.position_title_ar !== undefined) add('POSITION_TITLE_AR', this.strRequired(payload.position_title_ar, 'position_title_ar'));
 
-      if (payload.org_structure_id !== undefined) add('ORG_STRUCTURE_ID', this.numRequired(payload.org_structure_id, 'org_structure_id'));
-      if (payload.org_unit_id !== undefined) add('ORG_UNIT_ID', this.numRequired(payload.org_unit_id, 'org_unit_id'));
+      if (payload.org_structure_id !== undefined) add('ORG_STRUCTURE_ID', this.raw16Required(payload.org_structure_id, 'org_structure_id'));
+      if (payload.org_unit_id !== undefined) add('ORG_UNIT_ID', this.raw16Required(payload.org_unit_id, 'org_unit_id'));
 
       if (payload.org_path_json !== undefined) add('ORG_PATH_JSON', payload.org_path_json ? JSON.stringify(payload.org_path_json) : null);
 
@@ -554,21 +616,16 @@ class PositionsModel {
       if (payload.job_level_id !== undefined) add('JOB_LEVEL_ID', this.numRequired(payload.job_level_id, 'job_level_id'));
       if (payload.grade_id !== undefined) add('GRADE_ID', this.numRequired(payload.grade_id, 'grade_id'));
 
-      if (payload.step_no !== undefined) {
-        const step = this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 });
-        add('STEP_NO', step);
-      }
-
+      if (payload.step_no !== undefined) add('STEP_NO', this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 }));
       if (payload.number_of_positions !== undefined) add('NUMBER_OF_POSITIONS', this.numRequired(payload.number_of_positions, 'number_of_positions'));
       if (payload.filled_positions !== undefined) add('FILLED_POSITIONS', this.numRequired(payload.filled_positions, 'filled_positions'));
 
       if (payload.employment_type !== undefined) add('EMPLOYMENT_TYPE', this.strRequired(payload.employment_type, 'employment_type'));
-
       if (payload.budgeted_min_kd !== undefined) add('BUDGETED_MIN_KD', this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd'));
       if (payload.budgeted_max_kd !== undefined) add('BUDGETED_MAX_KD', this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd'));
       if (payload.actual_avg_kd !== undefined) add('ACTUAL_AVG_KD', this.numOptional(payload.actual_avg_kd));
 
-      if (payload.reports_to_position_id !== undefined) add('REPORTS_TO_POSITION_ID', this.numOptional(payload.reports_to_position_id));
+      if (payload.reports_to_position_id !== undefined) add('REPORTS_TO_POSITION_ID', this.raw16Optional(payload.reports_to_position_id, 'reports_to_position_id'));
       if (payload.last_update_login !== undefined) add('LAST_UPDATE_LOGIN', payload.last_update_login ?? null);
 
       if (!sets.length) {
@@ -581,16 +638,15 @@ class PositionsModel {
       add('LAST_UPDATED_BY', userId);
       add('LAST_UPDATED_DATE', new Date());
 
-      binds.push(id);
+      binds.push(idBuf);
       const sql = `UPDATE ${this.TABLE_NAME} SET ${sets.join(', ')} WHERE POSITION_ID = :${i}`;
       const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
       if ((r.rowsAffected || 0) === 0) return null;
 
       const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-      const rr = await connection.execute(selectSql, [id], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const rr = await connection.execute(selectSql, [idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
-      const row = this.toLowerCaseKeys(rr.rows[0]);
+      const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
       row.org_path = await this.fetchOrgPath(row.org_unit_id);
       return this.shape(row);
     });
@@ -599,22 +655,23 @@ class PositionsModel {
   // ----------------------------
   // SOFT DELETE
   // ----------------------------
-  static async softDelete(positionId, userId = 'SYSTEM') {
-    const id = this.numRequired(positionId, 'position_id');
+  static async softDelete(positionIdHex32, userId = 'SYSTEM') {
+    const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
-      const sql = `UPDATE ${this.TABLE_NAME}
+      const sql = `
+        UPDATE ${this.TABLE_NAME}
         SET STATUS = 'INACTIVE',
             LAST_UPDATED_BY = :1,
             LAST_UPDATED_DATE = :2
-        WHERE POSITION_ID = :3`;
-
-      const r = await connection.execute(sql, [userId, new Date(), id], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        WHERE POSITION_ID = :3
+      `;
+      const r = await connection.execute(sql, [userId, new Date(), idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
       if ((r.rowsAffected || 0) === 0) return null;
 
       const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-      const rr = await connection.execute(selectSql, [id], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const rr = await connection.execute(selectSql, [idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
-      const row = this.toLowerCaseKeys(rr.rows[0]);
+      const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
       row.org_path = await this.fetchOrgPath(row.org_unit_id);
       return this.shape(row);
     });
@@ -623,10 +680,10 @@ class PositionsModel {
   // ----------------------------
   // HARD DELETE
   // ----------------------------
-  static async hardDelete(positionId) {
-    const id = this.numRequired(positionId, 'position_id');
+  static async hardDelete(positionIdHex32) {
+    const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
-      const r = await connection.execute(`DELETE FROM ${this.TABLE_NAME} WHERE POSITION_ID = :1`, [id], {
+      const r = await connection.execute(`DELETE FROM ${this.TABLE_NAME} WHERE POSITION_ID = :1`, [idBuf], {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
       });
       if ((r.rowsAffected || 0) === 0) return null;
@@ -635,108 +692,62 @@ class PositionsModel {
   }
 
   // ----------------------------
-  // FIND REPORTING RELATIONSHIPS (Hierarchical Tree)
+  // REPORTING RELATIONSHIPS TREE
   // ----------------------------
-  static async findReportingRelationships(positionId = null, includeHierarchy = true) {
-    // Validate positionId if provided
-    let validatedId = null;
-    if (positionId !== null && positionId !== undefined && positionId !== '') {
-      // Additional check: if it's a string, make sure it's not just whitespace
-      if (typeof positionId === 'string' && positionId.trim() === '') {
-        validatedId = null;
-      } else {
-        validatedId = this.intOptional(positionId, 'position_id', { min: 1 });
-        if (!validatedId) return [];
-      }
+  static async findReportingRelationships(positionIdHex32 = null, includeHierarchy = true) {
+    let rootHex = null;
+    if (positionIdHex32) {
+      const norm = this.normalizeGuidHex32(positionIdHex32);
+      if (!this.isHex32(norm)) return [];
+      rootHex = norm;
     }
 
-    // Build query to get all positions with their reporting relationships
-    let sql = this.selectBase();
-    const binds = [];
+    const sql = this.selectBase() + ` ORDER BY p.CREATED_DATE DESC`;
+    const r = await this.executeQuery(sql, []);
+    const all = this.shapeMany(r.rows || []);
 
-    // Always get all positions to build the complete tree structure
-    // We'll filter by positionId in JavaScript if needed
-    sql += ` ORDER BY p.REPORTS_TO_POSITION_ID NULLS FIRST, p.POSITION_ID`;
-
-    const r = await this.executeQuery(sql, binds);
-    let allPositions = this.shapeMany(r.rows || []);
-
-    // If specific position_id is provided, filter to get that position and all its descendants
-    if (validatedId !== null) {
-      const rootPosition = allPositions.find((pos) => pos.position_id === validatedId);
-      if (!rootPosition) return [];
-
-      // Get all descendants of this position
-      const descendants = new Set([validatedId]);
-      let foundNew = true;
-      while (foundNew) {
-        foundNew = false;
-        for (const pos of allPositions) {
-          if (pos.reports_to_position_id && descendants.has(pos.reports_to_position_id) && !descendants.has(pos.position_id)) {
-            descendants.add(pos.position_id);
-            foundNew = true;
-          }
-        }
-      }
-
-      // Filter to only include the root position and its descendants
-      allPositions = allPositions.filter((pos) => descendants.has(pos.position_id));
+    // Build map: parentId => children[]
+    const childrenByParent = new Map();
+    const byId = new Map();
+    for (const p of all) {
+      byId.set(p.position_id, p);
+      const parent = p.reports_to_position_id || null;
+      if (!childrenByParent.has(parent)) childrenByParent.set(parent, []);
+      childrenByParent.get(parent).push(p);
     }
 
-    // Build hierarchical tree structure
-    const buildTree = (parentId, level = 0) => {
-      const children = allPositions.filter((pos) => {
-        const reportsToId = pos.reports_to_position_id;
-        if (parentId === null) {
-          return reportsToId === null || reportsToId === undefined;
-        }
-        return reportsToId === parentId;
-      });
-
-      if (!includeHierarchy && level > 0) {
-        // If hierarchy is false, only return direct children (no recursion)
-        return children.map((pos) => ({
-          position_id: pos.position_id,
-          position_code: pos.position_code,
-          position_title_en: pos.position_title_en,
-          position_title_ar: pos.position_title_ar,
-          status: pos.status,
-          reports_to: pos.reports_to,
-          direct_reports: [],
-        }));
-      }
-
-      return children.map((pos) => ({
+    const build = (parentId, level = 0) => {
+      const kids = childrenByParent.get(parentId) || [];
+      return kids.map((pos) => ({
         position_id: pos.position_id,
         position_code: pos.position_code,
         position_title_en: pos.position_title_en,
         position_title_ar: pos.position_title_ar,
         status: pos.status,
         reports_to: pos.reports_to,
-        direct_reports: buildTree(pos.position_id, level + 1),
+        direct_reports:
+          includeHierarchy ? build(pos.position_id, level + 1) : [],
       }));
     };
 
-    // If positionId is provided, return subtree starting from that position
-    if (validatedId !== null) {
-      const rootPosition = allPositions.find((pos) => pos.position_id === validatedId);
-      if (!rootPosition) return [];
-
+    if (rootHex) {
+      const root = byId.get(rootHex);
+      if (!root) return [];
       return [
         {
-          position_id: rootPosition.position_id,
-          position_code: rootPosition.position_code,
-          position_title_en: rootPosition.position_title_en,
-          position_title_ar: rootPosition.position_title_ar,
-          status: rootPosition.status,
-          reports_to: rootPosition.reports_to,
-          direct_reports: buildTree(rootPosition.position_id, 0),
+          position_id: root.position_id,
+          position_code: root.position_code,
+          position_title_en: root.position_title_en,
+          position_title_ar: root.position_title_ar,
+          status: root.status,
+          reports_to: root.reports_to,
+          direct_reports: includeHierarchy ? build(root.position_id, 0) : [],
         },
       ];
     }
 
-    // Otherwise, return all root positions with their subtrees
-    return buildTree(null, 0);
+    // Forest (top-level = reports_to_position_id is null)
+    return build(null, 0);
   }
 }
 

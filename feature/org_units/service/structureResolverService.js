@@ -33,8 +33,9 @@ class StructureResolverService {
     }
 
     // Load ordered levels (IS_ACTIVE='Y', ordered by DISPLAY_ORDER)
+    // structureId is hex32 GUID, use structureIdHex filter
     const levels = await HrOrgHierarchyLevelModel.findAll({
-      structureId: structureId,
+      structureIdHex: structureId,
       isActive: true
     });
 

@@ -21,7 +21,6 @@ import shiftController from './feature/shifts/controller/shiftController.js';
 import workPatternController from './feature/work_patterns/controller/workPatternController.js';
 import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
 import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
-import holidayController from './feature/holidays/controller/holidayController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
@@ -52,29 +51,29 @@ app.use('/api/enterprises', enterpriseController);
 // HR Organization Hierarchy Level routes
 app.use('/api/hr-org-hierarchy-levels', hrOrgHierarchyLevelController);
 
-// HR Organization Structure routes (mounted first so specific routes like /active/levels match before parameterized routes)
-app.use('/api/hr-org-structures', hrOrgStructureController);
-
-// Org Units routes (structure-centric, mounted after structure routes)
+// Org Units routes (structure-centric, mounted FIRST so specific routes like /:structureId/org-units match before catch-all /:id)
 // Routes: /api/hr-org-structures/:structureId, /api/hr-org-structures/:structureId/levels, etc.
 app.use('/api/hr-org-structures', orgUnitController);
 
-// Structure Level routes
+// HR Organization Structure routes (mounted AFTER orgUnitController so catch-all /:id doesn't intercept specific routes)
+// Routes: /api/hr-org-structures/:id, /api/hr-org-structures/active/levels
+app.use('/api/hr-org-structures', hrOrgStructureController);
+
+// Structure Level routes (mounted BEFORE orgUnitController to avoid route conflicts)
 app.use('/api/structure-levels', structureLevelController);
 
-app.use('/', hrOrgHierarchyLevelController);
-
-
+// Mount specific routes BEFORE catch-all routes to avoid conflicts
 app.use('/api/grades', gradeController);
-
-
 app.use('/api/job-families', jobFamilyController);
-
-
 app.use('/api/job-levels', jobLevelsController);
-
-
 app.use('/api/positions', positionsController);
+
+// Org Units simplified routes (for easier access)
+// Routes: /api/org-units/tree/active
+// NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions
+app.use('/api', orgUnitController);
+
+app.use('/', hrOrgHierarchyLevelController);
 
 // Shifts routes
 app.use('/api/tm/shifts', shiftController);
@@ -87,9 +86,6 @@ app.use('/api/tm/work-schedules', workScheduleController);
 
 // Schedule Assignments routes
 app.use('/api/tm/schedule-assignments', scheduleAssignmentController);
-
-// Holidays routes
-app.use('/api/holidays', holidayController);
 
 
 

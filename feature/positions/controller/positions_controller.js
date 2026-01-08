@@ -1,3 +1,4 @@
+// features/positions/controller/positions_controller.js
 import express from 'express';
 import PositionsModel from '../model/positions_model.js';
 import { toUpperCaseKeys } from '../../../utils/stringUtils.js';
@@ -10,7 +11,7 @@ import {
   sendBadRequest,
   sendServerError,
   sendConflict,
-  sendReportingRelationships
+  sendReportingRelationships,
 } from '../view/position_view.js';
 
 const router = express.Router();
@@ -24,12 +25,18 @@ function getUserId(req) {
   return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
 }
 
+// GUID helpers (client input): accepts UUID or 32-hex
+function normalizeGuidString(v) {
+  if (v === undefined || v === null) return '';
+  return String(v).trim().replace(/-/g, '').toUpperCase();
+}
+function isHex32Guid(v) {
+  return /^[0-9A-F]{32}$/.test(normalizeGuidString(v));
+}
+
 function validatePosition(data, isUpdate = false) {
   const errors = [];
   const empty = (v) => v === undefined || v === null || String(v).trim() === '';
-  const isNum = (v) => !isNaN(parseInt(v));
-  const isPos = (v) => isNum(v) && parseInt(v) > 0;
-
   const reqIfCreate = (field, msg) => {
     if (!isUpdate && empty(data[field])) errors.push(msg);
   };
@@ -48,20 +55,31 @@ function validatePosition(data, isUpdate = false) {
   reqIfCreate('JOB_FAMILY_ID', 'job_family_id is required');
   reqIfCreate('JOB_LEVEL_ID', 'job_level_id is required');
   reqIfCreate('GRADE_ID', 'grade_id is required');
-  reqIfCreate('STEP_NO', 'step_no is required');
 
   reqIfCreate('NUMBER_OF_POSITIONS', 'number_of_positions is required');
   reqIfCreate('EMPLOYMENT_TYPE', 'employment_type is required');
   reqIfCreate('BUDGETED_MIN_KD', 'budgeted_min_kd is required');
   reqIfCreate('BUDGETED_MAX_KD', 'budgeted_max_kd is required');
 
-  // Numeric checks (only if provided)
+  // GUID checks
+  const guidFields = ['ORG_STRUCTURE_ID', 'ORG_UNIT_ID', 'REPORTS_TO_POSITION_ID', 'POSITION_ID'];
+  for (const f of guidFields) {
+    if (!empty(data[f]) && !isHex32Guid(data[f])) {
+      errors.push(`${f.toLowerCase()} must be a valid GUID (32-hex or UUID)`);
+    }
+  }
+
+  // numeric checks
   const numericFields = [
-    'ORG_STRUCTURE_ID','ORG_UNIT_ID',
-    'JOB_FAMILY_ID','JOB_LEVEL_ID','GRADE_ID',
-    'STEP_NO','NUMBER_OF_POSITIONS','FILLED_POSITIONS',
-    'BUDGETED_MIN_KD','BUDGETED_MAX_KD','ACTUAL_AVG_KD',
-    'REPORTS_TO_POSITION_ID'
+    'JOB_FAMILY_ID',
+    'JOB_LEVEL_ID',
+    'GRADE_ID',
+    'STEP_NO',
+    'NUMBER_OF_POSITIONS',
+    'FILLED_POSITIONS',
+    'BUDGETED_MIN_KD',
+    'BUDGETED_MAX_KD',
+    'ACTUAL_AVG_KD',
   ];
 
   for (const f of numericFields) {
@@ -70,32 +88,24 @@ function validatePosition(data, isUpdate = false) {
     }
   }
 
-  if (data.ORG_STRUCTURE_ID !== undefined && data.ORG_STRUCTURE_ID !== null && data.ORG_STRUCTURE_ID !== '' && !isPos(data.ORG_STRUCTURE_ID)) {
-    errors.push('org_structure_id must be a positive number');
-  }
-
-  if (data.ORG_UNIT_ID !== undefined && data.ORG_UNIT_ID !== null && data.ORG_UNIT_ID !== '' && !isPos(data.ORG_UNIT_ID)) {
-    errors.push('org_unit_id must be a positive number');
-  }
-
   if (data.STEP_NO !== undefined && data.STEP_NO !== null && data.STEP_NO !== '') {
-    const step = parseInt(data.STEP_NO);
+    const step = parseInt(data.STEP_NO, 10);
     if (isNaN(step) || step < 1 || step > 5) errors.push('step_no must be between 1 and 5');
   }
 
   if (data.NUMBER_OF_POSITIONS !== undefined) {
-    const n = parseInt(data.NUMBER_OF_POSITIONS);
+    const n = parseInt(data.NUMBER_OF_POSITIONS, 10);
     if (isNaN(n) || n < 1) errors.push('number_of_positions must be >= 1');
   }
 
-  if (data.FILLED_POSITIONS !== undefined) {
-    const f = parseInt(data.FILLED_POSITIONS);
+  if (data.FILLED_POSITIONS !== undefined && data.FILLED_POSITIONS !== null && data.FILLED_POSITIONS !== '') {
+    const f = parseInt(data.FILLED_POSITIONS, 10);
     if (isNaN(f) || f < 0) errors.push('filled_positions must be >= 0');
   }
 
   if (data.NUMBER_OF_POSITIONS !== undefined && data.FILLED_POSITIONS !== undefined) {
-    const n = parseInt(data.NUMBER_OF_POSITIONS);
-    const f = parseInt(data.FILLED_POSITIONS);
+    const n = parseInt(data.NUMBER_OF_POSITIONS, 10);
+    const f = parseInt(data.FILLED_POSITIONS, 10);
     if (!isNaN(n) && !isNaN(f) && f > n) errors.push('filled_positions cannot be greater than number_of_positions');
   }
 
@@ -105,14 +115,14 @@ function validatePosition(data, isUpdate = false) {
     if (!isNaN(min) && !isNaN(max) && min > max) errors.push('budgeted_min_kd cannot be greater than budgeted_max_kd');
   }
 
-  if (data.STATUS !== undefined) {
+  if (data.STATUS !== undefined && data.STATUS !== null && data.STATUS !== '') {
     const v = String(data.STATUS).toUpperCase();
-    if (!['ACTIVE','INACTIVE'].includes(v)) errors.push('status must be ACTIVE or INACTIVE');
+    if (!['ACTIVE', 'INACTIVE'].includes(v)) errors.push('status must be ACTIVE or INACTIVE');
   }
 
-  if (data.EMPLOYMENT_TYPE !== undefined) {
+  if (data.EMPLOYMENT_TYPE !== undefined && data.EMPLOYMENT_TYPE !== null && data.EMPLOYMENT_TYPE !== '') {
     const v = String(data.EMPLOYMENT_TYPE).toUpperCase();
-    const allowed = ['FULL_TIME','PART_TIME','CONTRACT','TEMP'];
+    const allowed = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'TEMP'];
     if (!allowed.includes(v)) errors.push(`employment_type must be one of: ${allowed.join(', ')}`);
   }
 
@@ -121,33 +131,37 @@ function validatePosition(data, isUpdate = false) {
 
 /**
  * GET /api/positions
- * Optional filters:
- * status, org_structure_id, org_unit_id, job_family_id, job_level_id, grade_id, search
  */
 router.get('/', async (req, res) => {
   try {
     const filters = {};
 
-    // filters (optional)
     if (req.query.status) filters.status = String(req.query.status).toUpperCase();
     if (req.query.search) filters.search = String(req.query.search);
 
-    const ids = ['org_structure_id', 'org_unit_id', 'job_family_id', 'job_level_id', 'grade_id'];
-    for (const k of ids) {
-      if (req.query[k] !== undefined) {
-        const v = parseInt(req.query[k]);
+    // GUID filters
+    for (const k of ['org_structure_id', 'org_unit_id']) {
+      if (req.query[k] !== undefined && req.query[k] !== null && String(req.query[k]).trim() !== '') {
+        const v = normalizeGuidString(req.query[k]);
+        if (!/^[0-9A-F]{32}$/.test(v)) return sendBadRequest(res, req, `${k} must be a valid GUID (32-hex or UUID)`);
+        filters[k] = v;
+      }
+    }
+
+    // numeric filters
+    for (const k of ['job_family_id', 'job_level_id', 'grade_id']) {
+      if (req.query[k] !== undefined && req.query[k] !== null && String(req.query[k]).trim() !== '') {
+        const v = parseInt(req.query[k], 10);
         if (isNaN(v)) return sendBadRequest(res, req, `${k} must be a valid number`);
         filters[k] = v;
       }
     }
 
     // pagination
-    const page = req.query.page ? parseInt(req.query.page) : 1;
-    const pageSize = req.query.page_size ? parseInt(req.query.page_size) : 10;
-
+    const page = req.query.page ? parseInt(req.query.page, 10) : 1;
+    const pageSize = req.query.page_size ? parseInt(req.query.page_size, 10) : 10;
     if (isNaN(page) || page < 1) return sendBadRequest(res, req, 'page must be >= 1');
     if (isNaN(pageSize) || pageSize < 1) return sendBadRequest(res, req, 'page_size must be >= 1');
-
     filters.pagination = { page, pageSize };
 
     const result = await PositionsModel.findAll(filters);
@@ -162,8 +176,8 @@ router.get('/', async (req, res) => {
         page_size: pageSize,
         total_pages: totalPages,
         has_next: page < totalPages,
-        has_previous: page > 1
-      }
+        has_previous: page > 1,
+      },
     });
   } catch (error) {
     return sendServerError(res, req, 'Failed to fetch positions', error);
@@ -172,34 +186,21 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/positions/reporting-relationships
- * Returns hierarchical tree structure showing which positions report to which positions
- * Query parameters:
- *   - position_id (optional): Filter to show subtree starting from this specific position
- *   - hierarchy (optional, default: true): If true, show full hierarchy; if false, only direct reports
  */
 router.get('/reporting-relationships', async (req, res) => {
   try {
     let positionId = null;
-    
-    // Only process position_id if it's explicitly provided and has a value
     if ('position_id' in req.query) {
-      const paramValue = req.query.position_id;
-      // Skip if it's undefined, null, or empty string
-      if (paramValue != null && paramValue !== '') {
-        const numValue = Number(paramValue);
-        // Check if it's a valid number and integer
-        if (!isNaN(numValue) && Number.isInteger(numValue) && numValue > 0) {
-          positionId = numValue;
-        } else {
-          return sendBadRequest(res, req, 'position_id must be a valid positive integer');
-        }
+      const v = String(req.query.position_id || '').trim();
+      if (v) {
+        const norm = normalizeGuidString(v);
+        if (!/^[0-9A-F]{32}$/.test(norm)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+        positionId = norm;
       }
     }
 
     const includeHierarchy = req.query.hierarchy !== 'false' && req.query.hierarchy !== '0';
-
     const relationships = await PositionsModel.findReportingRelationships(positionId, includeHierarchy);
-    
     return sendReportingRelationships(res, req, relationships);
   } catch (error) {
     return sendServerError(res, req, 'Failed to fetch reporting relationships', error);
@@ -211,8 +212,8 @@ router.get('/reporting-relationships', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) return sendBadRequest(res, req, 'position_id must be a valid number');
+    const id = normalizeGuidString(req.params.id);
+    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const position = await PositionsModel.findById(id);
     return sendPosition(res, req, position);
@@ -223,7 +224,6 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/positions
- * lowercase body accepted
  */
 router.post('/', async (req, res) => {
   try {
@@ -231,6 +231,10 @@ router.post('/', async (req, res) => {
 
     const errors = validatePosition(data, false);
     if (errors.length) return sendBadRequest(res, req, errors);
+
+    if (data.ORG_STRUCTURE_ID) data.ORG_STRUCTURE_ID = normalizeGuidString(data.ORG_STRUCTURE_ID);
+    if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
+    if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
 
     const created = await PositionsModel.create(data, getUserId(req));
     return sendCreated(res, req, created);
@@ -246,12 +250,16 @@ router.post('/', async (req, res) => {
  */
 router.put('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) return sendBadRequest(res, req, 'position_id must be a valid number');
+    const id = normalizeGuidString(req.params.id);
+    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const data = toUpperCaseKeys(req.body);
     const errors = validatePosition(data, true);
     if (errors.length) return sendBadRequest(res, req, errors);
+
+    if (data.ORG_STRUCTURE_ID) data.ORG_STRUCTURE_ID = normalizeGuidString(data.ORG_STRUCTURE_ID);
+    if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
+    if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
 
     const updated = await PositionsModel.update(id, data, getUserId(req));
     return sendUpdated(res, req, updated);
@@ -263,22 +271,20 @@ router.put('/:id', async (req, res) => {
 });
 
 /**
- * PATCH /api/positions/:id
+ * PATCH -> same as PUT
  */
 router.patch('/:id', async (req, res) => {
-  // same logic as PUT
-  return router.handle({ ...req, method: 'PUT' }, res);
+  req.method = 'PUT';
+  return router.handle(req, res);
 });
 
 /**
  * DELETE /api/positions/:id
- * soft delete by default (sets status=INACTIVE)
- * hard delete: ?hard=true
  */
 router.delete('/:id', async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) return sendBadRequest(res, req, 'position_id must be a valid number');
+    const id = normalizeGuidString(req.params.id);
+    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const hard = req.query.hard === 'true' || req.query.hard === '1';
 

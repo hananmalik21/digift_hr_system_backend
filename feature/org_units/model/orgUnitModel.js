@@ -11,13 +11,19 @@ import oracledb from 'oracledb';
  */
 class OrgUnitModel {
   static TABLE_NAME = 'ENT.ORG_UNITS';
+  static STRUCTURE_TABLE_NAME = 'ENT.HR_ORG_STRUCTURES';
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
+   * Converts Buffer objects (Oracle RAW/GUID types) to hex strings
    */
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
-    if (obj instanceof Date || obj instanceof Buffer) return obj;
+    if (obj instanceof Date) return obj;
+    if (obj instanceof Buffer) {
+      // Convert Buffer (Oracle RAW/GUID) to uppercase hex string
+      return obj.toString('hex').toUpperCase();
+    }
     if (typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(item => this.convertKeysToSnakeCase(item));
 
@@ -26,8 +32,11 @@ class OrgUnitModel {
       const newKey = key.toLowerCase();
       if (value === null || value === undefined) {
         converted[newKey] = value;
-      } else if (value instanceof Date || value instanceof Buffer) {
+      } else if (value instanceof Date) {
         converted[newKey] = value;
+      } else if (value instanceof Buffer) {
+        // Convert Buffer (Oracle RAW/GUID) to uppercase hex string
+        converted[newKey] = value.toString('hex').toUpperCase();
       } else if (typeof value === 'object') {
         converted[newKey] = this.convertKeysToSnakeCase(value);
       } else {
@@ -65,27 +74,97 @@ class OrgUnitModel {
       await connection.commit();
       return result;
     } catch (error) {
-      if (connection && connection.rollback) {
+      if (connection?.rollback) {
         try {
           await connection.rollback();
-        } catch (rollbackErr) {
-          console.error('Error during rollback:', rollbackErr);
+        } catch {
+          // Silently handle rollback errors
         }
       }
       throw error;
     } finally {
-      if (connection && connection.close) {
+      if (connection?.close) {
         try {
           await connection.close();
-        } catch (err) {
-          console.error('Error closing connection:', err);
+        } catch {
+          // Silently handle close errors
         }
       }
     }
   }
 
   /**
-   * ✅ Build parent_unit object using aliased parent columns
+   * Convert GUID to hex string format
+   */
+  static guidToHex(guid) {
+    if (Buffer.isBuffer(guid)) {
+      return guid.toString('hex').toUpperCase();
+    }
+    if (typeof guid === 'string') {
+      return guid.toUpperCase();
+    }
+    return String(guid).toUpperCase();
+  }
+
+  /**
+   * Convert hex string GUID to Buffer for Oracle RAW binding
+   * Oracle RAW(16) expects exactly 16 bytes (32 hex characters)
+   */
+  static guidToBuffer(guid) {
+    if (Buffer.isBuffer(guid)) {
+      // Ensure buffer is exactly 16 bytes for Oracle RAW(16)
+      if (guid.length === 16) {
+        return guid;
+      }
+      // If buffer is wrong size, try to convert from hex
+      const hex = guid.toString('hex').toUpperCase();
+      return this.guidToBuffer(hex);
+    }
+    
+    if (!guid || guid === '') {
+      return null;
+    }
+    
+    const hexId = typeof guid === 'string' ? guid.toUpperCase().trim() : String(guid).toUpperCase().trim();
+    
+    // Validate hex string format
+    if (!/^[0-9A-F]+$/i.test(hexId)) {
+      // If not a valid hex string, return as-is (might be a different format)
+      return hexId;
+    }
+    
+    try {
+      // Oracle RAW(16) expects exactly 16 bytes (32 hex characters)
+      // If the hex string is shorter, pad with zeros; if longer, truncate
+      let normalizedHex = hexId;
+      if (normalizedHex.length < 32) {
+        // Pad with leading zeros
+        normalizedHex = normalizedHex.padStart(32, '0');
+      } else if (normalizedHex.length > 32) {
+        // Truncate to 32 characters (take first 32)
+        normalizedHex = normalizedHex.substring(0, 32);
+      }
+      
+      const buffer = Buffer.from(normalizedHex, 'hex');
+      
+      // Ensure we have exactly 16 bytes
+      if (buffer.length !== 16) {
+        // If conversion didn't produce 16 bytes, pad or truncate
+        const result = Buffer.alloc(16);
+        buffer.copy(result, 0, 0, Math.min(buffer.length, 16));
+        return result;
+      }
+      
+      return buffer;
+    } catch (error) {
+      // If conversion fails, return the original hex string
+      // Oracle might accept it as a string in some cases
+      return hexId;
+    }
+  }
+
+  /**
+   * Build parent_unit object using aliased parent columns
    */
   static attachParentUnit(row) {
     if (!row) return row;
@@ -109,14 +188,72 @@ class OrgUnitModel {
 
   /**
    * Find org units by structure and level
+   * Optimized for performance with efficient JOINs and conditional COUNT
    * @returns Array OR { orgUnits, total } when paginated
    */
   static async findByStructureAndLevel(structureId, levelCode, filters = {}) {
     try {
-      let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ou`;
+      const pagination = filters.pagination;
+      const needsCount = pagination && pagination.page && pagination.pageSize;
+      
+      // Build WHERE conditions - order by selectivity (most selective first)
+      const conditions = [];
+      const bindParams = [];
+      let paramIndex = 1;
 
-      // ✅ add parent self join for parent_unit object
-      let dataQuery = `SELECT 
+      // Most selective filters first (structure + level are required and most selective)
+      // Convert hex string GUID to RAW for Oracle comparison
+      conditions.push(`ou.ORG_STRUCTURE_ID = HEXTORAW(:${paramIndex})`);
+      bindParams.push(structureId);
+      paramIndex++;
+
+      conditions.push(`ou.LEVEL_CODE = :${paramIndex}`);
+      bindParams.push(levelCode);
+      paramIndex++;
+
+      // Optional filters - parentId is very selective
+      if (filters.parentId !== undefined && filters.parentId !== null) {
+        const parentIdBuffer = this.guidToBuffer(filters.parentId);
+        const parentIdHex = this.guidToHex(filters.parentId);
+        // Handle both RAW and hex string formats for GUID
+        conditions.push(`(ou.PARENT_ORG_UNIT_ID = :${paramIndex} OR RAWTOHEX(ou.PARENT_ORG_UNIT_ID) = :${paramIndex + 1})`);
+        bindParams.push(parentIdBuffer, parentIdHex);
+        paramIndex += 2;
+      }
+
+      // IS_ACTIVE filter (moderately selective)
+      if (filters.isActive !== undefined) {
+        const isActiveValue = filters.isActive === true || filters.isActive === 'Y' ? 'Y' : 'N';
+        conditions.push(`ou.IS_ACTIVE = :${paramIndex}`);
+        bindParams.push(isActiveValue);
+        paramIndex++;
+      }
+
+      // Search filter (least selective, use function-based index if available)
+      if (filters.search) {
+        const searchValue = `%${filters.search.toUpperCase()}%`;
+        conditions.push(`(
+          UPPER(ou.ORG_UNIT_CODE) LIKE :${paramIndex} OR
+          UPPER(ou.ORG_UNIT_NAME_EN) LIKE :${paramIndex + 1} OR
+          UPPER(ou.ORG_UNIT_NAME_AR) LIKE :${paramIndex + 2}
+        )`);
+        bindParams.push(searchValue, searchValue, searchValue);
+        paramIndex += 3;
+      }
+
+      const whereClause = ` WHERE ${conditions.join(' AND ')}`;
+
+      // Only run COUNT query if pagination is needed
+      let totalCount = 0;
+      if (needsCount) {
+        const countQuery = `SELECT /*+ FIRST_ROWS(1) */ COUNT(*) AS total FROM ${this.TABLE_NAME} ou ${whereClause}`;
+        const countResult = await this.executeQuery(countQuery, bindParams);
+        totalCount = countResult.rows?.[0]?.total ?? 0;
+      }
+
+      // Optimized data query with efficient LEFT JOINs
+      // Join parent table for parent_unit object and structure table for structure name
+      let dataQuery = `SELECT /*+ FIRST_ROWS(${pagination?.pageSize || 100}) */
         ou.ORG_UNIT_ID,
         ou.ORG_STRUCTURE_ID,
         ou.ENTERPRISE_ID,
@@ -138,73 +275,23 @@ class OrgUnitModel {
         ou.LAST_UPDATED_BY,
         ou.LAST_UPDATED_DATE,
         ou.LAST_UPDATE_LOGIN,
-
-        -- ✅ parent fields for parent_unit object
         p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
         p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE
-
+        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
+        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
       FROM ${this.TABLE_NAME} ou
       LEFT JOIN ${this.TABLE_NAME} p
-        ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID`;
+        ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+        AND p.ORG_STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
+        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      ${whereClause}
+      ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
 
-      const conditions = [];
-      const bindParams = [];
-      let paramIndex = 1;
-
-      // Required filters
-      conditions.push(`ou.ORG_STRUCTURE_ID = :${paramIndex}`);
-      bindParams.push(structureId);
-      paramIndex++;
-
-      conditions.push(`ou.LEVEL_CODE = :${paramIndex}`);
-      bindParams.push(levelCode);
-      paramIndex++;
-
-      // Optional filters
-      if (filters.parentId !== undefined && filters.parentId !== null) {
-        conditions.push(`ou.PARENT_ORG_UNIT_ID = :${paramIndex}`);
-        bindParams.push(filters.parentId);
-        paramIndex++;
-      }
-
-      if (filters.isActive !== undefined) {
-        const isActiveValue = filters.isActive === true || filters.isActive === 'Y' ? 'Y' : 'N';
-        conditions.push(`ou.IS_ACTIVE = :${paramIndex}`);
-        bindParams.push(isActiveValue);
-        paramIndex++;
-      }
-
-      if (filters.search) {
-        const searchValue = `%${filters.search}%`;
-        conditions.push(`(
-          UPPER(ou.ORG_UNIT_CODE) LIKE UPPER(:${paramIndex}) OR
-          UPPER(ou.ORG_UNIT_NAME_EN) LIKE UPPER(:${paramIndex + 1}) OR
-          UPPER(ou.ORG_UNIT_NAME_AR) LIKE UPPER(:${paramIndex + 2})
-        )`);
-        bindParams.push(searchValue);
-        bindParams.push(searchValue);
-        bindParams.push(searchValue);
-        paramIndex += 3;
-      }
-
-      const whereClause = ` WHERE ${conditions.join(' AND ')}`;
-      countQuery += whereClause;
-      dataQuery += whereClause;
-
-      dataQuery += ` ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
-
-      // Handle pagination
-      const pagination = filters.pagination;
-      let totalCount = 0;
-
-      const countBindParams = [...bindParams];
       const dataBindParams = [...bindParams];
 
-      if (pagination && pagination.page && pagination.pageSize) {
-        const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows && countResult.rows.length > 0 ? countResult.rows[0].total : 0;
-
+      // Add pagination to data query
+      if (needsCount) {
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
         dataBindParams.push(offset);
@@ -212,22 +299,10 @@ class OrgUnitModel {
       }
 
       const result = await this.executeQuery(dataQuery, dataBindParams);
+      const orgUnits = (result.rows || []).map(r => this.attachParentUnit(r));
 
-      // ✅ attach parent_unit object
-      let orgUnits = (result.rows || []).map(r => this.attachParentUnit(r));
-
-      if (pagination && pagination.page && pagination.pageSize) {
-        return { orgUnits, total: totalCount };
-      }
-
-      return orgUnits;
+      return needsCount ? { orgUnits, total: totalCount } : orgUnits;
     } catch (error) {
-      console.error('Error in findByStructureAndLevel:', {
-        message: error.message,
-        errorNum: error.errorNum,
-        code: error.code,
-        stack: error.stack
-      });
       throw new Error(`Failed to fetch org units: ${error.message}`);
     }
   }
@@ -250,7 +325,8 @@ class OrgUnitModel {
       const bindParams = [];
       let paramIndex = 1;
 
-      conditions.push(`ou.ORG_STRUCTURE_ID = :${paramIndex}`);
+      // Convert hex string GUID to RAW for Oracle comparison
+      conditions.push(`ou.ORG_STRUCTURE_ID = HEXTORAW(:${paramIndex})`);
       bindParams.push(structureId);
       paramIndex++;
 
@@ -310,16 +386,17 @@ class OrgUnitModel {
 
       return parents;
     } catch (error) {
-      console.error('Error in findParentOptions:', error);
       throw new Error(`Failed to fetch parent options: ${error.message}`);
     }
   }
 
   /**
    * Find org unit by ID (includes parent_unit object)
+   * Handles both GUID/RAW and numeric IDs
    */
   static async findById(orgUnitId, structureId = null) {
     try {
+      // Handle GUID/RAW type IDs - try both RAW and hex string formats
       let query = `SELECT 
         ou.ORG_UNIT_ID,
         ou.ORG_STRUCTURE_ID,
@@ -342,20 +419,24 @@ class OrgUnitModel {
         ou.LAST_UPDATED_BY,
         ou.LAST_UPDATED_DATE,
         ou.LAST_UPDATE_LOGIN,
-
         p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
         p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE
-
+        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
+        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
       FROM ${this.TABLE_NAME} ou
       LEFT JOIN ${this.TABLE_NAME} p
         ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-      WHERE ou.ORG_UNIT_ID = :1`;
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
+        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      WHERE (ou.ORG_UNIT_ID = :1 OR RAWTOHEX(ou.ORG_UNIT_ID) = :2)`;
 
-      const bindParams = [orgUnitId];
+      // Prepare bind parameters - try both RAW and hex string
+      const hexId = this.guidToHex(orgUnitId);
+      const rawId = this.guidToBuffer(orgUnitId);
+      const bindParams = [rawId, hexId];
 
       if (structureId !== null) {
-        query += ` AND ou.ORG_STRUCTURE_ID = :2`;
+        query += ` AND ou.ORG_STRUCTURE_ID = HEXTORAW(:3)`;
         bindParams.push(structureId);
       }
 
@@ -366,7 +447,6 @@ class OrgUnitModel {
       }
       return null;
     } catch (error) {
-      console.error('Error in findById:', error);
       throw new Error(`Failed to fetch org unit: ${error.message}`);
     }
   }
@@ -398,21 +478,21 @@ class OrgUnitModel {
         ou.LAST_UPDATED_BY,
         ou.LAST_UPDATED_DATE,
         ou.LAST_UPDATE_LOGIN,
-
         p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
         p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE
-
+        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
+        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
       FROM ${this.TABLE_NAME} ou
       LEFT JOIN ${this.TABLE_NAME} p
         ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-      WHERE ou.ORG_STRUCTURE_ID = :1
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
+        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1)
       ORDER BY ou.LEVEL_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
 
       const result = await this.executeQuery(query, [structureId]);
       return (result.rows || []).map(r => this.attachParentUnit(r));
     } catch (error) {
-      console.error('Error in findAllByStructure:', error);
       throw new Error(`Failed to fetch org units: ${error.message}`);
     }
   }
@@ -425,7 +505,7 @@ class OrgUnitModel {
       const query = `SELECT COUNT(*) AS count
         FROM ${this.TABLE_NAME}
         WHERE ORG_UNIT_ID = :1
-          AND ORG_STRUCTURE_ID = :2
+          AND ORG_STRUCTURE_ID = HEXTORAW(:2)
           AND LEVEL_CODE = :3`;
 
       const result = await connection.execute(query, [parentOrgUnitId, structureId, expectedLevelCode], {
@@ -434,8 +514,7 @@ class OrgUnitModel {
 
       const count = result.rows && result.rows.length > 0 ? (result.rows[0].COUNT ?? result.rows[0].count ?? 0) : 0;
       return count > 0;
-    } catch (error) {
-      console.error('Error in validateParent:', error);
+    } catch {
       return false;
     }
   }
@@ -446,16 +525,21 @@ class OrgUnitModel {
   static async create(structureId, enterpriseId, data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        // Generate ORG_UNIT_ID
+        // Generate ORG_UNIT_ID using SYS_GUID() for GUID/RAW type
         let orgUnitId;
         try {
-          const seqQuery = `SELECT ENT.ORG_UNITS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-          const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          orgUnitId = seqResult.rows[0].NEXT_ID;
-        } catch (seqError) {
-          const maxQuery = `SELECT NVL(MAX(ORG_UNIT_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
-          const maxResult = await connection.execute(maxQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          orgUnitId = maxResult.rows[0].NEXT_ID;
+          const guidQuery = `SELECT SYS_GUID() AS NEXT_ID FROM DUAL`;
+          const guidResult = await connection.execute(guidQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+          orgUnitId = this.guidToHex(guidResult.rows[0].NEXT_ID);
+        } catch (guidError) {
+          // Fallback: try sequence if GUID generation fails
+          try {
+            const seqQuery = `SELECT ENT.ORG_UNITS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
+            const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+            orgUnitId = seqResult.rows[0].NEXT_ID;
+          } catch {
+            throw new Error(`Failed to generate org unit ID: ${guidError.message}`);
+          }
         }
 
         const now = new Date();
@@ -511,7 +595,7 @@ class OrgUnitModel {
           orgUnitCode,
           orgUnitNameEn,
           orgUnitNameAr,
-          parentOrgUnitId,
+          parentOrgUnitId ? this.guidToBuffer(parentOrgUnitId) : null,
           isActive,
           data.manager_name || data.MANAGER_NAME || null,
           data.manager_email || data.MANAGER_EMAIL || null,
@@ -527,10 +611,18 @@ class OrgUnitModel {
           data.last_update_login || data.LAST_UPDATE_LOGIN || null
         ];
 
+        // Convert GUID to proper format for Oracle RAW type binding
+        bindParams[0] = this.guidToBuffer(orgUnitId);
+        bindParams[1] = this.guidToBuffer(structureId);
+
         await connection.execute(insertQuery, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
+        // Prepare finalOrgUnitId for querying - use hex string format
+        const finalOrgUnitId = this.guidToHex(orgUnitId);
+        const hexId = finalOrgUnitId;
+        const rawId = this.guidToBuffer(orgUnitId);
+
         // Query the freshly created record using the same transaction connection
-        // This ensures we can see the uncommitted insert
         const selectQuery = `SELECT 
           ou.ORG_UNIT_ID,
           ou.ORG_STRUCTURE_ID,
@@ -555,18 +647,70 @@ class OrgUnitModel {
           ou.LAST_UPDATE_LOGIN,
           p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
           p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-          p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE
+          p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
+          s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
         FROM ${this.TABLE_NAME} ou
         LEFT JOIN ${this.TABLE_NAME} p
           ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-        WHERE ou.ORG_UNIT_ID = :1 AND ou.ORG_STRUCTURE_ID = :2`;
+        LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
+          ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+        WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1) 
+          AND (ou.ORG_UNIT_ID = :2 OR RAWTOHEX(ou.ORG_UNIT_ID) = :3)`;
 
-        const selectResult = await connection.execute(selectQuery, [orgUnitId, structureId], {
+        let selectResult = await connection.execute(selectQuery, [structureId, rawId, hexId], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
 
+        // If that didn't work, try using ROWID (get the most recently inserted row for this structure)
         if (!selectResult.rows || selectResult.rows.length === 0) {
-          throw new Error(`Failed to retrieve created org unit with ID ${orgUnitId}`);
+          const rowidQuery = `SELECT 
+            ou.ORG_UNIT_ID,
+            ou.ORG_STRUCTURE_ID,
+            ou.ENTERPRISE_ID,
+            ou.LEVEL_CODE,
+            ou.ORG_UNIT_CODE,
+            ou.ORG_UNIT_NAME_EN,
+            ou.ORG_UNIT_NAME_AR,
+            ou.PARENT_ORG_UNIT_ID,
+            ou.IS_ACTIVE,
+            ou.MANAGER_NAME,
+            ou.MANAGER_EMAIL,
+            ou.MANAGER_PHONE,
+            ou.LOCATION,
+            ou.CITY,
+            ou.ADDRESS,
+            ou.DESCRIPTION,
+            ou.CREATED_BY,
+            ou.CREATED_DATE,
+            ou.LAST_UPDATED_BY,
+            ou.LAST_UPDATED_DATE,
+            ou.LAST_UPDATE_LOGIN,
+            p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
+            p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
+            p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
+            s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
+          FROM ${this.TABLE_NAME} ou
+          LEFT JOIN ${this.TABLE_NAME} p
+            ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+          LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
+            ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+          WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1)
+            AND ou.ORG_UNIT_CODE = :2
+            AND ou.LEVEL_CODE = :3
+            AND ROWNUM = 1
+          ORDER BY ou.CREATED_DATE DESC`;
+
+          selectResult = await connection.execute(rowidQuery, [
+            structureId,
+            data.org_unit_code || data.ORG_UNIT_CODE,
+            data.level_code || data.LEVEL_CODE
+          ], {
+            outFormat: oracledb.OUT_FORMAT_OBJECT
+          });
+        }
+
+        if (!selectResult.rows || selectResult.rows.length === 0) {
+          throw new Error(`Failed to retrieve created org unit with ID ${finalOrgUnitId}`);
         }
 
         // Convert keys and attach parent_unit object
@@ -574,8 +718,6 @@ class OrgUnitModel {
         return this.attachParentUnit(row);
       });
     } catch (error) {
-      console.error('Error in create:', error);
-
       if (error.errorNum === 1 || error.message?.includes('ORA-00001')) {
         const codeAttempted = data.org_unit_code || data.ORG_UNIT_CODE || 'UNKNOWN';
         const nameAttempted = data.org_unit_name_en || data.ORG_UNIT_NAME_EN || 'UNKNOWN';
@@ -622,8 +764,10 @@ class OrgUnitModel {
         const setIfProvided = (col, snake, upper, transform = v => v) => {
           const val = data[snake] !== undefined ? data[snake] : data[upper];
           if (val !== undefined) {
+            // Convert empty strings to null for optional fields
+            const processedVal = (val === '' || val === null) ? null : val;
             updateFields.push(`${col} = :${paramIndex}`);
-            bindParams.push(transform(val));
+            bindParams.push(transform(processedVal));
             paramIndex++;
           }
         };
@@ -632,15 +776,38 @@ class OrgUnitModel {
         setIfProvided('ORG_UNIT_NAME_EN', 'org_unit_name_en', 'ORG_UNIT_NAME_EN');
         setIfProvided('ORG_UNIT_NAME_AR', 'org_unit_name_ar', 'ORG_UNIT_NAME_AR', v => (v === null ? null : v));
         setIfProvided('IS_ACTIVE', 'is_active', 'IS_ACTIVE', v => (v === true || v === 'Y' ? 'Y' : 'N'));
-        setIfProvided('PARENT_ORG_UNIT_ID', 'parent_org_unit_id', 'PARENT_ORG_UNIT_ID', v => (v ? v : null));
-        setIfProvided('MANAGER_NAME', 'manager_name', 'MANAGER_NAME', v => (v === null ? null : v));
-        setIfProvided('MANAGER_EMAIL', 'manager_email', 'MANAGER_EMAIL', v => (v === null ? null : v));
-        setIfProvided('MANAGER_PHONE', 'manager_phone', 'MANAGER_PHONE', v => (v === null ? null : v));
-        setIfProvided('LOCATION', 'location', 'LOCATION', v => (v === null ? null : v));
-        setIfProvided('CITY', 'city', 'CITY', v => (v === null ? null : v));
-        setIfProvided('ADDRESS', 'address', 'ADDRESS', v => (v === null ? null : v));
-        setIfProvided('DESCRIPTION', 'description', 'DESCRIPTION', v => (v === null ? null : v));
-        setIfProvided('LAST_UPDATE_LOGIN', 'last_update_login', 'LAST_UPDATE_LOGIN', v => (v === null ? null : v));
+        
+        // Handle PARENT_ORG_UNIT_ID with GUID conversion
+        if (data.parent_org_unit_id !== undefined || data.PARENT_ORG_UNIT_ID !== undefined) {
+          let parentId = data.parent_org_unit_id ?? data.PARENT_ORG_UNIT_ID ?? null;
+          
+          // Handle empty strings and trim whitespace
+          if (parentId && typeof parentId === 'string') {
+            parentId = parentId.trim();
+            if (parentId === '') {
+              parentId = null;
+            }
+          }
+          
+          if (parentId) {
+            updateFields.push(`PARENT_ORG_UNIT_ID = :${paramIndex}`);
+            bindParams.push(this.guidToBuffer(parentId));
+            paramIndex++;
+          } else {
+            updateFields.push(`PARENT_ORG_UNIT_ID = :${paramIndex}`);
+            bindParams.push(null);
+            paramIndex++;
+          }
+        }
+        
+        setIfProvided('MANAGER_NAME', 'manager_name', 'MANAGER_NAME', v => (v === null || v === '' ? null : v));
+        setIfProvided('MANAGER_EMAIL', 'manager_email', 'MANAGER_EMAIL', v => (v === null || v === '' ? null : v));
+        setIfProvided('MANAGER_PHONE', 'manager_phone', 'MANAGER_PHONE', v => (v === null || v === '' ? null : v));
+        setIfProvided('LOCATION', 'location', 'LOCATION', v => (v === null || v === '' ? null : v));
+        setIfProvided('CITY', 'city', 'CITY', v => (v === null || v === '' ? null : v));
+        setIfProvided('ADDRESS', 'address', 'ADDRESS', v => (v === null || v === '' ? null : v));
+        setIfProvided('DESCRIPTION', 'description', 'DESCRIPTION', v => (v === null || v === '' ? null : v));
+        setIfProvided('LAST_UPDATE_LOGIN', 'last_update_login', 'LAST_UPDATE_LOGIN', v => (v === null || v === '' ? null : v));
 
         if (updateFields.length === 0) throw new Error('No fields to update');
 
@@ -652,20 +819,27 @@ class OrgUnitModel {
         bindParams.push(new Date());
         paramIndex++;
 
-        bindParams.push(orgUnitId);
-        bindParams.push(structureId);
+        // Handle GUID in WHERE clause - support both RAW and hex string formats
+        const orgUnitIdBuffer = this.guidToBuffer(orgUnitId);
+        const orgUnitIdHex = this.guidToHex(orgUnitId);
+        bindParams.push(orgUnitIdBuffer, orgUnitIdHex, structureId);
 
         const query = `UPDATE ${this.TABLE_NAME}
           SET ${updateFields.join(', ')}
-          WHERE ORG_UNIT_ID = :${paramIndex} AND ORG_STRUCTURE_ID = :${paramIndex + 1}`;
+          WHERE (ORG_UNIT_ID = :${paramIndex} OR RAWTOHEX(ORG_UNIT_ID) = :${paramIndex + 1}) 
+            AND ORG_STRUCTURE_ID = HEXTORAW(:${paramIndex + 2})`;
 
-        await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const updateResult = await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        
+        // Check if any rows were updated
+        const rowsAffected = updateResult.rowsAffected || updateResult.rowCount || 0;
+        if (!rowsAffected) {
+          throw new Error(`No org unit found with ID ${orgUnitId} in structure ${structureId}`);
+        }
 
         return await this.findById(orgUnitId, structureId);
       });
     } catch (error) {
-      console.error('Error in update:', error);
-
       if (error.errorNum === 1 || error.message?.includes('ORA-00001')) {
         const constraintError = new Error('An org unit with the same code already exists in this structure.');
         constraintError.statusCode = 409;
@@ -680,7 +854,32 @@ class OrgUnitModel {
         throw constraintError;
       }
 
-      throw new Error(`Failed to update org unit: ${error.message}`);
+      // Handle mutating table trigger error (ORA-04091)
+      // This is a database trigger issue, not a validation issue
+      if (error.errorNum === 4091 || error.message?.includes('ORA-04091') || error.message?.includes('mutating')) {
+        // Extract trigger name if available
+        const triggerMatch = error.message?.match(/trigger ['"]([^'"]+)['"]/i);
+        const triggerName = triggerMatch ? triggerMatch[1] : 'database trigger';
+        
+        // This error occurs when a database trigger tries to read from the table being updated
+        // The application-level validation should have caught any issues, so this is likely a trigger bug
+        const constraintError = new Error(
+          `Database trigger error: The update operation failed due to a database trigger issue. ` +
+          `The parent org unit validation was performed, but the database trigger '${triggerName}' encountered an error. ` +
+          `This may indicate a database configuration issue. Please contact the database administrator.`
+        );
+        constraintError.statusCode = 500;
+        constraintError.code = 'DATABASE_TRIGGER_ERROR';
+        constraintError.triggerName = triggerName;
+        constraintError.originalError = error;
+        throw constraintError;
+      }
+
+      // Re-throw with more context
+      const errorMessage = error.message || 'Unknown error';
+      const enhancedError = new Error(`Failed to update org unit: ${errorMessage}`);
+      enhancedError.originalError = error;
+      throw enhancedError;
     }
   }
 
@@ -691,15 +890,21 @@ class OrgUnitModel {
     try {
       await this.executeWithTransaction(async (connection) => {
         const now = new Date();
+        const orgUnitIdBuffer = this.guidToBuffer(orgUnitId);
+        const orgUnitIdHex = this.guidToHex(orgUnitId);
+        
         const query = `UPDATE ${this.TABLE_NAME}
           SET IS_ACTIVE = 'N',
               LAST_UPDATED_BY = :1,
               LAST_UPDATED_DATE = :2
-          WHERE ORG_UNIT_ID = :3 AND ORG_STRUCTURE_ID = :4`;
+          WHERE (ORG_UNIT_ID = :3 OR RAWTOHEX(ORG_UNIT_ID) = :4) 
+            AND ORG_STRUCTURE_ID = HEXTORAW(:5)`;
 
-        const updateResult = await connection.execute(query, [userId || 'SYSTEM', now, orgUnitId, structureId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const updateResult = await connection.execute(
+          query, 
+          [userId || 'SYSTEM', now, orgUnitIdBuffer, orgUnitIdHex, structureId], 
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
         const rowsAffected = updateResult.rowsAffected || updateResult.rowCount || 0;
         if (!rowsAffected) throw new Error(`No org unit found with ID: ${orgUnitId} in structure ${structureId}`);
@@ -707,7 +912,6 @@ class OrgUnitModel {
 
       return true;
     } catch (error) {
-      console.error('Error in softDelete:', error);
       throw new Error(`Failed to delete org unit: ${error.message}`);
     }
   }
@@ -718,12 +922,18 @@ class OrgUnitModel {
   static async hardDelete(orgUnitId, structureId) {
     try {
       await this.executeWithTransaction(async (connection) => {
+        const orgUnitIdBuffer = this.guidToBuffer(orgUnitId);
+        const orgUnitIdHex = this.guidToHex(orgUnitId);
+        
         const query = `DELETE FROM ${this.TABLE_NAME}
-          WHERE ORG_UNIT_ID = :1 AND ORG_STRUCTURE_ID = :2`;
+          WHERE (ORG_UNIT_ID = :1 OR RAWTOHEX(ORG_UNIT_ID) = :2) 
+            AND ORG_STRUCTURE_ID = HEXTORAW(:3)`;
 
-        const deleteResult = await connection.execute(query, [orgUnitId, structureId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const deleteResult = await connection.execute(
+          query, 
+          [orgUnitIdBuffer, orgUnitIdHex, structureId], 
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
         const rowsAffected = deleteResult.rowsAffected || deleteResult.rowCount || 0;
         if (!rowsAffected) throw new Error(`No org unit found with ID: ${orgUnitId} in structure ${structureId}`);
@@ -731,8 +941,6 @@ class OrgUnitModel {
 
       return { success: true };
     } catch (error) {
-      console.error('Error in hardDelete:', error);
-
       if (error.errorNum === 2292 || error.message?.includes('ORA-02292')) {
         const constraintError = new Error('Cannot delete org unit: This org unit is referenced by other records.');
         constraintError.statusCode = 409;

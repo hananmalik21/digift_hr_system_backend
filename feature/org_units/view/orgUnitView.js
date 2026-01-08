@@ -10,7 +10,11 @@ const API_VERSION = '1.0.0';
  */
 function convertKeysToSnakeCase(obj) {
   if (obj === null || obj === undefined) return obj;
-  if (obj instanceof Date || obj instanceof Buffer) return obj;
+  if (obj instanceof Date) return obj;
+  if (obj instanceof Buffer) {
+    // Convert Buffer (Oracle RAW/GUID) to uppercase hex string
+    return obj.toString('hex').toUpperCase();
+  }
   if (typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(item => convertKeysToSnakeCase(item));
   
@@ -19,8 +23,11 @@ function convertKeysToSnakeCase(obj) {
     const newKey = key.toLowerCase();
     if (value === null || value === undefined) {
       converted[newKey] = value;
-    } else if (value instanceof Date || value instanceof Buffer) {
+    } else if (value instanceof Date) {
       converted[newKey] = value;
+    } else if (value instanceof Buffer) {
+      // Convert Buffer (Oracle RAW/GUID) to uppercase hex string
+      converted[newKey] = value.toString('hex').toUpperCase();
     } else if (typeof value === 'object') {
       converted[newKey] = convertKeysToSnakeCase(value);
     } else {
@@ -211,11 +218,6 @@ export function sendBadRequest(res, req, errors) {
  * Send server error
  */
 export function sendServerError(res, req, message, error = null) {
-  if (error) {
-    console.error('Server error:', error);
-    console.error('Error stack:', error.stack);
-  }
-
   let errorCode = 'INTERNAL_SERVER_ERROR';
   let statusCode = 500;
   let errorMessage = message || 'Internal server error';

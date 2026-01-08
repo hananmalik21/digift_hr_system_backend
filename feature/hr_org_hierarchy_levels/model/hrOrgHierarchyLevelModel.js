@@ -15,7 +15,7 @@ class HrOrgHierarchyLevelModel {
    */
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
-    if (obj instanceof Date || obj instanceof Buffer) return obj;
+    if (obj instanceof Date) return obj;
     if (typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(item => this.convertKeysToSnakeCase(item));
     
@@ -24,8 +24,15 @@ class HrOrgHierarchyLevelModel {
       const newKey = key.toLowerCase();
       if (value === null || value === undefined) {
         converted[newKey] = value;
-      } else if (value instanceof Date || value instanceof Buffer) {
+      } else if (value instanceof Date) {
         converted[newKey] = value;
+      } else if (Buffer.isBuffer(value)) {
+        // Convert Buffer (RAW) to hex string for structure_id fields
+        if (key.toLowerCase() === 'structure_id') {
+          converted[newKey] = value.toString('hex').toUpperCase();
+        } else {
+          converted[newKey] = value;
+        }
       } else if (typeof value === 'object') {
         converted[newKey] = this.convertKeysToSnakeCase(value);
       } else {
@@ -86,15 +93,29 @@ class HrOrgHierarchyLevelModel {
   }
 
   /**
+   * Helper to check if a value is a hex32 string (GUID format)
+   */
+  static isHex32(v) {
+    return typeof v === 'string' && /^[0-9a-fA-F]{32}$/.test(v);
+  }
+
+  /**
+   * Helper to normalize hex32 string
+   */
+  static normalizeHex32(v) {
+    return typeof v === 'string' ? v.trim().toUpperCase() : v;
+  }
+
+  /**
    * Get all hierarchy levels
-   * @param {Object} filters - Optional filters (levelId, structureId, isActive)
+   * @param {Object} filters - Optional filters (levelId, structureId/structureIdHex, isActive)
    * @returns {Promise<Array>} Array of hierarchy levels
    */
   static async findAll(filters = {}) {
     try {
       let query = `SELECT 
         LEVEL_ID,
-        STRUCTURE_ID,
+        RAWTOHEX(STRUCTURE_ID) AS STRUCTURE_ID,
         LEVEL_NUMBER,
         LEVEL_CODE,
         LEVEL_NAME,
@@ -118,9 +139,20 @@ class HrOrgHierarchyLevelModel {
         paramIndex++;
       }
 
-      if (filters.structureId) {
-        conditions.push(`STRUCTURE_ID = :${paramIndex}`);
-        bindParams.push(filters.structureId);
+      // Handle structureId - can be hex string (GUID) or number
+      const structureId = filters.structureIdHex || filters.structureId;
+      if (structureId) {
+        // Check if it's a hex32 string (GUID format)
+        const normalizedId = typeof structureId === 'string' ? this.normalizeHex32(structureId) : structureId;
+        if (this.isHex32(normalizedId)) {
+          // STRUCTURE_ID is RAW(16) GUID, use HEXTORAW
+          conditions.push(`STRUCTURE_ID = HEXTORAW(:${paramIndex})`);
+          bindParams.push(normalizedId);
+        } else {
+          // Legacy: treat as number (if STRUCTURE_ID column is still NUMBER)
+          conditions.push(`STRUCTURE_ID = :${paramIndex}`);
+          bindParams.push(structureId);
+        }
         paramIndex++;
       }
 
@@ -215,6 +247,22 @@ class HrOrgHierarchyLevelModel {
         }
 
         const now = new Date();
+        
+        // Handle STRUCTURE_ID - can be hex32 GUID or number
+        const structureId = data.STRUCTURE_ID || data.structure_id || null;
+        let structureIdValue = null;
+        let structureIdIsHex = false;
+        
+        if (structureId) {
+          const normalizedId = typeof structureId === 'string' ? this.normalizeHex32(structureId) : structureId;
+          if (this.isHex32(normalizedId)) {
+            structureIdValue = normalizedId;
+            structureIdIsHex = true;
+          } else {
+            structureIdValue = structureId;
+          }
+        }
+        
         const query = `INSERT INTO ${this.TABLE_NAME} (
           LEVEL_ID,
           STRUCTURE_ID,
@@ -230,12 +278,12 @@ class HrOrgHierarchyLevelModel {
           LAST_UPDATED_DATE,
           LAST_UPDATE_LOGIN
         ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
+          :1, ${structureIdIsHex ? 'HEXTORAW(:2)' : ':2'}, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
         )`;
 
         const bindParams = [
           levelId,
-          data.STRUCTURE_ID || null,
+          structureIdValue,
           data.LEVEL_NUMBER || null,
           data.LEVEL_CODE || null,
           data.LEVEL_NAME || null,
@@ -253,8 +301,22 @@ class HrOrgHierarchyLevelModel {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
 
-        // Fetch and return the created record
-        const selectQuery = `SELECT * FROM ${this.TABLE_NAME} WHERE LEVEL_ID = :1`;
+        // Fetch and return the created record with STRUCTURE_ID as hex
+        const selectQuery = `SELECT 
+          LEVEL_ID,
+          RAWTOHEX(STRUCTURE_ID) AS STRUCTURE_ID,
+          LEVEL_NUMBER,
+          LEVEL_CODE,
+          LEVEL_NAME,
+          IS_MANDATORY,
+          IS_ACTIVE,
+          DISPLAY_ORDER,
+          CREATED_BY,
+          CREATED_DATE,
+          LAST_UPDATED_BY,
+          LAST_UPDATED_DATE,
+          LAST_UPDATE_LOGIN
+        FROM ${this.TABLE_NAME} WHERE LEVEL_ID = :1`;
         const selectResult = await connection.execute(selectQuery, [levelId], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
@@ -270,21 +332,30 @@ class HrOrgHierarchyLevelModel {
   /**
    * Create multiple hierarchy levels for a structure (uses existing connection for transaction)
    * @param {Object} connection - Database connection (from existing transaction)
-   * @param {number} structureId - Structure ID
+   * @param {string} structureIdHex - Structure ID as hex32 string (GUID)
    * @param {Array} levelsArray - Array of level data objects
    * @param {string} userId - User ID for audit fields
    * @returns {Promise<Array>} Array of created hierarchy levels
    */
-  static async createBulk(connection, structureId, levelsArray, userId) {
+  static async createBulk(connection, structureIdHex, levelsArray, userId) {
     try {
-      // Validate structure exists
-      const structureCheckQuery = `SELECT COUNT(*) AS count FROM ENT.HR_ORG_STRUCTURES WHERE STRUCTURE_ID = :1`;
-      const structureCheck = await connection.execute(structureCheckQuery, [structureId], {
+      // Normalize and validate structure ID is hex32
+      const normalizedId = typeof structureIdHex === 'string' ? this.normalizeHex32(structureIdHex) : structureIdHex;
+      if (!this.isHex32(normalizedId)) {
+        const validationError = new Error(`Invalid structure ID format. Expected 32-char hex string, got: ${structureIdHex}`);
+        validationError.code = 'VALIDATION_ERROR';
+        validationError.statusCode = 400;
+        throw validationError;
+      }
+
+      // Validate structure exists (STRUCTURE_ID is RAW(16), use HEXTORAW)
+      const structureCheckQuery = `SELECT COUNT(*) AS count FROM ENT.HR_ORG_STRUCTURES WHERE STRUCTURE_ID = HEXTORAW(:1)`;
+      const structureCheck = await connection.execute(structureCheckQuery, [normalizedId], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
       
       if (structureCheck.rows[0].COUNT === 0) {
-        const notFoundError = new Error(`Structure with ID ${structureId} not found`);
+        const notFoundError = new Error(`Structure with ID ${normalizedId} not found`);
         notFoundError.code = 'NOT_FOUND';
         notFoundError.statusCode = 404;
         throw notFoundError;
@@ -437,12 +508,12 @@ class HrOrgHierarchyLevelModel {
           LAST_UPDATED_DATE,
           LAST_UPDATE_LOGIN
         ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
+          :1, HEXTORAW(:2), :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
         )`;
 
         const bindParams = [
           levelId,
-          structureId,
+          normalizedId, // hex string, converted to RAW via HEXTORAW
           levelData.LEVEL_NUMBER,
           levelCode,
           levelName,
@@ -462,7 +533,7 @@ class HrOrgHierarchyLevelModel {
 
         createdLevels.push({
           LEVEL_ID: levelId,
-          STRUCTURE_ID: structureId,
+          STRUCTURE_ID: normalizedId, // Store as hex string
           LEVEL_NUMBER: levelData.LEVEL_NUMBER,
           LEVEL_CODE: levelCode,
           LEVEL_NAME: levelName,
@@ -472,9 +543,23 @@ class HrOrgHierarchyLevelModel {
         });
       }
 
-      // Fetch all created levels to return complete data
-      const selectQuery = `SELECT * FROM ${this.TABLE_NAME} WHERE STRUCTURE_ID = :1 ORDER BY LEVEL_NUMBER`;
-      const selectResult = await connection.execute(selectQuery, [structureId], {
+      // Fetch all created levels to return complete data with STRUCTURE_ID as hex
+      const selectQuery = `SELECT 
+        LEVEL_ID,
+        RAWTOHEX(STRUCTURE_ID) AS STRUCTURE_ID,
+        LEVEL_NUMBER,
+        LEVEL_CODE,
+        LEVEL_NAME,
+        IS_MANDATORY,
+        IS_ACTIVE,
+        DISPLAY_ORDER,
+        CREATED_BY,
+        CREATED_DATE,
+        LAST_UPDATED_BY,
+        LAST_UPDATED_DATE,
+        LAST_UPDATE_LOGIN
+      FROM ${this.TABLE_NAME} WHERE STRUCTURE_ID = HEXTORAW(:1) ORDER BY LEVEL_NUMBER`;
+      const selectResult = await connection.execute(selectQuery, [normalizedId], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
 
@@ -491,14 +576,18 @@ class HrOrgHierarchyLevelModel {
   /**
    * Fetch levels for a single structure
    * @param {Object} connection - Database connection (optional, for transaction)
-   * @param {number} structureId - Structure ID
+   * @param {string|number} structureId - Structure ID (hex32 GUID or number)
    * @returns {Promise<Array>} Array of hierarchy levels
    */
   static async fetchLevelsForStructure(connection, structureId) {
     try {
+      // Check if structureId is hex32 (GUID format)
+      const normalizedId = typeof structureId === 'string' ? this.normalizeHex32(structureId) : structureId;
+      const isHex = this.isHex32(normalizedId);
+      
       const query = `SELECT 
         LEVEL_ID,
-        STRUCTURE_ID,
+        ${isHex ? 'RAWTOHEX(STRUCTURE_ID) AS STRUCTURE_ID' : 'STRUCTURE_ID'},
         LEVEL_NUMBER,
         LEVEL_CODE,
         LEVEL_NAME,
@@ -511,18 +600,18 @@ class HrOrgHierarchyLevelModel {
         LAST_UPDATED_DATE,
         LAST_UPDATE_LOGIN
       FROM ${this.TABLE_NAME}
-      WHERE STRUCTURE_ID = :1
+      WHERE STRUCTURE_ID = ${isHex ? 'HEXTORAW(:1)' : ':1'}
       ORDER BY LEVEL_NUMBER, DISPLAY_ORDER`;
 
       let result;
       if (connection) {
         // Use provided connection (for transaction)
-        result = await connection.execute(query, [structureId], {
+        result = await connection.execute(query, [normalizedId], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
       } else {
         // Use executeQuery (creates own connection)
-        result = await this.executeQuery(query, [structureId]);
+        result = await this.executeQuery(query, [normalizedId]);
       }
 
       return this.convertKeysToSnakeCase(result.rows || []);
@@ -534,8 +623,8 @@ class HrOrgHierarchyLevelModel {
 
   /**
    * Fetch levels for multiple structures (batch fetch)
-   * @param {Array} structureIds - Array of structure IDs
-   * @returns {Promise<Object>} Object with structureId as key and levels array as value
+   * @param {Array} structureIds - Array of structure IDs (hex32 GUIDs or numbers)
+   * @returns {Promise<Object>} Object with structureId (hex) as key and levels array as value
    */
   static async fetchLevelsForStructures(structureIds) {
     try {
@@ -543,10 +632,19 @@ class HrOrgHierarchyLevelModel {
         return {};
       }
 
-      const placeholders = structureIds.map((_, i) => `:${i + 1}`).join(',');
+      // Normalize structure IDs and check if they're hex
+      const normalizedIds = structureIds.map(id => 
+        typeof id === 'string' ? this.normalizeHex32(id) : id
+      );
+      const isHex = normalizedIds.length > 0 && this.isHex32(normalizedIds[0]);
+
+      const placeholders = normalizedIds.map((_, i) => 
+        isHex ? `HEXTORAW(:${i + 1})` : `:${i + 1}`
+      ).join(',');
+      
       const query = `SELECT 
         LEVEL_ID,
-        STRUCTURE_ID,
+        ${isHex ? 'RAWTOHEX(STRUCTURE_ID) AS STRUCTURE_ID' : 'STRUCTURE_ID'},
         LEVEL_NUMBER,
         LEVEL_CODE,
         LEVEL_NAME,
@@ -562,10 +660,10 @@ class HrOrgHierarchyLevelModel {
       WHERE STRUCTURE_ID IN (${placeholders})
       ORDER BY STRUCTURE_ID, LEVEL_NUMBER, DISPLAY_ORDER`;
 
-      const result = await this.executeQuery(query, structureIds);
+      const result = await this.executeQuery(query, normalizedIds);
       const levels = this.convertKeysToSnakeCase(result.rows || []);
 
-      // Group levels by STRUCTURE_ID
+      // Group levels by STRUCTURE_ID (use hex format for keys)
       const levelsByStructure = {};
       for (const level of levels) {
         const structureId = level.structure_id;
@@ -597,9 +695,13 @@ class HrOrgHierarchyLevelModel {
         let paramIndex = 1;
 
         // Build dynamic update query
-        if (data.STRUCTURE_ID !== undefined) {
-          updateFields.push(`STRUCTURE_ID = :${paramIndex}`);
-          bindParams.push(data.STRUCTURE_ID);
+        if (data.STRUCTURE_ID !== undefined || data.structure_id !== undefined) {
+          const structureId = data.STRUCTURE_ID !== undefined ? data.STRUCTURE_ID : data.structure_id;
+          const normalizedId = typeof structureId === 'string' ? this.normalizeHex32(structureId) : structureId;
+          const isHex = this.isHex32(normalizedId);
+          
+          updateFields.push(`STRUCTURE_ID = ${isHex ? 'HEXTORAW(:' : ':'}${paramIndex}${isHex ? ')' : ''}`);
+          bindParams.push(normalizedId);
           paramIndex++;
         }
         if (data.LEVEL_NUMBER !== undefined) {

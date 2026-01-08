@@ -1,35 +1,25 @@
+// features/positions/view/position_view.js
 const API_VERSION = '1.0.0';
 
-function reqId() {
-  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-}
-
 function meta(req, extra = {}) {
-  return {
-    ...extra
-  };
+  return { api_version: API_VERSION, ...extra };
 }
 
 export function sendPositionList(res, req, data, m = {}) {
   const rows = Array.isArray(data) ? data : [];
-
   res.json({
     success: true,
-    meta: meta(req, {
-      count: rows.length,
-      ...m
-    }),
-    data: rows
+    meta: meta(req, { count: rows.length, ...m }),
+    data: rows,
   });
 }
-
 
 export function sendPosition(res, req, data) {
   if (!data) {
     return res.status(404).json({
       success: false,
       error: 'Position not found',
-      meta: meta(req)
+      meta: meta(req),
     });
   }
   res.json({ success: true, meta: meta(req), data });
@@ -39,8 +29,8 @@ export function sendCreated(res, req, data) {
   res.status(201).json({
     success: true,
     message: 'Position created successfully',
-    meta: meta(req, { position_id: data.position_id }),
-    data
+    meta: meta(req, { position_id: data?.position_id }),
+    data,
   });
 }
 
@@ -48,8 +38,8 @@ export function sendUpdated(res, req, data) {
   res.json({
     success: true,
     message: 'Position updated successfully',
-    meta: meta(req, { position_id: data.position_id }),
-    data
+    meta: meta(req, { position_id: data?.position_id }),
+    data,
   });
 }
 
@@ -57,7 +47,7 @@ export function sendDeleted(res, req, message, id) {
   res.json({
     success: true,
     message,
-    meta: meta(req, { position_id: id })
+    meta: meta(req, { position_id: id }),
   });
 }
 
@@ -71,24 +61,27 @@ export function sendBadRequest(res, req, errors) {
       message: 'Validation failed',
       code: 'VALIDATION_ERROR',
       type: 'ValidationError',
-      validation_errors: arr
-    }
+      validation_errors: arr,
+    },
   });
 }
 
-export function sendConflict(res, req, message, details = null) {
+export function sendConflict(res, req, message) {
   res.status(409).json({
     success: false,
     error: message,
     error_details: {
-      message: message,
+      message,
       code: 'CONFLICT',
-      type: 'ConflictError'
-    }
+      type: 'ConflictError',
+    },
   });
 }
 
 export function sendServerError(res, req, message, error = null) {
+  // IMPORTANT: log the real error server-side
+  console.error('API ERROR:', message, error?.message || error, error?.stack);
+
   res.status(500).json({
     success: false,
     error: message || 'Internal server error',
@@ -96,19 +89,17 @@ export function sendServerError(res, req, message, error = null) {
       message: error?.message || message || 'Internal server error',
       code: 'INTERNAL_SERVER_ERROR',
       type: 'Error',
-      stack: error?.stack
-    }
+      // Keep stack only for dev; if you want: gate by NODE_ENV
+      stack: process.env.NODE_ENV === 'production' ? undefined : error?.stack,
+    },
   });
 }
 
 export function sendReportingRelationships(res, req, data) {
   const relationships = Array.isArray(data) ? data : [];
-  
   res.json({
     success: true,
-    meta: meta(req, {
-      count: relationships.length
-    }),
-    data: relationships
+    meta: meta(req, { count: relationships.length }),
+    data: relationships,
   });
 }

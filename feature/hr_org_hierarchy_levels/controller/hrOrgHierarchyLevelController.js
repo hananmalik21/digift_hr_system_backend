@@ -100,11 +100,21 @@ router.get('/', async (req, res) => {
     }
     
     if (req.query.structure_id) {
-      filters.structureId = parseInt(req.query.structure_id);
-      if (isNaN(filters.structureId)) {
-        return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format');
+      const structureIdParam = req.query.structure_id.trim();
+      // Check if it's a hex32 GUID format
+      const isHex32 = /^[0-9a-fA-F]{32}$/.test(structureIdParam);
+      if (isHex32) {
+        filters.structureIdHex = structureIdParam.toUpperCase();
+        appliedFilters.structure_id = filters.structureIdHex;
+      } else {
+        // Legacy: try to parse as number
+        const parsed = parseInt(structureIdParam);
+        if (isNaN(parsed)) {
+          return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex or number)');
+        }
+        filters.structureId = parsed;
+        appliedFilters.structure_id = filters.structureId;
       }
-      appliedFilters.structure_id = filters.structureId;
     }
 
     if (req.query.isActive !== undefined) {
@@ -162,9 +172,18 @@ router.post('/bulk', async (req, res) => {
       return sendBadRequest(res, req, 'structure_id is required');
     }
 
-    const structureId = parseInt(structure_id);
-    if (isNaN(structureId)) {
-      return sendBadRequest(res, req, 'Invalid structure_id format');
+    // Handle structure_id as hex32 GUID or number (legacy)
+    const structureIdParam = String(structure_id).trim();
+    const isHex32 = /^[0-9a-fA-F]{32}$/.test(structureIdParam);
+    let structureId;
+    if (isHex32) {
+      structureId = structureIdParam.toUpperCase();
+    } else {
+      const parsed = parseInt(structureIdParam);
+      if (isNaN(parsed)) {
+        return sendBadRequest(res, req, 'Invalid structure_id format (expected 32-char hex or number)');
+      }
+      structureId = parsed;
     }
 
     // Validate levels array
@@ -397,14 +416,22 @@ router.delete('/:id', async (req, res) => {
 router.get('/enterprises/:enterpriseId/org-structures/:structureId/levels', async (req, res) => {
   try {
     const enterpriseId = parseInt(req.params.enterpriseId);
-    const structureId = parseInt(req.params.structureId);
-    
     if (isNaN(enterpriseId)) {
       return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
     }
     
-    if (isNaN(structureId)) {
-      return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format');
+    // Handle structureId as hex32 GUID or number (legacy)
+    const structureIdParam = req.params.structureId.trim();
+    const isHex32 = /^[0-9a-fA-F]{32}$/.test(structureIdParam);
+    let structureId;
+    if (isHex32) {
+      structureId = structureIdParam.toUpperCase();
+    } else {
+      const parsed = parseInt(structureIdParam);
+      if (isNaN(parsed)) {
+        return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex or number)');
+      }
+      structureId = parsed;
     }
 
     const levels = await HrOrgHierarchyLevelModel.findByEnterpriseAndStructure(enterpriseId, structureId);
@@ -433,14 +460,22 @@ router.get('/enterprises/:enterpriseId/org-structures/:structureId/levels', asyn
 router.put('/enterprises/:enterpriseId/org-structures/:structureId/levels/reorder', async (req, res) => {
   try {
     const enterpriseId = parseInt(req.params.enterpriseId);
-    const structureId = parseInt(req.params.structureId);
-    
     if (isNaN(enterpriseId)) {
       return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
     }
     
-    if (isNaN(structureId)) {
-      return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format');
+    // Handle structureId as hex32 GUID or number (legacy)
+    const structureIdParam = req.params.structureId.trim();
+    const isHex32 = /^[0-9a-fA-F]{32}$/.test(structureIdParam);
+    let structureId;
+    if (isHex32) {
+      structureId = structureIdParam.toUpperCase();
+    } else {
+      const parsed = parseInt(structureIdParam);
+      if (isNaN(parsed)) {
+        return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex or number)');
+      }
+      structureId = parsed;
     }
 
     const { levels } = req.body;
