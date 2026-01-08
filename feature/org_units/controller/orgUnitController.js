@@ -99,7 +99,7 @@ function buildPaginationMeta(page, pageSize, totalCount) {
 
 /**
  * @route   GET /org-units/tree/active
- * @desc    Get tree structure for the active org structure
+ * @desc    Get tree structure for the active org structure (minimal data, hierarchy only)
  */
 router.get('/org-units/tree/active', async (req, res) => {
   try {
@@ -110,15 +110,30 @@ router.get('/org-units/tree/active', async (req, res) => {
     }
 
     const structureId = activeStructure.structure_id || activeStructure.STRUCTURE_ID;
-    const allowDraft = req.query.includeDraft === 'true';
-    const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
-    const orgUnits = await OrgUnitModel.findAllByStructure(structureId);
+    
+    // Fetch only active org units with minimal data
+    const orgUnits = await OrgUnitModel.findActiveByStructure(structureId);
+    
+    // Build tree with minimal data
+    const tree = OrgUnitModel.buildMinimalTree(orgUnits);
+    
+    // Count root-level nodes (companies) for pagination
+    const rootLevelCount = Array.isArray(tree) ? tree.length : 0;
 
     sendOrgUnitList(res, req, {
-      structure: activeStructure,
-      levels_ordered: resolver.levelsOrdered,
-      org_units: orgUnits,
-      tree: OrgUnitModel.buildTree(orgUnits)
+      structure_id: structureId,
+      structure_name: activeStructure.structure_name || activeStructure.STRUCTURE_NAME,
+      tree: tree
+    }, {
+      total: rootLevelCount,
+      pagination: {
+        page: 1,
+        pageSize: rootLevelCount,
+        total: rootLevelCount,
+        totalPages: 1,
+        hasNext: false,
+        hasPrevious: false
+      }
     });
   } catch (error) {
     if (error.code === 'STRUCTURE_NOT_FOUND') {

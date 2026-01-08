@@ -498,6 +498,48 @@ class OrgUnitModel {
   }
 
   /**
+   * Find all active org units for a structure (minimal data for tree)
+   */
+  static async findActiveByStructure(structureId) {
+    try {
+      const query = `SELECT 
+        ou.ORG_UNIT_ID,
+        ou.LEVEL_CODE,
+        ou.ORG_UNIT_CODE,
+        ou.ORG_UNIT_NAME_EN,
+        ou.ORG_UNIT_NAME_AR,
+        ou.PARENT_ORG_UNIT_ID,
+        ou.IS_ACTIVE
+      FROM ${this.TABLE_NAME} ou
+      WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1)
+        AND ou.IS_ACTIVE = 'Y'
+      ORDER BY ou.LEVEL_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
+
+      const result = await this.executeQuery(query, [structureId]);
+      return result.rows || [];
+    } catch (error) {
+      throw new Error(`Failed to fetch active org units: ${error.message}`);
+    }
+  }
+
+  /**
+   * Extract minimal data from org unit for tree display
+   */
+  static toMinimalData(orgUnit) {
+    if (!orgUnit) return null;
+    
+    return {
+      org_unit_id: orgUnit.org_unit_id || orgUnit.ORG_UNIT_ID,
+      org_unit_code: orgUnit.org_unit_code || orgUnit.ORG_UNIT_CODE,
+      org_unit_name_en: orgUnit.org_unit_name_en || orgUnit.ORG_UNIT_NAME_EN,
+      org_unit_name_ar: orgUnit.org_unit_name_ar || orgUnit.ORG_UNIT_NAME_AR,
+      level_code: orgUnit.level_code || orgUnit.LEVEL_CODE,
+      parent_org_unit_id: orgUnit.parent_org_unit_id || orgUnit.PARENT_ORG_UNIT_ID || null,
+      is_active: orgUnit.is_active || orgUnit.IS_ACTIVE
+    };
+  }
+
+  /**
    * Validate parent org unit exists and belongs to structure
    */
   static async validateParent(connection, parentOrgUnitId, structureId, expectedLevelCode) {
@@ -976,6 +1018,51 @@ class OrgUnitModel {
         unit.parent_org_unit_id ??
         unit.PARENT_ORG_UNIT_ID ??
         null;
+
+      if (parentId && unitMap.has(parentId)) {
+        unitMap.get(parentId).children.push(unitMap.get(unitId));
+      } else {
+        roots.push(unitMap.get(unitId));
+      }
+    });
+
+    return roots;
+  }
+
+  /**
+   * Build tree structure with minimal data from flat org units array
+   */
+  static buildMinimalTree(orgUnits) {
+    const unitMap = new Map();
+    const roots = [];
+
+    // Normalize GUIDs to uppercase hex strings for consistent comparison
+    const normalizeId = (id) => {
+      if (!id) return null;
+      if (Buffer.isBuffer(id)) {
+        return id.toString('hex').toUpperCase();
+      }
+      return String(id).toUpperCase().trim();
+    };
+
+    orgUnits.forEach(unit => {
+      const minimal = this.toMinimalData(unit);
+      if (minimal) {
+        const unitId = normalizeId(minimal.org_unit_id);
+        if (unitId) {
+          unitMap.set(unitId, { ...minimal, org_unit_id: unitId, children: [] });
+        }
+      }
+    });
+
+    orgUnits.forEach(unit => {
+      const minimal = this.toMinimalData(unit);
+      if (!minimal) return;
+
+      const unitId = normalizeId(minimal.org_unit_id);
+      const parentId = normalizeId(minimal.parent_org_unit_id);
+
+      if (!unitId) return;
 
       if (parentId && unitMap.has(parentId)) {
         unitMap.get(parentId).children.push(unitMap.get(unitId));
