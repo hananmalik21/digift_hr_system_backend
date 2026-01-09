@@ -249,6 +249,49 @@ class ScheduleAssignmentModel {
     }
   }
 
+  static async fetchOrgPath(orgUnitIdHex32) {
+    if (!orgUnitIdHex32) return [];
+    
+    try {
+      const idBuffer = this.hexToRawBuffer(orgUnitIdHex32);
+      if (!idBuffer) return [];
+
+      // Traverse up from child -> parent using Oracle hierarchical query
+      const sql = `
+        SELECT
+          RAWTOHEX(ou.ORG_UNIT_ID) AS ORG_UNIT_ID,
+          ou.ORG_UNIT_NAME_EN,
+          ou.ORG_UNIT_NAME_AR,
+          ou.LEVEL_CODE,
+          RAWTOHEX(ou.PARENT_ORG_UNIT_ID) AS PARENT_ORG_UNIT_ID,
+          LEVEL AS HIERARCHY_LEVEL
+        FROM ENT.ORG_UNITS ou
+        START WITH ou.ORG_UNIT_ID = :1
+        CONNECT BY PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
+        ORDER BY LEVEL DESC
+      `;
+
+      const result = await db.executeQuery(sql, [idBuffer]);
+      
+      // Convert rows and ensure proper key mapping
+      const path = (result.rows || []).map((row) => {
+        // Handle both uppercase (from Oracle) and lowercase (already converted) keys
+        const normalized = this.toSnake(row);
+        return {
+          level_code: normalized.level_code || row.LEVEL_CODE,
+          org_unit_id: normalized.org_unit_id || row.ORG_UNIT_ID,
+          name_en: normalized.org_unit_name_en || normalized.name_en || row.ORG_UNIT_NAME_EN,
+          name_ar: normalized.org_unit_name_ar || normalized.name_ar || row.ORG_UNIT_NAME_AR,
+        };
+      });
+      
+      return path;
+    } catch (error) {
+      console.error('Error fetching org path:', error);
+      return [];
+    }
+  }
+
   static async getOrgUnitDetails(orgUnitHex32, tenantId) {
     try {
       const hexId = this.ensureHex32(orgUnitHex32, 'org_unit_id');
@@ -298,6 +341,9 @@ class ScheduleAssignmentModel {
   }
 
   static async enrichAssignment(a, tenantId) {
+    // Initialize org_path to empty array by default
+    a.org_path = [];
+    
     if (a.work_schedule_id) {
       a.work_schedule = await this.getWorkScheduleDetails(a.work_schedule_id, tenantId);
     }
@@ -307,6 +353,15 @@ class ScheduleAssignmentModel {
       a.department_id = depHex;
       a.org_unit_id = depHex;
       a.org_unit = await this.getOrgUnitDetails(depHex, tenantId);
+      
+      // Fetch org path (hierarchical path from root to department)
+      try {
+        const path = await this.fetchOrgPath(depHex);
+        a.org_path = Array.isArray(path) ? path : [];
+      } catch (error) {
+        console.error('Error fetching org path for department:', depHex, error);
+        a.org_path = [];
+      }
     } else {
       if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
     }
