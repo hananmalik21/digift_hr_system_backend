@@ -21,6 +21,7 @@ import shiftController from './feature/shifts/controller/shiftController.js';
 import workPatternController from './feature/work_patterns/controller/workPatternController.js';
 import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
 import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
+import holidayController from './feature/holidays/controller/holidayController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
@@ -68,9 +69,12 @@ app.use('/api/job-families', jobFamilyController);
 app.use('/api/job-levels', jobLevelsController);
 app.use('/api/positions', positionsController);
 
+// Holidays routes (must be BEFORE catch-all /api route)
+app.use('/api/holidays', holidayController);
+
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
-// NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions
+// NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
 app.use('/api', orgUnitController);
 
 app.use('/', hrOrgHierarchyLevelController);
