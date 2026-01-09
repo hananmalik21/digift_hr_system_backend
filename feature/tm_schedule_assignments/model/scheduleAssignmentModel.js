@@ -2,6 +2,7 @@
 import db from '../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../utils/errors/index.js';
+import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
 
 /**
  * Schedule Assignment Model
@@ -340,9 +341,31 @@ class ScheduleAssignmentModel {
     }
   }
 
+  static async getEnterpriseDetails(enterpriseId) {
+    try {
+      if (!enterpriseId) return null;
+      const enterprise = await EnterpriseModel.findById(enterpriseId);
+      if (!enterprise) return null;
+      
+      return {
+        id: enterprise.enterprise_id,
+        name: enterprise.enterprise_name,
+        code: enterprise.enterprise_code
+      };
+    } catch (error) {
+      console.error('Error fetching enterprise details:', error);
+      return null;
+    }
+  }
+
   static async enrichAssignment(a, tenantId) {
     // Initialize org_path to empty array by default
     a.org_path = [];
+    
+    // Add enterprise information
+    if (tenantId) {
+      a.enterprise = await this.getEnterpriseDetails(tenantId);
+    }
     
     if (a.work_schedule_id) {
       a.work_schedule = await this.getWorkScheduleDetails(a.work_schedule_id, tenantId);
