@@ -165,7 +165,8 @@ router.get('/active/levels', async (req, res) => {
 router.get('/:structureId/levels', async (req, res) => {
   try {
     const structureId = parseStructureId(req.params.structureId);
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     sendOrgUnitList(res, req, resolver.levelsOrdered);
   } catch (error) {
@@ -200,7 +201,8 @@ router.get('/:structureId/org-units', async (req, res) => {
       return sendBadRequest(res, req, 'level query parameter is required');
     }
 
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
 
     if (!resolver.levelExists(level)) {
@@ -293,7 +295,8 @@ router.get('/:structureId/org-units/parents', async (req, res) => {
     }
 
     const { page, pageSize } = parsePagination(req.query);
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
 
     const result = await StructureHierarchyService.getParentCandidates(
       structureId,
@@ -348,7 +351,8 @@ router.post('/:structureId/org-units', async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
 
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     const levelCode = data.level_code || data.LEVEL_CODE;
 
@@ -413,7 +417,8 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
       return sendBadRequest(res, req, 'Invalid ORG_UNIT_ID format');
     }
 
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
 
     // Check if org unit exists and belongs to structure
@@ -523,7 +528,8 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
 router.get('/:structureId/org-units/tree', async (req, res) => {
   try {
     const structureId = parseStructureId(req.params.structureId);
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     const orgUnits = await OrgUnitModel.findAllByStructure(structureId);
 
@@ -551,7 +557,8 @@ router.get('/:structureId/org-units/tree', async (req, res) => {
 router.get('/:structureId', async (req, res) => {
   try {
     const structureId = parseStructureId(req.params.structureId);
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     sendOrgUnit(res, req, resolver.structureRow);
   } catch (error) {
@@ -582,7 +589,8 @@ router.delete('/:structureId/org-units/:orgUnitId', async (req, res) => {
       return sendBadRequest(res, req, 'Invalid ORG_UNIT_ID format');
     }
 
-    const allowDraft = req.query.includeDraft === 'true';
+    // Always allow draft structures to return data regardless of active status
+    const allowDraft = true;
     
     // Validate structure exists
     await StructureResolverService.resolveStructure(structureId, { allowDraft });
