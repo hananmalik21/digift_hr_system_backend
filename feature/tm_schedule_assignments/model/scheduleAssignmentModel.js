@@ -3,6 +3,7 @@ import db from '../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import EnterpriseModel from '../../enterprises/model/enterpriseModel.js';
+import HrOrgStructureModel from '../../hr_org_structures/model/hrOrgStructureModel.js';
 
 /**
  * Schedule Assignment Model
@@ -358,6 +359,46 @@ class ScheduleAssignmentModel {
     }
   }
 
+  static async getOrgStructureDetails(structureIdHex) {
+    try {
+      if (!structureIdHex) return null;
+      const structure = await HrOrgStructureModel.findById(structureIdHex);
+      if (!structure) return null;
+      
+      return {
+        id: structure.structure_id,
+        name: structure.structure_name,
+        code: structure.structure_code
+      };
+    } catch (error) {
+      console.error('Error fetching org structure details:', error);
+      return null;
+    }
+  }
+
+  static async getActiveOrgStructureForEnterprise(enterpriseId) {
+    try {
+      if (!enterpriseId) return null;
+      const result = await HrOrgStructureModel.findAll({
+        enterpriseId,
+        isActive: true
+      });
+      
+      // Get the first active org structure for this enterprise
+      const activeStructure = Array.isArray(result) ? result[0] : (result?.structures?.[0] || null);
+      if (!activeStructure) return null;
+      
+      return {
+        id: activeStructure.structure_id,
+        name: activeStructure.structure_name,
+        code: activeStructure.structure_code
+      };
+    } catch (error) {
+      console.error('Error fetching active org structure for enterprise:', error);
+      return null;
+    }
+  }
+
   static async enrichAssignment(a, tenantId) {
     // Initialize org_path to empty array by default
     a.org_path = [];
@@ -377,6 +418,11 @@ class ScheduleAssignmentModel {
       a.org_unit_id = depHex;
       a.org_unit = await this.getOrgUnitDetails(depHex, tenantId);
       
+      // Add org structure information if org_unit has org_structure_id
+      if (a.org_unit && a.org_unit.org_structure_id) {
+        a.org_structure = await this.getOrgStructureDetails(a.org_unit.org_structure_id);
+      }
+      
       // Fetch org path (hierarchical path from root to department)
       try {
         const path = await this.fetchOrgPath(depHex);
@@ -387,6 +433,11 @@ class ScheduleAssignmentModel {
       }
     } else {
       if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
+    }
+
+    // Add org structure information if not already set (fallback to active org structure for enterprise)
+    if (!a.org_structure && tenantId) {
+      a.org_structure = await this.getActiveOrgStructureForEnterprise(tenantId);
     }
 
     return a;
