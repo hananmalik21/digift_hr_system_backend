@@ -202,6 +202,16 @@ router.get('/', asyncHandler(async (req, res) => {
     appliedFilters.org_unit_id = orgUnitId;
   }
 
+  // ✅✅ FIX: org_structure_id support (pass-through to model)
+  if (req.query.org_structure_id !== undefined) {
+    const orgStructureId = String(req.query.org_structure_id).trim();
+    if (!orgStructureId) throw new ValidationError('Invalid org_structure_id format');
+    // model will validate hex32; we can also fail early:
+    // if (!/^[0-9a-fA-F-]{32,36}$/.test(orgStructureId)) throw new ValidationError('org_structure_id must be a GUID');
+    filters.orgStructureId = orgStructureId;
+    appliedFilters.org_structure_id = orgStructureId;
+  }
+
   if (req.query.employee_id !== undefined) {
     const employeeId = parseInt(req.query.employee_id, 10);
     if (isNaN(employeeId)) throw new ValidationError('Invalid employee_id format');
@@ -228,9 +238,14 @@ router.get('/', asyncHandler(async (req, res) => {
     page = parseInt(req.query.page, 10);
     if (isNaN(page) || page < 1) throw new ValidationError('page must be a positive integer');
   }
+
+  // ✅ keep your existing page_size, but also accept limit (common client param)
   if (req.query.page_size !== undefined) {
     pageSize = parseInt(req.query.page_size, 10);
     if (isNaN(pageSize) || pageSize < 1 || pageSize > 100) throw new ValidationError('page_size must be between 1 and 100');
+  } else if (req.query.limit !== undefined) {
+    pageSize = parseInt(req.query.limit, 10);
+    if (isNaN(pageSize) || pageSize < 1 || pageSize > 100) throw new ValidationError('limit must be between 1 and 100');
   }
 
   filters.pagination = { page, pageSize };

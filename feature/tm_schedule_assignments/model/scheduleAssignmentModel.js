@@ -14,13 +14,13 @@ import HrOrgStructureModel from '../../hr_org_structures/model/hrOrgStructureMod
  * - WORK_SCHEDULE_ID is NUMBER
  * - EMPLOYEE_ID is NUMBER (nullable)
  *
- * RAW/GUID rule:
- * ✅ For lookups/filters on RAW: use RAW = HEXTORAW(:hex) OR RAWTOHEX(RAW) = :hex
- * ✅ For INSERT/UPDATE RAW: bind Buffer(16) or use HEXTORAW(:hex) in SQL
- *
  * ORG PATH:
- * ✅ ALWAYS returned for DEPARTMENT assignments (no include_org_path flag)
- * ✅ Batch enrichment for list endpoints + safe fallback per row
+ * ✅ ALWAYS returned for DEPARTMENT assignments
+ *
+ * FIXES:
+ * ✅ ORA-01722 in batchGetOrgUnitDetails: compare RAW using HEXTORAW binds
+ * ✅ org_structure_id filter: EXISTS subquery (pagination-safe)
+ * ✅ work_schedule object disappearing: always set from cache and fallback fetch if missing
  */
 class ScheduleAssignmentModel {
   static TABLE_NAME = 'ENT.TM_SCHEDULE_ASSIGNMENTS';
@@ -283,7 +283,6 @@ class ScheduleAssignmentModel {
    * Org Path / Org Unit / Org Structure
    * ========================= */
 
-  // Single path (detail view + safe fallback)
   static async fetchOrgPath(orgUnitHex32) {
     if (!orgUnitHex32) return [];
     try {
@@ -321,10 +320,6 @@ class ScheduleAssignmentModel {
     }
   }
 
-  /**
-   * Batch paths (1 query)
-   * Returns: { [startHex32]: [ {level_code, org_unit_id, name_en, name_ar, hierarchy_level}, ... ] }
-   */
   static async batchFetchOrgPaths(orgUnitHex32Array) {
     if (!orgUnitHex32Array || orgUnitHex32Array.length === 0) return {};
 
@@ -353,7 +348,7 @@ class ScheduleAssignmentModel {
     `;
 
     try {
-      const result = await db.executeQuery(sql, uniqueHex); // ✅ array binds
+      const result = await db.executeQuery(sql, uniqueHex);
 
       const grouped = {};
       (result.rows || []).forEach((row) => {
@@ -425,9 +420,7 @@ class ScheduleAssignmentModel {
     }
   }
 
-  /**
-   * ✅ FIXED: uses RAW IN list with HEXTORAW binds (avoids ORA-01722)
-   */
+  // ✅ FIXED: RAW IN (...) using HEXTORAW binds (prevents ORA-01722)
   static async batchGetOrgUnitDetails(orgUnitHex32Array, tenantId) {
     if (!orgUnitHex32Array || orgUnitHex32Array.length === 0) return {};
     try {
@@ -439,7 +432,6 @@ class ScheduleAssignmentModel {
 
       if (uniqueHexIds.length === 0) return {};
 
-      // ✅ compare RAW directly
       const placeholders = uniqueHexIds.map((_, i) => `HEXTORAW(:${i + 2})`).join(',');
 
       const sql = `
@@ -563,15 +555,23 @@ class ScheduleAssignmentModel {
    * ========================= */
 
   static async enrichAssignment(a, tenantId, cache = {}) {
-    // default
     a.org_path = [];
 
-    // work schedule
+    // ✅ FIX: work schedule should NEVER disappear
+    a.work_schedule = null;
     if (a.work_schedule_id) {
-      if (cache.workSchedules && cache.workSchedules[a.work_schedule_id] !== undefined) {
-        a.work_schedule = cache.workSchedules[a.work_schedule_id] || null;
-      } else if (!cache.workSchedules) {
-        a.work_schedule = await this.getWorkScheduleDetails(a.work_schedule_id, tenantId);
+      const id = a.work_schedule_id;
+
+      if (cache?.workSchedules) {
+        a.work_schedule = cache.workSchedules[id] ?? null;
+
+        // fallback if missing from batch cache
+        if (a.work_schedule === null) {
+          a.work_schedule = await this.getWorkScheduleDetails(id, tenantId);
+          cache.workSchedules[id] = a.work_schedule;
+        }
+      } else {
+        a.work_schedule = await this.getWorkScheduleDetails(id, tenantId);
       }
     }
 
@@ -597,7 +597,7 @@ class ScheduleAssignmentModel {
         }
       }
 
-      // ✅ ORG PATH ALWAYS (batch preferred + fallback)
+      // org path (batch preferred + fallback)
       const fromBatch = cache?.orgPaths?.[depHex];
       if (Array.isArray(fromBatch) && fromBatch.length) {
         a.org_path = fromBatch;
@@ -624,7 +624,6 @@ class ScheduleAssignmentModel {
   static async enrichAssignmentsBatch(assignments, tenantId) {
     if (!assignments || assignments.length === 0) return assignments;
 
-    // Collect all unique IDs for batch fetching
     const workScheduleIds = [];
     const orgUnitIds = [];
     const structureIds = new Set();
@@ -637,23 +636,19 @@ class ScheduleAssignmentModel {
       }
     });
 
-    // Batch fetch all related data in parallel
     const [workSchedules, orgUnits, activeOrgStructure, orgPaths] = await Promise.all([
       this.batchGetWorkScheduleDetails(workScheduleIds, tenantId),
       this.batchGetOrgUnitDetails(orgUnitIds, tenantId),
       this.getActiveOrgStructureForEnterprise(tenantId),
-      this.batchFetchOrgPaths(orgUnitIds) // ✅ always fetch paths for list
+      this.batchFetchOrgPaths(orgUnitIds)
     ]);
 
-    // Collect structure IDs from org units
     Object.values(orgUnits).forEach(ou => {
       if (ou && ou.org_structure_id) structureIds.add(ou.org_structure_id);
     });
 
-    // Batch fetch org structures
     const orgStructures = await this.batchGetOrgStructureDetails([...structureIds]);
 
-    // Build cache object
     const cache = {
       workSchedules,
       orgUnits,
@@ -662,7 +657,6 @@ class ScheduleAssignmentModel {
       orgPaths
     };
 
-    // Enrich each assignment using cached data (with fallback per row)
     return Promise.all(assignments.map(a => this.enrichAssignment(a, tenantId, cache)));
   }
 
@@ -673,7 +667,6 @@ class ScheduleAssignmentModel {
   static async create(data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        // next id
         let scheduleAssignmentId;
         try {
           const seqResult = await connection.execute(
@@ -698,7 +691,6 @@ class ScheduleAssignmentModel {
         const status = String(data.STATUS || 'ACTIVE').toUpperCase();
 
         const effectiveStartDate = this.parseDateOrThrow(data.EFFECTIVE_START_DATE, 'effective_start_date');
-
         const effectiveEndDate =
           (data.EFFECTIVE_END_DATE === null || data.EFFECTIVE_END_DATE === undefined || data.EFFECTIVE_END_DATE === '')
             ? null
@@ -708,7 +700,6 @@ class ScheduleAssignmentModel {
           throw new ValidationError('effective_end_date must be >= effective_start_date');
         }
 
-        // overlap check (ACTIVE only)
         if (status === 'ACTIVE') {
           const overlap = await this.checkOverlap(connection, {
             tenantId: data.TENANT_ID,
@@ -838,35 +829,72 @@ class ScheduleAssignmentModel {
       const binds = [];
       let p = 1;
 
-      conditions.push(`TENANT_ID = :${p}`); binds.push(filters.tenantId); p++;
+      // Always use alias "sa" for consistency (especially needed when org_structure_id filter uses EXISTS with sa.DEPARTMENT_ID)
+      conditions.push(`sa.TENANT_ID = :${p}`); binds.push(filters.tenantId); p++;
 
       if (filters.assignmentLevel) {
-        conditions.push(`UPPER(ASSIGNMENT_LEVEL) = :${p}`); binds.push(String(filters.assignmentLevel).toUpperCase()); p++;
+        conditions.push(`UPPER(sa.ASSIGNMENT_LEVEL) = :${p}`); binds.push(String(filters.assignmentLevel).toUpperCase()); p++;
       }
 
       if (filters.orgUnitId !== undefined && filters.orgUnitId !== null) {
         const depHex = this.ensureHex32(filters.orgUnitId, 'org_unit_id');
-        conditions.push(`DEPARTMENT_ID = HEXTORAW(:${p})`); binds.push(depHex); p++;
+        conditions.push(`sa.DEPARTMENT_ID = HEXTORAW(:${p})`); binds.push(depHex); p++;
+      }
+
+      // ✅ org_structure_id filter (pagination-safe, NO join)
+      // Only filters DEPARTMENT assignments (where DEPARTMENT_ID is NOT NULL)
+      // EMPLOYEE assignments will be excluded since they have NULL DEPARTMENT_ID
+      if (filters.orgStructureId !== undefined && filters.orgStructureId !== null) {
+        const structHex = this.ensureHex32(filters.orgStructureId, 'org_structure_id');
+        conditions.push(`
+          EXISTS (
+            SELECT 1
+            FROM ENT.ORG_UNITS ou
+            WHERE ou.ORG_UNIT_ID = sa.DEPARTMENT_ID
+              AND sa.DEPARTMENT_ID IS NOT NULL
+              AND ou.ORG_STRUCTURE_ID = HEXTORAW(:${p})
+          )
+        `);
+        binds.push(structHex); p++;
       }
 
       if (filters.employeeId !== undefined && filters.employeeId !== null) {
-        conditions.push(`EMPLOYEE_ID = :${p}`); binds.push(filters.employeeId); p++;
+        conditions.push(`sa.EMPLOYEE_ID = :${p}`); binds.push(filters.employeeId); p++;
       }
 
       if (filters.status) {
-        conditions.push(`UPPER(STATUS) = :${p}`); binds.push(String(filters.status).toUpperCase()); p++;
+        conditions.push(`UPPER(sa.STATUS) = :${p}`); binds.push(String(filters.status).toUpperCase()); p++;
       }
 
       if (filters.effectiveOn) {
         const d = (filters.effectiveOn instanceof Date) ? filters.effectiveOn : new Date(filters.effectiveOn);
-        conditions.push(`EFFECTIVE_START_DATE <= :${p} AND (EFFECTIVE_END_DATE IS NULL OR EFFECTIVE_END_DATE >= :${p})`);
+        conditions.push(`sa.EFFECTIVE_START_DATE <= :${p} AND (sa.EFFECTIVE_END_DATE IS NULL OR sa.EFFECTIVE_END_DATE >= :${p})`);
         binds.push(d); p++;
       }
 
       const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
-      countSql += where;
-      dataSql += where;
-      dataSql += ` ORDER BY SCHEDULE_ASSIGNMENT_ID DESC`;
+
+      // Always use alias "sa" for consistency (required when org_structure_id filter is used)
+      countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} sa${where}`;
+      dataSql = `
+        SELECT
+          sa.SCHEDULE_ASSIGNMENT_ID,
+          sa.TENANT_ID,
+          sa.ASSIGNMENT_LEVEL,
+          sa.DEPARTMENT_ID,
+          sa.EMPLOYEE_ID,
+          sa.WORK_SCHEDULE_ID,
+          sa.EFFECTIVE_START_DATE,
+          sa.EFFECTIVE_END_DATE,
+          sa.STATUS,
+          sa.NOTES,
+          sa.CREATION_DATE,
+          sa.CREATED_BY,
+          sa.LAST_UPDATE_DATE,
+          sa.LAST_UPDATED_BY
+        FROM ${this.TABLE_NAME} sa${where}
+        ORDER BY sa.SCHEDULE_ASSIGNMENT_ID DESC
+      `;
 
       const pagination = filters.pagination;
       const dataBinds = [...binds];
@@ -934,7 +962,7 @@ class ScheduleAssignmentModel {
       if (!result.rows?.length) return null;
 
       const assignment = this.toSnake(result.rows[0]);
-      return await this.enrichAssignment(assignment, tenantId, {}); // org_path always
+      return await this.enrichAssignment(assignment, tenantId, {});
     } catch (error) {
       if (error instanceof ValidationError) throw error;
 
@@ -1023,48 +1051,13 @@ class ScheduleAssignmentModel {
         const bindParams = [];
         let p = 1;
 
-        if (data.WORK_SCHEDULE_ID !== undefined) {
-          fields.push(`WORK_SCHEDULE_ID = :${p}`);
-          bindParams.push(data.WORK_SCHEDULE_ID === null ? null : data.WORK_SCHEDULE_ID);
-          p++;
-        }
-
-        if (data.DEPARTMENT_ID !== undefined) {
-          fields.push(`DEPARTMENT_ID = :${p}`);
-          const raw = (data.DEPARTMENT_ID === null) ? null : this.hexToRawBuffer(data.DEPARTMENT_ID);
-          bindParams.push(raw);
-          p++;
-        }
-
-        if (data.EMPLOYEE_ID !== undefined) {
-          fields.push(`EMPLOYEE_ID = :${p}`);
-          bindParams.push(data.EMPLOYEE_ID === null ? null : data.EMPLOYEE_ID);
-          p++;
-        }
-
-        if (data.EFFECTIVE_START_DATE !== undefined) {
-          fields.push(`EFFECTIVE_START_DATE = :${p}`);
-          bindParams.push(newStartDate);
-          p++;
-        }
-
-        if (data.EFFECTIVE_END_DATE !== undefined) {
-          fields.push(`EFFECTIVE_END_DATE = :${p}`);
-          bindParams.push(newEndDate);
-          p++;
-        }
-
-        if (data.STATUS !== undefined) {
-          fields.push(`STATUS = :${p}`);
-          bindParams.push(data.STATUS === null ? null : String(data.STATUS).toUpperCase());
-          p++;
-        }
-
-        if (data.NOTES !== undefined) {
-          fields.push(`NOTES = :${p}`);
-          bindParams.push(data.NOTES);
-          p++;
-        }
+        if (data.WORK_SCHEDULE_ID !== undefined) { fields.push(`WORK_SCHEDULE_ID = :${p}`); bindParams.push(data.WORK_SCHEDULE_ID === null ? null : data.WORK_SCHEDULE_ID); p++; }
+        if (data.DEPARTMENT_ID !== undefined) { fields.push(`DEPARTMENT_ID = :${p}`); bindParams.push(data.DEPARTMENT_ID === null ? null : this.hexToRawBuffer(data.DEPARTMENT_ID)); p++; }
+        if (data.EMPLOYEE_ID !== undefined) { fields.push(`EMPLOYEE_ID = :${p}`); bindParams.push(data.EMPLOYEE_ID === null ? null : data.EMPLOYEE_ID); p++; }
+        if (data.EFFECTIVE_START_DATE !== undefined) { fields.push(`EFFECTIVE_START_DATE = :${p}`); bindParams.push(newStartDate); p++; }
+        if (data.EFFECTIVE_END_DATE !== undefined) { fields.push(`EFFECTIVE_END_DATE = :${p}`); bindParams.push(newEndDate); p++; }
+        if (data.STATUS !== undefined) { fields.push(`STATUS = :${p}`); bindParams.push(data.STATUS === null ? null : String(data.STATUS).toUpperCase()); p++; }
+        if (data.NOTES !== undefined) { fields.push(`NOTES = :${p}`); bindParams.push(data.NOTES); p++; }
 
         if (!fields.length) throw new ValidationError('No fields to update');
 
