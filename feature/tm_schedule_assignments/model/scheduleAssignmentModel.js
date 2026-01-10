@@ -250,6 +250,38 @@ class ScheduleAssignmentModel {
     }
   }
 
+  static async batchGetWorkScheduleDetails(workScheduleIds, tenantId) {
+    if (!workScheduleIds || workScheduleIds.length === 0) return {};
+    try {
+      const uniqueIds = [...new Set(workScheduleIds.filter(id => id != null))];
+      if (uniqueIds.length === 0) return {};
+
+      const placeholders = uniqueIds.map((_, i) => `:${i + 2}`).join(',');
+      const sql = `
+        SELECT
+          WORK_SCHEDULE_ID,
+          TENANT_ID,
+          SCHEDULE_CODE,
+          SCHEDULE_NAME_EN,
+          SCHEDULE_NAME_AR
+        FROM ENT.TM_WORK_SCHEDULES
+        WHERE WORK_SCHEDULE_ID IN (${placeholders})
+          AND TENANT_ID = :1
+      `;
+      const binds = [tenantId, ...uniqueIds];
+      const result = await db.executeQuery(sql, binds);
+      const schedules = {};
+      (result.rows || []).forEach(row => {
+        const schedule = this.toSnake(row);
+        schedules[schedule.work_schedule_id] = schedule;
+      });
+      return schedules;
+    } catch (error) {
+      console.error('Error batch fetching work schedules:', error);
+      return {};
+    }
+  }
+
   static async fetchOrgPath(orgUnitIdHex32) {
     if (!orgUnitIdHex32) return [];
     
@@ -341,6 +373,67 @@ class ScheduleAssignmentModel {
     }
   }
 
+  static async batchGetOrgUnitDetails(orgUnitHex32Array, tenantId) {
+    if (!orgUnitHex32Array || orgUnitHex32Array.length === 0) return {};
+    try {
+      const uniqueHexIds = [...new Set(
+        orgUnitHex32Array
+          .map(id => id ? this.normalizeHex32(id) : null)
+          .filter(id => id && /^[0-9A-F]{32}$/.test(id))
+      )];
+      if (uniqueHexIds.length === 0) return {};
+
+      // Use RAWTOHEX comparison for Oracle RAW type
+      const placeholders = uniqueHexIds.map((_, i) => `:${i + 2}`).join(',');
+      const sql = `
+        SELECT
+          RAWTOHEX(ou.ORG_UNIT_ID)        AS ORG_UNIT_ID,
+          RAWTOHEX(ou.ORG_STRUCTURE_ID)   AS ORG_STRUCTURE_ID,
+          ou.ENTERPRISE_ID,
+          ou.LEVEL_CODE,
+          ou.ORG_UNIT_CODE,
+          ou.ORG_UNIT_NAME_EN,
+          ou.ORG_UNIT_NAME_AR,
+          RAWTOHEX(ou.PARENT_ORG_UNIT_ID) AS PARENT_ORG_UNIT_ID,
+          RAWTOHEX(p.ORG_UNIT_ID)         AS PARENT_ORG_UNIT_ID_FULL,
+          p.ORG_UNIT_NAME_EN              AS PARENT_ORG_UNIT_NAME_EN,
+          p.ORG_UNIT_NAME_AR              AS PARENT_ORG_UNIT_NAME_AR,
+          p.LEVEL_CODE                    AS PARENT_ORG_LEVEL_CODE
+        FROM ENT.ORG_UNITS ou
+        LEFT JOIN ENT.ORG_UNITS p
+          ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+        WHERE RAWTOHEX(ou.ORG_UNIT_ID) IN (${placeholders})
+          AND ou.ENTERPRISE_ID = :1
+      `;
+      const binds = [tenantId, ...uniqueHexIds];
+      const result = await db.executeQuery(sql, binds);
+      const orgUnits = {};
+      (result.rows || []).forEach(row => {
+        const ou = this.toSnake(row);
+        const hexId = ou.org_unit_id || (row.ORG_UNIT_ID ? this.normalizeHex32(row.ORG_UNIT_ID) : null);
+        if (!hexId) return;
+        
+        const parentId = ou.parent_org_unit_id_full ?? ou.parent_org_unit_id ?? null;
+        orgUnits[hexId] = {
+          org_unit_id: hexId,
+          org_structure_id: ou.org_structure_id,
+          enterprise_id: ou.enterprise_id,
+          level_code: ou.level_code,
+          org_unit_code: ou.org_unit_code,
+          org_unit_name_en: ou.org_unit_name_en,
+          org_unit_name_ar: ou.org_unit_name_ar,
+          parent_unit: parentId
+            ? { id: parentId, name: ou.parent_org_unit_name_en || ou.parent_org_unit_name_ar || null, level: ou.parent_org_level_code || null }
+            : null
+        };
+      });
+      return orgUnits;
+    } catch (error) {
+      console.error('Error batch fetching org units:', error);
+      return {};
+    }
+  }
+
   static async getOrgStructureDetails(structureIdHex) {
     try {
       if (!structureIdHex) return null;
@@ -355,6 +448,36 @@ class ScheduleAssignmentModel {
     } catch (error) {
       console.error('Error fetching org structure details:', error);
       return null;
+    }
+  }
+
+  static async batchGetOrgStructureDetails(structureIdHexArray) {
+    if (!structureIdHexArray || structureIdHexArray.length === 0) return {};
+    try {
+      const uniqueIds = [...new Set(structureIdHexArray.filter(id => id != null))];
+      if (uniqueIds.length === 0) return {};
+
+      const structures = {};
+      // Fetch structures in parallel for better performance
+      const structurePromises = uniqueIds.map(async (id) => {
+        try {
+          const structure = await HrOrgStructureModel.findById(id);
+          if (structure) {
+            structures[id] = {
+              id: structure.structure_id,
+              name: structure.structure_name,
+              code: structure.structure_code
+            };
+          }
+        } catch (error) {
+          console.error(`Error fetching org structure ${id}:`, error);
+        }
+      });
+      await Promise.all(structurePromises);
+      return structures;
+    } catch (error) {
+      console.error('Error batch fetching org structures:', error);
+      return {};
     }
   }
 
@@ -381,43 +504,107 @@ class ScheduleAssignmentModel {
     }
   }
 
-  static async enrichAssignment(a, tenantId) {
+  static async enrichAssignment(a, tenantId, cache = {}) {
     // Initialize org_path to empty array by default
     a.org_path = [];
     
+    // Use cached work schedule if available, otherwise fetch individually (for single assignment case)
     if (a.work_schedule_id) {
-      a.work_schedule = await this.getWorkScheduleDetails(a.work_schedule_id, tenantId);
+      if (cache.workSchedules && cache.workSchedules[a.work_schedule_id] !== undefined) {
+        a.work_schedule = cache.workSchedules[a.work_schedule_id] || null;
+      } else if (!cache.workSchedules) {
+        a.work_schedule = await this.getWorkScheduleDetails(a.work_schedule_id, tenantId);
+      }
     }
 
     if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
       const depHex = this.normalizeHex32(a.department_id);
       a.department_id = depHex;
       a.org_unit_id = depHex;
-      a.org_unit = await this.getOrgUnitDetails(depHex, tenantId);
+      
+      // Use cached org unit if available
+      if (cache.orgUnits && cache.orgUnits[depHex] !== undefined) {
+        a.org_unit = cache.orgUnits[depHex] || null;
+      } else if (!cache.orgUnits) {
+        // Fallback to individual fetch if no cache (for single assignment case)
+        a.org_unit = await this.getOrgUnitDetails(depHex, tenantId);
+      }
       
       // Add org structure information if org_unit has org_structure_id
       if (a.org_unit && a.org_unit.org_structure_id) {
-        a.org_structure = await this.getOrgStructureDetails(a.org_unit.org_structure_id);
+        if (cache.orgStructures && cache.orgStructures[a.org_unit.org_structure_id] !== undefined) {
+          a.org_structure = cache.orgStructures[a.org_unit.org_structure_id] || null;
+        } else if (!cache.orgStructures) {
+          // Fallback to individual fetch if no cache
+          a.org_structure = await this.getOrgStructureDetails(a.org_unit.org_structure_id);
+        }
       }
       
-      // Fetch org path (hierarchical path from root to department)
-      try {
-        const path = await this.fetchOrgPath(depHex);
-        a.org_path = Array.isArray(path) ? path : [];
-      } catch (error) {
-        console.error('Error fetching org path for department:', depHex, error);
-        a.org_path = [];
-      }
+      // Skip org_path fetching for list endpoints (too expensive - causes N+1 queries)
+      // Only fetch if explicitly requested (e.g., for single assignment detail view)
     } else {
       if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
     }
 
     // Add org structure information if not already set (fallback to active org structure for enterprise)
     if (!a.org_structure && tenantId) {
-      a.org_structure = await this.getActiveOrgStructureForEnterprise(tenantId);
+      if (cache.activeOrgStructure !== undefined) {
+        a.org_structure = cache.activeOrgStructure;
+      } else {
+        a.org_structure = await this.getActiveOrgStructureForEnterprise(tenantId);
+        if (cache) {
+          cache.activeOrgStructure = a.org_structure;
+        }
+      }
     }
 
     return a;
+  }
+
+  static async enrichAssignmentsBatch(assignments, tenantId) {
+    if (!assignments || assignments.length === 0) return assignments;
+
+    // Collect all unique IDs for batch fetching
+    const workScheduleIds = [];
+    const orgUnitIds = [];
+    const structureIds = new Set();
+
+    assignments.forEach(a => {
+      if (a.work_schedule_id) workScheduleIds.push(a.work_schedule_id);
+      
+      if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
+        const depHex = this.normalizeHex32(a.department_id);
+        orgUnitIds.push(depHex);
+      }
+    });
+
+    // Batch fetch all related data in parallel
+    const [workSchedules, orgUnits, activeOrgStructure] = await Promise.all([
+      this.batchGetWorkScheduleDetails(workScheduleIds, tenantId),
+      this.batchGetOrgUnitDetails(orgUnitIds, tenantId),
+      this.getActiveOrgStructureForEnterprise(tenantId)
+    ]);
+
+    // Collect structure IDs from org units
+    Object.values(orgUnits).forEach(ou => {
+      if (ou && ou.org_structure_id) {
+        structureIds.add(ou.org_structure_id);
+      }
+    });
+
+    // Batch fetch org structures
+    const orgStructures = await this.batchGetOrgStructureDetails([...structureIds]);
+
+    // Build cache object
+    const cache = {
+      workSchedules,
+      orgUnits,
+      orgStructures,
+      activeOrgStructure
+    };
+
+    // Enrich each assignment using cached data
+    return Promise.all(assignments.map(a => this.enrichAssignment(a, tenantId, cache)));
   }
 
   /* =========================
@@ -634,8 +821,20 @@ class ScheduleAssignmentModel {
       const result = await db.executeQuery(dataSql, dataBinds);
       const rows = result.rows || [];
 
-      const assignments = rows.map((r) => this.toSnake(r));
-      const enriched = await Promise.all(assignments.map((a) => this.enrichAssignment(a, filters.tenantId)));
+      const assignments = rows.map((r) => {
+        const a = this.toSnake(r);
+        // Normalize department_id for DEPARTMENT assignments
+        if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
+          a.department_id = this.normalizeHex32(a.department_id);
+          a.org_unit_id = a.department_id;
+        } else if (a.department_id) {
+          a.department_id = this.normalizeHex32(a.department_id);
+        }
+        return a;
+      });
+
+      // Use batch enrichment for better performance
+      const enriched = await this.enrichAssignmentsBatch(assignments, filters.tenantId);
 
       return pagination?.page
         ? { assignments: enriched, total }
