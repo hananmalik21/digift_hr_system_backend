@@ -14,9 +14,13 @@ import HrOrgStructureModel from '../../hr_org_structures/model/hrOrgStructureMod
  * - WORK_SCHEDULE_ID is NUMBER
  * - EMPLOYEE_ID is NUMBER (nullable)
  *
- * Key rule to avoid ORA-00932:
- * ✅ For lookups/filters on RAW: use RAWTOHEX(column) = :hex
- * ✅ For INSERT/UPDATE into RAW: bind Buffer(16)
+ * RAW/GUID rule:
+ * ✅ For lookups/filters on RAW: use RAW = HEXTORAW(:hex) OR RAWTOHEX(RAW) = :hex
+ * ✅ For INSERT/UPDATE RAW: bind Buffer(16) or use HEXTORAW(:hex) in SQL
+ *
+ * ORG PATH:
+ * ✅ ALWAYS returned for DEPARTMENT assignments (no include_org_path flag)
+ * ✅ Batch enrichment for list endpoints + safe fallback per row
  */
 class ScheduleAssignmentModel {
   static TABLE_NAME = 'ENT.TM_SCHEDULE_ASSIGNMENTS';
@@ -40,25 +44,17 @@ class ScheduleAssignmentModel {
       return result;
     } catch (error) {
       if (connection?.rollback) {
-        try {
-          await connection.rollback();
-        } catch (e) {
-          // ignore
-        }
+        try { await connection.rollback(); } catch {}
       }
       throw error;
     } finally {
       if (connection?.close) {
-        try {
-          await connection.close();
-        } catch (e) {
-          // ignore
-        }
+        try { await connection.close(); } catch {}
       }
     }
   }
 
-  // Lower-case keys for API + convert Buffers to hex32
+  // Lower-case keys + convert Buffers to hex32
   static toSnake(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date) return obj;
@@ -132,7 +128,7 @@ class ScheduleAssignmentModel {
       const sql = `
         SELECT 1
         FROM ENT.ORG_UNITS
-        WHERE RAWTOHEX(ORG_UNIT_ID) = :1
+        WHERE ORG_UNIT_ID = HEXTORAW(:1)
           AND ENTERPRISE_ID = :2
       `;
 
@@ -207,7 +203,7 @@ class ScheduleAssignmentModel {
 
     if (level === 'DEPARTMENT') {
       const depHex = this.ensureHex32(departmentId, 'department_id');
-      sql += ` AND RAWTOHEX(DEPARTMENT_ID) = :depHex`;
+      sql += ` AND DEPARTMENT_ID = HEXTORAW(:depHex)`;
       binds.depHex = depHex;
     } else {
       if (employeeId === null || employeeId === undefined) throw new ValidationError('employeeId is required');
@@ -226,7 +222,7 @@ class ScheduleAssignmentModel {
   }
 
   /* =========================
-   * Enrichment Helpers
+   * Work Schedule Enrichment
    * ========================= */
 
   static async getWorkScheduleDetails(workScheduleId, tenantId) {
@@ -270,6 +266,7 @@ class ScheduleAssignmentModel {
       `;
       const binds = [tenantId, ...uniqueIds];
       const result = await db.executeQuery(sql, binds);
+
       const schedules = {};
       (result.rows || []).forEach(row => {
         const schedule = this.toSnake(row);
@@ -282,14 +279,16 @@ class ScheduleAssignmentModel {
     }
   }
 
-  static async fetchOrgPath(orgUnitIdHex32) {
-    if (!orgUnitIdHex32) return [];
-    
-    try {
-      const idBuffer = this.hexToRawBuffer(orgUnitIdHex32);
-      if (!idBuffer) return [];
+  /* =========================
+   * Org Path / Org Unit / Org Structure
+   * ========================= */
 
-      // Traverse up from child -> parent using Oracle hierarchical query
+  // Single path (detail view + safe fallback)
+  static async fetchOrgPath(orgUnitHex32) {
+    if (!orgUnitHex32) return [];
+    try {
+      const hex = this.ensureHex32(orgUnitHex32, 'org_unit_id');
+
       const sql = `
         SELECT
           RAWTOHEX(ou.ORG_UNIT_ID) AS ORG_UNIT_ID,
@@ -299,29 +298,82 @@ class ScheduleAssignmentModel {
           RAWTOHEX(ou.PARENT_ORG_UNIT_ID) AS PARENT_ORG_UNIT_ID,
           LEVEL AS HIERARCHY_LEVEL
         FROM ENT.ORG_UNITS ou
-        START WITH ou.ORG_UNIT_ID = :1
+        START WITH ou.ORG_UNIT_ID = HEXTORAW(:1)
         CONNECT BY PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
         ORDER BY LEVEL DESC
       `;
 
-      const result = await db.executeQuery(sql, [idBuffer]);
-      
-      // Convert rows and ensure proper key mapping
-      const path = (result.rows || []).map((row) => {
-        // Handle both uppercase (from Oracle) and lowercase (already converted) keys
-        const normalized = this.toSnake(row);
+      const result = await db.executeQuery(sql, [hex]);
+
+      return (result.rows || []).map((row) => {
+        const r = this.toSnake(row);
         return {
-          level_code: normalized.level_code || row.LEVEL_CODE,
-          org_unit_id: normalized.org_unit_id || row.ORG_UNIT_ID,
-          name_en: normalized.org_unit_name_en || normalized.name_en || row.ORG_UNIT_NAME_EN,
-          name_ar: normalized.org_unit_name_ar || normalized.name_ar || row.ORG_UNIT_NAME_AR,
+          level_code: r.level_code,
+          org_unit_id: r.org_unit_id,
+          name_en: r.org_unit_name_en,
+          name_ar: r.org_unit_name_ar,
+          hierarchy_level: r.hierarchy_level
         };
       });
-      
-      return path;
     } catch (error) {
       console.error('Error fetching org path:', error);
       return [];
+    }
+  }
+
+  /**
+   * Batch paths (1 query)
+   * Returns: { [startHex32]: [ {level_code, org_unit_id, name_en, name_ar, hierarchy_level}, ... ] }
+   */
+  static async batchFetchOrgPaths(orgUnitHex32Array) {
+    if (!orgUnitHex32Array || orgUnitHex32Array.length === 0) return {};
+
+    const uniqueHex = [...new Set(
+      orgUnitHex32Array
+        .map(x => x ? this.normalizeHex32(x) : null)
+        .filter(x => x && /^[0-9A-F]{32}$/.test(x))
+    )];
+
+    if (uniqueHex.length === 0) return {};
+
+    const placeholders = uniqueHex.map((_, i) => `HEXTORAW(:${i + 1})`).join(', ');
+
+    const sql = `
+      SELECT
+        RAWTOHEX(CONNECT_BY_ROOT ou.ORG_UNIT_ID) AS START_ID,
+        RAWTOHEX(ou.ORG_UNIT_ID) AS ORG_UNIT_ID,
+        ou.ORG_UNIT_NAME_EN,
+        ou.ORG_UNIT_NAME_AR,
+        ou.LEVEL_CODE,
+        LEVEL AS HIERARCHY_LEVEL
+      FROM ENT.ORG_UNITS ou
+      START WITH ou.ORG_UNIT_ID IN (${placeholders})
+      CONNECT BY PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
+      ORDER BY RAWTOHEX(CONNECT_BY_ROOT ou.ORG_UNIT_ID), LEVEL DESC
+    `;
+
+    try {
+      const result = await db.executeQuery(sql, uniqueHex); // ✅ array binds
+
+      const grouped = {};
+      (result.rows || []).forEach((row) => {
+        const r = this.toSnake(row);
+        if (!r.start_id) return;
+
+        if (!grouped[r.start_id]) grouped[r.start_id] = [];
+        grouped[r.start_id].push({
+          level_code: r.level_code,
+          org_unit_id: r.org_unit_id,
+          name_en: r.org_unit_name_en,
+          name_ar: r.org_unit_name_ar,
+          hierarchy_level: r.hierarchy_level
+        });
+      });
+
+      return grouped;
+    } catch (error) {
+      console.error('Error batch fetching org paths:', error);
+      return {};
     }
   }
 
@@ -346,7 +398,7 @@ class ScheduleAssignmentModel {
         FROM ENT.ORG_UNITS ou
         LEFT JOIN ENT.ORG_UNITS p
           ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-        WHERE RAWTOHEX(ou.ORG_UNIT_ID) = :1
+        WHERE ou.ORG_UNIT_ID = HEXTORAW(:1)
           AND ou.ENTERPRISE_ID = :2
       `;
 
@@ -373,6 +425,9 @@ class ScheduleAssignmentModel {
     }
   }
 
+  /**
+   * ✅ FIXED: uses RAW IN list with HEXTORAW binds (avoids ORA-01722)
+   */
   static async batchGetOrgUnitDetails(orgUnitHex32Array, tenantId) {
     if (!orgUnitHex32Array || orgUnitHex32Array.length === 0) return {};
     try {
@@ -381,10 +436,12 @@ class ScheduleAssignmentModel {
           .map(id => id ? this.normalizeHex32(id) : null)
           .filter(id => id && /^[0-9A-F]{32}$/.test(id))
       )];
+
       if (uniqueHexIds.length === 0) return {};
 
-      // Use RAWTOHEX comparison for Oracle RAW type
-      const placeholders = uniqueHexIds.map((_, i) => `:${i + 2}`).join(',');
+      // ✅ compare RAW directly
+      const placeholders = uniqueHexIds.map((_, i) => `HEXTORAW(:${i + 2})`).join(',');
+
       const sql = `
         SELECT
           RAWTOHEX(ou.ORG_UNIT_ID)        AS ORG_UNIT_ID,
@@ -402,17 +459,19 @@ class ScheduleAssignmentModel {
         FROM ENT.ORG_UNITS ou
         LEFT JOIN ENT.ORG_UNITS p
           ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-        WHERE RAWTOHEX(ou.ORG_UNIT_ID) IN (${placeholders})
-          AND ou.ENTERPRISE_ID = :1
+        WHERE ou.ENTERPRISE_ID = :1
+          AND ou.ORG_UNIT_ID IN (${placeholders})
       `;
+
       const binds = [tenantId, ...uniqueHexIds];
       const result = await db.executeQuery(sql, binds);
+
       const orgUnits = {};
       (result.rows || []).forEach(row => {
         const ou = this.toSnake(row);
-        const hexId = ou.org_unit_id || (row.ORG_UNIT_ID ? this.normalizeHex32(row.ORG_UNIT_ID) : null);
+        const hexId = ou.org_unit_id;
         if (!hexId) return;
-        
+
         const parentId = ou.parent_org_unit_id_full ?? ou.parent_org_unit_id ?? null;
         orgUnits[hexId] = {
           org_unit_id: hexId,
@@ -427,6 +486,7 @@ class ScheduleAssignmentModel {
             : null
         };
       });
+
       return orgUnits;
     } catch (error) {
       console.error('Error batch fetching org units:', error);
@@ -439,7 +499,7 @@ class ScheduleAssignmentModel {
       if (!structureIdHex) return null;
       const structure = await HrOrgStructureModel.findById(structureIdHex);
       if (!structure) return null;
-      
+
       return {
         id: structure.structure_id,
         name: structure.structure_name,
@@ -458,8 +518,7 @@ class ScheduleAssignmentModel {
       if (uniqueIds.length === 0) return {};
 
       const structures = {};
-      // Fetch structures in parallel for better performance
-      const structurePromises = uniqueIds.map(async (id) => {
+      await Promise.all(uniqueIds.map(async (id) => {
         try {
           const structure = await HrOrgStructureModel.findById(id);
           if (structure) {
@@ -472,8 +531,7 @@ class ScheduleAssignmentModel {
         } catch (error) {
           console.error(`Error fetching org structure ${id}:`, error);
         }
-      });
-      await Promise.all(structurePromises);
+      }));
       return structures;
     } catch (error) {
       console.error('Error batch fetching org structures:', error);
@@ -484,15 +542,11 @@ class ScheduleAssignmentModel {
   static async getActiveOrgStructureForEnterprise(enterpriseId) {
     try {
       if (!enterpriseId) return null;
-      const result = await HrOrgStructureModel.findAll({
-        enterpriseId,
-        isActive: true
-      });
-      
-      // Get the first active org structure for this enterprise
+      const result = await HrOrgStructureModel.findAll({ enterpriseId, isActive: true });
+
       const activeStructure = Array.isArray(result) ? result[0] : (result?.structures?.[0] || null);
       if (!activeStructure) return null;
-      
+
       return {
         id: activeStructure.structure_id,
         name: activeStructure.structure_name,
@@ -504,11 +558,15 @@ class ScheduleAssignmentModel {
     }
   }
 
+  /* =========================
+   * Enrichment (ORG PATH always)
+   * ========================= */
+
   static async enrichAssignment(a, tenantId, cache = {}) {
-    // Initialize org_path to empty array by default
+    // default
     a.org_path = [];
-    
-    // Use cached work schedule if available, otherwise fetch individually (for single assignment case)
+
+    // work schedule
     if (a.work_schedule_id) {
       if (cache.workSchedules && cache.workSchedules[a.work_schedule_id] !== undefined) {
         a.work_schedule = cache.workSchedules[a.work_schedule_id] || null;
@@ -517,44 +575,46 @@ class ScheduleAssignmentModel {
       }
     }
 
+    // department assignment
     if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
       const depHex = this.normalizeHex32(a.department_id);
       a.department_id = depHex;
       a.org_unit_id = depHex;
-      
-      // Use cached org unit if available
+
+      // org unit
       if (cache.orgUnits && cache.orgUnits[depHex] !== undefined) {
         a.org_unit = cache.orgUnits[depHex] || null;
       } else if (!cache.orgUnits) {
-        // Fallback to individual fetch if no cache (for single assignment case)
         a.org_unit = await this.getOrgUnitDetails(depHex, tenantId);
       }
-      
-      // Add org structure information if org_unit has org_structure_id
+
+      // org structure
       if (a.org_unit && a.org_unit.org_structure_id) {
         if (cache.orgStructures && cache.orgStructures[a.org_unit.org_structure_id] !== undefined) {
           a.org_structure = cache.orgStructures[a.org_unit.org_structure_id] || null;
         } else if (!cache.orgStructures) {
-          // Fallback to individual fetch if no cache
           a.org_structure = await this.getOrgStructureDetails(a.org_unit.org_structure_id);
         }
       }
-      
-      // Skip org_path fetching for list endpoints (too expensive - causes N+1 queries)
-      // Only fetch if explicitly requested (e.g., for single assignment detail view)
+
+      // ✅ ORG PATH ALWAYS (batch preferred + fallback)
+      const fromBatch = cache?.orgPaths?.[depHex];
+      if (Array.isArray(fromBatch) && fromBatch.length) {
+        a.org_path = fromBatch;
+      } else {
+        a.org_path = await this.fetchOrgPath(depHex);
+      }
     } else {
       if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
     }
 
-    // Add org structure information if not already set (fallback to active org structure for enterprise)
+    // fallback active org structure
     if (!a.org_structure && tenantId) {
       if (cache.activeOrgStructure !== undefined) {
         a.org_structure = cache.activeOrgStructure;
       } else {
         a.org_structure = await this.getActiveOrgStructureForEnterprise(tenantId);
-        if (cache) {
-          cache.activeOrgStructure = a.org_structure;
-        }
+        if (cache) cache.activeOrgStructure = a.org_structure;
       }
     }
 
@@ -571,25 +631,23 @@ class ScheduleAssignmentModel {
 
     assignments.forEach(a => {
       if (a.work_schedule_id) workScheduleIds.push(a.work_schedule_id);
-      
+
       if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
-        const depHex = this.normalizeHex32(a.department_id);
-        orgUnitIds.push(depHex);
+        orgUnitIds.push(this.normalizeHex32(a.department_id));
       }
     });
 
     // Batch fetch all related data in parallel
-    const [workSchedules, orgUnits, activeOrgStructure] = await Promise.all([
+    const [workSchedules, orgUnits, activeOrgStructure, orgPaths] = await Promise.all([
       this.batchGetWorkScheduleDetails(workScheduleIds, tenantId),
       this.batchGetOrgUnitDetails(orgUnitIds, tenantId),
-      this.getActiveOrgStructureForEnterprise(tenantId)
+      this.getActiveOrgStructureForEnterprise(tenantId),
+      this.batchFetchOrgPaths(orgUnitIds) // ✅ always fetch paths for list
     ]);
 
     // Collect structure IDs from org units
     Object.values(orgUnits).forEach(ou => {
-      if (ou && ou.org_structure_id) {
-        structureIds.add(ou.org_structure_id);
-      }
+      if (ou && ou.org_structure_id) structureIds.add(ou.org_structure_id);
     });
 
     // Batch fetch org structures
@@ -600,10 +658,11 @@ class ScheduleAssignmentModel {
       workSchedules,
       orgUnits,
       orgStructures,
-      activeOrgStructure
+      activeOrgStructure,
+      orgPaths
     };
 
-    // Enrich each assignment using cached data
+    // Enrich each assignment using cached data (with fallback per row)
     return Promise.all(assignments.map(a => this.enrichAssignment(a, tenantId, cache)));
   }
 
@@ -713,7 +772,7 @@ class ScheduleAssignmentModel {
           scheduleAssignmentId: { val: scheduleAssignmentId, dir: oracledb.BIND_IN },
           tenantId: { val: data.TENANT_ID, dir: oracledb.BIND_IN },
           assignmentLevel: { val: assignmentLevel, dir: oracledb.BIND_IN },
-          departmentId: { val: departmentRaw, dir: oracledb.BIND_IN }, // RAW(16)
+          departmentId: { val: departmentRaw, dir: oracledb.BIND_IN },
           employeeId: { val: data.EMPLOYEE_ID ?? null, dir: oracledb.BIND_IN },
           workScheduleId: { val: data.WORK_SCHEDULE_ID, dir: oracledb.BIND_IN },
           effectiveStartDate: { val: effectiveStartDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -740,7 +799,10 @@ class ScheduleAssignmentModel {
 
       const ora = this.extractOraCode(error);
       if (error?.errorNum !== undefined || ora) {
-        throw new DatabaseError(ora ? `${ora}: ${error.message || String(error)}` : (error.message || 'Oracle database error'), error);
+        throw new DatabaseError(
+          ora ? `${ora}: ${error.message || String(error)}` : (error.message || 'Oracle database error'),
+          error
+        );
       }
       throw new DatabaseError('Failed to create schedule assignment', error);
     }
@@ -784,7 +846,7 @@ class ScheduleAssignmentModel {
 
       if (filters.orgUnitId !== undefined && filters.orgUnitId !== null) {
         const depHex = this.ensureHex32(filters.orgUnitId, 'org_unit_id');
-        conditions.push(`RAWTOHEX(DEPARTMENT_ID) = :${p}`); binds.push(depHex); p++;
+        conditions.push(`DEPARTMENT_ID = HEXTORAW(:${p})`); binds.push(depHex); p++;
       }
 
       if (filters.employeeId !== undefined && filters.employeeId !== null) {
@@ -823,7 +885,6 @@ class ScheduleAssignmentModel {
 
       const assignments = rows.map((r) => {
         const a = this.toSnake(r);
-        // Normalize department_id for DEPARTMENT assignments
         if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
           a.department_id = this.normalizeHex32(a.department_id);
           a.org_unit_id = a.department_id;
@@ -833,7 +894,6 @@ class ScheduleAssignmentModel {
         return a;
       });
 
-      // Use batch enrichment for better performance
       const enriched = await this.enrichAssignmentsBatch(assignments, filters.tenantId);
 
       return pagination?.page
@@ -874,7 +934,7 @@ class ScheduleAssignmentModel {
       if (!result.rows?.length) return null;
 
       const assignment = this.toSnake(result.rows[0]);
-      return await this.enrichAssignment(assignment, tenantId);
+      return await this.enrichAssignment(assignment, tenantId, {}); // org_path always
     } catch (error) {
       if (error instanceof ValidationError) throw error;
 
@@ -940,7 +1000,6 @@ class ScheduleAssignmentModel {
             ? String(data.STATUS).toUpperCase()
             : String(cur.STATUS || 'ACTIVE').toUpperCase();
 
-        // overlap check (ACTIVE only)
         if (newStatus === 'ACTIVE') {
           const overlap = await this.checkOverlap(connection, {
             tenantId,
@@ -960,7 +1019,6 @@ class ScheduleAssignmentModel {
           }
         }
 
-        // build UPDATE
         const fields = [];
         const bindParams = [];
         let p = 1;
@@ -1049,7 +1107,7 @@ class ScheduleAssignmentModel {
         if (!sel.rows?.length) throw new NotFoundError('Schedule assignment not found');
 
         const assignment = this.toSnake(sel.rows[0]);
-        return await this.enrichAssignment(assignment, tenantId);
+        return await this.enrichAssignment(assignment, tenantId, {});
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) throw error;
