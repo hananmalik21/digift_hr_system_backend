@@ -13,6 +13,7 @@ import hrOrgStructureController from './feature/hr_org_structures/controller/hrO
 import orgUnitController from './feature/org_units/controller/orgUnitController.js';
 import structureLevelController from './feature/structure_levels/controller/structureLevelController.js';
 import enterpriseController from './feature/enterprises/controller/enterpriseController.js';
+import employeeController from './feature/employees/controller/employeeController.js';
 import jobFamilyController from './feature/job_families/controller/jobFamilyController.js';
 import gradeController from './feature/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
@@ -22,6 +23,11 @@ import workPatternController from './feature/work_patterns/controller/workPatter
 import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
 import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
 import holidayController from './feature/holidays/controller/holidayController.js';
+import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
+import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
+import leaveTypeAccrualController from './feature/leave_type_accrual/controller/leaveTypeAccrualController.js';
+import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
+import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 
 
@@ -49,6 +55,9 @@ app.use('/api/departments', departmentController);
 // Enterprise routes
 app.use('/api/enterprises', enterpriseController);
 
+// Employee routes
+app.use('/api/employees', employeeController);
+
 // HR Organization Hierarchy Level routes
 app.use('/api/hr-org-hierarchy-levels', hrOrgHierarchyLevelController);
 
@@ -72,6 +81,9 @@ app.use('/api/positions', positionsController);
 // Holidays routes (must be BEFORE catch-all /api route)
 app.use('/api/holidays', holidayController);
 
+// Workforce Stats routes (must be BEFORE catch-all /api route)
+app.use('/api/workforce-stats', workforceStatsController);
+
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
 // NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
@@ -90,6 +102,14 @@ app.use('/api/tm/work-schedules', workScheduleController);
 
 // Schedule Assignments routes
 app.use('/api/tm/schedule-assignments', scheduleAssignmentController);
+
+// Time Management Stats routes
+app.use('/api/tm/stats', timeManagementStatsController);
+
+// Accrual Plans routes (Absence Management)
+app.use('/api/abs/accrual-plans', accrualPlanController);
+app.use('/api/abs/leave-types', leaveTypeController);
+app.use('/api/abs/leave-type-accrual', leaveTypeAccrualController);
 
 
 

@@ -18,7 +18,7 @@ class HrOrgStructureModel {
   static TABLE_NAME = 'ENT.HR_ORG_STRUCTURES';
 
   // -----------------------------
-  // Helpers
+  // Helpersempl
   // -----------------------------
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
