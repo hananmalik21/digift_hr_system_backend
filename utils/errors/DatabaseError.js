@@ -130,7 +130,15 @@ export class DatabaseError extends AppError {
 
     // Mutating table error (trigger reading from same table being modified)
     if (errorNum === 4091 || message.includes('ORA-04091')) {
-      return 'Cannot update schedule assignment due to a database constraint conflict. The assignment may overlap with existing assignments. Please verify the dates and try again, or contact support if the issue persists.';
+      // Try to infer context from error message or table name
+      if (message.includes('LEAVE_REQUESTS') || message.includes('LEAVE_REQUEST')) {
+        return 'Cannot update leave request due to a database constraint conflict. Please verify the dates and try again, or contact support if the issue persists.';
+      }
+      if (message.includes('SCHEDULE') || message.includes('ASSIGNMENT')) {
+        return 'Cannot update schedule assignment due to a database constraint conflict. The assignment may overlap with existing assignments. Please verify the dates and try again, or contact support if the issue persists.';
+      }
+      // Generic message for other contexts
+      return 'Cannot update the record due to a database constraint conflict. A trigger or constraint is preventing this update. Please verify your input and try again, or contact support if the issue persists.';
     }
 
     // Default database error

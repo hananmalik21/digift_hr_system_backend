@@ -26,6 +26,9 @@ import holidayController from './feature/holidays/controller/holidayController.j
 import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
 import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
 import leaveTypeAccrualController from './feature/leave_type_accrual/controller/leaveTypeAccrualController.js';
+import leaveRequestController from './feature/leave_requests/controller/leaveRequestController.js';
+import leaveContactController from './feature/leave_contacts/controller/leaveContactController.js';
+import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
 import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
@@ -35,6 +38,10 @@ import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.j
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Trust proxy - enables reading X-Forwarded-* headers (for load balancers, reverse proxies)
+// Set to true to trust all proxies, or set to specific proxy IP addresses
+app.set('trust proxy', process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1' || false);
 
 // Middleware
 app.use(cors());
@@ -110,6 +117,9 @@ app.use('/api/tm/stats', timeManagementStatsController);
 app.use('/api/abs/accrual-plans', accrualPlanController);
 app.use('/api/abs/leave-types', leaveTypeController);
 app.use('/api/abs/leave-type-accrual', leaveTypeAccrualController);
+app.use('/api/abs/leave-requests', leaveRequestController);
+app.use('/api/abs/leave-contacts', leaveContactController);
+app.use('/api/abs/leave-documents', leaveDocumentController);
 
 
 

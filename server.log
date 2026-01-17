@@ -1,0 +1,16 @@
+
+> digify-erp@1.0.0 start
+> node index.js
+
+[dotenv@17.2.3] injecting env (0) from .env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+Using project wallet (TESTDB folder)
+Wallet path: /Users/mac/Desktop/Node/Digify ERP/TESTDB
+TNS_ADMIN: /Users/mac/Desktop/Node/Digify ERP/TESTDB
+Oracle Client initialized from: /Users/mac/oracle/instantclient_23_3
+Connection pool created successfully
+✅ Database pool initialized
+
+🚀 Oracle Database API Server Started!
+📡 Server running on: http://localhost:3000
+
+📚 Available API Endpoints:
