@@ -359,7 +359,30 @@ class LeaveDocumentModel {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
 
-        if (selectResult.rows?.length) return this.convertKeysToSnakeCase(selectResult.rows[0]);
+        if (selectResult.rows?.length) {
+          const createdDocument = this.convertKeysToSnakeCase(selectResult.rows[0]);
+          
+          // Step 3: Update leave request status to PENDING when document is uploaded
+          try {
+            const updateLeaveRequestSql = `UPDATE ABS.ABS_LEAVE_REQUESTS 
+              SET REQUEST_STATUS = 'PENDING',
+                  LAST_UPDATE_DATE = :1,
+                  LAST_UPDATED_BY = :2
+              WHERE LEAVE_REQUEST_ID = :3
+                AND REQUEST_STATUS NOT IN ('APPROVED', 'REJECTED', 'CANCELLED')`;
+            
+            await connection.execute(
+              updateLeaveRequestSql,
+              [now, userId || 'SYSTEM', parseInt(data.LEAVE_REQUEST_ID)],
+              { autoCommit: false }
+            );
+          } catch (updateError) {
+            // Log error but don't fail document creation if status update fails
+            console.error('Failed to update leave request status to PENDING:', updateError);
+          }
+          
+          return createdDocument;
+        }
         throw new DatabaseError('Failed to retrieve created leave document');
       });
     } catch (error) {
