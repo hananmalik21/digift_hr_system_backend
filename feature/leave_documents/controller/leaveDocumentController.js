@@ -23,9 +23,10 @@ const upload = multer({
 });
 
 // Middleware to accept either 'file' or 'file_base64' field name
+// maxCount: 1 ensures only one file per field, but we'll take the first if multiple are sent
 const uploadFile = upload.fields([
-  { name: 'file', maxCount: 1 },
-  { name: 'file_base64', maxCount: 1 }
+  { name: 'file', maxCount: 10 }, // Allow multiple but we'll only use first
+  { name: 'file_base64', maxCount: 10 } // Allow multiple but we'll only use first
 ]);
 
 const router = express.Router();
@@ -340,10 +341,17 @@ router.post('/', uploadFile, async (req, res) => {
       return sendBadRequest(res, req, 'No file provided. Please upload a file using multipart/form-data with "file" or "file_base64" field.');
     }
 
+    // If multiple files are uploaded, only use the first one (we only allow one document per request)
     uploadedFile = req.files['file']?.[0] || req.files['file_base64']?.[0];
     
     if (!uploadedFile) {
       return sendBadRequest(res, req, 'File upload failed. Please ensure a valid file is provided.');
+    }
+    
+    // Log if multiple files were provided (for debugging)
+    const fileCount = req.files['file']?.length || req.files['file_base64']?.length || 0;
+    if (fileCount > 1) {
+      console.log(`Warning: ${fileCount} files uploaded, only using the first one.`);
     }
 
     fileBuffer = uploadedFile.buffer;
@@ -415,6 +423,15 @@ router.post('/', uploadFile, async (req, res) => {
     if (error.message?.includes('Validation failed')) {
       return sendBadRequest(res, req, error.message);
     }
+    // Log the full error for debugging
+    console.error('=== LEAVE DOCUMENT UPLOAD ERROR (CONTROLLER) ===');
+    console.error('Error:', error);
+    console.error('Error message:', error?.message);
+    console.error('Error code:', error?.code);
+    console.error('Error stack:', error?.stack);
+    console.error('Full error:', JSON.stringify(error, null, 2));
+    console.error('================================================');
+    
     sendServerError(res, req, 'Failed to upload leave document', error);
   }
 });
