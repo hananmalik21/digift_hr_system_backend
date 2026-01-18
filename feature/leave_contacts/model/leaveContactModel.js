@@ -229,11 +229,7 @@ class LeaveContactModel {
         a.CONTACT_PHONE,
         a.EMERGENCY_CONTACT_NAME,
         a.EMERGENCY_CONTACT_PHONE,
-        a.ADDITIONAL_NOTES,
-        a.CREATION_DATE,
-        a.CREATED_BY,
-        a.LAST_UPDATE_DATE,
-        a.LAST_UPDATED_BY
+        a.ADDITIONAL_NOTES
       FROM ${this.TABLE_NAME} a
       WHERE a.LEAVE_REQUEST_ID = :1`;
 
@@ -249,11 +245,81 @@ class LeaveContactModel {
   }
 
   /**
-   * Create a new leave contact
+   * Create or replace leave contact
+   * If a contact already exists for the leave request, it will be replaced
    */
   static async create(data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
+        const now = new Date();
+        const leaveRequestId = data.LEAVE_REQUEST_ID !== undefined && data.LEAVE_REQUEST_ID !== null ? parseInt(data.LEAVE_REQUEST_ID) : null;
+
+        // Check if a contact already exists for this leave request
+        const checkSql = `SELECT LEAVE_CONTACT_ID, LEAVE_CONTACT_GUID FROM ${this.TABLE_NAME} WHERE LEAVE_REQUEST_ID = :1`;
+        const checkResult = await connection.execute(checkSql, [leaveRequestId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+
+        if (checkResult.rows && checkResult.rows.length > 0) {
+          // Contact exists - update it
+          const existingContact = checkResult.rows[0];
+          const existingGuid = existingContact.LEAVE_CONTACT_GUID;
+
+          const updateSql = `UPDATE ${this.TABLE_NAME} SET
+            REASON_FOR_LEAVE = :1,
+            DELEGATED_EMPLOYEE_ID = :2,
+            ADDRESS_DURING_LEAVE = :3,
+            CONTACT_PHONE = :4,
+            EMERGENCY_CONTACT_NAME = :5,
+            EMERGENCY_CONTACT_PHONE = :6,
+            ADDITIONAL_NOTES = :7,
+            LAST_UPDATE_DATE = :8,
+            LAST_UPDATED_BY = :9
+          WHERE LEAVE_CONTACT_GUID = :10`;
+
+          const updateParams = [
+            data.REASON_FOR_LEAVE || null,
+            data.DELEGATED_EMPLOYEE_ID !== undefined && data.DELEGATED_EMPLOYEE_ID !== null ? parseInt(data.DELEGATED_EMPLOYEE_ID) : null,
+            data.ADDRESS_DURING_LEAVE || null,
+            data.CONTACT_PHONE || null,
+            data.EMERGENCY_CONTACT_NAME || null,
+            data.EMERGENCY_CONTACT_PHONE || null,
+            data.ADDITIONAL_NOTES || null,
+            now,
+            userId || 'SYSTEM',
+            existingGuid
+          ];
+
+          await connection.execute(updateSql, updateParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+
+          // Return updated contact
+          const selectSql = `SELECT 
+            a.LEAVE_CONTACT_ID,
+            RAWTOHEX(a.LEAVE_CONTACT_GUID) AS LEAVE_CONTACT_GUID,
+            a.LEAVE_REQUEST_ID,
+            a.REASON_FOR_LEAVE,
+            a.DELEGATED_EMPLOYEE_ID,
+            a.ADDRESS_DURING_LEAVE,
+            a.CONTACT_PHONE,
+            a.EMERGENCY_CONTACT_NAME,
+            a.EMERGENCY_CONTACT_PHONE,
+            a.ADDITIONAL_NOTES,
+            a.CREATION_DATE,
+            a.CREATED_BY,
+            a.LAST_UPDATE_DATE,
+            a.LAST_UPDATED_BY
+          FROM ${this.TABLE_NAME} a
+          WHERE a.LEAVE_CONTACT_GUID = :1`;
+
+          const selectResult = await connection.execute(selectSql, [existingGuid], {
+            outFormat: oracledb.OUT_FORMAT_OBJECT
+          });
+
+          if (selectResult.rows?.length) {
+            return this.convertKeysToSnakeCase(selectResult.rows[0]);
+          }
+          throw new DatabaseError('Failed to retrieve updated leave contact');
+        }
+
+        // No existing contact - create new one
         // Next ID
         let leaveContactId;
         try {
@@ -274,8 +340,6 @@ class LeaveContactModel {
         } catch (guidError) {
           console.error('Failed to generate GUID (will rely on DB trigger if exists):', guidError);
         }
-
-        const now = new Date();
 
         const insertSql = `INSERT INTO ${this.TABLE_NAME} (
           LEAVE_CONTACT_ID,
@@ -299,7 +363,7 @@ class LeaveContactModel {
         const bindParams = [
           leaveContactId,
           guidBuffer,
-          data.LEAVE_REQUEST_ID !== undefined && data.LEAVE_REQUEST_ID !== null ? parseInt(data.LEAVE_REQUEST_ID) : null,
+          leaveRequestId,
           data.REASON_FOR_LEAVE || null,
           data.DELEGATED_EMPLOYEE_ID !== undefined && data.DELEGATED_EMPLOYEE_ID !== null ? parseInt(data.DELEGATED_EMPLOYEE_ID) : null,
           data.ADDRESS_DURING_LEAVE || null,

@@ -1,5 +1,7 @@
 import express from 'express';
 import LeaveRequestModel from '../model/leaveRequestModel.js';
+import LeaveContactModel from '../../leave_contacts/model/leaveContactModel.js';
+import LeaveDocumentModel from '../../leave_documents/model/leaveDocumentModel.js';
 import {
   sendLeaveRequestList,
   sendLeaveRequest,
@@ -252,6 +254,58 @@ router.get('/', async (req, res) => {
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;
 
+    // Fetch leave contact and document information for each leave request
+    const leaveRequestsWithContactsAndDocs = await Promise.all(
+      leaveRequests.map(async (leaveRequest) => {
+        try {
+          // Fetch leave contact
+          const leaveContact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+          
+          // Fetch leave document (only one document per request, so get first from array)
+          let leaveDocument = null;
+          try {
+            const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+            if (documents && documents.length > 0) {
+              leaveDocument = documents[0];
+              // Add download URL to document info (match document view logic)
+              const baseUrl = process.env.API_BASE_URL;
+              if (baseUrl) {
+                leaveDocument.download_url = `${baseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+              } else {
+                let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+                if (protocol.includes(',')) {
+                  protocol = protocol.split(',')[0].trim();
+                }
+                let host = req.get('x-forwarded-host') || req.get('host');
+                if (!host) {
+                  host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+                }
+                if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+                  host = host.replace(':3000', '');
+                }
+                leaveDocument.download_url = `${protocol}://${host}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+              }
+            }
+          } catch (docError) {
+            console.error(`Error fetching leave document for request ${leaveRequest.leave_request_id}:`, docError);
+          }
+
+          return {
+            ...leaveRequest,
+            leave_contact_info: leaveContact || null,
+            leave_document_info: leaveDocument || null
+          };
+        } catch (error) {
+          console.error(`Error fetching leave contact for request ${leaveRequest.leave_request_id}:`, error);
+          return {
+            ...leaveRequest,
+            leave_contact_info: null,
+            leave_document_info: null
+          };
+        }
+      })
+    );
+
     // Build pagination metadata
     const paginationMeta = buildPaginationMeta(
       filters.pagination.page,
@@ -259,7 +313,7 @@ router.get('/', async (req, res) => {
       total
     );
 
-    sendLeaveRequestList(res, req, leaveRequests, {
+    sendLeaveRequestList(res, req, leaveRequestsWithContactsAndDocs, {
       total,
       pagination: paginationMeta
     });
@@ -287,7 +341,51 @@ router.get('/:guid', async (req, res) => {
       return sendNotFound(res, req, 'Leave request not found');
     }
 
-    sendLeaveRequest(res, req, leaveRequest);
+    // Fetch leave contact information
+    let leaveContact = null;
+    try {
+      leaveContact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+    } catch (error) {
+      console.error(`Error fetching leave contact for request ${leaveRequest.leave_request_id}:`, error);
+    }
+
+    // Fetch leave document information (only one document per request, so get first from array)
+    let leaveDocument = null;
+    try {
+      const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+      if (documents && documents.length > 0) {
+        leaveDocument = documents[0];
+        // Add download URL to document info (match document view logic)
+        const baseUrl = process.env.API_BASE_URL;
+        if (baseUrl) {
+          leaveDocument.download_url = `${baseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+        } else {
+          let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+          if (protocol.includes(',')) {
+            protocol = protocol.split(',')[0].trim();
+          }
+          let host = req.get('x-forwarded-host') || req.get('host');
+          if (!host) {
+            host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+          }
+          if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+            host = host.replace(':3000', '');
+          }
+          leaveDocument.download_url = `${protocol}://${host}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+        }
+      }
+    } catch (error) {
+      console.error(`Error fetching leave document for request ${leaveRequest.leave_request_id}:`, error);
+    }
+
+    // Add leave contact and document info to leave request
+    const leaveRequestWithContactAndDoc = {
+      ...leaveRequest,
+      leave_contact_info: leaveContact || null,
+      leave_document_info: leaveDocument || null
+    };
+
+    sendLeaveRequest(res, req, leaveRequestWithContactAndDoc);
   } catch (error) {
     if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
       return sendBadRequest(res, req, error.message);

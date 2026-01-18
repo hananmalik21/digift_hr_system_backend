@@ -103,11 +103,31 @@ export function sendLeaveRequestList(res, req, leaveRequests, meta = {}) {
 
   const convertedData = convertKeysToSnakeCase(leaveRequests);
   
+  // Wrap each leave request in a "leave_details" object
+  // Separate leave_contact_info and leave_document_info from leave_details
+  const wrappedData = Array.isArray(convertedData)
+    ? convertedData.map(item => {
+        const { leave_contact_info, leave_document_info, ...leaveDetails } = item;
+        return {
+          leave_details: leaveDetails,
+          leave_contact_info: leave_contact_info || null,
+          leave_document_info: leave_document_info || null
+        };
+      })
+    : (() => {
+        const { leave_contact_info, leave_document_info, ...leaveDetails } = convertedData;
+        return [{
+          leave_details: leaveDetails,
+          leave_contact_info: leave_contact_info || null,
+          leave_document_info: leave_document_info || null
+        }];
+      })();
+  
   res.json({
     success: true,
     message: 'Leave requests retrieved successfully',
     meta: responseMeta,
-    data: convertedData
+    data: wrappedData
   });
 }
 
@@ -120,11 +140,21 @@ export function sendLeaveRequestList(res, req, leaveRequests, meta = {}) {
 export function sendLeaveRequest(res, req, leaveRequest) {
   const convertedData = convertKeysToSnakeCase(leaveRequest);
   
+  // Separate leave_contact_info and leave_document_info from leave_details
+  const { leave_contact_info, leave_document_info, ...leaveDetails } = convertedData;
+  
+  // Wrap leave request in a "leave_details" object
+  const wrappedData = {
+    leave_details: leaveDetails,
+    leave_contact_info: leave_contact_info || null,
+    leave_document_info: leave_document_info || null
+  };
+  
   res.json({
     success: true,
     message: 'Leave request retrieved successfully',
     meta: generateBaseMetadata(req, {}),
-    data: convertedData
+    data: [wrappedData]
   });
 }
 
@@ -137,11 +167,14 @@ export function sendLeaveRequest(res, req, leaveRequest) {
 export function sendCreated(res, req, leaveRequest) {
   const convertedData = convertKeysToSnakeCase(leaveRequest);
   
+  // Wrap leave request in a "leave_details" object
+  const wrappedData = { leave_details: convertedData };
+  
   res.status(201).json({
     success: true,
     message: 'Leave request created successfully',
     meta: generateBaseMetadata(req, {}),
-    data: convertedData
+    data: [wrappedData]
   });
 }
 
@@ -154,11 +187,14 @@ export function sendCreated(res, req, leaveRequest) {
 export function sendUpdated(res, req, leaveRequest) {
   const convertedData = convertKeysToSnakeCase(leaveRequest);
   
+  // Wrap leave request in a "leave_details" object
+  const wrappedData = { leave_details: convertedData };
+  
   res.json({
     success: true,
     message: 'Leave request updated successfully',
     meta: generateBaseMetadata(req, {}),
-    data: convertedData
+    data: [wrappedData]
   });
 }
 

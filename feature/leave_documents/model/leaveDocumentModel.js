@@ -182,15 +182,7 @@ class LeaveDocumentModel {
         a.DOCUMENT_ID,
         RAWTOHEX(a.DOCUMENT_GUID) AS DOCUMENT_GUID,
         a.LEAVE_REQUEST_ID,
-        a.FILE_NAME,
-        a.FILE_TYPE,
-        a.FILE_SIZE_MB,
-        a.FILE_URL,
-        a.FILE_HASH,
-        a.CREATION_DATE,
-        a.CREATED_BY,
-        a.LAST_UPDATE_DATE,
-        a.LAST_UPDATED_BY
+        a.FILE_NAME
       FROM ${this.TABLE_NAME} a
       WHERE a.LEAVE_REQUEST_ID = :1
       ORDER BY a.CREATION_DATE DESC`;
@@ -266,9 +258,30 @@ class LeaveDocumentModel {
    * data: { LEAVE_REQUEST_ID, FILE_CONTENT(Buffer), FILE_NAME, FILE_TYPE?, FILE_SIZE?, FILE_HASH? }
    * - FILE_SIZE_MB will be computed from FILE_CONTENT length
    */
+  /**
+   * Create or replace leave document
+   * If a document already exists for the leave request, it will be replaced
+   */
   static async create(data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
+        const now = new Date();
+        const leaveRequestId = parseInt(data.LEAVE_REQUEST_ID);
+
+        // Check if a document already exists for this leave request
+        const checkSql = `SELECT DOCUMENT_ID, DOCUMENT_GUID FROM ${this.TABLE_NAME} WHERE LEAVE_REQUEST_ID = :1`;
+        const checkResult = await connection.execute(checkSql, [leaveRequestId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+
+        if (checkResult.rows && checkResult.rows.length > 0) {
+          // Document exists - delete the old one (including BLOB)
+          const existingDocument = checkResult.rows[0];
+          const existingGuid = existingDocument.DOCUMENT_GUID;
+
+          const deleteSql = `DELETE FROM ${this.TABLE_NAME} WHERE DOCUMENT_GUID = :1`;
+          await connection.execute(deleteSql, [existingGuid], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        }
+
+        // Create new document (or replace the deleted one)
         // Determine next DOCUMENT_ID (sequence preferred)
         let documentId;
         try {
@@ -297,8 +310,6 @@ class LeaveDocumentModel {
 
         const fileSizeBytes = data.FILE_SIZE ? parseInt(data.FILE_SIZE) : fileBuffer.length;
         const fileSizeMb = Math.round((fileSizeBytes / (1024 * 1024)) * 100) / 100; // 2 decimals
-
-        const now = new Date();
 
         const insertSql = `INSERT INTO ${this.TABLE_NAME} (
           DOCUMENT_ID,
