@@ -280,6 +280,57 @@ router.get('/:guid', async (req, res) => {
 });
 
 /**
+ * @route   GET /api/abs/leave-documents/:guid/preview
+ * @desc    Preview a leave document file in browser (inline display)
+ */
+router.get('/:guid/preview', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const document = await LeaveDocumentModel.findBlobByGuid(guidHex32);
+
+    if (!document) {
+      return sendNotFound(res, req, 'Leave document not found');
+    }
+
+    // Set headers for inline preview (view in browser)
+    const contentType = document.fileType || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${document.fileName || 'document'}"`);
+    
+    // Convert FILE_SIZE_MB to bytes for Content-Length
+    const fileSizeBytes = document.fileSizeMb ? Math.round(document.fileSizeMb * 1024 * 1024) : 0;
+    if (fileSizeBytes > 0) {
+      res.setHeader('Content-Length', fileSizeBytes);
+    }
+    
+    // Cache control for preview
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    
+    // Add CORS headers if needed for cross-origin preview
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    // Stream the BLOB/Buffer to response
+    if (document.fileContent instanceof Buffer) {
+      res.send(document.fileContent);
+    } else {
+      // If it's a LOB, handle streaming
+      res.send(document.fileContent);
+    }
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to preview leave document', error);
+  }
+});
+
+/**
  * @route   GET /api/abs/leave-documents/:guid/download
  * @desc    Download a leave document file (streams BLOB from database)
  */

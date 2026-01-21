@@ -1,25 +1,38 @@
 import db from '../../../config/db.js';
 import oracledb from 'oracledb';
-import { DatabaseError, NotFoundError, ValidationError } from '../../../utils/errors/index.js';
+import { DatabaseError } from '../../../utils/errors/index.js';
+import { generateSysGuid } from '../../../utils/guidUtils.js';
 
 /**
  * Employee Model
  * Handles all database operations for EMPL.EMPLOYEES table
+ *
+ * Table columns (confirmed):
+ * - EMPLOYEE_ID (PK)
+ * - EMPLOYEE_GUID (RAW(16))
+ * - ENTERPRISE_ID
+ * - FIRST_NAME, MIDDLE_NAME, LAST_NAME
+ * - FIRST_NAME_AR, MIDDLE_NAME_AR, LAST_NAME_AR
+ * - EMAIL, PHONE_NUMBER, MOBILE_NUMBER
+ * - DATE_OF_BIRTH
+ * - STATUS
+ * - IS_ACTIVE (Y/N)
+ * - CREATION_DATE, CREATED_BY
+ * - LAST_UPDATE_DATE, LAST_UPDATED_BY
  */
 class EmployeeModel {
   static TABLE_NAME = 'EMPL.EMPLOYEES';
+  static SEQ_NAME = 'EMPL.EMPLOYEES_SEQ';
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
-   * @param {*} obj - Object or array to convert
-   * @returns {*} Converted object or array
    */
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date || obj instanceof Buffer) return obj;
     if (typeof obj !== 'object') return obj;
     if (Array.isArray(obj)) return obj.map(item => this.convertKeysToSnakeCase(item));
-    
+
     const converted = {};
     for (const [key, value] of Object.entries(obj)) {
       const newKey = key.toLowerCase();
@@ -37,51 +50,29 @@ class EmployeeModel {
   }
 
   /**
-   * Helper method to execute queries with proper connection handling
+   * Helper method to execute queries (non-transaction)
    */
   static async executeQuery(query, bindParams = [], options = {}) {
     const result = await db.executeQuery(query, bindParams, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
       ...options
     });
-    
-    // Convert keys to lowercase snake_case
+
     if (result.rows) {
       result.rows = this.convertKeysToSnakeCase(result.rows);
     }
-    
+
     return result;
   }
 
   /**
-   * Convert date string to Date object for Oracle
-   * @param {string|Date|null} dateValue - Date string or Date object
-   * @returns {Date|null} Date object or null
-   */
-  static convertToDate(dateValue) {
-    if (!dateValue) return null;
-    if (dateValue instanceof Date) return dateValue;
-    if (typeof dateValue === 'string') {
-      const parsed = new Date(dateValue);
-      if (isNaN(parsed.getTime())) {
-        return null;
-      }
-      return parsed;
-    }
-    return null;
-  }
-
-  /**
-   * Helper method to execute queries with transaction support
+   * Helper method to execute operations within a transaction
    */
   static async executeWithTransaction(callback) {
     let connection;
-    
     try {
       connection = await db.getConnection();
-      
       const result = await callback(connection);
-      
       await connection.commit();
       return result;
     } catch (error) {
@@ -105,267 +96,270 @@ class EmployeeModel {
   }
 
   /**
-   * Get all employees
-   * @param {Object} filters - Optional filters (enterpriseId, isActive, status, email, name, pagination)
-   * @param {Object} filters.pagination - Pagination options {page, pageSize}
-   * @returns {Promise<Object>} Object with {employees, total}
+   * Convert date string to Date object
+   */
+  static convertToDate(dateValue) {
+    if (!dateValue) return null;
+    if (dateValue instanceof Date) return dateValue;
+    const date = new Date(dateValue);
+    return isNaN(date.getTime()) ? null : date;
+  }
+
+  /**
+   * Normalize boolean/Y/N to 'Y'/'N'
+   */
+  static toYN(v, defaultValue = 'Y') {
+    if (v === null || v === undefined) return defaultValue;
+    if (typeof v === 'string') {
+      const s = v.trim().toUpperCase();
+      if (s === 'Y' || s === 'YES' || s === 'TRUE' || s === '1') return 'Y';
+      if (s === 'N' || s === 'NO' || s === 'FALSE' || s === '0') return 'N';
+      return defaultValue;
+    }
+    if (typeof v === 'boolean') return v ? 'Y' : 'N';
+    if (typeof v === 'number') return v === 1 ? 'Y' : 'N';
+    return defaultValue;
+  }
+
+  /**
+   * Find all employees with filters and pagination
+   *
+   * Accepted filter keys:
+   * - enterprise_id OR enterpriseId
+   * - status
+   * - is_active OR isActive (boolean/string)
+   * - email
+   * - name
+   * - pagination: { page, pageSize }
    */
   static async findAll(filters = {}) {
     try {
-      let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
-      let dataQuery = `SELECT 
-        EMPLOYEE_ID,
-        RAWTOHEX(EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        ENTERPRISE_ID,
-        FIRST_NAME,
-        MIDDLE_NAME,
-        LAST_NAME,
-        FIRST_NAME_AR,
-        MIDDLE_NAME_AR,
-        LAST_NAME_AR,
-        EMAIL,
-        PHONE_NUMBER,
-        MOBILE_NUMBER,
-        DATE_OF_BIRTH,
-        STATUS,
-        IS_ACTIVE,
-        CREATED_AT,
-        CREATED_BY,
-        UPDATED_AT,
-        UPDATED_BY
-      FROM ${this.TABLE_NAME}`;
-
       const conditions = [];
       const bindParams = [];
       let paramIndex = 1;
 
-      if (filters.enterpriseId) {
-        conditions.push(`ENTERPRISE_ID = :${paramIndex}`);
-        bindParams.push(filters.enterpriseId);
-        paramIndex++;
-      }
+      // Base queries
+      let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} e WHERE 1=1`;
 
-      if (filters.isActive !== undefined) {
-        conditions.push(`IS_ACTIVE = :${paramIndex}`);
-        bindParams.push(filters.isActive ? 'Y' : 'N');
+      let dataQuery = `SELECT 
+        e.EMPLOYEE_ID,
+        RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.ENTERPRISE_ID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
+        e.PHONE_NUMBER,
+        e.MOBILE_NUMBER,
+        e.DATE_OF_BIRTH,
+        e.STATUS,
+        e.IS_ACTIVE,
+        e.CREATED_BY,
+        e.CREATION_DATE,
+        e.LAST_UPDATED_BY,
+        e.LAST_UPDATE_DATE
+      FROM ${this.TABLE_NAME} e WHERE 1=1`;
+
+      // ENTERPRISE filter (fix: accept both keys)
+      const enterpriseId = filters.enterprise_id ?? filters.enterpriseId;
+      if (enterpriseId !== undefined && enterpriseId !== null && enterpriseId !== '' && !isNaN(Number(enterpriseId))) {
+        conditions.push(`e.ENTERPRISE_ID = :${paramIndex}`);
+        bindParams.push(Number(enterpriseId));
         paramIndex++;
       }
 
       if (filters.status) {
-        conditions.push(`STATUS = :${paramIndex}`);
-        bindParams.push(String(filters.status).toUpperCase());
+        conditions.push(`UPPER(e.STATUS) = UPPER(:${paramIndex})`);
+        bindParams.push(String(filters.status));
+        paramIndex++;
+      }
+
+      const isActive = filters.is_active ?? filters.isActive;
+      if (isActive !== undefined) {
+        conditions.push(`e.IS_ACTIVE = :${paramIndex}`);
+        bindParams.push(this.toYN(isActive, 'Y'));
         paramIndex++;
       }
 
       if (filters.email) {
-        conditions.push(`LOWER(EMAIL) LIKE LOWER(:${paramIndex})`);
-        bindParams.push(`%${String(filters.email)}%`);
+        conditions.push(`UPPER(e.EMAIL) LIKE UPPER(:${paramIndex})`);
+        bindParams.push(`%${filters.email}%`);
         paramIndex++;
       }
 
       if (filters.name) {
-        conditions.push(`(LOWER(FIRST_NAME) LIKE LOWER(:${paramIndex}) OR LOWER(LAST_NAME) LIKE LOWER(:${paramIndex}) OR LOWER(MIDDLE_NAME) LIKE LOWER(:${paramIndex}))`);
-        bindParams.push(`%${String(filters.name)}%`);
-        paramIndex++;
+        conditions.push(`(
+          UPPER(e.FIRST_NAME) LIKE UPPER(:${paramIndex}) OR
+          UPPER(e.LAST_NAME) LIKE UPPER(:${paramIndex + 1}) OR
+          UPPER(e.MIDDLE_NAME) LIKE UPPER(:${paramIndex + 2})
+        )`);
+        const like = `%${filters.name}%`;
+        bindParams.push(like, like, like);
+        paramIndex += 3;
       }
 
-      const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+      const whereClause = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : '';
       countQuery += whereClause;
       dataQuery += whereClause;
 
-      dataQuery += ` ORDER BY CREATED_AT DESC, EMPLOYEE_ID DESC`;
+      // FIX: order by CREATION_DATE (not CREATED_DATE)
+      dataQuery += ` ORDER BY e.CREATION_DATE DESC NULLS LAST, e.EMPLOYEE_ID DESC`;
 
+      // Pagination
       const pagination = filters.pagination;
       let totalCount = 0;
-      
+
       const countBindParams = [...bindParams];
       const dataBindParams = [...bindParams];
-      
+
       if (pagination && pagination.page && pagination.pageSize) {
         const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows && countResult.rows.length > 0 ? countResult.rows[0].total : 0;
+        totalCount =
+          countResult.rows && countResult.rows.length > 0
+            ? Number(countResult.rows[0].total || 0)
+            : 0;
 
-        const offset = (pagination.page - 1) * pagination.pageSize;
+        const offset = (Number(pagination.page) - 1) * Number(pagination.pageSize);
         dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
         dataBindParams.push(offset);
-        dataBindParams.push(pagination.pageSize);
+        dataBindParams.push(Number(pagination.pageSize));
       }
 
       const result = await this.executeQuery(dataQuery, dataBindParams);
       const employees = result.rows || [];
 
       if (pagination && pagination.page && pagination.pageSize) {
-        return {
-          employees: employees,
-          total: totalCount
-        };
+        return { employees, total: totalCount };
       }
 
       return employees;
     } catch (error) {
-      console.error('Error in findAll:', error);
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
+      console.error('[EmployeeModel.findAll] Error:', {
+        errorType: error?.constructor?.name,
+        message: error?.message,
+        errorNum: error?.errorNum,
+        code: error?.code,
+        stack: error?.stack?.split('\n').slice(0, 6)
+      });
+
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
-      throw new DatabaseError(`Failed to fetch employees: ${error.message}`, error);
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to fetch employees', error);
     }
   }
 
   /**
-   * Get a single employee by ID
-   * @param {number} enterpriseId - Enterprise ID
-   * @param {number} employeeId - Employee ID
-   * @returns {Promise<Object|null>} Employee object or null
+   * Find employee by GUID (hex string)
    */
-  static async findById(enterpriseId, employeeId) {
+  static async findByGuidHex(guid) {
     try {
-      const query = `SELECT 
-        EMPLOYEE_ID,
-        RAWTOHEX(EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        ENTERPRISE_ID,
-        FIRST_NAME,
-        MIDDLE_NAME,
-        LAST_NAME,
-        FIRST_NAME_AR,
-        MIDDLE_NAME_AR,
-        LAST_NAME_AR,
-        EMAIL,
-        PHONE_NUMBER,
-        MOBILE_NUMBER,
-        DATE_OF_BIRTH,
-        STATUS,
-        IS_ACTIVE,
-        CREATED_AT,
-        CREATED_BY,
-        UPDATED_AT,
-        UPDATED_BY
-      FROM ${this.TABLE_NAME}
-      WHERE ENTERPRISE_ID = :1 AND EMPLOYEE_ID = :2`;
-
-      const result = await this.executeQuery(query, [enterpriseId, employeeId]);
-      
-      if (result.rows && result.rows.length > 0) {
-        return result.rows[0];
-      }
-      return null;
-    } catch (error) {
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      
-      if (error instanceof DatabaseError) {
-        throw error;
-      }
-      
-      throw new DatabaseError('Failed to fetch employee', error);
-    }
-  }
-
-  /**
-   * Get a single employee by GUID (32-char hex)
-   * @param {string} guidHex32 - Employee GUID as 32-char hex string
-   * @returns {Promise<Object|null>} Employee object or null
-   */
-  static async findByGuidHex(guidHex32) {
-    try {
-      const hex = String(guidHex32 || '').trim().replace(/-/g, '').toUpperCase();
-      if (hex.length !== 32) {
-        throw new ValidationError('GUID must be 32-character hex string', { guid: guidHex32 });
-      }
+      const guidHex = String(guid).trim().toUpperCase().replace(/-/g, '');
+      if (!/^[0-9A-F]{32}$/.test(guidHex)) return null;
 
       const query = `SELECT 
-        EMPLOYEE_ID,
-        RAWTOHEX(EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        ENTERPRISE_ID,
-        FIRST_NAME,
-        MIDDLE_NAME,
-        LAST_NAME,
-        FIRST_NAME_AR,
-        MIDDLE_NAME_AR,
-        LAST_NAME_AR,
-        EMAIL,
-        PHONE_NUMBER,
-        MOBILE_NUMBER,
-        DATE_OF_BIRTH,
-        STATUS,
-        IS_ACTIVE,
-        CREATED_AT,
-        CREATED_BY,
-        UPDATED_AT,
-        UPDATED_BY
-      FROM ${this.TABLE_NAME}
-      WHERE RAWTOHEX(EMPLOYEE_GUID) = :1`;
+        e.EMPLOYEE_ID,
+        RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.ENTERPRISE_ID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
+        e.PHONE_NUMBER,
+        e.MOBILE_NUMBER,
+        e.DATE_OF_BIRTH,
+        e.STATUS,
+        e.IS_ACTIVE,
+        e.CREATED_BY,
+        e.CREATION_DATE,
+        e.LAST_UPDATED_BY,
+        e.LAST_UPDATE_DATE
+      FROM ${this.TABLE_NAME} e
+      WHERE RAWTOHEX(e.EMPLOYEE_GUID) = :1`;
 
-      const result = await this.executeQuery(query, [hex]);
-      
-      if (result.rows && result.rows.length > 0) {
-        return result.rows[0];
-      }
-      return null;
+      const result = await this.executeQuery(query, [guidHex]);
+      return result.rows && result.rows.length > 0 ? result.rows[0] : null;
     } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      
-      if (error instanceof DatabaseError) {
-        throw error;
-      }
-      
+      if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to fetch employee by GUID', error);
     }
   }
 
   /**
+   * Find employee by ID
+   */
+  static async findById(enterpriseId, employeeId) {
+    try {
+      const query = `SELECT 
+        e.EMPLOYEE_ID,
+        RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.ENTERPRISE_ID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
+        e.PHONE_NUMBER,
+        e.MOBILE_NUMBER,
+        e.DATE_OF_BIRTH,
+        e.STATUS,
+        e.IS_ACTIVE,
+        e.CREATED_BY,
+        e.CREATION_DATE,
+        e.LAST_UPDATED_BY,
+        e.LAST_UPDATE_DATE
+      FROM ${this.TABLE_NAME} e
+      WHERE e.ENTERPRISE_ID = :1 AND e.EMPLOYEE_ID = :2`;
+
+      const result = await this.executeQuery(query, [Number(enterpriseId), Number(employeeId)]);
+      return result.rows && result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+      }
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to fetch employee by ID', error);
+    }
+  }
+
+  /**
    * Create a new employee
-   * @param {Object} data - Employee data
-   * @param {number} enterpriseId - Enterprise ID
-   * @param {string} userId - User ID for audit fields
-   * @returns {Promise<Object>} Created employee
    */
   static async create(data, enterpriseId, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        // Get next EMPLOYEE_ID from sequence or use provided ID
+        // 1) Get next EMPLOYEE_ID
         let employeeId;
-        const useSeq = String(data.use_seq || 'N').toUpperCase() === 'Y';
-        
-        if (useSeq) {
-          try {
-            const seqQuery = `SELECT EMPL.SEQ_EMPLOYEES.NEXTVAL AS NEXT_ID FROM DUAL`;
-            const seqResult = await connection.execute(seqQuery, [], {
-              outFormat: oracledb.OUT_FORMAT_OBJECT
-            });
-            employeeId = seqResult.rows[0].NEXT_ID;
-          } catch (seqError) {
-            // If sequence doesn't exist, get max ID and increment
-            const maxQuery = `SELECT NVL(MAX(EMPLOYEE_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
-            const maxResult = await connection.execute(maxQuery, [], {
-              outFormat: oracledb.OUT_FORMAT_OBJECT
-            });
-            employeeId = maxResult.rows[0].NEXT_ID;
-          }
-        } else {
-          if (!data.EMPLOYEE_ID) {
-            throw new ValidationError('EMPLOYEE_ID is required (or pass use_seq="Y" if you have a sequence)');
-          }
-          employeeId = Number(data.EMPLOYEE_ID);
+        try {
+          const seqQuery = `SELECT ${this.SEQ_NAME}.NEXTVAL AS NEXT_ID FROM DUAL`;
+          const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+          employeeId = seqResult.rows[0].NEXT_ID;
+        } catch (seqError) {
+          const maxQuery = `SELECT NVL(MAX(EMPLOYEE_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME} WHERE ENTERPRISE_ID = :1`;
+          const maxResult = await connection.execute(maxQuery, [Number(enterpriseId)], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+          employeeId = maxResult.rows[0].NEXT_ID;
         }
 
+        // 2) Generate GUID (RAW buffer)
+        const { buffer: guidBuffer } = await generateSysGuid(connection);
+
+        // 3) Insert
         const now = new Date();
         const query = `INSERT INTO ${this.TABLE_NAME} (
           EMPLOYEE_ID,
+          EMPLOYEE_GUID,
           ENTERPRISE_ID,
           FIRST_NAME,
           MIDDLE_NAME,
@@ -379,95 +373,87 @@ class EmployeeModel {
           DATE_OF_BIRTH,
           STATUS,
           IS_ACTIVE,
-          CREATED_AT,
-          CREATED_BY
+          CREATED_BY,
+          CREATION_DATE,
+          LAST_UPDATED_BY,
+          LAST_UPDATE_DATE
         ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16
+          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18, :19
         )`;
 
         const bindParams = [
           employeeId,
-          enterpriseId,
-          String(data.FIRST_NAME || ''),
-          data.MIDDLE_NAME || null,
-          String(data.LAST_NAME || ''),
-          data.FIRST_NAME_AR || null,
-          data.MIDDLE_NAME_AR || null,
-          data.LAST_NAME_AR || null,
-          String(data.EMAIL || ''),
-          String(data.PHONE_NUMBER || ''),
-          data.MOBILE_NUMBER || null,
+          guidBuffer,
+          Number(enterpriseId),
+          data.FIRST_NAME ?? null,
+          data.MIDDLE_NAME ?? null,
+          data.LAST_NAME ?? null,
+          data.FIRST_NAME_AR ?? null,
+          data.MIDDLE_NAME_AR ?? null,
+          data.LAST_NAME_AR ?? null,
+          data.EMAIL ?? null,
+          data.PHONE_NUMBER ?? null,
+          data.MOBILE_NUMBER ?? null,
           this.convertToDate(data.DATE_OF_BIRTH),
-          String(data.STATUS || 'DRAFT').toUpperCase(),
-          String(data.IS_ACTIVE ?? 'Y').toUpperCase(),
+          (data.STATUS ?? 'DRAFT'),
+          this.toYN(data.IS_ACTIVE, 'Y'),
+          userId || 'SYSTEM',
           now,
-          userId || 'SYSTEM'
+          userId || 'SYSTEM',
+          now
         ];
 
-        await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
-        // Fetch and return the created record using the same connection
+        // 4) Return created row
         const selectQuery = `SELECT 
-          EMPLOYEE_ID,
-          RAWTOHEX(EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-          ENTERPRISE_ID,
-          FIRST_NAME,
-          MIDDLE_NAME,
-          LAST_NAME,
-          FIRST_NAME_AR,
-          MIDDLE_NAME_AR,
-          LAST_NAME_AR,
-          EMAIL,
-          PHONE_NUMBER,
-          MOBILE_NUMBER,
-          DATE_OF_BIRTH,
-          STATUS,
-          IS_ACTIVE,
-          CREATED_AT,
-          CREATED_BY,
-          UPDATED_AT,
-          UPDATED_BY
-        FROM ${this.TABLE_NAME}
-        WHERE ENTERPRISE_ID = :1 AND EMPLOYEE_ID = :2`;
+          e.EMPLOYEE_ID,
+          RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.ENTERPRISE_ID,
+          e.FIRST_NAME,
+          e.MIDDLE_NAME,
+          e.LAST_NAME,
+          e.FIRST_NAME_AR,
+          e.MIDDLE_NAME_AR,
+          e.LAST_NAME_AR,
+          e.EMAIL,
+          e.PHONE_NUMBER,
+          e.MOBILE_NUMBER,
+          e.DATE_OF_BIRTH,
+          e.STATUS,
+          e.IS_ACTIVE,
+          e.CREATED_BY,
+          e.CREATION_DATE,
+          e.LAST_UPDATED_BY,
+          e.LAST_UPDATE_DATE
+        FROM ${this.TABLE_NAME} e
+        WHERE e.EMPLOYEE_ID = :1 AND e.ENTERPRISE_ID = :2`;
 
-        const selectResult = await connection.execute(selectQuery, [enterpriseId, employeeId], {
+        const selectResult = await connection.execute(selectQuery, [employeeId, Number(enterpriseId)], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
 
-        if (selectResult.rows && selectResult.rows.length > 0) {
-          return this.convertKeysToSnakeCase(selectResult.rows[0]);
-        }
-        
-        throw new Error(`Failed to retrieve created employee with ID: ${employeeId}`);
+        return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
+      console.error('[EmployeeModel.create] Error:', {
+        errorType: error?.constructor?.name,
+        message: error?.message,
+        errorNum: error?.errorNum,
+        code: error?.code,
+        stack: error?.stack?.split('\n').slice(0, 6)
+      });
+
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      
-      if (error instanceof DatabaseError) {
-        throw error;
-      }
-      
+      if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to create employee', error);
     }
   }
 
   /**
    * Update an existing employee
-   * @param {number} enterpriseId - Enterprise ID
-   * @param {number} employeeId - Employee ID
-   * @param {Object} data - Updated data
-   * @param {string} userId - User ID for audit fields
-   * @returns {Promise<Object>} Updated employee
    */
   static async update(enterpriseId, employeeId, data, userId) {
     try {
@@ -476,118 +462,123 @@ class EmployeeModel {
         const bindParams = [];
         let paramIndex = 1;
 
-        const allowed = [
-          'FIRST_NAME', 'MIDDLE_NAME', 'LAST_NAME',
-          'FIRST_NAME_AR', 'MIDDLE_NAME_AR', 'LAST_NAME_AR',
-          'EMAIL', 'PHONE_NUMBER', 'MOBILE_NUMBER',
-          'DATE_OF_BIRTH', 'STATUS', 'IS_ACTIVE'
-        ];
-
-        for (const field of allowed) {
-          if (data[field] === undefined) continue;
-          
-          if (field === 'DATE_OF_BIRTH') {
-            updateFields.push(`${field} = :${paramIndex}`);
-            bindParams.push(this.convertToDate(data[field]));
-            paramIndex++;
-            continue;
-          }
-          
-          if (field === 'STATUS' || field === 'IS_ACTIVE') {
-            updateFields.push(`${field} = :${paramIndex}`);
-            bindParams.push(String(data[field]).toUpperCase());
-            paramIndex++;
-            continue;
-          }
-          
-          updateFields.push(`${field} = :${paramIndex}`);
-          bindParams.push(data[field]);
+        if (data.FIRST_NAME !== undefined) {
+          updateFields.push(`FIRST_NAME = :${paramIndex}`);
+          bindParams.push(data.FIRST_NAME);
+          paramIndex++;
+        }
+        if (data.MIDDLE_NAME !== undefined) {
+          updateFields.push(`MIDDLE_NAME = :${paramIndex}`);
+          bindParams.push(data.MIDDLE_NAME);
+          paramIndex++;
+        }
+        if (data.LAST_NAME !== undefined) {
+          updateFields.push(`LAST_NAME = :${paramIndex}`);
+          bindParams.push(data.LAST_NAME);
+          paramIndex++;
+        }
+        if (data.FIRST_NAME_AR !== undefined) {
+          updateFields.push(`FIRST_NAME_AR = :${paramIndex}`);
+          bindParams.push(data.FIRST_NAME_AR);
+          paramIndex++;
+        }
+        if (data.MIDDLE_NAME_AR !== undefined) {
+          updateFields.push(`MIDDLE_NAME_AR = :${paramIndex}`);
+          bindParams.push(data.MIDDLE_NAME_AR);
+          paramIndex++;
+        }
+        if (data.LAST_NAME_AR !== undefined) {
+          updateFields.push(`LAST_NAME_AR = :${paramIndex}`);
+          bindParams.push(data.LAST_NAME_AR);
+          paramIndex++;
+        }
+        if (data.EMAIL !== undefined) {
+          updateFields.push(`EMAIL = :${paramIndex}`);
+          bindParams.push(data.EMAIL);
+          paramIndex++;
+        }
+        if (data.PHONE_NUMBER !== undefined) {
+          updateFields.push(`PHONE_NUMBER = :${paramIndex}`);
+          bindParams.push(data.PHONE_NUMBER);
+          paramIndex++;
+        }
+        if (data.MOBILE_NUMBER !== undefined) {
+          updateFields.push(`MOBILE_NUMBER = :${paramIndex}`);
+          bindParams.push(data.MOBILE_NUMBER);
+          paramIndex++;
+        }
+        if (data.DATE_OF_BIRTH !== undefined) {
+          updateFields.push(`DATE_OF_BIRTH = :${paramIndex}`);
+          bindParams.push(this.convertToDate(data.DATE_OF_BIRTH));
+          paramIndex++;
+        }
+        if (data.STATUS !== undefined) {
+          updateFields.push(`STATUS = :${paramIndex}`);
+          bindParams.push(data.STATUS);
+          paramIndex++;
+        }
+        if (data.IS_ACTIVE !== undefined) {
+          updateFields.push(`IS_ACTIVE = :${paramIndex}`);
+          bindParams.push(this.toYN(data.IS_ACTIVE, 'Y'));
           paramIndex++;
         }
 
         if (updateFields.length === 0) {
-          throw new ValidationError('No fields provided for update');
+          throw new DatabaseError('No fields to update');
         }
 
-        updateFields.push(`UPDATED_AT = :${paramIndex}`);
-        bindParams.push(new Date());
-        paramIndex++;
-
-        updateFields.push(`UPDATED_BY = :${paramIndex}`);
+        // Always update WHO fields
+        const now = new Date();
+        updateFields.push(`LAST_UPDATED_BY = :${paramIndex}`);
         bindParams.push(userId || 'SYSTEM');
         paramIndex++;
 
-        bindParams.push(enterpriseId);
-        bindParams.push(employeeId);
-        
-        const query = `UPDATE ${this.TABLE_NAME} 
-          SET ${updateFields.join(', ')} 
-          WHERE ENTERPRISE_ID = :${paramIndex - 1} AND EMPLOYEE_ID = :${paramIndex}`;
+        updateFields.push(`LAST_UPDATE_DATE = :${paramIndex}`);
+        bindParams.push(now);
+        paramIndex++;
 
-        await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const query = `UPDATE ${this.TABLE_NAME}
+          SET ${updateFields.join(', ')}
+          WHERE ENTERPRISE_ID = :${paramIndex} AND EMPLOYEE_ID = :${paramIndex + 1}`;
+
+        bindParams.push(Number(enterpriseId));
+        bindParams.push(Number(employeeId));
+
+        await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         return await this.findById(enterpriseId, employeeId);
       });
     } catch (error) {
-      if (error instanceof ValidationError) {
-        throw error;
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      
-      if (error instanceof DatabaseError) {
-        throw error;
-      }
-      
+      if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to update employee', error);
     }
   }
 
   /**
-   * Delete an employee (hard delete)
-   * @param {number} enterpriseId - Enterprise ID
-   * @param {number} employeeId - Employee ID
-   * @returns {Promise<Object>} Success status
+   * Remove (hard delete) an employee
    */
   static async remove(enterpriseId, employeeId) {
     try {
-      const result = await this.executeWithTransaction(async (connection) => {
-        const query = `DELETE FROM ${this.TABLE_NAME} WHERE ENTERPRISE_ID = :1 AND EMPLOYEE_ID = :2`;
-        const deleteResult = await connection.execute(query, [enterpriseId, employeeId], {
+      return await this.executeWithTransaction(async (connection) => {
+        const query = `DELETE FROM ${this.TABLE_NAME}
+                       WHERE ENTERPRISE_ID = :1 AND EMPLOYEE_ID = :2`;
+
+        const result = await connection.execute(query, [Number(enterpriseId), Number(employeeId)], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
-        
-        const rowsAffected = deleteResult.rowsAffected || deleteResult.rowCount || 0;
-        if (rowsAffected === 0) {
-          throw new NotFoundError(`No employee found with ID: ${employeeId}`);
-        }
-        
-        return { ...deleteResult, rowsAffected };
+
+        return {
+          rows_affected: result.rowsAffected || 0
+        };
       });
-      
-      console.log(`Delete successful for employee ID: ${employeeId}, rows affected: ${result.rowsAffected}`);
-      return { deleted: true, employeeId: Number(employeeId), enterpriseId };
     } catch (error) {
-      if (error instanceof NotFoundError) {
-        throw error;
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      
-      if (error instanceof DatabaseError) {
-        throw error;
-      }
-      
+      if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to delete employee', error);
     }
   }

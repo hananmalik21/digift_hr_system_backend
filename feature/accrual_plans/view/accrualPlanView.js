@@ -311,40 +311,112 @@ export function sendServerError(res, req, message, error = null) {
   let errorCode = 'INTERNAL_SERVER_ERROR';
   let statusCode = 500;
   let errorMessage = message || 'Internal server error';
+
+  const includeDebug = process.env.NODE_ENV !== 'production'; // dev only
+
   let details = null;
   let stack = null;
 
   if (error) {
-    if (error.stack) {
-      stack = error.stack;
-    }
-    
+    // keep stack (dev only recommended)
+    if (error.stack) stack = includeDebug ? error.stack : null;
+
+    // base details
     details = {
-      message: error.message,
-      code: error.code
+      message: error.userMessage || error.message || errorMessage,
+      code: error.code || errorCode
     };
 
+    // ---------------------------------------------
+    // 🔥 Oracle DB error extraction (the missing part)
+    // ---------------------------------------------
+    // Your DatabaseError wrapper earlier showed:
+    // - error.oracleError.message
+    // - error.technicalMessage
+    // - error.oracleCode / error.errorNum
+    const oracleMessage =
+      error.technicalMessage ||
+      error.oracleError?.message ||
+      error.oracle_message ||
+      null;
+
+    const oracleCode =
+      error.oracleCode ||
+      error.oracleError?.code ||
+      error.errorNum ||
+      null;
+
+    // If it's clearly an Oracle error, include it (dev only)
+    if (includeDebug && (oracleMessage || oracleCode || String(error.message || '').includes('ORA-'))) {
+      details.oracle = {
+        code: oracleCode,
+        message: oracleMessage || error.message || null
+      };
+    }
+
+    // ---------------------------------------------
+    // ✅ Map known app / DB errors to HTTP codes
+    // ---------------------------------------------
+    // Your custom codes
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
       errorCode = 'UNIQUE_CONSTRAINT_VIOLATION';
       statusCode = 409;
-      errorMessage = error.message || message;
+      errorMessage = error.userMessage || error.message || errorMessage;
     } else if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
       errorCode = 'FOREIGN_KEY_CONSTRAINT';
       statusCode = 400;
-      errorMessage = error.message || message;
+      errorMessage = error.userMessage || error.message || errorMessage;
     }
+
+    // Common Oracle codes (when you don't wrap them)
+    // ORA-00001 unique constraint violated
+    if (oracleCode === 1 || String(oracleMessage || '').includes('ORA-00001')) {
+      errorCode = 'UNIQUE_CONSTRAINT_VIOLATION';
+      statusCode = 409;
+      errorMessage = error.userMessage || 'Duplicate record. Unique constraint violated.';
+    }
+
+    // ORA-02291 / ORA-02292 FK issues
+    if (oracleCode === 2291 || String(oracleMessage || '').includes('ORA-02291')) {
+      errorCode = 'FOREIGN_KEY_CONSTRAINT';
+      statusCode = 400;
+      errorMessage = error.userMessage || 'Parent record not found (foreign key).';
+    }
+    if (oracleCode === 2292 || String(oracleMessage || '').includes('ORA-02292')) {
+      errorCode = 'FOREIGN_KEY_CONSTRAINT';
+      statusCode = 409;
+      errorMessage = error.userMessage || 'Cannot delete/update: child records exist (foreign key).';
+    }
+
+    // ORA-04098 invalid trigger (super common in your case)
+    if (oracleCode === 4098 || String(oracleMessage || '').includes('ORA-04098')) {
+      errorCode = 'INVALID_TRIGGER';
+      statusCode = 500;
+      errorMessage = 'Database trigger is invalid. Check USER_ERRORS / ALL_ERRORS.';
+    }
+
+    // ORA-00904 invalid identifier (column name mismatch)
+    if (oracleCode === 904 || String(oracleMessage || '').includes('ORA-00904')) {
+      errorCode = 'INVALID_IDENTIFIER';
+      statusCode = 500;
+      errorMessage = 'Invalid column identifier in SQL (ORA-00904).';
+    }
+
+    // final details code (keep consistent)
+    details.code = errorCode;
   }
 
-  res.status(statusCode).json({
+  return res.status(statusCode).json({
     success: false,
     message: errorMessage,
     error: {
       code: errorCode,
-      details: details,
-      stack: stack
+      details,
+      ...(includeDebug ? { stack } : {})
     }
   });
 }
+
 
 /**
  * Send not found error

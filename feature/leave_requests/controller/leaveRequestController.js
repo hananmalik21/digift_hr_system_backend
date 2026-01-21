@@ -1,4 +1,6 @@
 import express from 'express';
+import multer from 'multer';
+import db from '../../../config/db.js';
 import LeaveRequestModel from '../model/leaveRequestModel.js';
 import LeaveContactModel from '../../leave_contacts/model/leaveContactModel.js';
 import LeaveDocumentModel from '../../leave_documents/model/leaveDocumentModel.js';
@@ -13,7 +15,27 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/leaveRequestView.js';
+
+// Helper function to generate base metadata (same as in view)
+function generateBaseMetadata(req, additionalMeta = {}) {
+  return {
+    ...additionalMeta
+  };
+}
 import { parseGuid } from '../../../utils/guidUtils.js';
+import { ValidationError } from '../../../utils/errors/index.js';
+
+// Configure multer for file uploads (memory storage)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit per file
+  }
+});
+
+// Middleware to accept multiple files with field name 'documents'
+// Using array() instead of fields() to allow multiple files with the same field name
+const uploadDocuments = upload.array('documents', 10); // Allow up to 10 files
 
 const router = express.Router();
 
@@ -24,10 +46,29 @@ router.use((req, res, next) => {
 });
 
 /**
+ * Extract tenant ID from request
+ */
+function getTenantId(req) {
+  const tenantId = req.headers['x-tenant-id'];
+  if (!tenantId) {
+    throw new Error('Tenant ID is required');
+  }
+  const parsed = parseInt(tenantId);
+  if (isNaN(parsed) || parsed < 1) {
+    throw new Error('Tenant ID must be a valid positive number');
+  }
+  return parsed;
+}
+
+/**
  * Extract user ID from request
  */
 function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+  const userId = req.headers['x-user-id'];
+  if (!userId || userId.trim() === '') {
+    throw new Error('User ID is required');
+  }
+  return userId.trim();
 }
 
 /**
@@ -82,16 +123,27 @@ function normalizeRequestBody(data) {
   const keyMap = {
     'tenant_id': 'TENANT_ID',
     'employee_id': 'EMPLOYEE_ID',
+    'employee_guid': 'EMPLOYEE_GUID',
     'leave_type_id': 'LEAVE_TYPE_ID',
     'start_date': 'START_DATE',
     'end_date': 'END_DATE',
     'start_ts': 'START_TS',
     'end_ts': 'END_TS',
+    'start_portion': 'START_PORTION',
+    'end_portion': 'END_PORTION',
     'total_days': 'TOTAL_DAYS',
     'request_status': 'REQUEST_STATUS',
     'submitted_at': 'SUBMITTED_AT',
     'approved_at': 'APPROVED_AT',
-    'rejected_at': 'REJECTED_AT'
+    'rejected_at': 'REJECTED_AT',
+    'reason_for_leave': 'REASON_FOR_LEAVE',
+    'address_during_leave': 'ADDRESS_DURING_LEAVE',
+    'contact_phone': 'CONTACT_PHONE',
+    'emergency_contact_name': 'EMERGENCY_CONTACT_NAME',
+    'emergency_contact_phone': 'EMERGENCY_CONTACT_PHONE',
+    'additional_notes': 'ADDITIONAL_NOTES',
+    'delegated_employee_guid': 'DELEGATED_EMPLOYEE_GUID',
+    'delegated_employee_id': 'DELEGATED_EMPLOYEE_ID'
   };
 
   for (const [key, value] of Object.entries(data)) {
@@ -189,6 +241,7 @@ function validateLeaveRequestData(data, isUpdate = false) {
  * @route   GET /api/abs/leave-requests
  * @desc    Get all leave requests with optional filtering and pagination
  * @query   status - Filter by REQUEST_STATUS (DRAFT, PENDING, APPROVED, REJECTED, CANCELLED)
+ * @query   employee_guid - Filter by employee GUID (hex32)
  * @query   employeeId - Filter by EMPLOYEE_ID
  * @query   tenantId - Filter by TENANT_ID
  * @query   leaveTypeId - Filter by LEAVE_TYPE_ID
@@ -201,9 +254,44 @@ router.get('/', async (req, res) => {
   try {
     const filters = {};
 
+    // TENANT_ID should be included for multi-tenant filtering (better performance and security)
+    // Check both query param and header, prefer query param if provided
+    const tenantIdFromHeader = req.headers['x-tenant-id'] ? parseInt(req.headers['x-tenant-id']) : null;
+    if (req.query.tenantId) {
+      filters.tenantId = parseInt(req.query.tenantId);
+      if (isNaN(filters.tenantId)) {
+        return sendBadRequest(res, req, 'Invalid tenantId parameter');
+      }
+    } else if (tenantIdFromHeader && !isNaN(tenantIdFromHeader)) {
+      // Auto-add tenant_id from header if not in query (for performance optimization)
+      filters.tenantId = tenantIdFromHeader;
+    }
+
     // Filter by REQUEST_STATUS
     if (req.query.status) {
       filters.status = req.query.status.toUpperCase();
+    }
+
+    // Filter by employee_guid (resolve to employeeId)
+    if (req.query.employee_guid) {
+      try {
+        const tenantId = filters.tenantId || tenantIdFromHeader;
+        if (!tenantId || isNaN(tenantId)) {
+          return sendBadRequest(res, req, 'x-tenant-id header is required when filtering by employee_guid');
+        }
+        // Resolve employee_guid to employee_id
+        const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(
+          tenantId,
+          req.query.employee_guid
+        );
+        if (employeeId) {
+          filters.employeeId = employeeId;
+        } else {
+          return sendBadRequest(res, req, 'Employee not found for the provided employee_guid');
+        }
+      } catch (error) {
+        return sendBadRequest(res, req, `Invalid employee_guid: ${error.message}`);
+      }
     }
 
     // Filter by EMPLOYEE_ID
@@ -211,14 +299,6 @@ router.get('/', async (req, res) => {
       filters.employeeId = parseInt(req.query.employeeId);
       if (isNaN(filters.employeeId)) {
         return sendBadRequest(res, req, 'Invalid employeeId parameter');
-      }
-    }
-
-    // Filter by TENANT_ID
-    if (req.query.tenantId) {
-      filters.tenantId = parseInt(req.query.tenantId);
-      if (isNaN(filters.tenantId)) {
-        return sendBadRequest(res, req, 'Invalid tenantId parameter');
       }
     }
 
@@ -254,58 +334,6 @@ router.get('/', async (req, res) => {
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;
 
-    // Fetch leave contact and document information for each leave request
-    const leaveRequestsWithContactsAndDocs = await Promise.all(
-      leaveRequests.map(async (leaveRequest) => {
-        try {
-          // Fetch leave contact
-          const leaveContact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-          
-          // Fetch leave document (only one document per request, so get first from array)
-          let leaveDocument = null;
-          try {
-            const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-            if (documents && documents.length > 0) {
-              leaveDocument = documents[0];
-              // Add download URL to document info (match document view logic)
-              const baseUrl = process.env.API_BASE_URL;
-              if (baseUrl) {
-                leaveDocument.download_url = `${baseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
-              } else {
-                let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-                if (protocol.includes(',')) {
-                  protocol = protocol.split(',')[0].trim();
-                }
-                let host = req.get('x-forwarded-host') || req.get('host');
-                if (!host) {
-                  host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
-                }
-                if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
-                  host = host.replace(':3000', '');
-                }
-                leaveDocument.download_url = `${protocol}://${host}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
-              }
-            }
-          } catch (docError) {
-            console.error(`Error fetching leave document for request ${leaveRequest.leave_request_id}:`, docError);
-          }
-
-          return {
-            ...leaveRequest,
-            leave_contact_info: leaveContact || null,
-            leave_document_info: leaveDocument || null
-          };
-        } catch (error) {
-          console.error(`Error fetching leave contact for request ${leaveRequest.leave_request_id}:`, error);
-          return {
-            ...leaveRequest,
-            leave_contact_info: null,
-            leave_document_info: null
-          };
-        }
-      })
-    );
-
     // Build pagination metadata
     const paginationMeta = buildPaginationMeta(
       filters.pagination.page,
@@ -313,12 +341,73 @@ router.get('/', async (req, res) => {
       total
     );
 
-    sendLeaveRequestList(res, req, leaveRequestsWithContactsAndDocs, {
+    // Return only leave details (no contacts/documents) for list endpoint
+    sendLeaveRequestList(res, req, leaveRequests, {
       total,
       pagination: paginationMeta
     });
   } catch (error) {
     sendServerError(res, req, 'Failed to fetch leave requests', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-requests/:guid/documents
+ * @desc    Get all documents for a leave request by GUID
+ */
+router.get('/:guid/documents', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    if (!leaveRequest) {
+      return sendNotFound(res, req, 'Leave request not found');
+    }
+
+    const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+    sendLeaveRequestList(res, req, documents || [], { total: documents?.length || 0 });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave request documents', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-requests/:guid/contact
+ * @desc    Get contact information for a leave request by GUID
+ */
+router.get('/:guid/contact', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    if (!leaveRequest) {
+      return sendNotFound(res, req, 'Leave request not found');
+    }
+
+    const contact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+    if (!contact) {
+      return sendNotFound(res, req, 'Contact information not found for this leave request');
+    }
+
+    sendLeaveRequest(res, req, contact);
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave request contact', error);
   }
 });
 
@@ -353,29 +442,45 @@ router.get('/:guid', async (req, res) => {
     let leaveDocument = null;
     try {
       const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-      if (documents && documents.length > 0) {
+      if (documents && Array.isArray(documents) && documents.length > 0) {
         leaveDocument = documents[0];
-        // Add download URL to document info (match document view logic)
-        const baseUrl = process.env.API_BASE_URL;
-        if (baseUrl) {
-          leaveDocument.download_url = `${baseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+        // Verify document_guid exists before building URLs
+        if (leaveDocument && leaveDocument.document_guid) {
+          // Add download and preview URLs to document info
+          const baseUrl = process.env.API_BASE_URL;
+          let documentBaseUrl;
+          if (baseUrl) {
+            documentBaseUrl = baseUrl;
+          } else {
+            let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+            if (protocol.includes(',')) {
+              protocol = protocol.split(',')[0].trim();
+            }
+            let host = req.get('x-forwarded-host') || req.get('host');
+            if (!host) {
+              host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+            }
+            if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+              host = host.replace(':3000', '');
+            }
+            documentBaseUrl = `${protocol}://${host}`;
+          }
+          leaveDocument.download_url = `${documentBaseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+          leaveDocument.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/preview`;
         } else {
-          let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-          if (protocol.includes(',')) {
-            protocol = protocol.split(',')[0].trim();
-          }
-          let host = req.get('x-forwarded-host') || req.get('host');
-          if (!host) {
-            host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
-          }
-          if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
-            host = host.replace(':3000', '');
-          }
-          leaveDocument.download_url = `${protocol}://${host}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
+          console.warn(`Document found for leave request ${leaveRequest.leave_request_id} but document_guid is missing`);
         }
+      } else {
+        // Log when no documents are found (this is normal if no document was uploaded)
+        console.log(`No documents found for leave request ${leaveRequest.leave_request_id}`);
       }
     } catch (error) {
       console.error(`Error fetching leave document for request ${leaveRequest.leave_request_id}:`, error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        errorNum: error?.errorNum
+      });
     }
 
     // Add leave contact and document info to leave request
@@ -396,48 +501,150 @@ router.get('/:guid', async (req, res) => {
 
 /**
  * @route   POST /api/abs/leave-requests
- * @desc    Create a new leave request
- * @body    { EMPLOYEE_ID, LEAVE_TYPE_ID, START_DATE, END_DATE, TENANT_ID?, START_TS?, END_TS?, TOTAL_DAYS?, REQUEST_STATUS? }
+ * @desc    Create a new leave request with contact and documents in one transaction
+ * @body    Supports both JSON and multipart/form-data:
+ *          JSON: { employee_guid, leave_type_id, start_date, end_date, start_portion?, end_portion?, 
+ *                  reason_for_leave?, address_during_leave?, contact_phone?, emergency_contact_name?, 
+ *                  emergency_contact_phone?, additional_notes?, delegated_employee_guid?, documents[], submit? }
+ *          Multipart: All fields as form fields + 'documents' as file uploads (multiple files supported)
  */
-router.post('/', async (req, res) => {
+router.post('/', uploadDocuments, async (req, res) => {
   try {
-    // Normalize request body keys (lowercase to uppercase)
-    const normalizedBody = normalizeRequestBody(req.body);
+    // Get required headers
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
 
-    // Validate required fields
-    const errors = validateLeaveRequestData(normalizedBody, false);
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
+    // Handle both JSON and multipart/form-data
+    let requestData = {};
+    
+    // If multipart/form-data, extract from req.body and req.files
+    // req.files is an array when using upload.array()
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      // Multipart request - extract form fields
+      requestData = {
+        employee_guid: req.body.employee_guid,
+        leave_type_id: req.body.leave_type_id ? parseInt(req.body.leave_type_id) : null,
+        start_date: req.body.start_date,
+        end_date: req.body.end_date,
+        start_portion: req.body.start_portion,
+        end_portion: req.body.end_portion,
+        reason_for_leave: req.body.reason_for_leave,
+        address_during_leave: req.body.address_during_leave,
+        contact_phone: req.body.contact_phone,
+        emergency_contact_name: req.body.emergency_contact_name,
+        emergency_contact_phone: req.body.emergency_contact_phone,
+        additional_notes: req.body.additional_notes,
+        delegated_employee_guid: req.body.delegated_employee_guid,
+        submit: req.body.submit !== undefined ? req.body.submit === 'true' || req.body.submit === true : true
+      };
+
+      // Convert uploaded files to documents array format
+      // req.files is already an array when using upload.array()
+      // Pass buffer directly instead of converting to base64 (more efficient)
+      requestData.documents = req.files.map(file => ({
+        file_name: file.originalname,
+        file_type: file.mimetype || 'application/octet-stream',
+        file_size_mb: Math.round((file.size / (1024 * 1024)) * 100) / 100,
+        file_buffer: file.buffer // Pass buffer directly instead of base64
+      }));
+    } else {
+      // JSON request - use req.body directly
+      requestData = {
+        employee_guid: req.body.employee_guid,
+        leave_type_id: req.body.leave_type_id,
+        start_date: req.body.start_date,
+        end_date: req.body.end_date,
+        start_portion: req.body.start_portion?.toUpperCase(),
+        end_portion: req.body.end_portion?.toUpperCase(),
+        reason_for_leave: req.body.reason_for_leave,
+        address_during_leave: req.body.address_during_leave,
+        contact_phone: req.body.contact_phone,
+        emergency_contact_name: req.body.emergency_contact_name,
+        emergency_contact_phone: req.body.emergency_contact_phone,
+        additional_notes: req.body.additional_notes,
+        delegated_employee_guid: req.body.delegated_employee_guid,
+        documents: req.body.documents || [],
+        submit: req.body.submit !== undefined ? req.body.submit : true
+      };
     }
 
-    // Normalize data values
-    const normalizedData = {
-      TENANT_ID: normalizedBody.TENANT_ID !== undefined ? parseInt(normalizedBody.TENANT_ID) : null,
-      EMPLOYEE_ID: parseInt(normalizedBody.EMPLOYEE_ID),
-      LEAVE_TYPE_ID: parseInt(normalizedBody.LEAVE_TYPE_ID),
-      START_DATE: normalizedBody.START_DATE ? new Date(normalizedBody.START_DATE) : null,
-      END_DATE: normalizedBody.END_DATE ? new Date(normalizedBody.END_DATE) : null,
-      START_TS: normalizedBody.START_TS ? new Date(normalizedBody.START_TS) : null,
-      END_TS: normalizedBody.END_TS ? new Date(normalizedBody.END_TS) : null,
-      TOTAL_DAYS: normalizedBody.TOTAL_DAYS !== undefined ? parseFloat(normalizedBody.TOTAL_DAYS) : null,
-      REQUEST_STATUS: normalizedBody.REQUEST_STATUS ? normalizedBody.REQUEST_STATUS.toUpperCase() : 'DRAFT',
-      SUBMITTED_AT: normalizedBody.SUBMITTED_AT ? new Date(normalizedBody.SUBMITTED_AT) : null,
-      APPROVED_AT: normalizedBody.APPROVED_AT ? new Date(normalizedBody.APPROVED_AT) : null,
-      REJECTED_AT: normalizedBody.REJECTED_AT ? new Date(normalizedBody.REJECTED_AT) : null
-    };
+    // Validate required fields
+    if (!requestData.employee_guid) {
+      return sendBadRequest(res, req, 'employee_guid is required');
+    }
+    if (!requestData.leave_type_id) {
+      return sendBadRequest(res, req, 'leave_type_id is required');
+    }
+    if (!requestData.start_date) {
+      return sendBadRequest(res, req, 'start_date is required');
+    }
+    if (!requestData.end_date) {
+      return sendBadRequest(res, req, 'end_date is required');
+    }
 
-    const userId = getUserId(req);
-    const newLeaveRequest = await LeaveRequestModel.create(normalizedData, userId);
-    
-    sendCreated(res, req, newLeaveRequest);
+    // Validate dates
+    const startDate = new Date(requestData.start_date);
+    const endDate = new Date(requestData.end_date);
+    if (isNaN(startDate.getTime())) {
+      return sendBadRequest(res, req, 'Invalid start_date format');
+    }
+    if (isNaN(endDate.getTime())) {
+      return sendBadRequest(res, req, 'Invalid end_date format');
+    }
+    if (startDate > endDate) {
+      return sendBadRequest(res, req, 'end_date must be after or equal to start_date');
+    }
+
+    // Validate portions if provided
+    const validPortions = ['FULL_DAY', 'HALF_AM', 'HALF_PM', 'HOURS'];
+    if (requestData.start_portion && !validPortions.includes(requestData.start_portion.toUpperCase())) {
+      return sendBadRequest(res, req, `start_portion must be one of: ${validPortions.join(', ')}`);
+    }
+    if (requestData.end_portion && !validPortions.includes(requestData.end_portion.toUpperCase())) {
+      return sendBadRequest(res, req, `end_portion must be one of: ${validPortions.join(', ')}`);
+    }
+
+    // Normalize portions to uppercase
+    if (requestData.start_portion) {
+      requestData.start_portion = requestData.start_portion.toUpperCase();
+    }
+    if (requestData.end_portion) {
+      requestData.end_portion = requestData.end_portion.toUpperCase();
+    }
+
+    // Create leave request with contact and documents
+    const result = await LeaveRequestModel.createWithContactAndDocuments(
+      requestData,
+      tenantId,
+      userId
+    );
+
+    sendCreated(res, req, result);
   } catch (error) {
+    // Handle multer errors
+    if (error instanceof multer.MulterError) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return sendBadRequest(res, req, 'File size exceeds 10MB limit');
+      }
+      return sendBadRequest(res, req, `File upload error: ${error.message}`);
+    }
+
+    if (error.message?.includes('Tenant ID is required') || error.message?.includes('User ID is required')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('Employee not found') || error.message?.includes('Delegated employee not found')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('Leave type') || error.message?.includes('leave_type_id')) {
+      return sendBadRequest(res, req, error.message);
+    }
     if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
       return sendBadRequest(res, req, error.message || 'Invalid foreign key reference');
     }
     if (error.code === 'DUPLICATE_LEAVE_REQUEST') {
       return sendConflict(res, req, error.message || 'Leave Request already exists');
     }
-    if (error.message?.includes('Validation failed')) {
+    if (error.message?.includes('Validation failed') || error instanceof ValidationError) {
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to create leave request', error);
@@ -447,9 +654,19 @@ router.post('/', async (req, res) => {
 /**
  * @route   PUT /api/abs/leave-requests/:guid
  * @desc    Update a leave request by GUID
- * @body    { EMPLOYEE_ID?, LEAVE_TYPE_ID?, START_DATE?, END_DATE?, START_TS?, END_TS?, TOTAL_DAYS?, REQUEST_STATUS?, SUBMITTED_AT?, APPROVED_AT?, REJECTED_AT? }
+ * @body    Supports both JSON and multipart/form-data:
+ *          JSON: { employee_guid?, leave_type_id?, start_date?, end_date?, start_portion?, end_portion?,
+ *                  total_days?, request_status?, submitted_at?, approved_at?, rejected_at?,
+ *                  reason_for_leave?, address_during_leave?, contact_phone?, emergency_contact_name?,
+ *                  emergency_contact_phone?, additional_notes?, delegated_employee_guid?, documents[]? }
+ *          Multipart: All fields as form fields + 'documents' as file uploads (multiple files supported)
+ * @note    - If dates are updated, overlap checking is performed (excluding current request)
+ *          - If employee_guid is provided, it will be resolved to employee_id
+ *          - Status changes automatically set approved_at/rejected_at timestamps
+ *          - Contact fields update the associated leave contact record
+ *          - Documents can be added/updated via multipart file uploads
  */
-router.put('/:guid', async (req, res) => {
+router.put('/:guid', uploadDocuments, async (req, res) => {
   try {
     let guidHex32;
     try {
@@ -458,19 +675,128 @@ router.put('/:guid', async (req, res) => {
       return sendBadRequest(res, req, parseError.message);
     }
 
+    // Get required headers
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
     // Check if leave request exists
     const existingLeaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
 
+    // Handle both JSON and multipart/form-data
+    let requestBody = {};
+    
+    // If multipart/form-data, extract from req.body and req.files
+    if (req.files && Array.isArray(req.files) && req.files.length > 0) {
+      // Multipart request - extract form fields
+      requestBody = {
+        employee_guid: req.body.employee_guid,
+        leave_type_id: req.body.leave_type_id ? parseInt(req.body.leave_type_id) : undefined,
+        start_date: req.body.start_date,
+        end_date: req.body.end_date,
+        start_portion: req.body.start_portion,
+        end_portion: req.body.end_portion,
+        request_status: req.body.request_status,
+        reason_for_leave: req.body.reason_for_leave,
+        address_during_leave: req.body.address_during_leave,
+        contact_phone: req.body.contact_phone,
+        emergency_contact_name: req.body.emergency_contact_name,
+        emergency_contact_phone: req.body.emergency_contact_phone,
+        additional_notes: req.body.additional_notes,
+        delegated_employee_guid: req.body.delegated_employee_guid,
+        submit: req.body.submit !== undefined ? req.body.submit : undefined
+      };
+
+      // Convert uploaded files to documents array format
+      // Pass buffer directly instead of converting to base64 (more efficient)
+      requestBody.documents = req.files.map(file => ({
+        file_name: file.originalname,
+        file_type: file.mimetype || 'application/octet-stream',
+        file_size_mb: Math.round((file.size / (1024 * 1024)) * 100) / 100,
+        file_buffer: file.buffer // Pass buffer directly instead of base64
+      }));
+    } else {
+      // JSON request - use req.body directly
+      requestBody = req.body;
+    }
+
     // Normalize request body keys (lowercase to uppercase)
-    const normalizedBody = normalizeRequestBody(req.body);
+    // Also handle snake_case keys from request
+    const normalizedBody = normalizeRequestBody(requestBody);
+    
+    // Map additional fields that might come in snake_case
+    if (requestBody.start_portion && !normalizedBody.START_PORTION) {
+      normalizedBody.START_PORTION = requestBody.start_portion.toUpperCase();
+    }
+    if (requestBody.end_portion && !normalizedBody.END_PORTION) {
+      normalizedBody.END_PORTION = requestBody.end_portion.toUpperCase();
+    }
+
+    // Handle employee_guid if provided (resolve to employee_id)
+    if (normalizedBody.EMPLOYEE_GUID || req.body.employee_guid) {
+      const employeeGuid = normalizedBody.EMPLOYEE_GUID || req.body.employee_guid;
+      const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, employeeGuid);
+      if (!employeeId) {
+        return sendBadRequest(res, req, 'Employee not found for the provided employee_guid');
+      }
+      normalizedBody.EMPLOYEE_ID = employeeId;
+    }
+
+    // Handle delegated_employee_guid if provided
+    if (normalizedBody.DELEGATED_EMPLOYEE_GUID || req.body.delegated_employee_guid) {
+      const delegatedGuid = normalizedBody.DELEGATED_EMPLOYEE_GUID || req.body.delegated_employee_guid;
+      const delegatedId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, delegatedGuid);
+      if (!delegatedId) {
+        return sendBadRequest(res, req, 'Delegated employee not found for the provided delegated_employee_guid');
+      }
+      normalizedBody.DELEGATED_EMPLOYEE_ID = delegatedId;
+    }
 
     // Validate provided fields
     const errors = validateLeaveRequestData(normalizedBody, true);
     if (errors.length > 0) {
       return sendBadRequest(res, req, errors);
+    }
+
+    // Handle submit field - if submit is true, set status to SUBMITTED
+    if (requestBody.submit !== undefined) {
+      const submitValue = requestBody.submit === 'true' || requestBody.submit === true || requestBody.submit === 'TRUE';
+      if (submitValue) {
+        normalizedBody.REQUEST_STATUS = 'SUBMITTED';
+        // Set submitted_at if not already set
+        if (existingLeaveRequest.submitted_at === null) {
+          normalizedBody.SUBMITTED_AT = new Date();
+        }
+      } else if (requestBody.submit === false || requestBody.submit === 'false') {
+        normalizedBody.REQUEST_STATUS = 'DRAFT';
+      }
+    }
+
+    // Handle date updates - compute timestamps if dates or portions are provided
+    let startTs = normalizedBody.START_TS;
+    let endTs = normalizedBody.END_TS;
+    let totalDays = normalizedBody.TOTAL_DAYS;
+
+    if (normalizedBody.START_DATE || normalizedBody.END_DATE || 
+        normalizedBody.START_PORTION || normalizedBody.END_PORTION) {
+      const startDate = normalizedBody.START_DATE || existingLeaveRequest.start_date;
+      const endDate = normalizedBody.END_DATE || existingLeaveRequest.end_date;
+      const startPortion = normalizedBody.START_PORTION;
+      const endPortion = normalizedBody.END_PORTION;
+
+      if (startDate && endDate) {
+        const computed = LeaveRequestModel._computeTimestamps(
+          startDate,
+          endDate,
+          startPortion,
+          endPortion
+        );
+        startTs = computed.startTs;
+        endTs = computed.endTs;
+        totalDays = computed.totalDays;
+      }
     }
 
     // Normalize data values
@@ -490,14 +816,14 @@ router.put('/:guid', async (req, res) => {
     if (normalizedBody.END_DATE !== undefined) {
       normalizedData.END_DATE = normalizedBody.END_DATE ? new Date(normalizedBody.END_DATE) : null;
     }
-    if (normalizedBody.START_TS !== undefined) {
-      normalizedData.START_TS = normalizedBody.START_TS ? new Date(normalizedBody.START_TS) : null;
+    if (startTs !== undefined) {
+      normalizedData.START_TS = startTs;
     }
-    if (normalizedBody.END_TS !== undefined) {
-      normalizedData.END_TS = normalizedBody.END_TS ? new Date(normalizedBody.END_TS) : null;
+    if (endTs !== undefined) {
+      normalizedData.END_TS = endTs;
     }
-    if (normalizedBody.TOTAL_DAYS !== undefined) {
-      normalizedData.TOTAL_DAYS = normalizedBody.TOTAL_DAYS !== null ? parseFloat(normalizedBody.TOTAL_DAYS) : null;
+    if (totalDays !== undefined) {
+      normalizedData.TOTAL_DAYS = totalDays;
     }
     if (normalizedBody.REQUEST_STATUS !== undefined) {
       normalizedData.REQUEST_STATUS = normalizedBody.REQUEST_STATUS ? normalizedBody.REQUEST_STATUS.toUpperCase() : null;
@@ -512,11 +838,153 @@ router.put('/:guid', async (req, res) => {
       normalizedData.REJECTED_AT = normalizedBody.REJECTED_AT ? new Date(normalizedBody.REJECTED_AT) : null;
     }
 
-    const userId = getUserId(req);
+    // Check for date overlap if dates are being updated
+    if ((normalizedData.START_DATE || normalizedData.END_DATE || startTs || endTs) && (normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id)) {
+      const checkStartDate = startTs || normalizedData.START_DATE || existingLeaveRequest.start_date;
+      const checkEndDate = endTs || normalizedData.END_DATE || existingLeaveRequest.end_date;
+      const checkEmployeeId = normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id;
+      
+      let connection;
+      try {
+        connection = await db.getConnection();
+        const overlappingRequest = await LeaveRequestModel.checkOverlappingLeaveRequest(
+          connection,
+          tenantId,
+          checkEmployeeId,
+          checkStartDate,
+          checkEndDate,
+          existingLeaveRequest.leave_request_id // Exclude current request
+        );
+        
+        if (overlappingRequest) {
+          const existingStartDate = new Date(overlappingRequest.start_date).toISOString().split('T')[0];
+          const existingEndDate = new Date(overlappingRequest.end_date).toISOString().split('T')[0];
+          return sendBadRequest(res, req, 
+            `You already applied for leaves on these dates. Existing leave request (${overlappingRequest.request_status}) from ${existingStartDate} to ${existingEndDate}`
+          );
+        }
+      } finally {
+        if (connection) {
+          try {
+            await connection.close();
+          } catch {}
+        }
+      }
+    }
+
     const updatedLeaveRequest = await LeaveRequestModel.updateByGuid(guidHex32, normalizedData, userId);
     
-    sendUpdated(res, req, updatedLeaveRequest);
+    // Update contact information if provided
+    if (normalizedBody.REASON_FOR_LEAVE !== undefined || normalizedBody.ADDRESS_DURING_LEAVE !== undefined ||
+        normalizedBody.CONTACT_PHONE !== undefined || normalizedBody.EMERGENCY_CONTACT_NAME !== undefined ||
+        normalizedBody.EMERGENCY_CONTACT_PHONE !== undefined || normalizedBody.ADDITIONAL_NOTES !== undefined ||
+        normalizedBody.DELEGATED_EMPLOYEE_ID !== undefined) {
+      try {
+        await LeaveContactModel.updateByLeaveRequestId(
+          existingLeaveRequest.leave_request_id,
+          {
+            reason_for_leave: normalizedBody.REASON_FOR_LEAVE,
+            address_during_leave: normalizedBody.ADDRESS_DURING_LEAVE,
+            contact_phone: normalizedBody.CONTACT_PHONE,
+            emergency_contact_name: normalizedBody.EMERGENCY_CONTACT_NAME,
+            emergency_contact_phone: normalizedBody.EMERGENCY_CONTACT_PHONE,
+            additional_notes: normalizedBody.ADDITIONAL_NOTES,
+            delegated_employee_id: normalizedBody.DELEGATED_EMPLOYEE_ID
+          },
+          userId
+        );
+      } catch (contactError) {
+        // Log but don't fail the request update
+        console.error('Error updating contact information:', contactError);
+      }
+    }
+
+    // Add new documents if provided (from multipart or JSON)
+    if (requestBody.documents && Array.isArray(requestBody.documents) && requestBody.documents.length > 0) {
+      try {
+        for (const doc of requestBody.documents) {
+          if (!doc.file_name) continue;
+
+          // Support both file_buffer (from multipart) and file_base64 (from JSON)
+          const fileBuffer = doc.file_buffer && Buffer.isBuffer(doc.file_buffer) 
+            ? doc.file_buffer 
+            : (doc.file_base64 ? Buffer.from(doc.file_base64, 'base64') : null);
+
+          // Only create document if we have file content or file URL
+          if (fileBuffer || doc.file_url) {
+            await LeaveDocumentModel.create({
+              LEAVE_REQUEST_ID: existingLeaveRequest.leave_request_id,
+              FILE_NAME: doc.file_name,
+              FILE_TYPE: doc.file_type || 'application/octet-stream',
+              FILE_SIZE_MB: doc.file_size_mb,
+              FILE_CONTENT: fileBuffer, // Use FILE_CONTENT (model expects this)
+              FILE_URL: doc.file_url || null
+            }, userId);
+          }
+        }
+      } catch (docError) {
+        // Log but don't fail the request update
+        console.error('Error adding documents:', docError);
+      }
+    }
+    
+    // Fetch contact and document information in parallel for optimal performance
+    const [leaveContact, documents] = await Promise.all([
+      LeaveContactModel.findByLeaveRequestId(updatedLeaveRequest.leave_request_id).catch(err => {
+        console.error(`Error fetching leave contact for request ${updatedLeaveRequest.leave_request_id}:`, err);
+        return null;
+      }),
+      LeaveDocumentModel.findByLeaveRequestId(updatedLeaveRequest.leave_request_id).catch(err => {
+        console.error(`Error fetching leave documents for request ${updatedLeaveRequest.leave_request_id}:`, err);
+        return [];
+      })
+    ]);
+
+    // Add download and preview URLs to documents
+    const documentsWithUrls = (documents || []).map(doc => {
+      if (doc && doc.document_guid) {
+        const baseUrl = process.env.API_BASE_URL;
+        let documentBaseUrl;
+        if (baseUrl) {
+          documentBaseUrl = baseUrl;
+        } else {
+          let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+          if (protocol.includes(',')) {
+            protocol = protocol.split(',')[0].trim();
+          }
+          let host = req.get('x-forwarded-host') || req.get('host');
+          if (!host) {
+            host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+          }
+          if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+            host = host.replace(':3000', '');
+          }
+          documentBaseUrl = `${protocol}://${host}`;
+        }
+        doc.download_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/download`;
+        doc.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/preview`;
+      }
+      return doc;
+    });
+
+    // Use the first document or null
+    const leaveDocument = documentsWithUrls.length > 0 ? documentsWithUrls[0] : null;
+
+    // Return all 3 objects: leave_details, leave_contact_info, leave_document_info
+    const leaveRequestWithContactAndDoc = {
+      ...updatedLeaveRequest,
+      leave_contact_info: leaveContact || null,
+      leave_document_info: leaveDocument || null
+    };
+
+    sendLeaveRequest(res, req, leaveRequestWithContactAndDoc);
   } catch (error) {
+    if (error.message?.includes('Tenant ID is required') || error.message?.includes('User ID is required')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('Employee not found') || error.message?.includes('already applied for leaves')) {
+      return sendBadRequest(res, req, error.message);
+    }
     if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
       return sendBadRequest(res, req, error.message || 'Invalid foreign key reference');
     }
@@ -537,8 +1005,153 @@ router.put('/:guid', async (req, res) => {
 });
 
 /**
+ * @route   POST /api/abs/leave-requests/:guid/submit
+ * @desc    Submit a DRAFT leave request (change status to SUBMITTED)
+ * @header  x-tenant-id (required)
+ * @header  x-user-id (required)
+ */
+router.post('/:guid/submit', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const updatedLeaveRequest = await LeaveRequestModel.submitByGuid(guidHex32, tenantId, userId);
+    
+    const wrappedData = { leave_details: updatedLeaveRequest };
+    res.json({
+      success: true,
+      message: 'Leave request submitted successfully',
+      meta: generateBaseMetadata(req, {}),
+      data: [wrappedData]
+    });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
+    }
+    if (error instanceof ValidationError || error.message?.includes('Cannot submit')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to submit leave request', error);
+  }
+});
+
+/**
+ * @route   POST /api/abs/leave-requests/:guid/approve
+ * @desc    Approve a SUBMITTED leave request and deduct balance
+ * @header  x-tenant-id (required)
+ * @header  x-user-id (required)
+ */
+router.post('/:guid/approve', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const result = await LeaveRequestModel.approveByGuid(guidHex32, tenantId, userId);
+    
+    const wrappedData = { 
+      leave_details: result.leaveRequest,
+      transaction: result.transaction
+    };
+    res.json({
+      success: true,
+      message: 'Leave request approved successfully and balance deducted',
+      meta: generateBaseMetadata(req, {}),
+      data: [wrappedData]
+    });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
+    }
+    if (error.code === 'CHECK_CONSTRAINT_VIOLATION') {
+      return sendBadRequest(res, req, error.message || 'Invalid TXN_TYPE. Must be one of ACCRUAL/TAKEN/ADJUSTMENT/CARRY_FORWARD/FORFEIT/REVERSAL');
+    }
+    if (error.code === 'INVALID_COLUMN') {
+      return sendBadRequest(res, req, error.message || 'Invalid column identifier in database query');
+    }
+    if (error instanceof ValidationError || error.message?.includes('Cannot approve') || error.message?.includes('Insufficient leave balance')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to approve leave request', error);
+  }
+});
+
+/**
+ * @route   POST /api/abs/leave-requests/:guid/reject
+ * @desc    Reject a SUBMITTED leave request
+ * @header  x-tenant-id (required)
+ * @header  x-user-id (required)
+ * @body    { reason?: string, comments?: string } (optional)
+ */
+router.post('/:guid/reject', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
+    const rejectionData = {
+      reason: req.body.reason || null,
+      comments: req.body.comments || null
+    };
+
+    const updatedLeaveRequest = await LeaveRequestModel.rejectByGuid(guidHex32, tenantId, userId, rejectionData);
+    
+    const wrappedData = { leave_details: updatedLeaveRequest };
+    res.json({
+      success: true,
+      message: 'Leave request rejected successfully',
+      meta: generateBaseMetadata(req, {}),
+      data: [wrappedData]
+    });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
+    }
+    if (error instanceof ValidationError || error.message?.includes('Cannot reject')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to reject leave request', error);
+  }
+});
+
+/**
  * @route   DELETE /api/abs/leave-requests/:guid
- * @desc    Delete a leave request by GUID (hard delete)
+ * @desc    Delete or withdraw a leave request by GUID
+ * @header  x-tenant-id (required)
+ * @header  x-user-id (required)
+ * 
+ * Rules:
+ * - DRAFT requests: Can be deleted (hard delete from database)
+ * - SUBMITTED requests: Can be withdrawn (status changed to CANCELLED, not deleted)
+ * - Other statuses (APPROVED, REJECTED, CANCELLED): Cannot be deleted or withdrawn
  */
 router.delete('/:guid', async (req, res) => {
   try {
@@ -549,15 +1162,77 @@ router.delete('/:guid', async (req, res) => {
       return sendBadRequest(res, req, parseError.message);
     }
 
+    // Get required headers
+    const tenantId = getTenantId(req);
+    const userId = getUserId(req);
+
     // Check if leave request exists
     const existingLeaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
 
-    await LeaveRequestModel.deleteByGuid(guidHex32);
+    // Delete or withdraw based on status
+    const result = await LeaveRequestModel.deleteByGuid(guidHex32, userId);
     
-    sendDeleted(res, req, 'Leave request deleted successfully', guidHex32);
+    if (result.action === 'deleted') {
+      // Hard delete - return success message
+      sendDeleted(res, req, 'Leave request deleted successfully', guidHex32);
+    } else if (result.action === 'withdrawn') {
+      // Withdrawn - fetch and return all 3 objects (leave_details, contact, documents)
+      // Fetch contact and document information in parallel for optimal performance
+      const [leaveContact, documents] = await Promise.all([
+        LeaveContactModel.findByLeaveRequestId(result.leaveRequest.leave_request_id).catch(err => {
+          console.error(`Error fetching leave contact for request ${result.leaveRequest.leave_request_id}:`, err);
+          return null;
+        }),
+        LeaveDocumentModel.findByLeaveRequestId(result.leaveRequest.leave_request_id).catch(err => {
+          console.error(`Error fetching leave documents for request ${result.leaveRequest.leave_request_id}:`, err);
+          return [];
+        })
+      ]);
+
+      // Add download and preview URLs to documents
+      const documentsWithUrls = (documents || []).map(doc => {
+        if (doc && doc.document_guid) {
+          const baseUrl = process.env.API_BASE_URL;
+          let documentBaseUrl;
+          if (baseUrl) {
+            documentBaseUrl = baseUrl;
+          } else {
+            let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+            if (protocol.includes(',')) {
+              protocol = protocol.split(',')[0].trim();
+            }
+            let host = req.get('x-forwarded-host') || req.get('host');
+            if (!host) {
+              host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+            }
+            if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+              host = host.replace(':3000', '');
+            }
+            documentBaseUrl = `${protocol}://${host}`;
+          }
+          doc.download_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/download`;
+          doc.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/preview`;
+        }
+        return doc;
+      });
+
+      // Use the first document or null
+      const leaveDocument = documentsWithUrls.length > 0 ? documentsWithUrls[0] : null;
+
+      // Return all 3 objects: leave_details, leave_contact_info, leave_document_info
+      const leaveRequestWithContactAndDoc = {
+        ...result.leaveRequest,
+        leave_contact_info: leaveContact || null,
+        leave_document_info: leaveDocument || null
+      };
+
+      sendLeaveRequest(res, req, leaveRequestWithContactAndDoc);
+    } else {
+      sendServerError(res, req, 'Unexpected action returned from delete operation');
+    }
   } catch (error) {
     if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
       return sendBadRequest(res, req, error.message);
@@ -565,7 +1240,70 @@ router.delete('/:guid', async (req, res) => {
     if (error.message?.includes('not found')) {
       return sendNotFound(res, req, error.message);
     }
-    sendServerError(res, req, 'Failed to delete leave request', error);
+    if (error instanceof ValidationError || error.message?.includes('Cannot delete or withdraw')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to delete or withdraw leave request', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-requests/:guid/documents
+ * @desc    Get all documents for a leave request by GUID
+ */
+router.get('/:guid/documents', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    if (!leaveRequest) {
+      return sendNotFound(res, req, 'Leave request not found');
+    }
+
+    const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+    sendLeaveRequestList(res, req, documents || [], { total: documents?.length || 0 });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave request documents', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-requests/:guid/contact
+ * @desc    Get contact information for a leave request by GUID
+ */
+router.get('/:guid/contact', async (req, res) => {
+  try {
+    let guidHex32;
+    try {
+      guidHex32 = parseGuid(req.params.guid, 'guid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    if (!leaveRequest) {
+      return sendNotFound(res, req, 'Leave request not found');
+    }
+
+    const contact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
+    if (!contact) {
+      return sendNotFound(res, req, 'Contact information not found for this leave request');
+    }
+
+    sendLeaveRequest(res, req, contact);
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave request contact', error);
   }
 });
 

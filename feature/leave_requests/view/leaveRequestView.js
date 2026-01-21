@@ -104,22 +104,19 @@ export function sendLeaveRequestList(res, req, leaveRequests, meta = {}) {
   const convertedData = convertKeysToSnakeCase(leaveRequests);
   
   // Wrap each leave request in a "leave_details" object
-  // Separate leave_contact_info and leave_document_info from leave_details
+  // For list endpoint, only return leave_details (no contact/document info)
   const wrappedData = Array.isArray(convertedData)
     ? convertedData.map(item => {
+        // Remove leave_contact_info and leave_document_info if they exist (shouldn't for list endpoint)
         const { leave_contact_info, leave_document_info, ...leaveDetails } = item;
         return {
-          leave_details: leaveDetails,
-          leave_contact_info: leave_contact_info || null,
-          leave_document_info: leave_document_info || null
+          leave_details: leaveDetails
         };
       })
     : (() => {
         const { leave_contact_info, leave_document_info, ...leaveDetails } = convertedData;
         return [{
-          leave_details: leaveDetails,
-          leave_contact_info: leave_contact_info || null,
-          leave_document_info: leave_document_info || null
+          leave_details: leaveDetails
         }];
       })();
   
@@ -159,23 +156,93 @@ export function sendLeaveRequest(res, req, leaveRequest) {
 }
 
 /**
+ * Generate base URL for document endpoints
+ * @param {Object} req - Express request object
+ * @returns {string} Base URL
+ */
+function generateBaseUrl(req) {
+  const baseUrl = process.env.API_BASE_URL;
+  if (baseUrl) {
+    return baseUrl;
+  }
+  
+  // Fallback: construct from request
+  let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
+  if (protocol.includes(',')) {
+    protocol = protocol.split(',')[0].trim();
+  }
+  let host = req.get('x-forwarded-host') || req.get('host');
+  if (!host) {
+    host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
+  }
+  if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
+    host = host.replace(':3000', '');
+  }
+  return `${protocol}://${host}`;
+}
+
+/**
+ * Generate download URL for a document
+ * @param {Object} req - Express request object
+ * @param {string} documentGuid - Document GUID
+ * @returns {string} Download URL
+ */
+function generateDownloadUrl(req, documentGuid) {
+  const baseUrl = generateBaseUrl(req);
+  return `${baseUrl}/api/abs/leave-documents/${documentGuid}/download`;
+}
+
+/**
+ * Generate preview URL for a document
+ * @param {Object} req - Express request object
+ * @param {string} documentGuid - Document GUID
+ * @returns {string} Preview URL
+ */
+function generatePreviewUrl(req, documentGuid) {
+  const baseUrl = generateBaseUrl(req);
+  return `${baseUrl}/api/abs/leave-documents/${documentGuid}/preview`;
+}
+
+/**
  * Send created response
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {Object} leaveRequest - Created leave request object
  */
-export function sendCreated(res, req, leaveRequest) {
-  const convertedData = convertKeysToSnakeCase(leaveRequest);
-  
-  // Wrap leave request in a "leave_details" object
-  const wrappedData = { leave_details: convertedData };
-  
-  res.status(201).json({
-    success: true,
-    message: 'Leave request created successfully',
-    meta: generateBaseMetadata(req, {}),
-    data: [wrappedData]
-  });
+export function sendCreated(res, req, result) {
+  // Handle new unified format: { leave_request, contact, documents }
+  if (result.leave_request) {
+    const convertedData = {
+      leave_request: convertKeysToSnakeCase(result.leave_request),
+      contact: result.contact ? convertKeysToSnakeCase(result.contact) : null,
+      documents: result.documents ? result.documents.map(doc => {
+        const convertedDoc = convertKeysToSnakeCase(doc);
+        // Add download_url and preview_url if document_guid exists
+        if (convertedDoc.document_guid) {
+          convertedDoc.download_url = generateDownloadUrl(req, convertedDoc.document_guid);
+          convertedDoc.preview_url = generatePreviewUrl(req, convertedDoc.document_guid);
+        }
+        return convertedDoc;
+      }) : []
+    };
+    
+    res.status(201).json({
+      success: true,
+      message: 'Leave request created successfully',
+      data: convertedData
+    });
+  } else {
+    // Fallback for old format
+    const convertedData = convertKeysToSnakeCase(result);
+    const wrappedData = { leave_details: convertedData };
+    
+    res.status(201).json({
+      success: true,
+      message: 'Leave request created successfully',
+      meta: generateBaseMetadata(req, {}),
+      data: [wrappedData]
+    });
+  }
 }
 
 /**
@@ -287,9 +354,20 @@ export function sendServerError(res, req, message, error = null) {
     // Extract error details
     details = {
       message: error.message,
-      code: error.code,
-      errorNum: error.errorNum
+      code: error.code || 'DATABASE_ERROR',
+      errorNum: error.errorNum,
+      oracleError: error.oracleError,
+      oracleMessage: error.oracleMessage
     };
+    
+    // Include nested error details if available
+    if (error.originalError) {
+      details.originalError = {
+        message: error.originalError.message,
+        errorNum: error.originalError.errorNum,
+        code: error.originalError.code
+      };
+    }
 
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
       errorCode = 'UNIQUE_CONSTRAINT_VIOLATION';

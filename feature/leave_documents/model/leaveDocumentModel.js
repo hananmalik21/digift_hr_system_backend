@@ -175,6 +175,7 @@ class LeaveDocumentModel {
 
   /**
    * List documents for a leave request (metadata only, NO BLOB)
+   * Returns full document metadata including all fields needed for API responses
    */
   static async findByLeaveRequestId(leaveRequestId) {
     try {
@@ -182,7 +183,15 @@ class LeaveDocumentModel {
         a.DOCUMENT_ID,
         RAWTOHEX(a.DOCUMENT_GUID) AS DOCUMENT_GUID,
         a.LEAVE_REQUEST_ID,
-        a.FILE_NAME
+        a.FILE_NAME,
+        a.FILE_TYPE,
+        a.FILE_SIZE_MB,
+        a.FILE_URL,
+        a.FILE_HASH,
+        a.CREATION_DATE,
+        a.CREATED_BY,
+        a.LAST_UPDATE_DATE,
+        a.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} a
       WHERE a.LEAVE_REQUEST_ID = :1
       ORDER BY a.CREATION_DATE DESC`;

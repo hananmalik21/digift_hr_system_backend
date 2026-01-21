@@ -598,6 +598,157 @@ class LeaveContactModel {
   }
 
   /**
+   * Update leave contact by LEAVE_REQUEST_ID
+   * Creates contact if it doesn't exist, updates if it does
+   */
+  static async updateByLeaveRequestId(leaveRequestId, data, userId) {
+    try {
+      return await this.executeWithTransaction(async (connection) => {
+        // Check if contact exists
+        const checkSql = `SELECT LEAVE_CONTACT_ID, LEAVE_CONTACT_GUID FROM ${this.TABLE_NAME} WHERE LEAVE_REQUEST_ID = :1`;
+        const checkResult = await connection.execute(checkSql, [parseInt(leaveRequestId)], { 
+          outFormat: oracledb.OUT_FORMAT_OBJECT 
+        });
+
+        const now = new Date();
+        const normalizedData = {
+          LEAVE_REQUEST_ID: parseInt(leaveRequestId),
+          REASON_FOR_LEAVE: data.reason_for_leave !== undefined ? data.reason_for_leave : undefined,
+          DELEGATED_EMPLOYEE_ID: data.delegated_employee_id !== undefined ? 
+            (data.delegated_employee_id !== null ? parseInt(data.delegated_employee_id) : null) : undefined,
+          ADDRESS_DURING_LEAVE: data.address_during_leave !== undefined ? data.address_during_leave : undefined,
+          CONTACT_PHONE: data.contact_phone !== undefined ? data.contact_phone : undefined,
+          EMERGENCY_CONTACT_NAME: data.emergency_contact_name !== undefined ? data.emergency_contact_name : undefined,
+          EMERGENCY_CONTACT_PHONE: data.emergency_contact_phone !== undefined ? data.emergency_contact_phone : undefined,
+          ADDITIONAL_NOTES: data.additional_notes !== undefined ? data.additional_notes : undefined
+        };
+
+        if (checkResult.rows && checkResult.rows.length > 0) {
+          // Update existing contact
+          const existingGuid = checkResult.rows[0].LEAVE_CONTACT_GUID;
+          const updateFields = [];
+          const bindParams = [];
+          let i = 1;
+
+          if (normalizedData.REASON_FOR_LEAVE !== undefined) {
+            updateFields.push(`REASON_FOR_LEAVE = :${i}`);
+            bindParams.push(normalizedData.REASON_FOR_LEAVE || null);
+            i++;
+          }
+          if (normalizedData.DELEGATED_EMPLOYEE_ID !== undefined) {
+            updateFields.push(`DELEGATED_EMPLOYEE_ID = :${i}`);
+            bindParams.push(normalizedData.DELEGATED_EMPLOYEE_ID);
+            i++;
+          }
+          if (normalizedData.ADDRESS_DURING_LEAVE !== undefined) {
+            updateFields.push(`ADDRESS_DURING_LEAVE = :${i}`);
+            bindParams.push(normalizedData.ADDRESS_DURING_LEAVE || null);
+            i++;
+          }
+          if (normalizedData.CONTACT_PHONE !== undefined) {
+            updateFields.push(`CONTACT_PHONE = :${i}`);
+            bindParams.push(normalizedData.CONTACT_PHONE || null);
+            i++;
+          }
+          if (normalizedData.EMERGENCY_CONTACT_NAME !== undefined) {
+            updateFields.push(`EMERGENCY_CONTACT_NAME = :${i}`);
+            bindParams.push(normalizedData.EMERGENCY_CONTACT_NAME || null);
+            i++;
+          }
+          if (normalizedData.EMERGENCY_CONTACT_PHONE !== undefined) {
+            updateFields.push(`EMERGENCY_CONTACT_PHONE = :${i}`);
+            bindParams.push(normalizedData.EMERGENCY_CONTACT_PHONE || null);
+            i++;
+          }
+          if (normalizedData.ADDITIONAL_NOTES !== undefined) {
+            updateFields.push(`ADDITIONAL_NOTES = :${i}`);
+            bindParams.push(normalizedData.ADDITIONAL_NOTES || null);
+            i++;
+          }
+
+          if (updateFields.length > 0) {
+            updateFields.push(`LAST_UPDATE_DATE = :${i}`);
+            bindParams.push(now);
+            i++;
+            updateFields.push(`LAST_UPDATED_BY = :${i}`);
+            bindParams.push(userId || 'SYSTEM');
+            i++;
+
+            bindParams.push(existingGuid);
+            const updateSql = `UPDATE ${this.TABLE_NAME} SET ${updateFields.join(', ')} WHERE LEAVE_CONTACT_GUID = :${i}`;
+            await connection.execute(updateSql, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+          }
+
+          // Return updated contact
+          const selectSql = `SELECT 
+            a.LEAVE_CONTACT_ID,
+            RAWTOHEX(a.LEAVE_CONTACT_GUID) AS LEAVE_CONTACT_GUID,
+            a.LEAVE_REQUEST_ID,
+            a.REASON_FOR_LEAVE,
+            a.DELEGATED_EMPLOYEE_ID,
+            a.ADDRESS_DURING_LEAVE,
+            a.CONTACT_PHONE,
+            a.EMERGENCY_CONTACT_NAME,
+            a.EMERGENCY_CONTACT_PHONE,
+            a.ADDITIONAL_NOTES,
+            a.CREATION_DATE,
+            a.CREATED_BY,
+            a.LAST_UPDATE_DATE,
+            a.LAST_UPDATED_BY
+          FROM ${this.TABLE_NAME} a
+          WHERE a.LEAVE_CONTACT_GUID = :1`;
+
+          const selectResult = await connection.execute(selectSql, [existingGuid], {
+            outFormat: oracledb.OUT_FORMAT_OBJECT
+          });
+
+          if (selectResult.rows?.length) {
+            return this.convertKeysToSnakeCase(selectResult.rows[0]);
+          }
+        } else {
+          // Create new contact if at least one field is provided
+          const hasData = normalizedData.REASON_FOR_LEAVE || normalizedData.ADDRESS_DURING_LEAVE ||
+                          normalizedData.CONTACT_PHONE || normalizedData.EMERGENCY_CONTACT_NAME ||
+                          normalizedData.EMERGENCY_CONTACT_PHONE || normalizedData.ADDITIONAL_NOTES ||
+                          normalizedData.DELEGATED_EMPLOYEE_ID;
+
+          if (hasData) {
+            return await this.create(normalizedData, userId);
+          }
+        }
+
+        // Return existing or null
+        const selectSql = `SELECT 
+          a.LEAVE_CONTACT_ID,
+          RAWTOHEX(a.LEAVE_CONTACT_GUID) AS LEAVE_CONTACT_GUID,
+          a.LEAVE_REQUEST_ID,
+          a.REASON_FOR_LEAVE,
+          a.DELEGATED_EMPLOYEE_ID,
+          a.ADDRESS_DURING_LEAVE,
+          a.CONTACT_PHONE,
+          a.EMERGENCY_CONTACT_NAME,
+          a.EMERGENCY_CONTACT_PHONE,
+          a.ADDITIONAL_NOTES,
+          a.CREATION_DATE,
+          a.CREATED_BY,
+          a.LAST_UPDATE_DATE,
+          a.LAST_UPDATED_BY
+        FROM ${this.TABLE_NAME} a
+        WHERE a.LEAVE_REQUEST_ID = :1`;
+
+        const selectResult = await connection.execute(selectSql, [parseInt(leaveRequestId)], {
+          outFormat: oracledb.OUT_FORMAT_OBJECT
+        });
+
+        return selectResult.rows?.length ? this.convertKeysToSnakeCase(selectResult.rows[0]) : null;
+      });
+    } catch (error) {
+      console.error('Error updating contact by leave request ID:', error);
+      throw new DatabaseError('Failed to update leave contact', error);
+    }
+  }
+
+  /**
    * Delete by GUID (HEX32)
    */
   static async deleteByGuid(guidHex32) {
