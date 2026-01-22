@@ -293,8 +293,30 @@ class LeaveRequestModel {
         a.CREATION_DATE,
         a.CREATED_BY,
         a.LAST_UPDATE_DATE,
-        a.LAST_UPDATED_BY
+        a.LAST_UPDATED_BY,
+        -- Employee information (limited fields)
+        e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
+        RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
+        e.FIRST_NAME AS EMP_FIRST_NAME,
+        e.MIDDLE_NAME AS EMP_MIDDLE_NAME,
+        e.LAST_NAME AS EMP_LAST_NAME,
+        e.FIRST_NAME_AR AS EMP_FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR AS EMP_MIDDLE_NAME_AR,
+        e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
+        e.EMAIL AS EMP_EMAIL,
+        -- Leave type information (limited fields)
+        lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
+        RAWTOHEX(lt.LEAVE_TYPE_GUID) AS LT_LEAVE_TYPE_GUID,
+        lt.LEAVE_NAME_EN AS LT_LEAVE_NAME_EN,
+        lt.LEAVE_NAME_AR AS LT_LEAVE_NAME_AR,
+        lt.LEAVE_CODE AS LT_LEAVE_CODE
       FROM ${this.TABLE_NAME} a
+      LEFT JOIN EMPL.EMPLOYEES e
+        ON a.EMPLOYEE_ID = e.EMPLOYEE_ID
+       AND a.TENANT_ID = e.ENTERPRISE_ID
+      LEFT JOIN ABS.ABS_LEAVE_TYPES lt
+        ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
+       AND a.TENANT_ID = lt.TENANT_ID
       WHERE a.LEAVE_REQUEST_GUID = :1`;
 
       const result = await this.executeQuery(query, [guidBuffer]);
@@ -305,7 +327,54 @@ class LeaveRequestModel {
         if (row.request_status && String(row.request_status).toUpperCase() === 'PENDING') {
           row.request_status = 'SUBMITTED';
         }
-        return row;
+
+        // Build employee_info object (limited fields)
+        const employeeInfo = row.emp_employee_id ? {
+          employee_id: row.emp_employee_id,
+          employee_guid: row.emp_employee_guid,
+          first_name: row.emp_first_name,
+          middle_name: row.emp_middle_name,
+          last_name: row.emp_last_name,
+          first_name_ar: row.emp_first_name_ar,
+          middle_name_ar: row.emp_middle_name_ar,
+          last_name_ar: row.emp_last_name_ar,
+          email: row.emp_email
+        } : null;
+
+        // Build leave_type_info object (limited fields)
+        const leaveTypeInfo = row.lt_leave_type_id ? {
+          leave_type_id: row.lt_leave_type_id,
+          leave_type_guid: row.lt_leave_type_guid,
+          leave_name_en: row.lt_leave_name_en,
+          leave_name_ar: row.lt_leave_name_ar,
+          leave_code: row.lt_leave_code
+        } : null;
+
+        // Remove prefixed fields from main row
+        const {
+          emp_employee_id,
+          emp_employee_guid,
+          emp_first_name,
+          emp_middle_name,
+          emp_last_name,
+          emp_first_name_ar,
+          emp_middle_name_ar,
+          emp_last_name_ar,
+          emp_email,
+          lt_leave_type_id,
+          lt_leave_type_guid,
+          lt_leave_name_en,
+          lt_leave_name_ar,
+          lt_leave_code,
+          ...leaveRequestData
+        } = row;
+
+        // Add structured employee and leave type info
+        return {
+          ...leaveRequestData,
+          employee_info: employeeInfo,
+          leave_type_info: leaveTypeInfo
+        };
       }
       return null;
     } catch (error) {

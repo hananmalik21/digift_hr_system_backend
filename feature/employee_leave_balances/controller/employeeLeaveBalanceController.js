@@ -556,6 +556,144 @@ function validateOpeningBalanceData(data) {
 }
 
 /**
+ * @route   PUT /api/abs/leave-balances/:balanceGuid
+ * @desc    Update leave balance and record adjustments in transactions table
+ * @header  x-tenant-id (required)
+ * @header  x-user-id (required)
+ * @param   balanceGuid - Balance GUID (32-char hex string)
+ * @body    {
+ *            "opening_balance_days": number (optional),
+ *            "accrued_days": number (optional),
+ *            "taken_days": number (optional),
+ *            "adjusted_days": number (optional),
+ *            "available_days": number (optional),
+ *            "status": string (optional),
+ *            "comments": string (optional) - Comments for adjustment transaction
+ *          }
+ * 
+ * Example curl:
+ * curl -X PUT http://localhost:3000/api/abs/leave-balances/48BADBE252279908E063E15B000A1999 \
+ *   -H "Content-Type: application/json" \
+ *   -H "x-tenant-id: 1001" \
+ *   -H "x-user-id: ADMIN" \
+ *   -d '{
+ *     "opening_balance_days": 35,
+ *     "available_days": 35,
+ *     "comments": "Manual adjustment for year-end carryover"
+ *   }'
+ */
+router.put('/leave-balances/:balanceGuid', async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    const userId = getRequiredUserId(req);
+
+    // Extract and validate balance GUID
+    let balanceGuid;
+    try {
+      balanceGuid = ensureHex32(req.params.balanceGuid, 'balance_guid');
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return sendBadRequest(res, req, error.message);
+      }
+      throw error;
+    }
+
+    // Validate request body
+    const { 
+      opening_balance_days,
+      accrued_days,
+      taken_days,
+      adjusted_days,
+      available_days,
+      status,
+      comments
+    } = req.body;
+
+    // Build updates object (only include defined fields)
+    const updates = {};
+    if (opening_balance_days !== undefined) {
+      const value = parseFloat(opening_balance_days);
+      if (isNaN(value)) {
+        return sendBadRequest(res, req, 'opening_balance_days must be a valid number');
+      }
+      updates.opening_balance_days = value;
+    }
+
+    if (accrued_days !== undefined) {
+      const value = parseFloat(accrued_days);
+      if (isNaN(value)) {
+        return sendBadRequest(res, req, 'accrued_days must be a valid number');
+      }
+      updates.accrued_days = value;
+    }
+
+    if (taken_days !== undefined) {
+      const value = parseFloat(taken_days);
+      if (isNaN(value)) {
+        return sendBadRequest(res, req, 'taken_days must be a valid number');
+      }
+      updates.taken_days = value;
+    }
+
+    if (adjusted_days !== undefined) {
+      const value = parseFloat(adjusted_days);
+      if (isNaN(value)) {
+        return sendBadRequest(res, req, 'adjusted_days must be a valid number');
+      }
+      updates.adjusted_days = value;
+    }
+
+    if (available_days !== undefined) {
+      const value = parseFloat(available_days);
+      if (isNaN(value)) {
+        return sendBadRequest(res, req, 'available_days must be a valid number');
+      }
+      updates.available_days = value;
+    }
+
+    if (status !== undefined) {
+      if (typeof status !== 'string' || status.trim() === '') {
+        return sendBadRequest(res, req, 'status must be a non-empty string');
+      }
+      updates.status = status.toUpperCase();
+    }
+
+    // Check if any updates provided
+    if (Object.keys(updates).length === 0) {
+      return sendBadRequest(res, req, 'At least one field must be provided for update');
+    }
+
+    // Call model method
+    const result = await EmployeeLeaveBalanceModel.updateBalance({
+      tenantId,
+      balanceGuidHex: balanceGuid,
+      updates,
+      userId,
+      comments: comments || null
+    });
+
+    // Return updated balance with transactions
+    return sendOk(res, req, result.balance, {
+      transactions: result.transactions,
+      message: result.transactions.length > 0 
+        ? `Balance updated successfully. ${result.transactions.length} adjustment transaction(s) recorded.`
+        : 'Balance updated successfully (no changes detected).'
+    });
+  } catch (error) {
+    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
+    }
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    return sendServerError(res, req, 'Failed to update leave balance', error);
+  }
+});
+
+/**
  * @route   POST /api/abs/balances/opening
  * @desc    Initialize opening balance by calling PL/SQL procedure (explicitly idempotent)
  * @header  x-tenant-id - Required tenant ID

@@ -2216,6 +2216,304 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
     });
   }
 
+  /**
+   * Update leave balance and record adjustments in transactions table
+   * @param {Object} params - Update parameters
+   * @param {number} params.tenantId - Tenant ID
+   * @param {string} params.balanceGuidHex - Balance GUID (hex32)
+   * @param {Object} params.updates - Fields to update (opening_balance_days, accrued_days, taken_days, adjusted_days, available_days, status)
+   * @param {string} params.userId - User ID for audit
+   * @param {string} params.comments - Optional comments for adjustment transaction
+   * @returns {Object} Updated balance with transaction info
+   */
+  static async updateBalance(params) {
+    const {
+      tenantId,
+      balanceGuidHex,
+      updates = {},
+      userId = 'SYSTEM',
+      comments = null
+    } = params;
+
+    if (!tenantId) {
+      throw new ValidationError('Tenant ID is required');
+    }
+
+    if (!balanceGuidHex) {
+      throw new ValidationError('Balance GUID is required');
+    }
+
+    const normalizedGuid = ensureHex32(balanceGuidHex, 'balance_guid');
+
+    return await this.executeWithTransaction(async (connection) => {
+      // Fetch current balance
+      const currentBalanceQuery = `
+        SELECT 
+          EMPLOYEE_LEAVE_BALANCE_ID,
+          EMPLOYEE_ID,
+          LEAVE_TYPE_ID,
+          OPENING_BALANCE_DAYS,
+          ACCRUED_DAYS,
+          TAKEN_DAYS,
+          ADJUSTED_DAYS,
+          AVAILABLE_DAYS,
+          STATUS
+        FROM ${this.TABLE_NAME}
+        WHERE TENANT_ID = :1
+          AND RAWTOHEX(EMPLOYEE_LEAVE_BALANCE_GUID) = :2
+          AND NVL(STATUS, 'ACTIVE') = 'ACTIVE'
+        FOR UPDATE
+      `;
+
+      const currentResult = await connection.execute(
+        currentBalanceQuery,
+        [tenantId, normalizedGuid],
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (!currentResult.rows || currentResult.rows.length === 0) {
+        throw new ValidationError('Leave balance not found');
+      }
+
+      const current = currentResult.rows[0];
+      const employeeId = current.EMPLOYEE_ID;
+      const leaveTypeId = current.LEAVE_TYPE_ID;
+
+      // Calculate differences
+      const differences = {};
+      const updateFields = [];
+      const updateBindParams = [];
+      let paramIndex = 1;
+
+      const fieldsToCheck = [
+        'opening_balance_days',
+        'accrued_days',
+        'taken_days',
+        'adjusted_days',
+        'available_days'
+      ];
+
+      for (const field of fieldsToCheck) {
+        if (updates[field] !== undefined && updates[field] !== null) {
+          const newValue = parseFloat(updates[field]) || 0;
+          const currentValue = parseFloat(current[field.toUpperCase()]) || 0;
+          const diff = newValue - currentValue;
+
+          if (Math.abs(diff) > 0.0001) { // Only track non-zero differences
+            differences[field] = diff;
+            updateFields.push(`${field.toUpperCase()} = :${paramIndex}`);
+            updateBindParams.push(newValue);
+            paramIndex++;
+          }
+        }
+      }
+
+      // Handle status update
+      if (updates.status !== undefined) {
+        updateFields.push(`STATUS = :${paramIndex}`);
+        updateBindParams.push(updates.status);
+        paramIndex++;
+      }
+
+      // If no changes, return current balance
+      if (updateFields.length === 0) {
+        const fetchQuery = `
+          SELECT 
+            RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
+            b.TENANT_ID,
+            b.EMPLOYEE_ID,
+            RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+            b.LEAVE_TYPE_ID,
+            b.OPENING_BALANCE_DAYS,
+            b.ACCRUED_DAYS,
+            b.TAKEN_DAYS,
+            b.ADJUSTED_DAYS,
+            b.AVAILABLE_DAYS,
+            b.LAST_ACCRUAL_DATE,
+            b.PERIOD_START_DATE,
+            b.PERIOD_END_DATE,
+            b.STATUS,
+            b.CREATION_DATE,
+            b.CREATED_BY,
+            b.LAST_UPDATE_DATE,
+            b.LAST_UPDATED_BY
+          FROM ${this.TABLE_NAME} b
+          LEFT JOIN ${this.EMPLOYEE_TABLE_NAME} e
+            ON b.EMPLOYEE_ID = e.EMPLOYEE_ID
+           AND b.TENANT_ID = e.ENTERPRISE_ID
+          WHERE b.TENANT_ID = :1
+            AND RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) = :2
+        `;
+        const fetchResult = await connection.execute(
+          fetchQuery,
+          [tenantId, normalizedGuid],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        return {
+          balance: this.convertKeysToSnakeCase(fetchResult.rows[0]),
+          transactions: []
+        };
+      }
+
+      // Build UPDATE query
+      updateFields.push(`LAST_UPDATE_DATE = SYSTIMESTAMP`);
+      updateFields.push(`LAST_UPDATED_BY = :${paramIndex}`);
+      updateBindParams.push(userId);
+      paramIndex++;
+
+      updateBindParams.push(tenantId);
+      updateBindParams.push(normalizedGuid);
+
+      const updateQuery = `
+        UPDATE ${this.TABLE_NAME}
+        SET ${updateFields.join(', ')}
+        WHERE TENANT_ID = :${paramIndex}
+          AND RAWTOHEX(EMPLOYEE_LEAVE_BALANCE_GUID) = :${paramIndex + 1}
+      `;
+
+      const updateResult = await connection.execute(
+        updateQuery,
+        updateBindParams,
+        { autoCommit: false }
+      );
+
+      if (!updateResult.rowsAffected || updateResult.rowsAffected === 0) {
+        throw new DatabaseError('Balance update affected 0 rows');
+      }
+
+      // Insert adjustment transactions for each changed field
+      const insertedTransactions = [];
+      const txnDate = new Date();
+
+      for (const [field, diff] of Object.entries(differences)) {
+        try {
+          const txnComments = comments || `Balance adjustment: ${field} changed by ${diff > 0 ? '+' : ''}${diff.toFixed(2)} days`;
+          
+          const txnId = await this.insertTxn(connection, {
+            tenantId,
+            employeeId,
+            leaveTypeId,
+            txnType: 'ADJUSTMENT',
+            txnDate,
+            amountDays: diff,
+            referenceType: 'BALANCE_UPDATE',
+            referenceId: current.EMPLOYEE_LEAVE_BALANCE_ID,
+            comments: txnComments,
+            userId
+          });
+
+          // Fetch the inserted transaction (with fallback for AMOUNT_DAYS/DAYS column)
+          let txnFetchQuery = `
+            SELECT
+              RAWTOHEX(TXN_GUID) AS TXN_GUID,
+              TXN_ID,
+              TENANT_ID,
+              EMPLOYEE_ID,
+              LEAVE_TYPE_ID,
+              TXN_TYPE,
+              TXN_DATE,
+              AMOUNT_DAYS,
+              REFERENCE_TYPE,
+              REFERENCE_ID,
+              COMMENTS,
+              CREATION_DATE,
+              CREATED_BY
+            FROM ${this.TXN_TABLE}
+            WHERE TXN_ID = :1
+          `;
+          
+          let txnResult;
+          try {
+            txnResult = await connection.execute(
+              txnFetchQuery,
+              [txnId],
+              { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+          } catch (fetchError) {
+            // Fallback if AMOUNT_DAYS column doesn't exist
+            if (fetchError.errorNum === 904 || (fetchError.message && fetchError.message.includes('ORA-00904') && fetchError.message.includes('AMOUNT_DAYS'))) {
+              txnFetchQuery = `
+                SELECT
+                  RAWTOHEX(TXN_GUID) AS TXN_GUID,
+                  TXN_ID,
+                  TENANT_ID,
+                  EMPLOYEE_ID,
+                  LEAVE_TYPE_ID,
+                  TXN_TYPE,
+                  TXN_DATE,
+                  DAYS AS AMOUNT_DAYS,
+                  REFERENCE_TYPE,
+                  REFERENCE_ID,
+                  COMMENTS,
+                  CREATION_DATE,
+                  CREATED_BY
+                FROM ${this.TXN_TABLE}
+                WHERE TXN_ID = :1
+              `;
+              txnResult = await connection.execute(
+                txnFetchQuery,
+                [txnId],
+                { outFormat: oracledb.OUT_FORMAT_OBJECT }
+              );
+            } else {
+              throw fetchError;
+            }
+          }
+
+          if (txnResult.rows && txnResult.rows.length > 0) {
+            insertedTransactions.push(this.convertKeysToSnakeCase(txnResult.rows[0]));
+          }
+        } catch (txnError) {
+          // Log but don't fail the update if transaction insert fails
+          console.error(`Failed to insert adjustment transaction for ${field}:`, txnError);
+        }
+      }
+
+      // Fetch updated balance
+      const fetchQuery = `
+        SELECT 
+          RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
+          b.TENANT_ID,
+          b.EMPLOYEE_ID,
+          RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          b.LEAVE_TYPE_ID,
+          b.OPENING_BALANCE_DAYS,
+          b.ACCRUED_DAYS,
+          b.TAKEN_DAYS,
+          b.ADJUSTED_DAYS,
+          b.AVAILABLE_DAYS,
+          b.LAST_ACCRUAL_DATE,
+          b.PERIOD_START_DATE,
+          b.PERIOD_END_DATE,
+          b.STATUS,
+          b.CREATION_DATE,
+          b.CREATED_BY,
+          b.LAST_UPDATE_DATE,
+          b.LAST_UPDATED_BY
+        FROM ${this.TABLE_NAME} b
+        LEFT JOIN ${this.EMPLOYEE_TABLE_NAME} e
+          ON b.EMPLOYEE_ID = e.EMPLOYEE_ID
+         AND b.TENANT_ID = e.ENTERPRISE_ID
+        WHERE b.TENANT_ID = :1
+          AND RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) = :2
+      `;
+      const fetchResult = await connection.execute(
+        fetchQuery,
+        [tenantId, normalizedGuid],
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (!fetchResult.rows || fetchResult.rows.length === 0) {
+        throw new DatabaseError('Balance update succeeded but could not retrieve updated balance');
+      }
+
+      return {
+        balance: this.convertKeysToSnakeCase(fetchResult.rows[0]),
+        transactions: insertedTransactions
+      };
+    });
+  }
+
 }
 
 export default EmployeeLeaveBalanceModel;
