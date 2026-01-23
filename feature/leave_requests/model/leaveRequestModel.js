@@ -854,7 +854,9 @@ class LeaveRequestModel {
         }
 
         // 7. Determine request status
-        const requestStatus = data.submit !== false ? 'SUBMITTED' : 'DRAFT';
+        // Handle submit field: if explicitly false (boolean or string 'false'), set to DRAFT, otherwise SUBMITTED
+        const isSubmitFalse = data.submit === false || data.submit === 'false';
+        const requestStatus = isSubmitFalse ? 'DRAFT' : 'SUBMITTED';
         const submittedAt = requestStatus === 'SUBMITTED' ? now : null;
 
         // 8. Insert leave request

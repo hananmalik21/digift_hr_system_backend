@@ -535,7 +535,9 @@ router.post('/', uploadDocuments, async (req, res) => {
         emergency_contact_phone: req.body.emergency_contact_phone,
         additional_notes: req.body.additional_notes,
         delegated_employee_guid: req.body.delegated_employee_guid,
-        submit: req.body.submit !== undefined ? req.body.submit === 'true' || req.body.submit === true : true
+        submit: req.body.submit !== undefined 
+          ? (req.body.submit === 'true' || req.body.submit === true || req.body.submit === 'TRUE')
+          : true
       };
 
       // Convert uploaded files to documents array format
@@ -564,7 +566,9 @@ router.post('/', uploadDocuments, async (req, res) => {
         additional_notes: req.body.additional_notes,
         delegated_employee_guid: req.body.delegated_employee_guid,
         documents: req.body.documents || [],
-        submit: req.body.submit !== undefined ? req.body.submit : true
+        submit: req.body.submit !== undefined 
+          ? (req.body.submit === true || req.body.submit === 'true' || req.body.submit === 'TRUE')
+          : true
       };
     }
 
