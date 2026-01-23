@@ -172,6 +172,7 @@ function validateLeaveTypeData(data, isUpdate = false) {
 /**
  * @route   GET /api/abs/leave-types
  * @desc    Get all leave types with optional filtering and pagination
+ * @query   tenant_id - Filter by TENANT_ID
  * @query   status - Filter by STATUS (ACTIVE, INACTIVE)
  * @query   search - Search by LEAVE_CODE, LEAVE_NAME_EN, or LEAVE_NAME_AR (case-insensitive)
  * @query   page - Page number (default: 1)
@@ -180,6 +181,15 @@ function validateLeaveTypeData(data, isUpdate = false) {
 router.get('/', async (req, res) => {
   try {
     const filters = {};
+
+    // Filter by TENANT_ID
+    if (req.query.tenant_id !== undefined) {
+      const tenantId = parseInt(req.query.tenant_id);
+      if (isNaN(tenantId) || tenantId < 1) {
+        return sendBadRequest(res, req, 'TENANT_ID must be a valid positive number');
+      }
+      filters.tenantId = tenantId;
+    }
 
     // Filter by STATUS
     if (req.query.status) {

@@ -127,6 +127,13 @@ class LeaveTypeModel {
       const bindParams = [];
       let paramIndex = 1;
 
+      // Filter by TENANT_ID
+      if (filters.tenantId !== undefined) {
+        conditions.push(`a.TENANT_ID = :${paramIndex}`);
+        bindParams.push(filters.tenantId);
+        paramIndex++;
+      }
+
       // Filter by STATUS
       if (filters.status) {
         conditions.push(`a.STATUS = :${paramIndex}`);
