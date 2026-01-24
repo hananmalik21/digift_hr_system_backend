@@ -289,6 +289,13 @@ class EmployeeLeaveBalanceModel {
         b.TENANT_ID,
         b.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
         b.LEAVE_TYPE_ID,
         b.OPENING_BALANCE_DAYS,
         b.ACCRUED_DAYS,
@@ -352,6 +359,13 @@ class EmployeeLeaveBalanceModel {
         b.TENANT_ID,
         b.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
         b.LEAVE_TYPE_ID,
         b.OPENING_BALANCE_DAYS,
         b.ACCRUED_DAYS,
@@ -400,6 +414,13 @@ class EmployeeLeaveBalanceModel {
         b.TENANT_ID,
         b.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
         b.LEAVE_TYPE_ID,
         b.OPENING_BALANCE_DAYS,
         b.ACCRUED_DAYS,
@@ -427,6 +448,99 @@ class EmployeeLeaveBalanceModel {
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
       throw this._wrapDb(error, 'Failed to fetch leave balance by employee and leave type');
+    }
+  }
+
+  static async getBalanceByBalanceGuid(tenantId, balanceGuid) {
+    try {
+      const normalizedGuid = ensureHex32(balanceGuid, 'balanceGuid');
+      const query = `SELECT
+        RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
+        b.TENANT_ID,
+        b.EMPLOYEE_ID,
+        RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.FIRST_NAME,
+        e.MIDDLE_NAME,
+        e.LAST_NAME,
+        e.FIRST_NAME_AR,
+        e.MIDDLE_NAME_AR,
+        e.LAST_NAME_AR,
+        e.EMAIL,
+        b.LEAVE_TYPE_ID,
+        b.OPENING_BALANCE_DAYS,
+        b.ACCRUED_DAYS,
+        b.TAKEN_DAYS,
+        b.ADJUSTED_DAYS,
+        b.AVAILABLE_DAYS,
+        b.LAST_ACCRUAL_DATE,
+        b.PERIOD_START_DATE,
+        b.PERIOD_END_DATE,
+        b.STATUS,
+        b.CREATION_DATE,
+        b.CREATED_BY,
+        b.LAST_UPDATE_DATE,
+        b.LAST_UPDATED_BY
+      FROM ${this.TABLE_NAME} b
+      INNER JOIN ${this.EMPLOYEE_TABLE_NAME} e
+        ON b.EMPLOYEE_ID = e.EMPLOYEE_ID
+       AND b.TENANT_ID = e.ENTERPRISE_ID
+      WHERE b.TENANT_ID = :1
+        AND RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) = :2`;
+      const result = await this.executeQuery(query, [tenantId, normalizedGuid]);
+      return (result.rows && result.rows.length > 0) ? result.rows[0] : null;
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      if (error instanceof DatabaseError) throw error;
+      throw this._wrapDb(error, 'Failed to fetch leave balance by balance GUID');
+    }
+  }
+
+  static async create(tenantId, data, userId = 'SYSTEM') {
+    try {
+      const employeeId = parseInt(data.EMPLOYEE_ID, 10);
+      const leaveTypeId = parseInt(data.LEAVE_TYPE_ID, 10);
+      if (!Number.isFinite(employeeId) || employeeId < 1) throw new ValidationError('EMPLOYEE_ID must be a valid positive number');
+      if (!Number.isFinite(leaveTypeId) || leaveTypeId < 1) throw new ValidationError('LEAVE_TYPE_ID must be a valid positive number');
+
+      const opening = data.OPENING_BALANCE_DAYS != null ? (parseFloat(data.OPENING_BALANCE_DAYS) || 0) : 0;
+      const accrued = data.ACCRUED_DAYS != null ? (parseFloat(data.ACCRUED_DAYS) || 0) : 0;
+      const taken = data.TAKEN_DAYS != null ? (parseFloat(data.TAKEN_DAYS) || 0) : 0;
+      const adjusted = data.ADJUSTED_DAYS != null ? (parseFloat(data.ADJUSTED_DAYS) || 0) : 0;
+      const available = data.AVAILABLE_DAYS != null ? (parseFloat(data.AVAILABLE_DAYS) || 0) : 0;
+      const status = (data.STATUS && String(data.STATUS).toUpperCase()) || 'ACTIVE';
+      const lastAccrual = data.LAST_ACCRUAL_DATE != null ? this._toDate(data.LAST_ACCRUAL_DATE) : null;
+      const periodStart = data.PERIOD_START_DATE != null ? this._toDate(data.PERIOD_START_DATE) : null;
+      const periodEnd = data.PERIOD_END_DATE != null ? this._toDate(data.PERIOD_END_DATE) : null;
+      const userVal = userId || 'SYSTEM';
+
+      await this.executeWithTransaction(async (connection) => {
+        const { buffer: guidBuffer } = await generateSysGuid(connection);
+        const now = new Date();
+        const insertSql = `INSERT INTO ${this.TABLE_NAME} (
+          EMPLOYEE_LEAVE_BALANCE_GUID, TENANT_ID, EMPLOYEE_ID, LEAVE_TYPE_ID,
+          OPENING_BALANCE_DAYS, ACCRUED_DAYS, TAKEN_DAYS, ADJUSTED_DAYS, AVAILABLE_DAYS,
+          LAST_ACCRUAL_DATE, PERIOD_START_DATE, PERIOD_END_DATE, STATUS,
+          CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+        ) VALUES (
+          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17
+        )`;
+        const binds = [
+          guidBuffer, tenantId, employeeId, leaveTypeId,
+          opening, accrued, taken, adjusted, available,
+          lastAccrual, periodStart, periodEnd, status,
+          now, userVal, now, userVal
+        ];
+        this._assertPositionalBinds(insertSql, binds);
+        await connection.execute(insertSql, binds, { autoCommit: false });
+      });
+
+      const balance = await this.getBalanceByEmployeeAndLeaveType(tenantId, employeeId, leaveTypeId);
+      if (!balance) throw new DatabaseError('Leave balance was created but could not be retrieved');
+      return balance;
+    } catch (error) {
+      if (error instanceof ValidationError) throw error;
+      if (error instanceof DatabaseError) throw error;
+      throw this._wrapDb(error, 'Failed to create leave balance');
     }
   }
 
@@ -640,6 +754,13 @@ class EmployeeLeaveBalanceModel {
           b.TENANT_ID,
           b.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.FIRST_NAME,
+          e.MIDDLE_NAME,
+          e.LAST_NAME,
+          e.FIRST_NAME_AR,
+          e.MIDDLE_NAME_AR,
+          e.LAST_NAME_AR,
+          e.EMAIL,
           b.LEAVE_TYPE_ID,
           b.OPENING_BALANCE_DAYS,
           b.ACCRUED_DAYS,
@@ -664,6 +785,13 @@ class EmployeeLeaveBalanceModel {
           b.TENANT_ID,
           b.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.FIRST_NAME,
+          e.MIDDLE_NAME,
+          e.LAST_NAME,
+          e.FIRST_NAME_AR,
+          e.MIDDLE_NAME_AR,
+          e.LAST_NAME_AR,
+          e.EMAIL,
           b.LEAVE_TYPE_ID,
           b.OPENING_BALANCE_DAYS,
           b.ACCRUED_DAYS,
@@ -696,6 +824,13 @@ class EmployeeLeaveBalanceModel {
           b.TENANT_ID,
           b.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.FIRST_NAME,
+          e.MIDDLE_NAME,
+          e.LAST_NAME,
+          e.FIRST_NAME_AR,
+          e.MIDDLE_NAME_AR,
+          e.LAST_NAME_AR,
+          e.EMAIL,
           b.LEAVE_TYPE_ID,
           b.OPENING_BALANCE_DAYS,
           b.ACCRUED_DAYS,
@@ -818,6 +953,13 @@ class EmployeeLeaveBalanceModel {
             b.TENANT_ID,
             b.EMPLOYEE_ID,
             RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+            e.FIRST_NAME,
+            e.MIDDLE_NAME,
+            e.LAST_NAME,
+            e.FIRST_NAME_AR,
+            e.MIDDLE_NAME_AR,
+            e.LAST_NAME_AR,
+            e.EMAIL,
             b.LEAVE_TYPE_ID,
             b.OPENING_BALANCE_DAYS,
             b.ACCRUED_DAYS,
@@ -847,13 +989,20 @@ class EmployeeLeaveBalanceModel {
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
       } catch (joinError) {
-        // If JOIN fails, try without JOIN (employee_guid will be null)
+        // If JOIN fails, try without JOIN (employee_guid and employee info will be null)
         const fetchSqlSimple = `
           SELECT
             RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
             b.TENANT_ID,
             b.EMPLOYEE_ID,
             NULL AS EMPLOYEE_GUID,
+            NULL AS FIRST_NAME,
+            NULL AS MIDDLE_NAME,
+            NULL AS LAST_NAME,
+            NULL AS FIRST_NAME_AR,
+            NULL AS MIDDLE_NAME_AR,
+            NULL AS LAST_NAME_AR,
+            NULL AS EMAIL,
             b.LEAVE_TYPE_ID,
             b.OPENING_BALANCE_DAYS,
             b.ACCRUED_DAYS,
@@ -2323,6 +2472,13 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
             b.TENANT_ID,
             b.EMPLOYEE_ID,
             RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+            e.FIRST_NAME,
+            e.MIDDLE_NAME,
+            e.LAST_NAME,
+            e.FIRST_NAME_AR,
+            e.MIDDLE_NAME_AR,
+            e.LAST_NAME_AR,
+            e.EMAIL,
             b.LEAVE_TYPE_ID,
             b.OPENING_BALANCE_DAYS,
             b.ACCRUED_DAYS,
@@ -2476,6 +2632,13 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
           b.TENANT_ID,
           b.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.FIRST_NAME,
+          e.MIDDLE_NAME,
+          e.LAST_NAME,
+          e.FIRST_NAME_AR,
+          e.MIDDLE_NAME_AR,
+          e.LAST_NAME_AR,
+          e.EMAIL,
           b.LEAVE_TYPE_ID,
           b.OPENING_BALANCE_DAYS,
           b.ACCRUED_DAYS,

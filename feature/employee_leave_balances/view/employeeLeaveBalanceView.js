@@ -74,6 +74,43 @@ function convertKeysToSnakeCase(obj) {
   return converted;
 }
 
+const EMPLOYEE_INFO_KEYS = ['first_name', 'middle_name', 'last_name', 'first_name_ar', 'middle_name_ar', 'last_name_ar', 'email'];
+
+/**
+ * Build employee_info object from a balance row (has employee_id, employee_guid, first_name, etc.)
+ * @param {Object} b - Balance object (snake_case)
+ * @returns {Object} employee_info
+ */
+function buildEmployeeInfo(b) {
+  if (!b || typeof b !== 'object') return null;
+  const trim = (v) => (v != null && typeof v === 'string') ? v.trim() : (v ?? null);
+  return {
+    employee_id: b.employee_id ?? null,
+    employee_guid: b.employee_guid ?? null,
+    first_name: trim(b.first_name),
+    middle_name: trim(b.middle_name),
+    last_name: trim(b.last_name),
+    first_name_ar: b.first_name_ar ?? null,
+    middle_name_ar: b.middle_name_ar ?? null,
+    last_name_ar: b.last_name_ar ?? null,
+    email: b.email ?? null
+  };
+}
+
+/**
+ * Add employee_info to balance and remove raw employee fields from top-level.
+ * @param {Object} balance - Balance object (snake_case)
+ * @returns {Object} Balance with employee_info, without first_name etc. on top-level
+ */
+function enrichBalanceWithEmployeeInfo(balance) {
+  if (!balance || typeof balance !== 'object') return balance;
+  const employee_info = buildEmployeeInfo(balance);
+  const out = { ...balance };
+  for (const k of EMPLOYEE_INFO_KEYS) delete out[k];
+  out.employee_info = employee_info;
+  return out;
+}
+
 /**
  * Send list of leave balances
  * @param {Object} res - Express response object
@@ -84,7 +121,8 @@ function convertKeysToSnakeCase(obj) {
  */
 export function sendLeaveBalanceList(res, req, employeeGuid, balances, meta = {}) {
   const convertedBalances = convertKeysToSnakeCase(balances || []);
-  const count = convertedBalances.length;
+  const enrichedBalances = convertedBalances.map((b) => enrichBalanceWithEmployeeInfo(b));
+  const count = enrichedBalances.length;
   const total = meta.total !== undefined ? meta.total : count;
 
   // Build response meta object
@@ -114,8 +152,8 @@ export function sendLeaveBalanceList(res, req, employeeGuid, balances, meta = {}
   const executionTime = Date.now() - startTime;
   responseMeta.execution_time = `${executionTime}ms`;
 
-  // Build data object
-  const responseData = convertedBalances;
+  // Build data object (each item includes employee_info)
+  const responseData = enrichedBalances;
 
   res.json({
     success: true,
@@ -137,12 +175,13 @@ export function sendLeaveBalance(res, req, balance) {
   }
 
   const convertedBalance = convertKeysToSnakeCase(balance);
+  const enriched = enrichBalanceWithEmployeeInfo(convertedBalance);
 
   res.json({
     success: true,
     message: 'Leave balance fetched',
     data: {
-      item: convertedBalance
+      item: enriched
     }
   });
 }
@@ -160,9 +199,10 @@ export function sendCreated(res, req, balance, meta = {}) {
   }
 
   const convertedBalance = convertKeysToSnakeCase(balance);
+  const enriched = enrichBalanceWithEmployeeInfo(convertedBalance);
 
   const responseData = {
-    item: convertedBalance
+    item: enriched
   };
 
   // Add transaction history if provided
@@ -196,9 +236,10 @@ export function sendOk(res, req, balance, meta = {}) {
   }
 
   const convertedBalance = convertKeysToSnakeCase(balance);
+  const enriched = enrichBalanceWithEmployeeInfo(convertedBalance);
 
   const responseData = {
-    item: convertedBalance
+    item: enriched
   };
 
   // Add transaction history if provided
@@ -409,11 +450,13 @@ export function sendAccrualRunSuccess(res, req, data) {
     accrual_rate_days: data.accrual_rate_days
   };
 
-  // Build data object (balances_sample, recent_txns, and skipped_balances_sample)
+  // Build data object (balances_sample, recent_txns, skipped_balances_sample); add employee_info to balance samples
+  const balancesSample = (convertedData.balances_sample || []).map((b) => enrichBalanceWithEmployeeInfo(b));
+  const skippedSample = (convertedData.skipped_balances_sample || []).map((b) => enrichBalanceWithEmployeeInfo(b));
   const responseData = {
-    balances_sample: convertedData.balances_sample || [],
+    balances_sample: balancesSample,
     recent_txns: convertedData.recent_txns || [],
-    skipped_balances_sample: convertedData.skipped_balances_sample || []
+    skipped_balances_sample: skippedSample
   };
 
   // Add debug info if present
