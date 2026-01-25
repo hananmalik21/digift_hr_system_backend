@@ -2398,7 +2398,6 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
       // Fetch current balance
       const currentBalanceQuery = `
         SELECT 
-          EMPLOYEE_LEAVE_BALANCE_ID,
           EMPLOYEE_ID,
           LEAVE_TYPE_ID,
           OPENING_BALANCE_DAYS,
@@ -2553,7 +2552,7 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
             txnDate,
             amountDays: diff,
             referenceType: 'BALANCE_UPDATE',
-            referenceId: current.EMPLOYEE_LEAVE_BALANCE_ID,
+            referenceId: normalizedGuid,
             comments: txnComments,
             userId
           });
