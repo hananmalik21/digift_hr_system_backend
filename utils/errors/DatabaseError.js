@@ -95,6 +95,14 @@ export class DatabaseError extends AppError {
 
     // Foreign key constraint - parent key not found
     if (errorNum === 2291 || message.includes('ORA-02291')) {
+      // Check for specific entity types in error message
+      const upperMessage = message.toUpperCase();
+      if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE')) {
+        return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
+      }
+      if (upperMessage.includes('TENANT') || upperMessage.includes('TENANT_ID')) {
+        return 'The tenant does not exist. Please verify that the tenant_id is valid.';
+      }
       return 'The referenced record does not exist. Please check your input.';
     }
 
@@ -108,9 +116,54 @@ export class DatabaseError extends AppError {
       return 'Required fields are missing. Please provide all required information.';
     }
 
-    // Check constraint violation
+    // Check constraint violation (ORA-02290)
     if (errorNum === 2290 || message.includes('ORA-02290')) {
-      return 'The provided data violates a validation rule. Please check your input.';
+      // Try to extract constraint name and column from error message
+      const constraint = DatabaseError.extractConstraint(oracleError);
+      const columns = DatabaseError.extractColumns(oracleError);
+      
+      // Try to extract column name from common error message patterns
+      let columnName = null;
+      const columnMatch = message.match(/column\s+["']?(\w+)["']?/i) || 
+                         message.match(/\((\w+)\)/);
+      if (columnMatch) {
+        columnName = columnMatch[1];
+      }
+      
+      // Build specific error message
+      if (constraint) {
+        const constraintName = constraint.includes('.') ? constraint.split('.').pop() : constraint;
+        
+        // Map common constraint names to user-friendly messages
+        const constraintMessages = {
+          'ABS_LEAVE_POLICIES_C1': 'Invalid policy status. Status must be ACTIVE or INACTIVE.',
+          'ABS_LEAVE_POLICIES_C2': 'Invalid accrual method code. Please provide a valid accrual method.',
+          'ABS_LEAVE_POLICIES_C3': 'Invalid entitlement days. Entitlement days must be a positive number.',
+          'ABS_LEAVE_POLICIES_C4': 'Invalid grade range. Grade from must be less than or equal to grade to.',
+          'ABS_LEAVE_POLICIES_C5': 'Invalid grade entitlement. Grade entitlement days must be a positive number.',
+        };
+        
+        if (constraintMessages[constraintName]) {
+          return constraintMessages[constraintName];
+        }
+        
+        // Generic message with constraint name
+        return `The provided data violates the validation rule: ${constraintName}. Please check your input and ensure all values meet the required constraints.`;
+      }
+      
+      if (columnName) {
+        return `Invalid value for ${columnName}. Please check your input and ensure the value meets the required validation rules.`;
+      }
+      
+      // Try to extract more context from the error message
+      if (message.includes('check constraint')) {
+        const constraintMatch = message.match(/check constraint\s+["']?([^"']+)["']?/i);
+        if (constraintMatch) {
+          return `The provided data violates the validation rule: ${constraintMatch[1]}. Please check your input.`;
+        }
+      }
+      
+      return 'The provided data violates a validation rule. Please check your input and ensure all values meet the required constraints.';
     }
 
     // Invalid number
@@ -141,7 +194,96 @@ export class DatabaseError extends AppError {
       return 'Cannot update the record due to a database constraint conflict. A trigger or constraint is preventing this update. Please verify your input and try again, or contact support if the issue persists.';
     }
 
-    // Default database error
+    // Package body does not exist or is invalid (ORA-04067)
+    if (errorNum === 4067 || message.includes('ORA-04067')) {
+      return 'The database package ABS_POLICY_PKG does not exist or its body is invalid. Please verify that the package exists in the ABS schema and is properly compiled. Contact the database administrator to resolve this issue.';
+    }
+
+    // PL/SQL compilation error (ORA-06550)
+    if (errorNum === 6550 || message.includes('ORA-06550')) {
+      // Extract the actual error message from ORA-06550 (it usually contains the real error)
+      const match = message.match(/ORA-06550[^\n]*\n([^\n]+)/);
+      const actualError = match ? match[1].trim() : message;
+      
+      // Check for leave type related errors
+      const upperError = actualError.toUpperCase();
+      if (upperError.includes('LEAVE_TYPE') || upperError.includes('LEAVE TYPE') || upperError.includes('NOT FOUND')) {
+        return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
+      }
+      
+      return `PL/SQL compilation error: ${actualError}. Please verify that ABS.ABS_POLICY_PKG.CREATE_POLICY_WITH_GRADES procedure exists and all parameters are correct.`;
+    }
+
+    // Parallel query server error (ORA-12801) - wrapper error, extract underlying error
+    if (errorNum === 12801 || message.includes('ORA-12801')) {
+      // ORA-12801 is a wrapper - the actual error follows it
+      // Try to extract the underlying error message
+      const lines = message.split('\n');
+      const underlyingError = lines.find(line => 
+        line.includes('ORA-') && !line.includes('ORA-12801')
+      ) || lines[lines.length - 1];
+      
+      // Check for leave type related errors in underlying error
+      const upperError = underlyingError.toUpperCase();
+      if (upperError.includes('LEAVE_TYPE') || upperError.includes('LEAVE TYPE') || upperError.includes('NOT FOUND')) {
+        return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
+      }
+      
+      return `Database error: ${underlyingError.trim() || 'An error occurred during query execution. Please check the database logs for details.'}`;
+    }
+
+    // Application errors (ORA-20000 to ORA-20999) - user-defined errors from PL/SQL
+    if ((errorNum >= 20000 && errorNum <= 20999) || message.includes('ORA-20')) {
+      // Extract the user-friendly message (first line before stack trace)
+      let userMessage = message;
+      
+      // Remove Oracle stack traces (ORA-06512, ORA-04088, etc.)
+      const stackTracePattern = /\nORA-\d{5}:/;
+      if (stackTracePattern.test(userMessage)) {
+        // Get everything before the first stack trace
+        userMessage = userMessage.split(stackTracePattern)[0].trim();
+      }
+      
+      // Remove "Help: https://..." links
+      userMessage = userMessage.replace(/Help:\s*https?:\/\/[^\n]*/gi, '').trim();
+      
+      // Check for specific lookup validation errors
+      const upperMessage = userMessage.toUpperCase();
+      if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE') || upperMessage.includes('NOT FOUND')) {
+        return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
+      }
+      
+      // Check for lookup validation errors
+      if (upperMessage.includes('MUST EXIST IN LOOKUP') || upperMessage.includes('INVALID') && upperMessage.includes('CODE')) {
+        // Extract the field name and lookup name
+        const fieldMatch = userMessage.match(/INVALID\s+(\w+)/i);
+        const lookupMatch = userMessage.match(/LOOKUP\s+(\w+)/i);
+        
+        if (fieldMatch && lookupMatch) {
+          const fieldName = fieldMatch[1].replace(/_/g, ' ').toLowerCase();
+          const lookupName = lookupMatch[1].replace(/_/g, ' ');
+          return `Invalid ${fieldName}. The value must exist in the ${lookupName} lookup table. Please provide a valid value.`;
+        }
+        
+        // Generic lookup error message
+        return userMessage || 'Invalid value provided. The value must exist in the lookup table. Please check your input.';
+      }
+      
+      // Return the cleaned user message
+      return userMessage || message;
+    }
+
+    // Default database error - try to extract more details from message
+    if (message && message.length > 0 && message !== 'A database error occurred. Please try again later.') {
+      // If there's a detailed message, use it
+      const upperMessage = message.toUpperCase();
+      if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE')) {
+        return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
+      }
+      // Return first 200 chars of the actual error message if available
+      return message.length > 200 ? message.substring(0, 200) + '...' : message;
+    }
+    
     return 'A database error occurred. Please try again later.';
   }
 

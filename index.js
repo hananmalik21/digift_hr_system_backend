@@ -31,7 +31,7 @@ import leaveContactController from './feature/leave_contacts/controller/leaveCon
 import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
 import employeeLeaveBalanceController from './feature/employee_leave_balances/controller/employeeLeaveBalanceController.js';
 import absLookupController from './feature/abs_lookups/controller/absLookupController.js';
-import absLeavePolicyController from './feature/abs_leave_policies/controller/absLeavePolicyController.js';
+import leavePolicyController from './feature/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
@@ -124,7 +124,7 @@ app.use('/api/abs/leave-requests', leaveRequestController);
 app.use('/api/abs/leave-contacts', leaveContactController);
 app.use('/api/abs/leave-documents', leaveDocumentController);
 app.use('/api/abs/lookups', absLookupController);
-app.use('/api/abs/leave-policies', absLeavePolicyController);
+app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
 app.use('/api/abs', employeeLeaveBalanceController);
