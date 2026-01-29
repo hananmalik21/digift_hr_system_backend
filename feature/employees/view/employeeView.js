@@ -85,7 +85,7 @@ export function sendCreated(res, req, employee) {
 
   res.status(201).json({
     success: true,
-    message: 'Employee created successfully',
+    message: 'Employee created successfully. Use the same enterprise_id in GET /api/employees?enterprise_id=<value> to list this employee.',
     data: convertedEmployee
   });
 }

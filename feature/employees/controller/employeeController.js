@@ -43,13 +43,16 @@ function getUserId(req) {
 function validateEmployeeData(data, isUpdate = false) {
   const errors = [];
 
+  const firstName = data.FIRST_NAME_EN ?? data.FIRST_NAME;
+  const lastName = data.LAST_NAME_EN ?? data.LAST_NAME;
+
   if (!isUpdate) {
     // Required fields for creation
-    if (!data.FIRST_NAME || data.FIRST_NAME.trim() === '') {
-      errors.push('FIRST_NAME is required');
+    if (!firstName || String(firstName).trim() === '') {
+      errors.push('FIRST_NAME_EN (or FIRST_NAME) is required');
     }
-    if (!data.LAST_NAME || data.LAST_NAME.trim() === '') {
-      errors.push('LAST_NAME is required');
+    if (!lastName || String(lastName).trim() === '') {
+      errors.push('LAST_NAME_EN (or LAST_NAME) is required');
     }
     if (!data.EMAIL || data.EMAIL.trim() === '') {
       errors.push('EMAIL is required');
@@ -72,11 +75,11 @@ function validateEmployeeData(data, isUpdate = false) {
     }
   } else {
     // For updates, validate only provided fields
-    if (data.FIRST_NAME !== undefined && data.FIRST_NAME.trim() === '') {
-      errors.push('FIRST_NAME cannot be empty');
+    if ((data.FIRST_NAME_EN ?? data.FIRST_NAME) !== undefined && String(data.FIRST_NAME_EN ?? data.FIRST_NAME).trim() === '') {
+      errors.push('FIRST_NAME_EN cannot be empty');
     }
-    if (data.LAST_NAME !== undefined && data.LAST_NAME.trim() === '') {
-      errors.push('LAST_NAME cannot be empty');
+    if ((data.LAST_NAME_EN ?? data.LAST_NAME) !== undefined && String(data.LAST_NAME_EN ?? data.LAST_NAME).trim() === '') {
+      errors.push('LAST_NAME_EN cannot be empty');
     }
     if (data.EMAIL !== undefined) {
       if (data.EMAIL.trim() === '') {
@@ -122,7 +125,7 @@ function validateEmployeeData(data, isUpdate = false) {
 /**
  * @route   GET /api/employees
  * @desc    Get all employees
- * @query   enterprise_id - Filter by enterprise ID
+ * @query   enterprise_id - Required. Filter by enterprise ID (must match the enterprise_id used when creating the employee)
  * @query   is_active - Filter by active status (true/false)
  * @query   status - Filter by status
  * @query   email - Search by email (partial match, case-insensitive)

@@ -171,12 +171,13 @@ class LeaveRequestModel {
         -- Employee information (limited fields)
         e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
-        e.FIRST_NAME AS EMP_FIRST_NAME,
-        e.MIDDLE_NAME AS EMP_MIDDLE_NAME,
-        e.LAST_NAME AS EMP_LAST_NAME,
+        e.FIRST_NAME_EN AS EMP_FIRST_NAME_EN,
+        e.MIDDLE_NAME_EN AS EMP_MIDDLE_NAME_EN,
+        e.LAST_NAME_EN AS EMP_LAST_NAME_EN,
         e.FIRST_NAME_AR AS EMP_FIRST_NAME_AR,
         e.MIDDLE_NAME_AR AS EMP_MIDDLE_NAME_AR,
         e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
+        e.FAMILY_NAME_AR AS EMP_FAMILY_NAME_AR,
         e.EMAIL AS EMP_EMAIL,
         -- Leave type information (limited fields)
         lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
@@ -212,12 +213,13 @@ class LeaveRequestModel {
         const employeeInfo = row.emp_employee_id ? {
           employee_id: row.emp_employee_id,
           employee_guid: row.emp_employee_guid,
-          first_name: row.emp_first_name,
-          middle_name: row.emp_middle_name,
-          last_name: row.emp_last_name,
+          first_name_en: row.emp_first_name_en,
+          middle_name_en: row.emp_middle_name_en,
+          last_name_en: row.emp_last_name_en,
           first_name_ar: row.emp_first_name_ar,
           middle_name_ar: row.emp_middle_name_ar,
           last_name_ar: row.emp_last_name_ar,
+          family_name_ar: row.emp_family_name_ar,
           email: row.emp_email
         } : null;
 
@@ -234,12 +236,13 @@ class LeaveRequestModel {
         const {
           emp_employee_id,
           emp_employee_guid,
-          emp_first_name,
-          emp_middle_name,
-          emp_last_name,
+          emp_first_name_en,
+          emp_middle_name_en,
+          emp_last_name_en,
           emp_first_name_ar,
           emp_middle_name_ar,
           emp_last_name_ar,
+          emp_family_name_ar,
           emp_email,
           lt_leave_type_id,
           lt_leave_type_guid,
@@ -297,12 +300,13 @@ class LeaveRequestModel {
         -- Employee information (limited fields)
         e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
-        e.FIRST_NAME AS EMP_FIRST_NAME,
-        e.MIDDLE_NAME AS EMP_MIDDLE_NAME,
-        e.LAST_NAME AS EMP_LAST_NAME,
+        e.FIRST_NAME_EN AS EMP_FIRST_NAME_EN,
+        e.MIDDLE_NAME_EN AS EMP_MIDDLE_NAME_EN,
+        e.LAST_NAME_EN AS EMP_LAST_NAME_EN,
         e.FIRST_NAME_AR AS EMP_FIRST_NAME_AR,
         e.MIDDLE_NAME_AR AS EMP_MIDDLE_NAME_AR,
         e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
+        e.FAMILY_NAME_AR AS EMP_FAMILY_NAME_AR,
         e.EMAIL AS EMP_EMAIL,
         -- Leave type information (limited fields)
         lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
@@ -332,12 +336,13 @@ class LeaveRequestModel {
         const employeeInfo = row.emp_employee_id ? {
           employee_id: row.emp_employee_id,
           employee_guid: row.emp_employee_guid,
-          first_name: row.emp_first_name,
-          middle_name: row.emp_middle_name,
-          last_name: row.emp_last_name,
+          first_name_en: row.emp_first_name_en,
+          middle_name_en: row.emp_middle_name_en,
+          last_name_en: row.emp_last_name_en,
           first_name_ar: row.emp_first_name_ar,
           middle_name_ar: row.emp_middle_name_ar,
           last_name_ar: row.emp_last_name_ar,
+          family_name_ar: row.emp_family_name_ar,
           email: row.emp_email
         } : null;
 
@@ -354,12 +359,13 @@ class LeaveRequestModel {
         const {
           emp_employee_id,
           emp_employee_guid,
-          emp_first_name,
-          emp_middle_name,
-          emp_last_name,
+          emp_first_name_en,
+          emp_middle_name_en,
+          emp_last_name_en,
           emp_first_name_ar,
           emp_middle_name_ar,
           emp_last_name_ar,
+          emp_family_name_ar,
           emp_email,
           lt_leave_type_id,
           lt_leave_type_guid,

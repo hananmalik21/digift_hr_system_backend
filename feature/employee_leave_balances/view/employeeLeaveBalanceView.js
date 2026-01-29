@@ -74,10 +74,10 @@ function convertKeysToSnakeCase(obj) {
   return converted;
 }
 
-const EMPLOYEE_INFO_KEYS = ['first_name', 'middle_name', 'last_name', 'first_name_ar', 'middle_name_ar', 'last_name_ar', 'email'];
+const EMPLOYEE_INFO_KEYS = ['first_name_en', 'middle_name_en', 'last_name_en', 'first_name_ar', 'middle_name_ar', 'last_name_ar', 'family_name_ar', 'email'];
 
 /**
- * Build employee_info object from a balance row (has employee_id, employee_guid, first_name, etc.)
+ * Build employee_info object from a balance row (has employee_id, employee_guid, first_name_en, etc.)
  * @param {Object} b - Balance object (snake_case)
  * @returns {Object} employee_info
  */
@@ -87,12 +87,13 @@ function buildEmployeeInfo(b) {
   return {
     employee_id: b.employee_id ?? null,
     employee_guid: b.employee_guid ?? null,
-    first_name: trim(b.first_name),
-    middle_name: trim(b.middle_name),
-    last_name: trim(b.last_name),
+    first_name_en: trim(b.first_name_en),
+    middle_name_en: trim(b.middle_name_en),
+    last_name_en: trim(b.last_name_en),
     first_name_ar: b.first_name_ar ?? null,
     middle_name_ar: b.middle_name_ar ?? null,
     last_name_ar: b.last_name_ar ?? null,
+    family_name_ar: b.family_name_ar ?? null,
     email: b.email ?? null
   };
 }
@@ -100,7 +101,7 @@ function buildEmployeeInfo(b) {
 /**
  * Add employee_info to balance and remove raw employee fields from top-level.
  * @param {Object} balance - Balance object (snake_case)
- * @returns {Object} Balance with employee_info, without first_name etc. on top-level
+ * @returns {Object} Balance with employee_info, without first_name_en etc. on top-level
  */
 function enrichBalanceWithEmployeeInfo(balance) {
   if (!balance || typeof balance !== 'object') return balance;

@@ -10,15 +10,15 @@ import { generateSysGuid } from '../../../utils/guidUtils.js';
  * Table columns (confirmed):
  * - EMPLOYEE_ID (PK)
  * - EMPLOYEE_GUID (RAW(16))
+ * - TENANT_ID
  * - ENTERPRISE_ID
- * - FIRST_NAME, MIDDLE_NAME, LAST_NAME
- * - FIRST_NAME_AR, MIDDLE_NAME_AR, LAST_NAME_AR
+ * - FIRST_NAME_EN, MIDDLE_NAME_EN, LAST_NAME_EN
+ * - FIRST_NAME_AR, MIDDLE_NAME_AR, LAST_NAME_AR, FAMILY_NAME_AR
  * - EMAIL, PHONE_NUMBER, MOBILE_NUMBER
  * - DATE_OF_BIRTH
  * - STATUS
  * - IS_ACTIVE (Y/N)
- * - CREATION_DATE, CREATED_BY
- * - LAST_UPDATE_DATE, LAST_UPDATED_BY
+ * - CREATED_BY
  */
 class EmployeeModel {
   static TABLE_NAME = 'EMPL.EMPLOYEES';
@@ -144,23 +144,22 @@ class EmployeeModel {
       let dataQuery = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.TENANT_ID,
         e.ENTERPRISE_ID,
-        e.FIRST_NAME,
-        e.MIDDLE_NAME,
-        e.LAST_NAME,
+        e.FIRST_NAME_EN,
+        e.MIDDLE_NAME_EN,
+        e.LAST_NAME_EN,
         e.FIRST_NAME_AR,
         e.MIDDLE_NAME_AR,
         e.LAST_NAME_AR,
+        e.FAMILY_NAME_AR,
         e.EMAIL,
         e.PHONE_NUMBER,
         e.MOBILE_NUMBER,
         e.DATE_OF_BIRTH,
         e.STATUS,
         e.IS_ACTIVE,
-        e.CREATED_BY,
-        e.CREATION_DATE,
-        e.LAST_UPDATED_BY,
-        e.LAST_UPDATE_DATE
+        e.CREATED_BY
       FROM ${this.TABLE_NAME} e WHERE 1=1`;
 
       // ENTERPRISE filter (fix: accept both keys)
@@ -192,9 +191,9 @@ class EmployeeModel {
 
       if (filters.name) {
         conditions.push(`(
-          UPPER(e.FIRST_NAME) LIKE UPPER(:${paramIndex}) OR
-          UPPER(e.LAST_NAME) LIKE UPPER(:${paramIndex + 1}) OR
-          UPPER(e.MIDDLE_NAME) LIKE UPPER(:${paramIndex + 2})
+          UPPER(e.FIRST_NAME_EN) LIKE UPPER(:${paramIndex}) OR
+          UPPER(e.LAST_NAME_EN) LIKE UPPER(:${paramIndex + 1}) OR
+          UPPER(e.MIDDLE_NAME_EN) LIKE UPPER(:${paramIndex + 2})
         )`);
         const like = `%${filters.name}%`;
         bindParams.push(like, like, like);
@@ -205,8 +204,7 @@ class EmployeeModel {
       countQuery += whereClause;
       dataQuery += whereClause;
 
-      // FIX: order by CREATION_DATE (not CREATED_DATE)
-      dataQuery += ` ORDER BY e.CREATION_DATE DESC NULLS LAST, e.EMPLOYEE_ID DESC`;
+      dataQuery += ` ORDER BY e.EMPLOYEE_ID DESC`;
 
       // Pagination
       const pagination = filters.pagination;
@@ -264,23 +262,22 @@ class EmployeeModel {
       const query = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.TENANT_ID,
         e.ENTERPRISE_ID,
-        e.FIRST_NAME,
-        e.MIDDLE_NAME,
-        e.LAST_NAME,
+        e.FIRST_NAME_EN,
+        e.MIDDLE_NAME_EN,
+        e.LAST_NAME_EN,
         e.FIRST_NAME_AR,
         e.MIDDLE_NAME_AR,
         e.LAST_NAME_AR,
+        e.FAMILY_NAME_AR,
         e.EMAIL,
         e.PHONE_NUMBER,
         e.MOBILE_NUMBER,
         e.DATE_OF_BIRTH,
         e.STATUS,
         e.IS_ACTIVE,
-        e.CREATED_BY,
-        e.CREATION_DATE,
-        e.LAST_UPDATED_BY,
-        e.LAST_UPDATE_DATE
+        e.CREATED_BY
       FROM ${this.TABLE_NAME} e
       WHERE RAWTOHEX(e.EMPLOYEE_GUID) = :1`;
 
@@ -303,23 +300,22 @@ class EmployeeModel {
       const query = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        e.TENANT_ID,
         e.ENTERPRISE_ID,
-        e.FIRST_NAME,
-        e.MIDDLE_NAME,
-        e.LAST_NAME,
+        e.FIRST_NAME_EN,
+        e.MIDDLE_NAME_EN,
+        e.LAST_NAME_EN,
         e.FIRST_NAME_AR,
         e.MIDDLE_NAME_AR,
         e.LAST_NAME_AR,
+        e.FAMILY_NAME_AR,
         e.EMAIL,
         e.PHONE_NUMBER,
         e.MOBILE_NUMBER,
         e.DATE_OF_BIRTH,
         e.STATUS,
         e.IS_ACTIVE,
-        e.CREATED_BY,
-        e.CREATION_DATE,
-        e.LAST_UPDATED_BY,
-        e.LAST_UPDATE_DATE
+        e.CREATED_BY
       FROM ${this.TABLE_NAME} e
       WHERE e.ENTERPRISE_ID = :1 AND e.EMPLOYEE_ID = :2`;
 
@@ -356,51 +352,49 @@ class EmployeeModel {
         const { buffer: guidBuffer } = await generateSysGuid(connection);
 
         // 3) Insert
-        const now = new Date();
+        const tenantId = data.TENANT_ID != null ? Number(data.TENANT_ID) : Number(enterpriseId);
         const query = `INSERT INTO ${this.TABLE_NAME} (
           EMPLOYEE_ID,
           EMPLOYEE_GUID,
+          TENANT_ID,
           ENTERPRISE_ID,
-          FIRST_NAME,
-          MIDDLE_NAME,
-          LAST_NAME,
+          FIRST_NAME_EN,
+          MIDDLE_NAME_EN,
+          LAST_NAME_EN,
           FIRST_NAME_AR,
           MIDDLE_NAME_AR,
           LAST_NAME_AR,
+          FAMILY_NAME_AR,
           EMAIL,
           PHONE_NUMBER,
           MOBILE_NUMBER,
           DATE_OF_BIRTH,
           STATUS,
           IS_ACTIVE,
-          CREATED_BY,
-          CREATION_DATE,
-          LAST_UPDATED_BY,
-          LAST_UPDATE_DATE
+          CREATED_BY
         ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18, :19
+          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18
         )`;
 
         const bindParams = [
           employeeId,
           guidBuffer,
+          tenantId,
           Number(enterpriseId),
-          data.FIRST_NAME ?? null,
-          data.MIDDLE_NAME ?? null,
-          data.LAST_NAME ?? null,
+          data.FIRST_NAME_EN ?? data.FIRST_NAME ?? null,
+          data.MIDDLE_NAME_EN ?? data.MIDDLE_NAME ?? null,
+          data.LAST_NAME_EN ?? data.LAST_NAME ?? null,
           data.FIRST_NAME_AR ?? null,
           data.MIDDLE_NAME_AR ?? null,
           data.LAST_NAME_AR ?? null,
+          data.FAMILY_NAME_AR ?? null,
           data.EMAIL ?? null,
           data.PHONE_NUMBER ?? null,
           data.MOBILE_NUMBER ?? null,
           this.convertToDate(data.DATE_OF_BIRTH),
           (data.STATUS ?? 'DRAFT'),
           this.toYN(data.IS_ACTIVE, 'Y'),
-          userId || 'SYSTEM',
-          now,
-          userId || 'SYSTEM',
-          now
+          userId || 'SYSTEM'
         ];
 
         await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
@@ -409,23 +403,22 @@ class EmployeeModel {
         const selectQuery = `SELECT 
           e.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+          e.TENANT_ID,
           e.ENTERPRISE_ID,
-          e.FIRST_NAME,
-          e.MIDDLE_NAME,
-          e.LAST_NAME,
+          e.FIRST_NAME_EN,
+          e.MIDDLE_NAME_EN,
+          e.LAST_NAME_EN,
           e.FIRST_NAME_AR,
           e.MIDDLE_NAME_AR,
           e.LAST_NAME_AR,
+          e.FAMILY_NAME_AR,
           e.EMAIL,
           e.PHONE_NUMBER,
           e.MOBILE_NUMBER,
           e.DATE_OF_BIRTH,
           e.STATUS,
           e.IS_ACTIVE,
-          e.CREATED_BY,
-          e.CREATION_DATE,
-          e.LAST_UPDATED_BY,
-          e.LAST_UPDATE_DATE
+          e.CREATED_BY
         FROM ${this.TABLE_NAME} e
         WHERE e.EMPLOYEE_ID = :1 AND e.ENTERPRISE_ID = :2`;
 
@@ -462,19 +455,19 @@ class EmployeeModel {
         const bindParams = [];
         let paramIndex = 1;
 
-        if (data.FIRST_NAME !== undefined) {
-          updateFields.push(`FIRST_NAME = :${paramIndex}`);
-          bindParams.push(data.FIRST_NAME);
+        if (data.FIRST_NAME_EN !== undefined || data.FIRST_NAME !== undefined) {
+          updateFields.push(`FIRST_NAME_EN = :${paramIndex}`);
+          bindParams.push(data.FIRST_NAME_EN ?? data.FIRST_NAME);
           paramIndex++;
         }
-        if (data.MIDDLE_NAME !== undefined) {
-          updateFields.push(`MIDDLE_NAME = :${paramIndex}`);
-          bindParams.push(data.MIDDLE_NAME);
+        if (data.MIDDLE_NAME_EN !== undefined || data.MIDDLE_NAME !== undefined) {
+          updateFields.push(`MIDDLE_NAME_EN = :${paramIndex}`);
+          bindParams.push(data.MIDDLE_NAME_EN ?? data.MIDDLE_NAME);
           paramIndex++;
         }
-        if (data.LAST_NAME !== undefined) {
-          updateFields.push(`LAST_NAME = :${paramIndex}`);
-          bindParams.push(data.LAST_NAME);
+        if (data.LAST_NAME_EN !== undefined || data.LAST_NAME !== undefined) {
+          updateFields.push(`LAST_NAME_EN = :${paramIndex}`);
+          bindParams.push(data.LAST_NAME_EN ?? data.LAST_NAME);
           paramIndex++;
         }
         if (data.FIRST_NAME_AR !== undefined) {
@@ -490,6 +483,16 @@ class EmployeeModel {
         if (data.LAST_NAME_AR !== undefined) {
           updateFields.push(`LAST_NAME_AR = :${paramIndex}`);
           bindParams.push(data.LAST_NAME_AR);
+          paramIndex++;
+        }
+        if (data.FAMILY_NAME_AR !== undefined) {
+          updateFields.push(`FAMILY_NAME_AR = :${paramIndex}`);
+          bindParams.push(data.FAMILY_NAME_AR);
+          paramIndex++;
+        }
+        if (data.TENANT_ID !== undefined) {
+          updateFields.push(`TENANT_ID = :${paramIndex}`);
+          bindParams.push(Number(data.TENANT_ID));
           paramIndex++;
         }
         if (data.EMAIL !== undefined) {
@@ -526,16 +529,6 @@ class EmployeeModel {
         if (updateFields.length === 0) {
           throw new DatabaseError('No fields to update');
         }
-
-        // Always update WHO fields
-        const now = new Date();
-        updateFields.push(`LAST_UPDATED_BY = :${paramIndex}`);
-        bindParams.push(userId || 'SYSTEM');
-        paramIndex++;
-
-        updateFields.push(`LAST_UPDATE_DATE = :${paramIndex}`);
-        bindParams.push(now);
-        paramIndex++;
 
         const query = `UPDATE ${this.TABLE_NAME}
           SET ${updateFields.join(', ')}
