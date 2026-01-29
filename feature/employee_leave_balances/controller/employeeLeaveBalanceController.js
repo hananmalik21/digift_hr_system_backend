@@ -12,7 +12,7 @@ import {
   sendAccrualRunSuccess
 } from '../view/employeeLeaveBalanceView.js';
 import { ensureHex32 } from '../../../utils/guidUtils.js';
-import { ValidationError } from '../../../utils/errors/index.js';
+import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 
 const router = express.Router();
 
@@ -63,6 +63,15 @@ function getRequiredUserId(req) {
     throw new ValidationError('x-user-id header is required');
   }
   return userId;
+}
+
+/** Fetch balance transactions for an employee/leave type; returns [] on failure (optional data). */
+async function getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, limit = 5) {
+  try {
+    return await EmployeeLeaveBalanceModel.getBalanceTransactions(tenantId, employeeId, leaveTypeId, limit);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -804,19 +813,7 @@ router.post('/balances/opening', async (req, res) => {
       // Do NOT reapply opening_days, do NOT modify the balance
       // Return 200 with existing balance and clear message
       
-      // Fetch transaction history if available
-      let transactions = [];
-      try {
-        transactions = await EmployeeLeaveBalanceModel.getBalanceTransactions(
-          tenantId,
-          employeeId,
-          leaveTypeId,
-          5
-        );
-      } catch (txnError) {
-        // Transaction history is optional, continue without it
-        console.warn('Could not fetch transaction history:', txnError.message);
-      }
+      const transactions = await getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, 5);
 
       // Return 200 with existing balance (idempotent response)
       return sendOk(
@@ -840,19 +837,7 @@ router.post('/balances/opening', async (req, res) => {
       userId
     );
 
-    // Fetch transaction history if available
-    let transactions = [];
-    try {
-      transactions = await EmployeeLeaveBalanceModel.getBalanceTransactions(
-        tenantId,
-        employeeId,
-        leaveTypeId,
-        5
-      );
-    } catch (txnError) {
-      // Transaction history is optional, continue without it
-      console.warn('Could not fetch transaction history:', txnError.message);
-    }
+    const transactions = await getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, 5);
 
     // Return 201 Created with the new balance and transaction history
     sendCreated(res, req, balance, { transactions });
@@ -1117,6 +1102,16 @@ router.post('/accrual/run', async (req, res) => {
       audit_run_id: result.audit_run_id
     });
   } catch (error) {
+    if (error instanceof NotFoundError) {
+      return res.status(404).json({
+        success: false,
+        message: error.message,
+        error_details: {
+          code: 'NOT_FOUND',
+          type: 'NotFoundError'
+        }
+      });
+    }
     if (error instanceof ValidationError) {
       // Handle validation errors with proper status codes
       const statusCode = error.statusCode || 400;

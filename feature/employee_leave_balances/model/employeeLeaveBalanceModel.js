@@ -1,6 +1,6 @@
 import db from '../../../config/db.js';
 import oracledb from 'oracledb';
-import { DatabaseError, ValidationError } from '../../../utils/errors/index.js';
+import { DatabaseError, ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { ensureHex32, generateSysGuid, hexToRawBuffer } from '../../../utils/guidUtils.js';
 
 /**
@@ -131,8 +131,6 @@ class EmployeeLeaveBalanceModel {
     const maxN = nums.length ? Math.max(...nums) : 0;
 
     if (binds.length < maxN) {
-      console.error('=== BIND MISMATCH SQL ===\n', sql);
-      console.error('=== BINDS LENGTH ===', binds.length, 'EXPECTED >=', maxN);
       const e = new Error(`BIND_MISMATCH: SQL expects :1..:${maxN} but got binds.length=${binds.length}`);
       e.code = 'BIND_MISMATCH';
       e.meta = { expected: maxN, actual: binds.length };
@@ -167,8 +165,8 @@ class EmployeeLeaveBalanceModel {
       if (connection && connection.rollback) {
         try {
           await connection.rollback();
-        } catch (rollbackErr) {
-          console.error('Error during rollback:', rollbackErr);
+        } catch (_rollbackErr) {
+          // Ignore rollback errors; original error is rethrown
         }
       }
       throw error;
@@ -176,8 +174,8 @@ class EmployeeLeaveBalanceModel {
       if (connection && connection.close) {
         try {
           await connection.close();
-        } catch (err) {
-          console.error('Error closing connection:', err);
+        } catch (_closeErr) {
+          // Ignore close errors
         }
       }
     }
@@ -1173,7 +1171,9 @@ class EmployeeLeaveBalanceModel {
         }
 
         const accrualPlan = await this.getAccrualPlan(connection, tenantId, accrualMapping.accrual_plan_id);
-        if (!accrualPlan) throw new DatabaseError(`Accrual plan ${accrualMapping.accrual_plan_id} not found`);
+        if (!accrualPlan) {
+          throw new NotFoundError(`Accrual plan ${accrualMapping.accrual_plan_id} not found for this tenant`);
+        }
 
         const accrualMethod = String(accrualPlan.accrual_method || '').toUpperCase();
         if (accrualMethod !== 'MONTHLY') {
@@ -1255,22 +1255,17 @@ class EmployeeLeaveBalanceModel {
             }
 
             // Update balance first
-            let updatedBalance;
-            try {
-              updatedBalance = await this.updateBalanceWithAccrual(
-                connection,
-                tenantId,
-                balance.employee_id,
-                leaveTypeId,
-                accrualDays,
-                pStart,
-                pEnd,
-                maxBalanceDays,
-                userId
-              );
-            } catch (updateError) {
-              throw updateError;
-            }
+            const updatedBalance = await this.updateBalanceWithAccrual(
+              connection,
+              tenantId,
+              balance.employee_id,
+              leaveTypeId,
+              accrualDays,
+              pStart,
+              pEnd,
+              maxBalanceDays,
+              userId
+            );
 
             // Verify the balance was actually updated before inserting transaction
             if (!updatedBalance) {
@@ -2628,9 +2623,8 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
           if (txnResult.rows && txnResult.rows.length > 0) {
             insertedTransactions.push(this.convertKeysToSnakeCase(txnResult.rows[0]));
           }
-        } catch (txnError) {
-          // Log but don't fail the update if transaction insert fails
-          console.error(`Failed to insert adjustment transaction for ${field}:`, txnError);
+        } catch (_txnError) {
+          // Don't fail the update if transaction insert fails
         }
       }
 

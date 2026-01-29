@@ -309,19 +309,6 @@ export function sendNotFound(res, req, message = 'Resource not found') {
  * @param {Error} error - Error object
  */
 export function sendServerError(res, req, message, error = null) {
-  // Error logging
-  if (error) {
-    const oracleCode = error.errorNum !== undefined 
-      ? `ORA-${String(error.errorNum).padStart(5, '0')}` 
-      : null;
-    console.error(`[Employee Leave Balance Error] ${message}`, {
-      errorType: error.constructor?.name,
-      errorMessage: error.message,
-      oracleCode,
-      ...(error.oracleError && { oracleError: error.oracleError })
-    });
-  }
-
   let errorCode = 'INTERNAL_SERVER_ERROR';
   let statusCode = 500;
   let errorMessage = message || 'Internal server error';
