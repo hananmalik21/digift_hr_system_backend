@@ -75,6 +75,26 @@ class EmployeeLeaveBalanceModel {
   }
 
   /**
+   * Read CLOB OUT bind value (string or Lob) to string. Safe for null/undefined.
+   * @param {string|import('oracledb').Lob|null} val - Value from outBinds (string or Lob)
+   * @returns {Promise<string|null>}
+   */
+  static async _readClobOut(val) {
+    if (val == null) return null;
+    if (typeof val === 'string') return val;
+    if (typeof val.getData === 'function') {
+      try {
+        const p = val.getData();
+        const data = typeof p?.then === 'function' ? await p : await new Promise((res, rej) => val.getData((err, d) => (err ? rej(err) : res(d))));
+        return data != null ? String(data) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
    * ✅ FIXED: Wrap DB errors but preserve original Oracle details (cause/originalError/oracleError)
    */
   static _wrapDb(err, fallbackUserMsg = 'A database error occurred. Please try again later.') {
@@ -2679,6 +2699,351 @@ static async initOpeningBalance(tenantId, employeeId, leaveTypeId, openingDays, 
         transactions: insertedTransactions
       };
     });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Package / View helpers (require passed-in connection)               */
+  /* ------------------------------------------------------------------ */
+
+  static HISTORY_TABLE = 'ABS.ABS_LEAVE_BALANCE_HISTORY';
+  static V_EMP_LEAVE_BALANCES = 'ABS.V_EMP_LEAVE_BALANCES';
+
+  /**
+   * Call ABS.ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_JSON.
+   * @param {Object} conn - Oracle connection (from getConnection or transaction callback)
+   * @param {Object} payload - { tenantId, employeeId, adjustments, reason, createdBy, source }
+   * @param {number} payload.tenantId - Tenant ID
+   * @param {number} payload.employeeId - Employee ID
+   * @param {Object|Array} payload.adjustments - JSON-serializable adjustments (CLOB)
+   * @param {string} [payload.reason] - Change reason
+   * @param {string} [payload.createdBy] - Audit user
+   * @param {string} [payload.source] - Source code
+   */
+  static async callAdjustLeaveBalanceJson(conn, payload) {
+    if (!conn) throw new ValidationError('Connection is required');
+    const tenantId = payload?.tenantId ?? payload?.tenant_id;
+    const employeeId = payload?.employeeId ?? payload?.employee_id;
+    if (tenantId == null || employeeId == null) {
+      throw new ValidationError('tenantId and employeeId are required');
+    }
+    let jsonString;
+    try {
+      const raw = payload?.adjustments;
+      if (raw === undefined || raw === null) {
+        jsonString = '[]';
+      } else if (typeof raw === 'string') {
+        jsonString = raw;
+      } else {
+        jsonString = JSON.stringify(raw);
+      }
+    } catch (e) {
+      throw new ValidationError('adjustments must be JSON-serializable: ' + (e?.message || String(e)));
+    }
+    const reason = payload?.reason ?? payload?.change_reason ?? null;
+    const createdBy = payload?.createdBy ?? payload?.created_by ?? 'SYSTEM';
+    const source = payload?.source ?? payload?.source_code ?? null;
+
+    const plsql = `
+      BEGIN
+        ABS.ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_JSON(
+          p_tenant_id          => :p_tenant_id,
+          p_employee_id        => :p_employee_id,
+          p_adjustments_json   => :p_adjustments_json,
+          p_reason             => :p_reason,
+          p_created_by         => :p_created_by,
+          p_source             => :p_source
+        );
+      END;
+    `;
+    const binds = {
+      p_tenant_id: tenantId,
+      p_employee_id: employeeId,
+      p_adjustments_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: jsonString },
+      p_reason: reason,
+      p_created_by: createdBy,
+      p_source: source
+    };
+    try {
+      await conn.execute(plsql, binds, { autoCommit: false });
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to call ADJUST_LEAVE_BALANCE_JSON');
+    }
+  }
+
+  /**
+   * Call ABS.ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_ARRAY.
+   * Gets its own connection, executes with autoCommit: true, then closes.
+   * @param {Object} payload - { tenantId, employeeId, leaveItems, reason, createdBy, source }
+   * @param {number} payload.tenantId - Tenant ID
+   * @param {number} payload.employeeId - Employee ID
+   * @param {Array<{leave_code: string, new_days: number}>} payload.leaveItems - Items to adjust (JSON array for CLOB)
+   * @param {string} payload.reason - Change reason
+   * @param {string} [payload.createdBy] - Audit user (default API)
+   * @param {string} [payload.source] - Source code (default MANUAL)
+   */
+  static async adjustLeaveBalanceArray(payload) {
+    const tenantId = payload?.tenantId ?? payload?.tenant_id;
+    const employeeId = payload?.employeeId ?? payload?.employee_id;
+    if (tenantId == null || employeeId == null) {
+      throw new ValidationError('tenantId and employeeId are required');
+    }
+    const leaveItems = payload?.leaveItems ?? payload?.leave_items ?? [];
+    if (!Array.isArray(leaveItems) || leaveItems.length === 0) {
+      throw new ValidationError('leave_items must be a non-empty array');
+    }
+    const arr = leaveItems.map((item) => {
+      const days = typeof item.new_balance_days !== 'undefined' ? Number(item.new_balance_days) : (typeof item.new_days !== 'undefined' ? Number(item.new_days) : Number(item.newBalanceDays ?? NaN));
+      return {
+        leave_code: String(item.leave_code ?? item.leaveCode ?? '').trim().toUpperCase(),
+        new_balance_days: days
+      };
+    });
+    let jsonString;
+    try {
+      jsonString = JSON.stringify(arr);
+    } catch (e) {
+      throw new ValidationError('leave_items must be JSON-serializable: ' + (e?.message || String(e)));
+    }
+    const reason = payload?.reason ?? null;
+    const createdBy = payload?.createdBy ?? payload?.created_by ?? 'API';
+    const source = payload?.source ?? 'MANUAL';
+
+    return await this.executeWithTransaction(async (connection) => {
+      return await this.adjustLeaveBalanceArrayWithConnection(connection, {
+        tenantId,
+        employeeId,
+        leaveItems: arr,
+        reason,
+        createdBy,
+        source,
+        _jsonString: jsonString
+      });
+    });
+  }
+
+  /**
+   * Run ADJUST_LEAVE_BALANCE_ARRAY using the given connection (for use inside executeWithTransaction).
+   * Builds JSON with new_balance_days (DB procedure expects this key). Returns adj_id, updated_balances_json, lines_count, warning.
+   * @param {Object} connection - Oracle connection
+   * @param {Object} payload - tenantId, employeeId, leaveItems (with new_balance_days or new_days), reason, createdBy, source; may include _jsonString
+   * @returns {Promise<{ adjId: number|null, adjGuid: string|null, adjLines: Array<{ adj_line_id: number|null, adj_line_guid: string|null }>, updatedBalancesJson: string|null, linesCount: number, warning?: string }>}
+   */
+  static async adjustLeaveBalanceArrayWithConnection(connection, payload) {
+    if (!connection) throw new ValidationError('Connection is required');
+    const tenantId = payload?.tenantId ?? payload?.tenant_id;
+    const employeeId = payload?.employeeId ?? payload?.employee_id;
+    const reason = payload?.reason ?? null;
+    const createdBy = payload?.createdBy ?? payload?.created_by ?? 'API';
+    const source = payload?.source ?? 'MANUAL';
+    let jsonString = payload?._jsonString;
+    if (jsonString == null) {
+      const leaveItems = payload?.leaveItems ?? payload?.leave_items ?? [];
+      const arr = leaveItems.map((item) => {
+        const days = typeof item.new_balance_days !== 'undefined' ? Number(item.new_balance_days) : (typeof item.new_days !== 'undefined' ? Number(item.new_days) : Number(item.newBalanceDays));
+        return {
+          leave_code: String(item.leave_code ?? item.leaveCode ?? '').trim().toUpperCase(),
+          new_balance_days: days
+        };
+      });
+      jsonString = JSON.stringify(arr);
+    }
+
+    const sql = `
+BEGIN
+  EXECUTE IMMEDIATE 'ALTER SESSION SET CURRENT_SCHEMA="ABS"';
+
+  ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_ARRAY(
+    p_tenant_id             => :p_tenant_id,
+    p_employee_id           => :p_employee_id,
+    p_leave_items_json      => :p_leave_items_json,
+    p_reason                => :p_reason,
+    p_created_by            => :p_created_by,
+    p_source                => :p_source,
+    p_adj_id                => :p_adj_id,
+    p_updated_balances_json => :p_updated_balances_json
+  );
+END;`;
+
+    const binds = {
+      p_tenant_id: tenantId,
+      p_employee_id: employeeId,
+      p_leave_items_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: jsonString },
+      p_reason: reason,
+      p_created_by: createdBy,
+      p_source: source,
+      p_adj_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
+      p_updated_balances_json: { type: oracledb.CLOB, dir: oracledb.BIND_OUT }
+    };
+    let result;
+    try {
+      result = await connection.execute(sql, binds, { autoCommit: false });
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to call ADJUST_LEAVE_BALANCE_ARRAY');
+    }
+
+    const out = result.outBinds || {};
+    let adjId = Array.isArray(out.p_adj_id) ? out.p_adj_id[0] : out.p_adj_id;
+    if (adjId != null) adjId = Number(adjId);
+    const rawClob = Array.isArray(out.p_updated_balances_json) ? out.p_updated_balances_json[0] : out.p_updated_balances_json;
+    const updatedBalancesJson = await this._readClobOut(rawClob);
+
+    let linesCount = 0;
+    let adjGuid = null;
+    let adjLines = [];
+    if (adjId != null) {
+      try {
+        const countResult = await connection.execute(
+          `SELECT COUNT(*) AS lines_count FROM ABS.ABS_LEAVE_BAL_ADJ_LINES WHERE ADJ_ID = :adj_id`,
+          { adj_id: adjId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        const row = countResult.rows && countResult.rows[0];
+        linesCount = row && row.LINES_COUNT != null ? Number(row.LINES_COUNT) : 0;
+      } catch (_) {
+        linesCount = 0;
+      }
+      try {
+        const guidResult = await connection.execute(
+          `SELECT RAWTOHEX(ADJ_GUID) AS ADJ_GUID FROM ABS.ABS_LEAVE_BAL_ADJ WHERE ADJ_ID = :adj_id`,
+          { adj_id: adjId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        const guidRow = guidResult.rows && guidResult.rows[0];
+        adjGuid = guidRow && guidRow.ADJ_GUID != null ? String(guidRow.ADJ_GUID) : null;
+      } catch (_) {
+        adjGuid = null;
+      }
+      try {
+        const linesResult = await connection.execute(
+          `SELECT ADJ_LINE_ID, RAWTOHEX(ADJ_LINE_GUID) AS ADJ_LINE_GUID FROM ABS.ABS_LEAVE_BAL_ADJ_LINES WHERE ADJ_ID = :adj_id ORDER BY ADJ_LINE_ID`,
+          { adj_id: adjId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        const rows = linesResult.rows || [];
+        adjLines = rows.map((r) => this.convertKeysToSnakeCase(r)).map((r) => ({
+          adj_line_id: r.adj_line_id != null ? Number(r.adj_line_id) : null,
+          adj_line_guid: r.adj_line_guid != null ? String(r.adj_line_guid) : null
+        }));
+      } catch (_) {
+        adjLines = [];
+      }
+    }
+
+    const warning = linesCount === 0 && adjId != null
+      ? 'No lines inserted for this adjustment. Check procedure or constraints.'
+      : undefined;
+
+    return { adjId, adjGuid, adjLines, updatedBalancesJson, linesCount, warning };
+  }
+
+  /**
+   * Read employee leave balances from ABS.V_EMP_LEAVE_BALANCES, sorted by leave_code.
+   * @param {Object} conn - Oracle connection
+   * @param {number} tenantId - Tenant ID
+   * @param {number} employeeId - Employee ID
+   * @returns {Promise<Array>} Rows (snake_case)
+   */
+  static async getEmployeeLeaveBalances(conn, tenantId, employeeId) {
+    if (!conn) throw new ValidationError('Connection is required');
+    const sql = `
+      SELECT * FROM ${this.V_EMP_LEAVE_BALANCES}
+      WHERE TENANT_ID = :1 AND EMPLOYEE_ID = :2
+      ORDER BY LEAVE_CODE
+    `;
+    try {
+      const result = await conn.execute(sql, [tenantId, employeeId], {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      const rows = result.rows || [];
+      return this.convertKeysToSnakeCase(rows);
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to get employee leave balances');
+    }
+  }
+
+  /**
+   * Read leave balance history from ABS.ABS_LEAVE_BALANCE_HISTORY with optional filters.
+   * @param {Object} conn - Oracle connection
+   * @param {number} tenantId - Tenant ID
+   * @param {number} employeeId - Employee ID
+   * @param {Object} [filters] - { dateFrom?, dateTo?, leaveCode? }
+   * @returns {Promise<Array>} History rows (snake_case)
+   */
+  static async getLeaveBalanceHistory(conn, tenantId, employeeId, filters = {}) {
+    if (!conn) throw new ValidationError('Connection is required');
+    const dateFrom = filters?.dateFrom ?? filters?.date_from ?? null;
+    const dateTo = filters?.dateTo ?? filters?.date_to ?? null;
+    const leaveCode = filters?.leaveCode ?? filters?.leave_code ?? null;
+
+    const needJoin = leaveCode != null && String(leaveCode).trim() !== '';
+    const bindParams = [tenantId, employeeId];
+    let paramIndex = 3;
+
+    let sql = `
+      SELECT
+        h.HIST_ID,
+        RAWTOHEX(h.HIST_GUID) AS HIST_GUID,
+        h.TENANT_ID,
+        h.EMPLOYEE_ID,
+        h.LEAVE_TYPE_ID,
+        h.OLD_BALANCE_DAYS,
+        h.NEW_BALANCE_DAYS,
+        h.CHANGE_REASON,
+        h.SOURCE_CODE,
+        h.CHANGED_BY,
+        h.CHANGED_DATE,
+        h.REF_DOC_NO,
+        RAWTOHEX(h.REF_TXN_GUID) AS REF_TXN_GUID
+    `;
+    if (needJoin) {
+      sql += `,
+        lt.LEAVE_CODE
+      `;
+    }
+    sql += `
+      FROM ${this.HISTORY_TABLE} h
+    `;
+    if (needJoin) {
+      sql += `
+      INNER JOIN ${this.LEAVE_TYPE_TABLE_NAME} lt
+        ON h.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID AND h.TENANT_ID = lt.TENANT_ID
+      `;
+    }
+    sql += `
+      WHERE h.TENANT_ID = :1 AND h.EMPLOYEE_ID = :2
+    `;
+    if (dateFrom != null) {
+      const d = this._toDate(dateFrom);
+      if (d) {
+        sql += ` AND h.CHANGED_DATE >= :${paramIndex}`;
+        bindParams.push(d);
+        paramIndex++;
+      }
+    }
+    if (dateTo != null) {
+      const d = this._toDate(dateTo);
+      if (d) {
+        sql += ` AND h.CHANGED_DATE <= :${paramIndex}`;
+        bindParams.push(d);
+        paramIndex++;
+      }
+    }
+    if (needJoin) {
+      sql += ` AND UPPER(lt.LEAVE_CODE) = UPPER(:${paramIndex})`;
+      bindParams.push(String(leaveCode).trim());
+      paramIndex++;
+    }
+    sql += ` ORDER BY h.CHANGED_DATE DESC, h.HIST_ID DESC`;
+
+    try {
+      const result = await conn.execute(sql, bindParams, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      const rows = result.rows || [];
+      return this.convertKeysToSnakeCase(rows);
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to get leave balance history');
+    }
   }
 
 }

@@ -1,5 +1,6 @@
 import express from 'express';
 import EmployeeLeaveBalanceModel from '../model/employeeLeaveBalanceModel.js';
+import { adjustLeaveBalance } from '../services/leaveBalance.service.js';
 import {
   sendLeaveBalanceList,
   sendLeaveBalance,
@@ -237,6 +238,102 @@ router.get('/leave-balances', async (req, res) => {
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to fetch leave balances', error);
+  }
+});
+
+/**
+ * @route   POST /api/abs/leave-balances/adjust
+ * @desc    Adjust an employee's leave balances via ABS.ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_ARRAY
+ * @body    { tenant_id, employee_guid?, employee_id?, reason, source, leave_items: [{ leave_code, new_days|new_balance_days }, ...] }
+ * @access  Public
+ */
+router.post('/leave-balances/adjust', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const tenantId = req.headers['x-tenant-id'] ? parseInt(req.headers['x-tenant-id'], 10) : (body.tenant_id != null ? Number(body.tenant_id) : NaN);
+    const employeeGuid = body.employee_guid ?? body.employeeGuid ?? null;
+    const employeeId = body.employee_id != null ? Number(body.employee_id) : undefined;
+    const reason = body.reason != null ? String(body.reason).trim() : '';
+    const source = body.source != null ? String(body.source).trim() : '';
+    const rawLeaveItems = Array.isArray(body.leave_items) ? body.leave_items : [];
+
+    if (isNaN(tenantId) || tenantId < 1) {
+      return sendBadRequest(res, req, 'tenant_id is required and must be a valid positive number');
+    }
+    if (!employeeId && !employeeGuid) {
+      return sendBadRequest(res, req, 'employee_id or employee_guid is required');
+    }
+    if (employeeId != null && (isNaN(employeeId) || employeeId < 1)) {
+      return sendBadRequest(res, req, 'employee_id must be a valid positive number');
+    }
+    if (!reason) {
+      return sendBadRequest(res, req, 'reason is required');
+    }
+    if (!source) {
+      return sendBadRequest(res, req, 'source is required');
+    }
+    if (rawLeaveItems.length === 0) {
+      return sendBadRequest(res, req, 'leave_items must be a non-empty array');
+    }
+
+    const seen = new Set();
+    const leaveItems = [];
+    for (let i = 0; i < rawLeaveItems.length; i++) {
+      const item = rawLeaveItems[i];
+      const leaveCode = item?.leave_code != null ? String(item.leave_code).trim().toUpperCase() : (item?.leaveCode != null ? String(item.leaveCode).trim().toUpperCase() : '');
+      const hasNewDays = typeof item?.new_days !== 'undefined';
+      const hasNewBalanceDays = typeof item?.new_balance_days !== 'undefined';
+      const newDays = hasNewDays ? Number(item.new_days) : (hasNewBalanceDays ? Number(item.new_balance_days) : (typeof item?.newBalanceDays !== 'undefined' ? Number(item.newBalanceDays) : NaN));
+      if (!leaveCode) {
+        return sendBadRequest(res, req, `leave_items[${i}]: leave_code is required and must be a non-empty string`);
+      }
+      if (!hasNewDays && !hasNewBalanceDays && typeof item?.newBalanceDays === 'undefined') {
+        return sendBadRequest(res, req, `leave_items[${i}]: new_days or new_balance_days is required`);
+      }
+      if (isNaN(newDays) || newDays < 0) {
+        return sendBadRequest(res, req, `leave_items[${i}]: new_days/new_balance_days must be a number >= 0`);
+      }
+      if (seen.has(leaveCode)) {
+        return sendBadRequest(res, req, `leave_items: duplicate leave_code "${leaveCode}" is not allowed`);
+      }
+      seen.add(leaveCode);
+      leaveItems.push({ leave_code: leaveCode, new_days: newDays });
+    }
+
+    const createdBy = req.user?.username ?? req.headers['x-user-id'] ?? req.user?.id ?? 'API';
+
+    const result = await adjustLeaveBalance({
+      tenantId,
+      employeeGuid: employeeGuid || undefined,
+      employeeId,
+      leaveItems,
+      reason,
+      createdBy,
+      source: source || 'MANUAL',
+    });
+
+    const data = {
+      adj_id: result.adj_id,
+      adj_guid: result.adj_guid ?? null,
+      updated_balances: result.updated_balances ?? [],
+      leave_items: result.leave_items,
+      lines_count: result.lines_count ?? 0,
+    };
+    if (result.warning) data.warning = result.warning;
+
+    res.status(200).json({
+      success: true,
+      message: 'Leave balances adjusted successfully',
+      data,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error instanceof NotFoundError) {
+      return sendNotFound(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to adjust leave balances', error);
   }
 });
 
