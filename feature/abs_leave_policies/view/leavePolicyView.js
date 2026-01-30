@@ -129,17 +129,27 @@ export function sendDatabaseError(res, req, error) {
     statusCode = error.statusCode;
   }
 
+  const errorDetails = {
+    message: errorMessage,
+    code: errorCode,
+    type: 'DatabaseError',
+    errorNum: error.errorNum || null,
+    offset: error.offset !== undefined ? error.offset : null,
+    constraint: error.constraint || null
+  };
+
+  // For ORA-01400 include raw Oracle message and column so client sees which column failed
+  if (error.errorNum === 1400) {
+    const rawMsg = error.oracleError?.message || error.technicalMessage || error.oracleError?.oracleError?.message || '';
+    if (rawMsg) errorDetails.oracle_message = rawMsg;
+    const colMatch = rawMsg.match(/\."([^"]+)"\s*\)/) || rawMsg.match(/"([^"]+)"\s*\)\s*$/);
+    if (colMatch) errorDetails.null_column = colMatch[1];
+  }
+
   const errorResponse = {
     success: false,
     error: errorMessage,
-    error_details: {
-      message: errorMessage,
-      code: errorCode,
-      type: 'DatabaseError',
-      errorNum: error.errorNum || null,
-      offset: error.offset !== undefined ? error.offset : null,
-      constraint: error.constraint || null
-    }
+    error_details: errorDetails
   };
 
   // Add execution time if available

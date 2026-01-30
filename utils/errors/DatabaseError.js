@@ -111,9 +111,13 @@ export class DatabaseError extends AppError {
       return 'Cannot delete this record because it is referenced by other records.';
     }
 
-    // Not null constraint
+    // Not null constraint - append column name from "cannot insert NULL into ("SCHEMA"."TABLE"."COLUMN")"
     if (errorNum === 1400 || message.includes('ORA-01400')) {
-      return 'Required fields are missing. Please provide all required information.';
+      const colMatch = message.match(/\."([^"]+)"\s*\)/) || message.match(/"([^"]+)"\s*\)\s*$/);
+      const col = colMatch ? colMatch[1] : null;
+      return col
+        ? `Required fields are missing. Please provide all required information. (NULL not allowed for column: ${col})`
+        : 'Required fields are missing. Please provide all required information.';
     }
 
     // Check constraint violation (ORA-02290)

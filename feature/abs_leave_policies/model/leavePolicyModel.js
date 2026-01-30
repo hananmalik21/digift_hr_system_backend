@@ -39,6 +39,17 @@ class LeavePolicyModel {
   }
 
   /**
+   * Parse value to Date for Oracle DATE bind (avoids ORA-01861 format string).
+   * Returns Date or null; oracledb binds Date correctly to Oracle DATE.
+   */
+  static parseDateForOracle(value) {
+    if (value == null || value === '') return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
    * Helper method to execute queries
    */
   static async executeQuery(query, bindParams = [], options = {}) {
@@ -112,6 +123,9 @@ class LeavePolicyModel {
           encash_allow_encashment: row.encash_allow_encashment,
           encashment_limit_days: row.encashment_limit_days,
           encashment_rate_pct: row.encashment_rate_pct,
+          effective_start_date: row.effective_start_date,
+          effective_end_date: row.effective_end_date,
+          enable_pro_rata: row.enable_pro_rata,
           grade_rows: []
         };
         policyMap.set(policyId, policy);
@@ -252,6 +266,9 @@ class LeavePolicyModel {
             v.ENCASH_ALLOW_ENCASHMENT,
             v.ENCASHMENT_LIMIT_DAYS,
             v.ENCASHMENT_RATE_PCT,
+            v.EFFECTIVE_START_DATE,
+            v.EFFECTIVE_END_DATE,
+            v.ENABLE_PRO_RATA,
             v.ENTITLEMENT_ID,
             v.GRADE_FROM,
             v.GRADE_TO,
@@ -307,6 +324,9 @@ class LeavePolicyModel {
           ENCASH_ALLOW_ENCASHMENT,
           ENCASHMENT_LIMIT_DAYS,
           ENCASHMENT_RATE_PCT,
+          EFFECTIVE_START_DATE,
+          EFFECTIVE_END_DATE,
+          ENABLE_PRO_RATA,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
@@ -418,6 +438,9 @@ class LeavePolicyModel {
           ENCASH_ALLOW_ENCASHMENT,
           ENCASHMENT_LIMIT_DAYS,
           ENCASHMENT_RATE_PCT,
+          EFFECTIVE_START_DATE,
+          EFFECTIVE_END_DATE,
+          ENABLE_PRO_RATA,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
@@ -526,6 +549,9 @@ class LeavePolicyModel {
           ENCASH_ALLOW_ENCASHMENT,
           ENCASHMENT_LIMIT_DAYS,
           ENCASHMENT_RATE_PCT,
+          EFFECTIVE_START_DATE,
+          EFFECTIVE_END_DATE,
+          ENABLE_PRO_RATA,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
@@ -659,7 +685,10 @@ class LeavePolicyModel {
         notify_before_days: policyData.notify_before_days ?? null,
         encashment_limit_days: policyData.encashment_limit_days ?? null,
         encashment_rate_pct: policyData.encashment_rate_pct ?? null,
-        grade_rows_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: gradeRowsJson }
+        grade_rows_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: gradeRowsJson },
+        effective_start_date: LeavePolicyModel.parseDateForOracle(policyData.effective_start_date),
+        effective_end_date: LeavePolicyModel.parseDateForOracle(policyData.effective_end_date),
+        enable_pro_rata: policyData.enable_pro_rata ?? 'N'
       };
 
       const plsqlBlock = `
@@ -691,7 +720,10 @@ class LeavePolicyModel {
             p_notify_before_days     => :notify_before_days,
             p_encashment_limit_days  => :encashment_limit_days,
             p_encashment_rate_pct    => :encashment_rate_pct,
-            p_grade_rows_json        => :grade_rows_json
+            p_grade_rows_json        => :grade_rows_json,
+            p_effective_start_date   => :effective_start_date,
+            p_effective_end_date     => :effective_end_date,
+            p_enable_pro_rata        => :enable_pro_rata
           );
         END;
       `;
@@ -743,6 +775,9 @@ class LeavePolicyModel {
           ENCASH_ALLOW_ENCASHMENT,
           ENCASHMENT_LIMIT_DAYS,
           ENCASHMENT_RATE_PCT,
+          EFFECTIVE_START_DATE,
+          EFFECTIVE_END_DATE,
+          ENABLE_PRO_RATA,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
@@ -845,9 +880,10 @@ class LeavePolicyModel {
         // Ignore if already disabled or not supported
       }
       
-      // First, get policy_id and current policy_name from GUID
+      // First, get policy_id, policy_name, and optional date/flag columns from GUID (for fallback when client omits them)
       const guidLookupQuery = `
-        SELECT /*+ FIRST_ROWS(1) */ POLICY_ID, POLICY_NAME
+        SELECT /*+ FIRST_ROWS(1) */ POLICY_ID, POLICY_NAME,
+               EFFECTIVE_START_DATE, EFFECTIVE_END_DATE, ENABLE_PRO_RATA
         FROM ABS_LEAVE_POLICIES
         WHERE POLICY_GUID = HEXTORAW(:policy_guid)
       `;
@@ -863,8 +899,12 @@ class LeavePolicyModel {
         throw new DatabaseError(`Policy with GUID ${policyGuid} not found.`, { errorNum: 1403 });
       }
       
-      const policyId = guidResult.rows[0].POLICY_ID;
-      const currentPolicyName = guidResult.rows[0].POLICY_NAME;
+      const row = guidResult.rows[0];
+      const policyId = row.POLICY_ID;
+      const currentPolicyName = row.POLICY_NAME;
+      const existingEffectiveStartDate = row.EFFECTIVE_START_DATE;
+      const existingEffectiveEndDate = row.EFFECTIVE_END_DATE;
+      const existingEnableProRata = row.ENABLE_PRO_RATA;
       
       // Validate leave type exists before updating policy
       await this.validateLeaveTypeExists(connection, policyData.tenant_id, policyData.leave_type_id);
@@ -902,7 +942,17 @@ class LeavePolicyModel {
         notify_before_days: policyData.notify_before_days ?? null,
         encashment_limit_days: policyData.encashment_limit_days ?? null,
         encashment_rate_pct: policyData.encashment_rate_pct ?? null,
-        grade_rows_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: gradeRowsJson }
+        grade_rows_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: gradeRowsJson },
+        // Optional on update: when omitted, use existing values so we never send NULL (avoids ORA-01407)
+        effective_start_date: policyData.effective_start_date != null && policyData.effective_start_date !== ''
+          ? LeavePolicyModel.parseDateForOracle(policyData.effective_start_date)
+          : existingEffectiveStartDate,
+        effective_end_date: policyData.effective_end_date != null && policyData.effective_end_date !== ''
+          ? LeavePolicyModel.parseDateForOracle(policyData.effective_end_date)
+          : existingEffectiveEndDate,
+        enable_pro_rata: policyData.enable_pro_rata != null && policyData.enable_pro_rata !== ''
+          ? policyData.enable_pro_rata
+          : (existingEnableProRata ?? 'N')
       };
 
       // Handle null max_service_years with NUMBER type to avoid PLS-00457/SQL type issues
@@ -910,10 +960,10 @@ class LeavePolicyModel {
         binds.max_service_years = { type: oracledb.NUMBER, dir: oracledb.BIND_IN, val: null };
       }
 
-      // Dynamic PL/SQL block - do NOT use schema prefix "ABS." in the call
+      // Dynamic PL/SQL block - use package name so Oracle resolves the correct procedure
       const plsqlBlock = `
         BEGIN
-          UPDATE_POLICY_WITH_GRADES(
+          ABS_POLICY_PKG.UPDATE_POLICY_WITH_GRADES(
             p_tenant_id               => :tenant_id,
             p_policy_id               => :policy_id,
             p_leave_type_id           => :leave_type_id,
@@ -942,7 +992,10 @@ class LeavePolicyModel {
             p_notify_before_days      => :notify_before_days,
             p_encashment_limit_days   => :encashment_limit_days,
             p_encashment_rate_pct     => :encashment_rate_pct,
-            p_grade_rows_json         => :grade_rows_json
+            p_grade_rows_json         => :grade_rows_json,
+            p_effective_start_date    => :effective_start_date,
+            p_effective_end_date      => :effective_end_date,
+            p_enable_pro_rata         => :enable_pro_rata
           );
         END;
       `;
@@ -994,6 +1047,9 @@ class LeavePolicyModel {
           ENCASH_ALLOW_ENCASHMENT,
           ENCASHMENT_LIMIT_DAYS,
           ENCASHMENT_RATE_PCT,
+          EFFECTIVE_START_DATE,
+          EFFECTIVE_END_DATE,
+          ENABLE_PRO_RATA,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
