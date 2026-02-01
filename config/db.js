@@ -13,7 +13,9 @@ const __dirname = dirname(__filename);
 // IMPORTANT: Set TNS_ADMIN BEFORE initializing Oracle Client
 // Try local wallet path first (to avoid OneDrive placeholder issues), fallback to TESTDB
 const localWalletPath = process.env.ORACLE_WALLET_PATH || 'C:\\oracle\\wallet';
-const projectWalletPath = path.resolve(__dirname, '../TESTDB');
+// const projectWalletPath = path.resolve(__dirname, '../TESTDB');
+const projectWalletPath = path.resolve(__dirname, '../WALLET');
+
 
 // Use local wallet if it exists, otherwise use project wallet
 let walletPath;
