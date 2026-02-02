@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 // Try local wallet path first (to avoid OneDrive placeholder issues), fallback to TESTDB
 const localWalletPath = process.env.ORACLE_WALLET_PATH || 'C:\\oracle\\wallet';
 // const projectWalletPath = path.resolve(__dirname, '../TESTDB');
-const projectWalletPath = path.resolve(__dirname, '../WALLET');
+const projectWalletPath = path.resolve(__dirname, '../Wallet');
 
 
 // Use local wallet if it exists, otherwise use project wallet
