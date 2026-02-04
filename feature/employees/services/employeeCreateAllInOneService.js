@@ -348,10 +348,21 @@ export function buildBinds(body) {
     p_city: strOrNull(body.city, body.CITY),
     p_area: strOrNull(body.area, body.AREA),
     p_country_code: strOrNull(body.country_code, body.countryCode, body.COUNTRY_CODE),
-    // Only pass document params when FILE_NAME is present; otherwise INSERT_DOCUMENT raises "FILE_NAME is required"
+    // Document: same as PL/SQL – only insert when p_doc_file_name is non-empty. Pass plain string/null like other IN params.
     ...(function () {
-      const docFileName = strOrNull(body.doc_file_name, body.docFileName, body.DOC_FILE_NAME);
+      const docFileName = strOrNull(
+        body.doc_file_name,
+        body.docFileName,
+        body.DOC_FILE_NAME,
+        body.file_name,
+        body.fileName,
+        body.document_file_name
+      );
       const hasDocFile = docFileName != null && String(docFileName).trim() !== '';
+      const docType = strOrNull(body.document_type_code, body.documentTypeCode, body.DOCUMENT_TYPE_CODE) ?? 'EMPLOYEE_DOC';
+      const docMime = strOrNull(body.doc_mime_type, body.docMimeType, body.DOC_MIME_TYPE);
+      const docUrl = strOrNull(body.doc_access_url, body.docAccessUrl, body.DOC_ACCESS_URL);
+      const docHash = strOrNull(body.doc_hash_sha256, body.docHashSha256, body.DOC_HASH_SHA256);
       if (!hasDocFile) {
         return {
           p_document_type_code: null,
@@ -362,11 +373,11 @@ export function buildBinds(body) {
         };
       }
       return {
-        p_document_type_code: strOrNull(body.document_type_code, body.documentTypeCode, body.DOCUMENT_TYPE_CODE) ?? 'EMPLOYEE_DOC',
+        p_document_type_code: docType,
         p_doc_file_name: docFileName,
-        p_doc_mime_type: strOrNull(body.doc_mime_type, body.docMimeType, body.DOC_MIME_TYPE),
-        p_doc_access_url: strOrNull(body.doc_access_url, body.docAccessUrl, body.DOC_ACCESS_URL),
-        p_doc_hash_sha256: strOrNull(body.doc_hash_sha256, body.docHashSha256, body.DOC_HASH_SHA256)
+        p_doc_mime_type: docMime,
+        p_doc_access_url: docUrl != null && String(docUrl).trim() !== '' ? docUrl : docFileName,
+        p_doc_hash_sha256: docHash
       };
     })(),
     p_actor: strOrNull(body.actor, body.ACTOR, body.p_actor),

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import oracledb from 'oracledb';
 import EmployeeModel from '../model/employeeModel.js';
 import { getConnection } from '../../../config/db.js';
 import {
@@ -75,10 +76,593 @@ function getEnterprise(req) {
 }
 
 /**
+ * Get enterprise ID for employee full-details (req.user.enterprise_id or x-enterprise-id header first)
+ */
+function getEnterpriseIdForEmployee(req) {
+  const v = req.user?.enterprise_id ?? req.headers['x-enterprise-id'] ?? getEnterprise(req);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Extract user ID from request
  */
 function getUserId(req) {
   return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+}
+
+/**
+ * Parse and validate pagination parameters (same pattern as leave_requests, leave_types).
+ * @param {Object} query - req.query
+ * @returns {{ page: number, pageSize: number }}
+ */
+function parsePagination(query) {
+  let page = 1;
+  let pageSize = 10;
+
+  if (query.page !== undefined) {
+    const parsedPage = parseInt(query.page, 10);
+    if (isNaN(parsedPage) || parsedPage < 1) {
+      throw new Error('Invalid page number. Must be a positive integer.');
+    }
+    page = parsedPage;
+  }
+
+  if (query.page_size !== undefined) {
+    const parsedPageSize = parseInt(query.page_size, 10);
+    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
+      throw new Error('Invalid page_size. Must be a positive integer.');
+    }
+    pageSize = Math.min(100, parsedPageSize);
+  }
+
+  return { page, pageSize };
+}
+
+/**
+ * Build pagination metadata (same shape as other APIs).
+ */
+function buildPaginationMeta(page, pageSize, totalCount) {
+  const totalPages = Math.ceil(totalCount / pageSize) || 0;
+  return {
+    page,
+    pageSize,
+    total: totalCount,
+    totalPages,
+    hasNext: page < totalPages,
+    hasPrevious: page > 1
+  };
+}
+
+/**
+ * Build WHERE clause and bind arrays for EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST.
+ * - Base filters: enterpriseId, positionId, jobFamilyId, jobLevelId, gradeId (positional :1–:9).
+ * - Dynamic org filter: when org_unit_id_hex is set, add JSON_EXISTS on ORG_STRUCTURE_LIST_JSON
+ *   (org_unit_id as hex string; optional level_code). Count uses :10[:11]; data uses :12[:13] (offset/pageSize are :10,:11).
+ * - Pagination: data only, OFFSET :10 FETCH :11.
+ */
+function buildEmployeeListWhereAndBinds(filters) {
+  const baseConditions = [
+    'v.ENTERPRISE_ID = :1',
+    '(:2 IS NULL OR v.POSITION_ID = :2)',
+    '(:3 IS NULL OR v.JOB_FAMILY_ID = :3)',
+    '(:4 IS NULL OR v.JOB_LEVEL_ID = :4)',
+    '(:5 IS NULL OR v.GRADE_ID = :5)'
+  ];
+
+  const p = filters.positionId ?? null;
+  const jf = filters.jobFamilyId ?? null;
+  const jl = filters.jobLevelId ?? null;
+  const g = filters.gradeId ?? null;
+  const hasJsonFilter = filters.org_unit_id_hex != null && filters.org_unit_id_hex !== '';
+  const hasLevelCode = hasJsonFilter && filters.level_code != null && filters.level_code !== '';
+
+  const countConditions = [...baseConditions];
+  const dataConditions = [...baseConditions];
+  if (hasJsonFilter) {
+    if (hasLevelCode) {
+      countConditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :10 AS "oid", :11 AS "lvl")`
+      );
+      dataConditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :12 AS "oid", :13 AS "lvl")`
+      );
+    } else {
+      countConditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :10 AS "oid")`
+      );
+      dataConditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :12 AS "oid")`
+      );
+    }
+  }
+
+  const countWhere = countConditions.join(' AND ');
+  const dataWhere = dataConditions.join(' AND ');
+
+  const countSql = `SELECT COUNT(*) AS total_records FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${countWhere}`;
+  const dataSql = `SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${dataWhere}
+  ORDER BY v.EMPLOYEE_ID NULLS LAST
+  OFFSET :10 ROWS FETCH NEXT :11 ROWS ONLY`;
+
+  const countBinds = [
+    filters.enterpriseId,
+    p, p,
+    jf, jf,
+    jl, jl,
+    g, g
+  ];
+  if (hasJsonFilter) {
+    countBinds.push(filters.org_unit_id_hex);
+    if (hasLevelCode) countBinds.push(filters.level_code);
+  }
+
+  const dataBinds = [
+    filters.enterpriseId,
+    p, p,
+    jf, jf,
+    jl, jl,
+    g, g
+  ];
+  if (hasJsonFilter) {
+    dataBinds.push(filters.org_unit_id_hex);
+    if (hasLevelCode) dataBinds.push(filters.level_code);
+  }
+  dataBinds.push(filters.offset, filters.pageSize);
+
+  return { countSql, dataSql, countBinds, dataBinds };
+}
+
+/**
+ * Convert 32-char hex string to Buffer for Oracle RAW(16) bind.
+ * @param {string|null|undefined} hex
+ * @returns {Buffer|null}
+ */
+function hexToBuffer(hex) {
+  if (hex == null || typeof hex !== 'string') return null;
+  const s = hex.trim().replace(/-/g, '');
+  if (!/^[0-9A-Fa-f]{32}$/.test(s)) return null;
+  return Buffer.from(s, 'hex');
+}
+
+/**
+ * Recursively convert Buffer values (RAW) to hex strings in a row object.
+ * @param {Object} row
+ * @returns {Object}
+ */
+function rowRawToHex(row) {
+  if (row === null || row === undefined) return row;
+  if (row instanceof Buffer) return row.toString('hex').toUpperCase();
+  if (typeof row !== 'object') return row;
+  const out = {};
+  for (const [k, v] of Object.entries(row)) {
+    out[k] = v instanceof Buffer ? v.toString('hex').toUpperCase() : (typeof v === 'object' && v !== null && !(v instanceof Date) ? rowRawToHex(v) : v);
+  }
+  return out;
+}
+
+/**
+ * Parse org_structure_list from view (CLOB/string or Lob) into a JSON array.
+ * With oracledb.fetchAsString = [oracledb.CLOB], the value is a string; never return Lob or object with "0"/"1" keys.
+ * @param {*} value - CLOB string, null, or (legacy) Lob object
+ * @returns {Array}
+ */
+function parseOrgStructureList(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (s === '' || s.toLowerCase() === 'null') return [];
+    try {
+      const parsed = JSON.parse(s);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
+ * Normalize a single employee list row: RAW→hex and org_structure_list→array.
+ * Keeps employee_guid, assignment_guid, org_unit_id, position_id as hex strings.
+ */
+function normalizeEmployeeListRow(row) {
+  const r = rowRawToHex(row);
+  delete r.ORG_STRUCTURE_LIST_JSON;
+  delete r.org_structure_list_json;
+  const listKey = 'ORG_STRUCTURE_LIST' in r ? 'ORG_STRUCTURE_LIST' : 'org_structure_list';
+  r[listKey] = parseOrgStructureList(r[listKey]);
+  return r;
+}
+
+// --- Full details (V_EMPLOYEE_FULL_DETAILS) helpers ---
+
+/**
+ * Convert RAW GUID to hex string. Handles Buffer, null, or string.
+ * @param {Buffer|string|null|undefined} val
+ * @returns {string|null}
+ */
+function toHex(val) {
+  if (val == null) return null;
+  if (val instanceof Buffer) return val.toString('hex').toUpperCase();
+  if (typeof val === 'string') return val.trim();
+  return null;
+}
+
+/**
+ * Parse CLOB/JSON column to array safely. If already array keep; if object wrap in []; if string JSON.parse; null/empty → [].
+ * @param {*} value - CLOB string, object, array, or null
+ * @returns {Array}
+ */
+function parseJsonToArray(value) {
+  if (value == null) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') return [value];
+  if (typeof value !== 'string') return [];
+  const s = value.trim();
+  if (!s || s.toLowerCase() === 'null') return [];
+  try {
+    const parsed = JSON.parse(s);
+    return Array.isArray(parsed) ? parsed : (parsed != null && typeof parsed === 'object' ? [parsed] : []);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Ensure date/timestamp is returned as ISO string.
+ * @param {Date|string|null|undefined} val
+ * @returns {string|null}
+ */
+function dateToIso(val) {
+  if (val == null) return null;
+  if (val instanceof Date) return val.toISOString();
+  if (typeof val === 'string') return val;
+  return null;
+}
+
+/** Only EMPL.EMPLOYEES table columns go into data.employee. */
+const EMPLOYEE_TABLE_COLUMNS = new Set([
+  'EMPLOYEE_ID', 'EMPLOYEE_GUID', 'ENTERPRISE_ID',
+  'FIRST_NAME_EN', 'MIDDLE_NAME_EN', 'LAST_NAME_EN',
+  'FIRST_NAME_AR', 'MIDDLE_NAME_AR', 'LAST_NAME_AR', 'FAMILY_NAME_AR',
+  'EMAIL', 'PHONE_NUMBER', 'MOBILE_NUMBER', 'DATE_OF_BIRTH',
+  'STATUS', 'IS_ACTIVE', 'CREATED_BY', 'CREATION_DATE', 'LAST_UPDATED_BY', 'LAST_UPDATE_DATE',
+  'EMPLOYEE_NUMBER', 'WORK_LOCATION_ID', 'JOB_FAMILY_ID', 'JOB_LEVEL_ID', 'GRADE_ID',
+  'PROBATION_DAYS', 'REPORTING_TO_EMP_ID', 'EMPLOYEE_STATUS', 'EMPLOYEE_IS_ACTIVE'
+]);
+
+/**
+ * Column mapping: view columns → output group. Only EMPLOYEE_TABLE_COLUMNS go to employee.
+ */
+const FULL_DETAILS_COLUMN_GROUPS = {
+  ASSIGNMENT_ID: 'assignment',
+  ASSIGNMENT_GUID: 'assignment',
+  ASSIGNMENT_STATUS: 'assignment',
+  ASSIGNMENT_IS_ACTIVE: 'assignment',
+  ORG_UNIT_ID: 'assignment',
+  POSITION_ID: 'assignment',
+  JOB_ID: 'assignment',
+  ENTERPRISE_HIRE_DATE: 'assignment',
+  CONTRACT_TYPE_CODE: 'assignment',
+  EMPLOYMENT_STATUS: 'assignment',
+  ORG_STRUCTURE_LIST: 'assignment',
+  ORG_STRUCTURE_LIST_JSON: 'assignment',
+  CIVIL_ID_NUMBER: 'demographics',
+  PASSPORT_NUMBER: 'demographics',
+  NATIONALITY: 'demographics',
+  NATIONALITY_CODE: 'demographics',
+  GENDER_CODE: 'demographics',
+  VISA_NUMBER: 'demographics',
+  VISA_EXPIRY: 'demographics',
+  WORK_PERMIT_NUMBER: 'demographics',
+  WORK_PERMIT_EXPIRY: 'demographics',
+  MARITAL_STATUS_CODE: 'demographics',
+  RELIGION_CODE: 'demographics',
+  DEMO_ID: 'demographics',
+  DEMO_GUID: 'demographics',
+  WORK_SCHEDULE_ID: 'schedule',
+  EMP_SCH_ID: 'schedule',
+  EMP_SCH_GUID: 'schedule',
+  SCHEDULE_CODE: 'schedule',
+  SCHEDULE_NAME_EN: 'schedule',
+  SCHEDULE_NAME_AR: 'schedule',
+  WORK_PATTERN_ID: 'schedule',
+  EFFECTIVE_START_DATE: 'schedule',
+  EFFECTIVE_END_DATE: 'schedule',
+  ASSIGNMENT_MODE: 'schedule',
+  SCHEDULE_STATUS: 'schedule',
+  WS_START: 'schedule',
+  WS_END: 'schedule',
+  WS_STATUS: 'schedule',
+  WS_IS_ACTIVE: 'schedule',
+  SALARY: 'compensation',
+  BASIC_SALARY_KWD: 'compensation',
+  CURRENCY_CODE: 'compensation',
+  PAY_FREQUENCY: 'compensation',
+  COMPENSATION_BASIS: 'compensation',
+  COMP_ID: 'compensation',
+  COMP_GUID: 'compensation',
+  COMP_START: 'compensation',
+  COMP_END: 'compensation',
+  COMP_STATUS: 'compensation',
+  COMP_IS_ACTIVE: 'compensation',
+  HOUSING_KWD: 'allowances',
+  TRANSPORT_KWD: 'allowances',
+  OTHER_KWD: 'allowances',
+  FOOD_KWD: 'allowances',
+  MOBILE_KWD: 'allowances',
+  HOUSING_ALLOWANCE: 'allowances',
+  TRANSPORT_ALLOWANCE: 'allowances',
+  OTHER_ALLOWANCE: 'allowances',
+  ALLOW_ID: 'allowances',
+  ALLOW_GUID: 'allowances',
+  ALLOW_START: 'allowances',
+  ALLOW_END: 'allowances',
+  ALLOW_STATUS: 'allowances',
+  ALLOW_IS_ACTIVE: 'allowances',
+  DOC_COMPLIANCE_STATUS: 'document_compliance',
+  DOC_COMPLIANCE_LAST_CHECK: 'document_compliance',
+  DOC_COMP_ID: 'document_compliance',
+  DOC_COMP_GUID: 'document_compliance',
+  CIVIL_ID_EXPIRY: 'document_compliance',
+  PASSPORT_EXPIRY: 'document_compliance',
+  DOCC_STATUS: 'document_compliance',
+  DOCC_IS_ACTIVE: 'document_compliance',
+  DOCUMENTS_JSON: null,
+  EMERGENCY_CONTACTS_JSON: null,
+  BANK_CODE: 'bank',
+  BANK_ACCOUNT_NUMBER: 'bank',
+  BANK_NAME: 'bank',
+  BANK_NAME_AR: 'bank',
+  IBAN: 'bank',
+  BANK_ID: 'bank',
+  BANK_GUID: 'bank',
+  ACCOUNT_NUMBER: 'bank',
+  BANK_IS_PRIMARY: 'bank',
+  BANK_STATUS: 'bank',
+  BANK_IS_ACTIVE: 'bank',
+  ADDRESS_LINE1: 'address',
+  ADDRESS_LINE2: 'address',
+  ADDRESS_LINE3: 'address',
+  CITY: 'address',
+  COUNTRY: 'address',
+  COUNTRY_CODE: 'address',
+  POSTAL_CODE: 'address',
+  REGION: 'address',
+  AREA: 'address',
+  ADDRESS_ID: 'address',
+  ADDRESS_GUID: 'address',
+  ADDRESS_IS_PRIMARY: 'address',
+  ADDRESS_STATUS: 'address',
+  ADDRESS_IS_ACTIVE: 'address'
+};
+
+/**
+ * Convert object keys to snake_case (for API response).
+ */
+function toSnakeCaseKeys(obj) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object' || obj instanceof Date || obj instanceof Buffer) return obj;
+  if (Array.isArray(obj)) return obj.map(toSnakeCaseKeys);
+  const out = {};
+  for (const [key, value] of Object.entries(obj)) {
+    let newKey;
+    if (key.includes('_') || key === key.toUpperCase()) {
+      newKey = key.toLowerCase();
+    } else {
+      newKey = key.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+    }
+    out[newKey] = value === null || value === undefined ? value : (typeof value === 'object' && !(value instanceof Date) && !(value instanceof Buffer) ? toSnakeCaseKeys(value) : value);
+  }
+  return out;
+}
+
+/**
+ * Map a single row from EMPL.V_EMPLOYEE_FULL_DETAILS into the required response shape.
+ * Converts RAW to hex, dates to ISO, parses documents_json and emergency_contacts_json.
+ */
+function mapRowToFullDetailsShape(row) {
+  const groups = {
+    employee: {},
+    assignment: {},
+    demographics: {},
+    schedule: {},
+    compensation: {},
+    allowances: {},
+    document_compliance: {},
+    bank: {},
+    address: {}
+  };
+
+  const jsonColumnKeys = new Set(['DOCUMENTS_JSON', 'EMERGENCY_CONTACTS_JSON', 'BANK_ACCOUNTS_JSON', 'ADDRESSES_JSON']);
+  for (const [key, value] of Object.entries(row)) {
+    const keyUpper = key.toUpperCase && key.toUpperCase() || key;
+    if (jsonColumnKeys.has(keyUpper)) continue;
+
+    let group = EMPLOYEE_TABLE_COLUMNS.has(keyUpper)
+      ? 'employee'
+      : FULL_DETAILS_COLUMN_GROUPS[keyUpper];
+    if (group == null) continue;
+
+    let outVal = value;
+    if (value instanceof Buffer) outVal = toHex(value);
+    else if (value instanceof Date) outVal = dateToIso(value);
+    groups[group][key] = outVal;
+  }
+
+  const documents = parseJsonToArray(row.DOCUMENTS_JSON ?? row.documents_json);
+  const emergency_contacts = parseJsonToArray(row.EMERGENCY_CONTACTS_JSON ?? row.emergency_contacts_json);
+  const bank_accounts = parseJsonToArray(row.BANK_ACCOUNTS_JSON ?? row.bank_accounts_json);
+  const addresses = parseJsonToArray(row.ADDRESSES_JSON ?? row.addresses_json);
+
+  const assignmentOut = toSnakeCaseKeys(groups.assignment);
+  assignmentOut.org_structure_list = parseOrgStructureList(row.ORG_STRUCTURE_LIST ?? row.org_structure_list ?? row.ORG_STRUCTURE_LIST_JSON ?? row.org_structure_list_json);
+  delete assignmentOut.org_structure_list_json;
+
+  return {
+    employee: toSnakeCaseKeys(groups.employee),
+    assignment: assignmentOut,
+    demographics: toSnakeCaseKeys(groups.demographics),
+    work_schedule: toSnakeCaseKeys(groups.schedule),
+    compensation: toSnakeCaseKeys(groups.compensation),
+    allowances: toSnakeCaseKeys(groups.allowances),
+    document_compliance: toSnakeCaseKeys(groups.document_compliance),
+    documents,
+    emergency_contacts,
+    bank_accounts,
+    addresses
+  };
+}
+
+const SQL_FULL_DETAILS_BY_ID = `
+  SELECT v.*
+  FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
+  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
+`;
+
+const SQL_FULL_DETAILS_BY_GUID = `
+  SELECT v.*
+  FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
+  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)
+`;
+
+/**
+ * GET /api/employees/:idOrGuid/full-details – fetch single employee full details from EMPL.V_EMPLOYEE_FULL_DETAILS.
+ * Accepts employee_id (NUMBER) or employee_guid (32-char hex). enterprise_id mandatory (x-enterprise-id or req.user.enterprise_id).
+ * @param {import('express').Request} req - req.params.guid (employee_id number OR 32-char hex GUID)
+ * @param {import('express').Response} res
+ */
+export async function getEmployeeById(req, res) {
+  const param = String(req.params.guid ?? '').trim();
+  const normalizedGuid = param.replace(/-/g, '').toUpperCase();
+  const isNumericId = /^\d+$/.test(param);
+  const isGuid = normalizedGuid.length === 32 && /^[0-9A-Fa-f]+$/.test(normalizedGuid);
+
+  if (!isNumericId && !isGuid) {
+    return sendBadRequest(res, req, 'Parameter must be employee_id (numeric) or employee_guid (32-char hex).');
+  }
+
+  const enterpriseId = getEnterpriseIdForEmployee(req);
+  if (!enterpriseId || !Number.isFinite(enterpriseId)) {
+    return sendBadRequest(res, req, 'enterprise_id is required (x-enterprise-id header or req.user.enterprise_id)');
+  }
+
+  let connection;
+  try {
+    connection = await getConnection();
+    const opts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+    const result = isNumericId
+      ? await connection.execute(SQL_FULL_DETAILS_BY_ID, { enterprise_id: enterpriseId, employee_id: parseInt(param, 10) }, opts)
+      : await connection.execute(SQL_FULL_DETAILS_BY_GUID, { enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }, opts);
+    const row = result.rows?.[0] ?? null;
+    if (!row) return sendNotFound(res, req, 'Employee not found');
+
+    const data = mapRowToFullDetailsShape(rowRawToHex(row));
+    res.json({ success: true, message: 'Employee fetched successfully', data });
+  } catch (err) {
+    sendServerError(res, req, 'Failed to fetch employee full details', {
+      message: err?.message ?? String(err),
+      ...(err?.errorNum != null && { errorNum: err.errorNum }),
+      ...(err?.oraError != null && { oraCode: err.oraError?.code, oraMessage: err.oraError?.message })
+    });
+  } finally {
+    if (connection) try { await connection.close(); } catch (_) {}
+  }
+}
+
+/**
+ * GET /api/employees – fetch employee listing from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST.
+ * Supports pagination and optional filters. Uses bind variables only; RAW(16) in response as hex.
+ * Pagination: same pattern as leave_requests, leave_types (page, page_size, parsePagination, buildPaginationMeta).
+ *
+ * @param {import('express').Request} req - req.query: enterpriseId (required), org_unit_id (hex, dynamic org filter via ORG_STRUCTURE_LIST_JSON), level_code (optional, with org_unit_id), positionId, jobFamilyId, jobLevelId, gradeId, page, page_size
+ * @param {import('express').Response} res
+ */
+export async function getEmployees(req, res) {
+  let page;
+  let pageSize;
+  try {
+    const pagination = parsePagination(req.query);
+    page = pagination.page;
+    pageSize = pagination.pageSize;
+  } catch (paginationError) {
+    return sendBadRequest(res, req, paginationError.message);
+  }
+
+  const q = req.query;
+  const enterpriseIdRaw = q.enterpriseId ?? q.enterprise_id;
+  const enterpriseId = enterpriseIdRaw != null && enterpriseIdRaw !== '' ? Number(enterpriseIdRaw) : NaN;
+  if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
+    return sendBadRequest(res, req, 'enterpriseId (or enterprise_id) is required and must be a positive number');
+  }
+
+  // org_unit_id + level_code: dynamic org filter via ORG_STRUCTURE_LIST_JSON (hex string, not RAW)
+  const orgUnitIdHexRaw = (q.org_unit_id ?? q.orgUnitId) != null && String(q.org_unit_id ?? q.orgUnitId).trim() !== '' ? String(q.org_unit_id ?? q.orgUnitId).trim() : null;
+  const levelCodeRaw = (q.level_code ?? q.levelCode) != null && String(q.level_code ?? q.levelCode).trim() !== '' ? String(q.level_code ?? q.levelCode).trim() : null;
+  if (levelCodeRaw != null && (orgUnitIdHexRaw == null || orgUnitIdHexRaw === '')) {
+    return sendBadRequest(res, req, 'level_code requires org_unit_id');
+  }
+  const orgUnitIdHexForJson = orgUnitIdHexRaw ? orgUnitIdHexRaw.replace(/-/g, '').trim().toUpperCase() : null;
+  if (orgUnitIdHexRaw && (!/^[0-9A-Fa-f]{32}$/.test(orgUnitIdHexForJson))) {
+    return sendBadRequest(res, req, 'org_unit_id must be a 32-character hex string');
+  }
+
+  const positionIdHex = (q.positionId ?? q.position_id) != null && String(q.positionId ?? q.position_id).trim() !== '' ? String(q.positionId ?? q.position_id).trim() : null;
+  const jobFamilyIdRaw = q.jobFamilyId ?? q.job_family_id;
+  const jobLevelIdRaw = q.jobLevelId ?? q.job_level_id;
+  const gradeIdRaw = q.gradeId ?? q.grade_id;
+  const jobFamilyId = jobFamilyIdRaw != null && jobFamilyIdRaw !== '' ? parseInt(jobFamilyIdRaw, 10) : null;
+  const jobLevelId = jobLevelIdRaw != null && jobLevelIdRaw !== '' ? parseInt(jobLevelIdRaw, 10) : null;
+  const gradeId = gradeIdRaw != null && gradeIdRaw !== '' ? parseInt(gradeIdRaw, 10) : null;
+
+  const positionIdBuf = hexToBuffer(positionIdHex);
+  if (positionIdHex != null && positionIdBuf == null) {
+    return sendBadRequest(res, req, 'positionId must be a 32-character hex string');
+  }
+
+  const offset = (page - 1) * pageSize;
+  const filters = {
+    enterpriseId,
+    org_unit_id_hex: orgUnitIdHexForJson,
+    level_code: levelCodeRaw ?? null,
+    positionId: positionIdBuf,
+    jobFamilyId: Number.isFinite(jobFamilyId) ? jobFamilyId : null,
+    jobLevelId: Number.isFinite(jobLevelId) ? jobLevelId : null,
+    gradeId: Number.isFinite(gradeId) ? gradeId : null,
+    offset,
+    pageSize
+  };
+  const { countSql, dataSql, countBinds, dataBinds } = buildEmployeeListWhereAndBinds(filters);
+
+  let connection;
+  try {
+    connection = await getConnection();
+
+    const [countResult, dataResult] = await Promise.all([
+      connection.execute(countSql, countBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(dataSql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    ]);
+
+    const totalRecords = countResult.rows && countResult.rows[0] ? Number(countResult.rows[0].TOTAL_RECORDS) : 0;
+    const paginationMeta = buildPaginationMeta(page, pageSize, totalRecords);
+    const rows = dataResult.rows || [];
+    const data = rows.map(row => normalizeEmployeeListRow(row));
+
+    sendEmployeeList(res, req, data, {
+      total: totalRecords,
+      pagination: paginationMeta
+    });
+  } catch (err) {
+    sendServerError(res, req, 'Failed to fetch employees', err);
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (_) {}
+    }
+  }
 }
 
 /**
@@ -207,98 +791,11 @@ function validateEmployeeData(data, isUpdate = false) {
 
 /**
  * @route   GET /api/employees
- * @desc    Get all employees
- * @query   enterprise_id - Required. Filter by enterprise ID (must match the enterprise_id used when creating the employee)
- * @query   is_active - Filter by active status (true/false)
- * @query   status - Filter by status
- * @query   email - Search by email (partial match, case-insensitive)
- * @query   name - Search by name (partial match, case-insensitive)
- * @query   page - Page number (default: 1)
- * @query   page_size - Number of items per page (default: 10, max: 100)
+ * @desc    Get employee listing from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST with pagination and filters (incl. dynamic org via org_unit_id + level_code)
+ * @query   enterpriseId (required), org_unit_id (hex, filter by ORG_STRUCTURE_LIST_JSON), level_code (optional with org_unit_id), positionId, jobFamilyId, jobLevelId, gradeId, page, page_size
  * @access  Public
  */
-router.get('/', asyncHandler(async (req, res) => {
-  try {
-    const filters = {};
-    const appliedFilters = {};
-    
-    const enterpriseId = getEnterprise(req);
-    if (!enterpriseId || isNaN(enterpriseId)) {
-      return sendBadRequest(res, req, 'ENTERPRISE_ID is required');
-    }
-    filters.enterpriseId = enterpriseId;
-    appliedFilters.enterprise_id = enterpriseId;
-
-  if (req.query.is_active !== undefined) {
-    filters.isActive = req.query.is_active === 'true' || req.query.is_active === '1';
-    appliedFilters.is_active = filters.isActive;
-  }
-
-  if (req.query.status) {
-    filters.status = req.query.status;
-    appliedFilters.status = filters.status;
-  }
-
-  if (req.query.email) {
-    filters.email = req.query.email;
-    appliedFilters.email = filters.email;
-  }
-
-  if (req.query.name) {
-    filters.name = req.query.name;
-    appliedFilters.name = filters.name;
-  }
-
-  // Parse pagination parameters
-  let page = 1;
-  let pageSize = 10;
-  
-    if (req.query.page !== undefined) {
-      const parsedPage = parseInt(req.query.page);
-      if (isNaN(parsedPage) || parsedPage < 1) {
-        return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
-      }
-      page = parsedPage;
-    }
-    
-    if (req.query.page_size !== undefined || req.query.limit !== undefined) {
-      const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
-      if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-        return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
-      }
-      pageSize = Math.min(100, parsedPageSize);
-    }
-
-  filters.pagination = {
-    page,
-    pageSize
-  };
-
-  const result = await EmployeeModel.findAll(filters);
-  
-  // Calculate pagination metadata
-  const totalCount = result.total || result.length;
-  const totalPages = Math.ceil(totalCount / pageSize);
-  const hasNext = page < totalPages;
-  const hasPrevious = page > 1;
-  
-  const employees = result.employees || result;
-  
-  sendEmployeeList(res, req, employees, {
-    ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
-    pagination: {
-      page,
-      pageSize,
-      total: totalCount,
-      totalPages,
-      hasNext,
-      hasPrevious
-    }
-  });
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch employees', error);
-  }
-}));
+router.get('/', asyncHandler(getEmployees));
 
 /**
  * @route   GET /api/employees/by-guid/:guid
@@ -317,6 +814,14 @@ router.get('/by-guid/:guid', asyncHandler(async (req, res) => {
     sendServerError(res, req, 'Failed to fetch employee', error);
   }
 }));
+
+/**
+ * @route   GET /api/employees/:idOrGuid/full-details
+ * @desc    Get single employee full details from EMPL.V_EMPLOYEE_FULL_DETAILS (employee_id or employee_guid)
+ * @param   idOrGuid - employee_id (numeric) OR employee_guid (32-char hex)
+ * @access  Public
+ */
+router.get('/:guid/full-details', asyncHandler(getEmployeeById));
 
 /**
  * Helper function to check if a string is a 32-character hex GUID
@@ -430,6 +935,18 @@ async function createEmployeeAllInOneHandler(req, res) {
   if (visaExpiryVal != null && String(visaExpiryVal).trim() !== '' && String(visaExpiryVal).toLowerCase() !== 'null') body.visa_expiry = visaExpiryVal;
   if (workPermitNumVal != null) body.work_permit_number = workPermitNumVal;
   if (workPermitExpiryVal != null && String(workPermitExpiryVal).trim() !== '' && String(workPermitExpiryVal).toLowerCase() !== 'null') body.work_permit_expiry = workPermitExpiryVal;
+
+  // Normalize document fields from form/JSON (so buildBinds sees them)
+  const docFileNameRaw = raw.doc_file_name ?? raw.docFileName ?? raw.DOC_FILE_NAME ?? raw.file_name ?? raw.fileName ?? raw.document_file_name;
+  const docTypeRaw = raw.document_type_code ?? raw.documentTypeCode ?? raw.DOCUMENT_TYPE_CODE;
+  const docUrlRaw = raw.doc_access_url ?? raw.docAccessUrl ?? raw.DOC_ACCESS_URL;
+  const docMimeRaw = raw.doc_mime_type ?? raw.docMimeType ?? raw.DOC_MIME_TYPE;
+  const docHashRaw = raw.doc_hash_sha256 ?? raw.docHashSha256 ?? raw.DOC_HASH_SHA256;
+  if (docFileNameRaw != null && String(docFileNameRaw).trim() !== '') body.doc_file_name = String(docFileNameRaw).trim();
+  if (docTypeRaw != null && String(docTypeRaw).trim() !== '') body.document_type_code = String(docTypeRaw).trim();
+  if (docUrlRaw != null && String(docUrlRaw).trim() !== '') body.doc_access_url = String(docUrlRaw).trim();
+  if (docMimeRaw != null && String(docMimeRaw).trim() !== '') body.doc_mime_type = String(docMimeRaw).trim();
+  if (docHashRaw != null && String(docHashRaw).trim() !== '') body.doc_hash_sha256 = String(docHashRaw).trim();
 
   // If a file was uploaded, save it, compute hash, and set document fields for the procedure
   if (req.file) {

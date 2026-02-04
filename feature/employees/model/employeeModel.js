@@ -78,18 +78,14 @@ class EmployeeModel {
       if (connection && connection.rollback) {
         try {
           await connection.rollback();
-        } catch (rollbackErr) {
-          console.error('Error during rollback:', rollbackErr);
-        }
+        } catch (_) {}
       }
       throw error;
     } finally {
       if (connection && connection.close) {
         try {
           await connection.close();
-        } catch (err) {
-          console.error('Error closing connection:', err);
-        }
+        } catch (_) {}
       }
     }
   }
@@ -233,14 +229,6 @@ class EmployeeModel {
 
       return employees;
     } catch (error) {
-      console.error('[EmployeeModel.findAll] Error:', {
-        errorType: error?.constructor?.name,
-        message: error?.message,
-        errorNum: error?.errorNum,
-        code: error?.code,
-        stack: error?.stack?.split('\n').slice(0, 6)
-      });
-
       if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
         throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }
@@ -421,14 +409,6 @@ class EmployeeModel {
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
-      console.error('[EmployeeModel.create] Error:', {
-        errorType: error?.constructor?.name,
-        message: error?.message,
-        errorNum: error?.errorNum,
-        code: error?.code,
-        stack: error?.stack?.split('\n').slice(0, 6)
-      });
-
       if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
         throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
       }

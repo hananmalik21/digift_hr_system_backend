@@ -127,8 +127,6 @@ export function sendBadRequest(res, req, errors) {
 }
 
 export function sendServerError(res, req, message, error = null) {
-  if (error) console.error('Server error:', error);
-
   let errorCode = 'INTERNAL_SERVER_ERROR';
   let statusCode = 500;
   let errorMessage = message || 'Internal server error';
@@ -139,15 +137,21 @@ export function sendServerError(res, req, message, error = null) {
     errorMessage = error.userMessage || error.message || 'Cannot delete: Record is referenced by other records';
   }
 
+  const detailsMessage = (error && (typeof error.userMessage === 'string' || typeof error.message === 'string'))
+    ? (error.userMessage || error.message)
+    : errorMessage;
+  const detailsStack = error && typeof error.stack === 'string' ? error.stack : undefined;
+  const detailsConstraint = error && typeof error.constraint === 'string' ? error.constraint : undefined;
+
   res.status(statusCode).json({
     success: false,
     message: errorMessage,
     error_details: {
-      message: error?.userMessage || error?.message || errorMessage,
+      message: detailsMessage,
       code: errorCode,
       type: 'Error',
-      ...(error?.constraint && { constraint: error.constraint }),
-      stack: error?.stack
+      ...(detailsConstraint && { constraint: detailsConstraint }),
+      ...(detailsStack && { stack: detailsStack })
     }
   });
 }

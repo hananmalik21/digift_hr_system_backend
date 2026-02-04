@@ -147,7 +147,6 @@ app.use('/api/abs', employeeLeaveBalanceController);
 
 // Initialize database pool on startup
 await createPool();
-console.log('✅ Database pool initialized');
 
 // ==========================================
 // 📌 HEALTH CHECK ENDPOINT
@@ -178,21 +177,14 @@ app.use(errorMiddleware);
 // ==========================================
 // 📌 START SERVER
 // ==========================================
-const server = app.listen(PORT, () => {
-  console.log('\n🚀 Oracle Database API Server Started!');
-  console.log(`📡 Server running on: http://localhost:${PORT}`);
-  console.log('\n📚 Available API Endpoints:');
-});
+const server = app.listen(PORT);
 
 // ==========================================
 // 📌 GRACEFUL SHUTDOWN
 // ==========================================
 process.on('SIGINT', async () => {
-  console.log('\n\n🛑 Shutting down gracefully...');
   server.close(async () => {
-    console.log('📡 HTTP server closed');
     await closePool();
-    console.log('✅ Shutdown complete');
     process.exit(0);
   });
 });
