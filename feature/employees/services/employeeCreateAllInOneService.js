@@ -69,6 +69,7 @@ import oracledb from 'oracledb';
  * 8) BANK
  * @property {string}   bank_code              REQUIRED
  * @property {string}   account_number          REQUIRED
+ * @property {string}   [bank_name]            optional
  * @property {string}   [iban]
  *
  * 9) ASSIGNMENT
@@ -172,6 +173,7 @@ BEGIN
     p_work_permit_number       => :p_work_permit_number,
     p_work_permit_expiry       => :p_work_permit_expiry,
     p_bank_code                => :p_bank_code,
+    p_bank_name                => :p_bank_name,
     p_account_number           => :p_account_number,
     p_iban                     => :p_iban,
     p_org_unit_id              => :p_org_unit_id,
@@ -327,6 +329,7 @@ export function buildBinds(body) {
     p_work_permit_number: strBind(fromBody(body, 'work_permit_number', 'workPermitNumber', 'WORK_PERMIT_NUMBER', 'work_permit_no', 'workPermitNo')),
     p_work_permit_expiry: (() => { const d = parseDate(body.work_permit_expiry ?? body.workPermitExpiry ?? body.WORK_PERMIT_EXPIRY ?? body.work_permit_expiry_date ?? body.workPermitExpiryDate); return d; })(),
     p_bank_code: body.bank_code ?? body.bankCode ?? body.BANK_CODE,
+    p_bank_name: strOrNull(body.bank_name, body.bankName, body.BANK_NAME),
     p_account_number: body.account_number ?? body.accountNumber ?? body.ACCOUNT_NUMBER,
     p_iban: strOrNull(body.iban, body.IBAN),
     p_org_unit_id: orgUnitIdRaw,
