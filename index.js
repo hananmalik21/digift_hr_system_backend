@@ -41,6 +41,8 @@ import leaveContactController from './feature/leave_contacts/controller/leaveCon
 import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
 import employeeLeaveBalanceController from './feature/employee_leave_balances/controller/employeeLeaveBalanceController.js';
 import absLookupController from './feature/abs_lookups/controller/absLookupController.js';
+import emplLookupTypeController from './feature/empl_lookup_types/controller/emplLookupTypeController.js';
+import emplLookupValueController from './feature/empl_lookup_values/controller/emplLookupValueController.js';
 import leavePolicyController from './feature/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
@@ -137,6 +139,8 @@ app.use('/api/abs/leave-requests', leaveRequestController);
 app.use('/api/abs/leave-contacts', leaveContactController);
 app.use('/api/abs/leave-documents', leaveDocumentController);
 app.use('/api/abs/lookups', absLookupController);
+app.use('/api/empl/lookup-types', emplLookupTypeController);
+app.use('/api/empl/lookup-values', emplLookupValueController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
