@@ -10,7 +10,6 @@ import { generateSysGuid } from '../../../utils/guidUtils.js';
  * Table columns (confirmed):
  * - EMPLOYEE_ID (PK)
  * - EMPLOYEE_GUID (RAW(16))
- * - TENANT_ID
  * - ENTERPRISE_ID
  * - FIRST_NAME_EN, MIDDLE_NAME_EN, LAST_NAME_EN
  * - FIRST_NAME_AR, MIDDLE_NAME_AR, LAST_NAME_AR, FAMILY_NAME_AR
@@ -144,7 +143,6 @@ class EmployeeModel {
       let dataQuery = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        e.TENANT_ID,
         e.ENTERPRISE_ID,
         e.FIRST_NAME_EN,
         e.MIDDLE_NAME_EN,
@@ -262,7 +260,6 @@ class EmployeeModel {
       const query = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        e.TENANT_ID,
         e.ENTERPRISE_ID,
         e.FIRST_NAME_EN,
         e.MIDDLE_NAME_EN,
@@ -300,7 +297,6 @@ class EmployeeModel {
       const query = `SELECT 
         e.EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-        e.TENANT_ID,
         e.ENTERPRISE_ID,
         e.FIRST_NAME_EN,
         e.MIDDLE_NAME_EN,
@@ -351,12 +347,10 @@ class EmployeeModel {
         // 2) Generate GUID (RAW buffer)
         const { buffer: guidBuffer } = await generateSysGuid(connection);
 
-        // 3) Insert
-        const tenantId = data.TENANT_ID != null ? Number(data.TENANT_ID) : Number(enterpriseId);
+        // 3) Insert (EMPL.EMPLOYEES has no TENANT_ID column)
         const query = `INSERT INTO ${this.TABLE_NAME} (
           EMPLOYEE_ID,
           EMPLOYEE_GUID,
-          TENANT_ID,
           ENTERPRISE_ID,
           FIRST_NAME_EN,
           MIDDLE_NAME_EN,
@@ -373,13 +367,12 @@ class EmployeeModel {
           IS_ACTIVE,
           CREATED_BY
         ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18
+          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17
         )`;
 
         const bindParams = [
           employeeId,
           guidBuffer,
-          tenantId,
           Number(enterpriseId),
           data.FIRST_NAME_EN ?? data.FIRST_NAME ?? null,
           data.MIDDLE_NAME_EN ?? data.MIDDLE_NAME ?? null,
@@ -403,7 +396,6 @@ class EmployeeModel {
         const selectQuery = `SELECT 
           e.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-          e.TENANT_ID,
           e.ENTERPRISE_ID,
           e.FIRST_NAME_EN,
           e.MIDDLE_NAME_EN,
@@ -488,11 +480,6 @@ class EmployeeModel {
         if (data.FAMILY_NAME_AR !== undefined) {
           updateFields.push(`FAMILY_NAME_AR = :${paramIndex}`);
           bindParams.push(data.FAMILY_NAME_AR);
-          paramIndex++;
-        }
-        if (data.TENANT_ID !== undefined) {
-          updateFields.push(`TENANT_ID = :${paramIndex}`);
-          bindParams.push(Number(data.TENANT_ID));
           paramIndex++;
         }
         if (data.EMAIL !== undefined) {

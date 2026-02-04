@@ -1,5 +1,17 @@
 import express from 'express';
+import multer from 'multer';
+import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import EmployeeModel from '../model/employeeModel.js';
+import { getConnection } from '../../../config/db.js';
+import {
+  validateRequired,
+  createEmployeeAllInOne,
+  fromBody,
+  fromBodyKeyContains
+} from '../services/employeeCreateAllInOneService.js';
 import {
   sendEmployeeList,
   sendEmployee,
@@ -13,7 +25,39 @@ import {
 import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const router = express.Router();
+
+// Upload dir for all-in-one document (create if missing)
+const UPLOADS_EMPLOYEES_DIR = path.resolve(__dirname, '../../../../uploads/employees');
+if (!fs.existsSync(UPLOADS_EMPLOYEES_DIR)) {
+  fs.mkdirSync(UPLOADS_EMPLOYEES_DIR, { recursive: true });
+}
+
+const uploadAllInOne = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, true)
+}).single('document');
+
+/** Only run multer when request is multipart (form-data with optional file). */
+function maybeMulterAllInOne(req, res, next) {
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  if (!contentType.includes('multipart/form-data')) {
+    return next();
+  }
+  uploadAllInOne(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? 'File too large (max 10MB)'
+        : (err.message || 'File upload error');
+      return res.status(400).json({ success: false, message: msg, details: err.code || null });
+    }
+    next();
+  });
+}
 
 // Middleware to track request start time for execution time calculation
 router.use((req, res, next) => {
@@ -35,6 +79,45 @@ function getEnterprise(req) {
  */
 function getUserId(req) {
   return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+}
+
+/**
+ * Map create-employee (all-in-one) Oracle errors to user-friendly messages.
+ * @param {string} message - Raw error message
+ * @returns {{ message: string, status?: number }}
+ */
+function getCreateEmployeeFriendlyMessage(message) {
+  const m = String(message);
+
+  // Civil ID duplicate (ORA-00001 / UK_DEMO_CIVILID)
+  const isCivilIdConstraint = (m.includes('ORA-00001') || m.includes('UK_DEMO_CIVILID') || m.includes('CIVIL_ID_NUMBER')) && m.includes('already exists');
+  if (isCivilIdConstraint) {
+    const isNullConflict = /CIVIL_ID_NUMBER\s*:\s*NULL/i.test(m);
+    return {
+      message: isNullConflict
+        ? 'Another employee already exists for this enterprise with no Civil ID. Provide a unique civil_id_number for this employee.'
+        : 'An employee with this civil ID already exists for this enterprise. Please use a unique civil ID.',
+      status: 409
+    };
+  }
+
+  // ORA-20001: EMAIL already exists for this enterprise
+  if (m.includes('ORA-20001') && /EMAIL\s+already\s+exists\s+for\s+this\s+enterprise/i.test(m)) {
+    return {
+      message: 'An employee with this email already exists for this enterprise. Please use a different email.',
+      status: 409
+    };
+  }
+
+  // Other ORA-20001: use the last (most specific) ORA-20001 message as the user message
+  if (m.includes('ORA-20001')) {
+    const match = m.match(/ORA-20001:\s*([^.\n]+(?:\.|$))/g);
+    const last = match ? match[match.length - 1] : null;
+    const text = last ? last.replace(/^ORA-20001:\s*/i, '').trim() : m;
+    return { message: text || 'Employee creation failed. Please check your data and try again.' };
+  }
+
+  return { message: m };
 }
 
 /**
@@ -295,6 +378,119 @@ router.get('/:id', asyncHandler(async (req, res) => {
  * @body    { FIRST_NAME, LAST_NAME, EMAIL, PHONE_NUMBER, DATE_OF_BIRTH, ... }
  * @access  Public
  */
+/**
+ * @route   POST /api/create-employee
+ * @desc    Create employee via EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.CREATE_EMPLOYEE_ALL_IN_ONE (all logic in PL/SQL)
+ * @body    Example request JSON (see below)
+ * @access  Public
+ *
+ * Example request JSON:
+ * {
+ *   "enterprise_id": 1,
+ *   "first_name_en": "Ahmed",
+ *   "last_name_en": "Ali",
+ *   "email": "ahmed.ali@example.com",
+ *   "phone_number": "+96550000000",
+ *   "date_of_birth": "1990-05-15",
+ *   "gender_code": "M",
+ *   "nationality": "KW",
+ *   "contact_name": "Sara Ali",
+ *   "relationship": "Spouse",
+ *   "emerg_phone": "+96551111111",
+ *   "work_schedule_id": 1,
+ *   "bank_code": "BANK01",
+ *   "account_number": "1234567890",
+ *   "org_unit_id_hex": "A1B2C3D4E5F60718293A4B5C6D7E8F90",
+ *   "enterprise_hire_date": "2024-01-01",
+ *   "contract_type_code": "FULL_TIME",
+ *   "employment_status": "ACTIVE",
+ *   "housing_kwd": 150,
+ *   "transport_kwd": 50,
+ *   "other_kwd": 0
+ * }
+ *
+ * Form-data (multipart): same fields as form fields + optional file field "document".
+ * When "document" is uploaded, doc_file_name, doc_mime_type, doc_access_url, doc_hash_sha256 are set from the file.
+ */
+async function createEmployeeAllInOneHandler(req, res) {
+  const body = { ...(req.body || {}) };
+
+  // Force-read from raw req.body (form-data keys can vary)
+  const raw = req.body || {};
+  const civilVal = fromBody(raw, 'civil_id_number', 'civilIdNumber', 'CIVIL_ID_NUMBER', 'civil_id', 'CIVIL_ID', 'civil_number', 'civilID');
+  let passportVal = fromBody(raw, 'passport_number', 'passportNumber', 'PASSPORT_NUMBER', 'passport', 'PASSPORT', 'passport_no', 'passportNo', 'PASSPORT_NO');
+  if (passportVal == null) passportVal = fromBodyKeyContains(raw, 'passport');
+  const visaVal = fromBody(raw, 'visa_number', 'visaNumber', 'VISA_NUMBER', 'visa_no', 'visaNo', 'VISA_NO');
+  const visaExpiryVal = raw.visa_expiry ?? raw.visaExpiry ?? raw.VISA_EXPIRY;
+  const workPermitNumVal = fromBody(raw, 'work_permit_number', 'workPermitNumber', 'WORK_PERMIT_NUMBER', 'work_permit_no', 'workPermitNo');
+  const workPermitExpiryVal = raw.work_permit_expiry ?? raw.workPermitExpiry ?? raw.WORK_PERMIT_EXPIRY ?? raw.work_permit_expiry_date ?? raw.workPermitExpiryDate;
+  if (civilVal != null) body.civil_id_number = civilVal;
+  if (passportVal != null) body.passport_number = passportVal;
+  if (visaVal != null) body.visa_number = visaVal;
+  if (visaExpiryVal != null && String(visaExpiryVal).trim() !== '' && String(visaExpiryVal).toLowerCase() !== 'null') body.visa_expiry = visaExpiryVal;
+  if (workPermitNumVal != null) body.work_permit_number = workPermitNumVal;
+  if (workPermitExpiryVal != null && String(workPermitExpiryVal).trim() !== '' && String(workPermitExpiryVal).toLowerCase() !== 'null') body.work_permit_expiry = workPermitExpiryVal;
+
+  // If a file was uploaded, save it, compute hash, and set document fields for the procedure
+  if (req.file) {
+    const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const ext = path.extname(req.file.originalname) || '';
+    const base = path.basename(req.file.originalname, ext).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filename = `${crypto.randomUUID()}${base ? `-${base}` : ''}${ext}`;
+    const filepath = path.join(UPLOADS_EMPLOYEES_DIR, filename);
+    fs.writeFileSync(filepath, req.file.buffer);
+    body.doc_file_name = req.file.originalname || filename;
+    body.doc_mime_type = req.file.mimetype || 'application/octet-stream';
+    body.doc_access_url = `/uploads/employees/${filename}`;
+    body.doc_hash_sha256 = hash;
+    if (body.document_type_code == null || body.document_type_code === '') {
+      body.document_type_code = 'EMPLOYEE_DOC';
+    }
+  }
+
+  const validation = validateRequired(body);
+  if (!validation.valid) {
+    return res.status(400).json({
+      success: false,
+      message: `Missing or invalid required field(s): ${validation.missing.join(', ')}`,
+      details: null
+    });
+  }
+
+  const enterpriseId = Number(body.enterprise_id ?? body.ENTERPRISE_ID ?? getEnterprise(req));
+  let connection;
+  try {
+    connection = await getConnection();
+    const { employeeId } = await createEmployeeAllInOne(connection, body);
+    const employee = await EmployeeModel.findById(enterpriseId, employeeId);
+    res.status(201).json({
+      success: true,
+      employee_id: employeeId,
+      employee: employee || { employee_id: employeeId }
+    });
+  } catch (err) {
+    const message = err.message || String(err);
+    const friendly = getCreateEmployeeFriendlyMessage(message);
+    const status = friendly.status ?? 500;
+    const details = err.errorNum != null
+      ? `ORA-${String(err.errorNum).padStart(5, '0')}: ${message}`
+      : message;
+    return res.status(status).json({
+      success: false,
+      message: friendly.message,
+      details
+    });
+  } finally {
+    if (connection) {
+      try { await connection.close(); } catch (_) {}
+    }
+  }
+}
+
+// Canonical URL: POST {{baseUrl}}/api/create-employee
+const createEmployeeRouter = express.Router();
+createEmployeeRouter.post('/create-employee', maybeMulterAllInOne, asyncHandler(createEmployeeAllInOneHandler));
+
 router.post('/', asyncHandler(async (req, res) => {
   try {
     const data = req.body;
@@ -440,3 +636,4 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 }));
 
 export default router;
+export { createEmployeeRouter };
