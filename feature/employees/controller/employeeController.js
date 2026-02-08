@@ -565,6 +565,60 @@ function mapRowToFullDetailsShape(row) {
     assignmentOut.position = null;
   }
 
+  const jobFamilyIdVal = row.JOB_FAMILY_ID ?? row.job_family_id ?? assignmentOut.job_family_id;
+  const jobFamilyId = jobFamilyIdVal != null && typeof jobFamilyIdVal === 'object' && Buffer.isBuffer(jobFamilyIdVal)
+    ? toHex(jobFamilyIdVal)
+    : (jobFamilyIdVal != null ? jobFamilyIdVal : null);
+  if (jobFamilyId != null) {
+    assignmentOut.job_family = {
+      job_family_id: jobFamilyId,
+      job_family_code: row.JOB_FAMILY_CODE ?? row.job_family_code ?? null,
+      job_family_name_en: row.JOB_FAMILY_NAME_EN ?? row.job_family_name_en ?? null,
+      job_family_name_ar: row.JOB_FAMILY_NAME_AR ?? row.job_family_name_ar ?? null,
+      job_family_status: row.JOB_FAMILY_STATUS ?? row.job_family_status ?? null
+    };
+  } else {
+    assignmentOut.job_family = null;
+  }
+
+  const jobLevelIdVal = row.JOB_LEVEL_ID ?? row.job_level_id ?? assignmentOut.job_level_id;
+  const jobLevelId = jobLevelIdVal != null && typeof jobLevelIdVal === 'object' && Buffer.isBuffer(jobLevelIdVal)
+    ? toHex(jobLevelIdVal)
+    : (jobLevelIdVal != null ? jobLevelIdVal : null);
+  if (jobLevelId != null) {
+    assignmentOut.job_level = {
+      job_level_id: jobLevelId,
+      job_level_code: row.JOB_LEVEL_CODE ?? row.job_level_code ?? null,
+      job_level_name_en: row.JOB_LEVEL_NAME_EN ?? row.job_level_name_en ?? null,
+      min_grade_id: row.JOB_LEVEL_MIN_GRADE_ID ?? row.job_level_min_grade_id ?? null,
+      max_grade_id: row.JOB_LEVEL_MAX_GRADE_ID ?? row.job_level_max_grade_id ?? null,
+      job_level_status: row.JOB_LEVEL_STATUS ?? row.job_level_status ?? null
+    };
+  } else {
+    assignmentOut.job_level = null;
+  }
+
+  const gradeIdVal = row.GRADE_ID ?? row.grade_id ?? assignmentOut.grade_id;
+  const gradeId = gradeIdVal != null && typeof gradeIdVal === 'object' && Buffer.isBuffer(gradeIdVal)
+    ? toHex(gradeIdVal)
+    : (gradeIdVal != null ? gradeIdVal : null);
+  if (gradeId != null) {
+    assignmentOut.grade = {
+      grade_id: gradeId,
+      grade_number: row.GRADE_NUMBER ?? row.grade_number ?? null,
+      grade_category: row.GRADE_CATEGORY ?? row.grade_category ?? null,
+      currency_code: row.GRADE_CURRENCY_CODE ?? row.grade_currency_code ?? null,
+      step_1_salary: row.GRADE_STEP_1_SALARY ?? row.grade_step_1_salary ?? null,
+      step_2_salary: row.GRADE_STEP_2_SALARY ?? row.grade_step_2_salary ?? null,
+      step_3_salary: row.GRADE_STEP_3_SALARY ?? row.grade_step_3_salary ?? null,
+      step_4_salary: row.GRADE_STEP_4_SALARY ?? row.grade_step_4_salary ?? null,
+      step_5_salary: row.GRADE_STEP_5_SALARY ?? row.grade_step_5_salary ?? null,
+      grade_status: row.GRADE_STATUS ?? row.grade_status ?? null
+    };
+  } else {
+    assignmentOut.grade = null;
+  }
+
   return {
     employee: toSnakeCaseKeys(groups.employee),
     assignment: assignmentOut,
