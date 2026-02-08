@@ -354,33 +354,41 @@ function dateToIso(val) {
   return null;
 }
 
-/** Only EMPL.EMPLOYEES table columns go into data.employee. */
+/** Employee flat columns only (latest row from V_EMPLOYEE_FULL_DETAILS). */
 const EMPLOYEE_TABLE_COLUMNS = new Set([
   'EMPLOYEE_ID', 'EMPLOYEE_GUID', 'ENTERPRISE_ID',
   'FIRST_NAME_EN', 'MIDDLE_NAME_EN', 'LAST_NAME_EN',
   'FIRST_NAME_AR', 'MIDDLE_NAME_AR', 'LAST_NAME_AR', 'FAMILY_NAME_AR',
   'EMAIL', 'PHONE_NUMBER', 'MOBILE_NUMBER', 'DATE_OF_BIRTH',
   'STATUS', 'IS_ACTIVE', 'CREATED_BY', 'CREATION_DATE', 'LAST_UPDATED_BY', 'LAST_UPDATE_DATE',
-  'EMPLOYEE_NUMBER', 'WORK_LOCATION_ID', 'JOB_FAMILY_ID', 'JOB_LEVEL_ID', 'GRADE_ID',
-  'PROBATION_DAYS', 'REPORTING_TO_EMP_ID', 'EMPLOYEE_STATUS', 'EMPLOYEE_IS_ACTIVE'
+  'EMPLOYEE_STATUS', 'EMPLOYEE_IS_ACTIVE'
 ]);
 
 /**
- * Column mapping: view columns → output group. Only EMPLOYEE_TABLE_COLUMNS go to employee.
+ * Column mapping: view columns → output group. Assignment = latest assignment flat; demographics, schedule, compensation, allowances, document_compliance = latest flat.
  */
 const FULL_DETAILS_COLUMN_GROUPS = {
   ASSIGNMENT_ID: 'assignment',
   ASSIGNMENT_GUID: 'assignment',
-  ASSIGNMENT_STATUS: 'assignment',
-  ASSIGNMENT_IS_ACTIVE: 'assignment',
+  EMPLOYEE_NUMBER: 'assignment',
   ORG_UNIT_ID: 'assignment',
   POSITION_ID: 'assignment',
-  JOB_ID: 'assignment',
+  WORK_LOCATION_ID: 'assignment',
+  JOB_FAMILY_ID: 'assignment',
+  JOB_LEVEL_ID: 'assignment',
+  GRADE_ID: 'assignment',
   ENTERPRISE_HIRE_DATE: 'assignment',
   CONTRACT_TYPE_CODE: 'assignment',
+  PROBATION_DAYS: 'assignment',
+  REPORTING_TO_EMP_ID: 'assignment',
   EMPLOYMENT_STATUS: 'assignment',
+  EFFECTIVE_START_DATE: 'assignment',
+  EFFECTIVE_END_DATE: 'assignment',
+  ASSIGNMENT_STATUS: 'assignment',
+  ASSIGNMENT_IS_ACTIVE: 'assignment',
   ORG_STRUCTURE_LIST: 'assignment',
   ORG_STRUCTURE_LIST_JSON: 'assignment',
+  JOB_ID: 'assignment',
   CIVIL_ID_NUMBER: 'demographics',
   PASSPORT_NUMBER: 'demographics',
   NATIONALITY: 'demographics',
@@ -401,8 +409,6 @@ const FULL_DETAILS_COLUMN_GROUPS = {
   SCHEDULE_NAME_EN: 'schedule',
   SCHEDULE_NAME_AR: 'schedule',
   WORK_PATTERN_ID: 'schedule',
-  EFFECTIVE_START_DATE: 'schedule',
-  EFFECTIVE_END_DATE: 'schedule',
   ASSIGNMENT_MODE: 'schedule',
   SCHEDULE_STATUS: 'schedule',
   WS_START: 'schedule',
@@ -493,7 +499,10 @@ function toSnakeCaseKeys(obj) {
 
 /**
  * Map a single row from EMPL.V_EMPLOYEE_FULL_DETAILS into the required response shape.
- * Converts RAW to hex, dates to ISO, parses documents_json and emergency_contacts_json.
+ * - assignment = latest assignment flat columns + org_structure_list (parsed) + position object (or null).
+ * - work_schedule, compensation, allowances, document_compliance = latest flat objects.
+ * - documents, emergency_contacts, bank_accounts, addresses = parsed arrays.
+ * - work_schedules, compensation_history, allowances_history, document_compliance_history = parsed history arrays (no *_json keys).
  */
 function mapRowToFullDetailsShape(row) {
   const groups = {
@@ -510,7 +519,7 @@ function mapRowToFullDetailsShape(row) {
 
   const jsonColumnKeys = new Set([
     'DOCUMENTS_JSON', 'EMERGENCY_CONTACTS_JSON', 'BANK_ACCOUNTS_JSON', 'ADDRESSES_JSON',
-    'ASSIGNMENTS_JSON', 'WORK_SCHEDULES_JSON', 'COMPENSATION_JSON', 'ALLOWANCES_JSON', 'DOCUMENT_COMPLIANCE_JSON'
+    'WORK_SCHEDULES_JSON', 'COMPENSATION_JSON', 'ALLOWANCES_JSON', 'DOCUMENT_COMPLIANCE_JSON'
   ]);
   for (const [key, value] of Object.entries(row)) {
     const keyUpper = key.toUpperCase && key.toUpperCase() || key;
@@ -531,11 +540,10 @@ function mapRowToFullDetailsShape(row) {
   const emergency_contacts = parseJsonToArray(row.EMERGENCY_CONTACTS_JSON ?? row.emergency_contacts_json);
   const bank_accounts = parseJsonToArray(row.BANK_ACCOUNTS_JSON ?? row.bank_accounts_json);
   const addresses = parseJsonToArray(row.ADDRESSES_JSON ?? row.addresses_json);
-  const assignments = parseJsonToArray(row.ASSIGNMENTS_JSON ?? row.assignments_json);
   const work_schedules = parseJsonToArray(row.WORK_SCHEDULES_JSON ?? row.work_schedules_json);
-  const compensation_json = parseJsonToArray(row.COMPENSATION_JSON ?? row.compensation_json);
-  const allowances_json = parseJsonToArray(row.ALLOWANCES_JSON ?? row.allowances_json);
-  const document_compliance_json = parseJsonToArray(row.DOCUMENT_COMPLIANCE_JSON ?? row.document_compliance_json);
+  const compensation_history = parseJsonToArray(row.COMPENSATION_JSON ?? row.compensation_json);
+  const allowances_history = parseJsonToArray(row.ALLOWANCES_JSON ?? row.allowances_json);
+  const document_compliance_history = parseJsonToArray(row.DOCUMENT_COMPLIANCE_JSON ?? row.document_compliance_json);
 
   const assignmentOut = toSnakeCaseKeys(groups.assignment);
   assignmentOut.org_structure_list = parseOrgStructureList(row.ORG_STRUCTURE_LIST ?? row.org_structure_list ?? row.ORG_STRUCTURE_LIST_JSON ?? row.org_structure_list_json);
@@ -569,11 +577,10 @@ function mapRowToFullDetailsShape(row) {
     emergency_contacts,
     bank_accounts,
     addresses,
-    assignments,
     work_schedules,
-    compensation_json,
-    allowances_json,
-    document_compliance_json
+    compensation_history,
+    allowances_history,
+    document_compliance_history
   };
 }
 
@@ -596,11 +603,32 @@ const SQL_FULL_DETAILS_BY_GUID = `
 `;
 
 /**
- * Paginated query: p_enterprise_id (required), p_employee_id (optional), p_offset, p_limit.
- * When p_employee_id is set returns that employee; when null returns list. Same for p_employee_guid_hex.
+ * Paginated query from EMPL.V_EMPLOYEE_FULL_DETAILS.
+ * Binds: enterprise_id (required), employee_id (optional), employee_guid_hex (optional), offset, limit.
+ * Single row when employee_id or employee_guid_hex set; list when both null.
  */
 const SQL_FULL_DETAILS_PAGINATED = `
-  SELECT v.*
+  SELECT
+    v.ENTERPRISE_ID, v.EMPLOYEE_ID, v.EMPLOYEE_GUID,
+    v.FIRST_NAME_EN, v.MIDDLE_NAME_EN, v.LAST_NAME_EN,
+    v.FIRST_NAME_AR, v.MIDDLE_NAME_AR, v.LAST_NAME_AR, v.FAMILY_NAME_AR,
+    v.EMAIL, v.PHONE_NUMBER, v.MOBILE_NUMBER, v.DATE_OF_BIRTH,
+    v.EMPLOYEE_STATUS, v.EMPLOYEE_IS_ACTIVE, v.CREATION_DATE, v.LAST_UPDATE_DATE,
+    v.ASSIGNMENT_ID, v.ASSIGNMENT_GUID, v.EMPLOYEE_NUMBER, v.ORG_UNIT_ID, v.ORG_STRUCTURE_LIST,
+    v.WORK_LOCATION_ID, v.POSITION_ID, v.POSITION_CODE, v.POSITION_NAME_EN, v.POSITION_NAME_AR, v.POSITION_STATUS,
+    v.JOB_FAMILY_ID, v.JOB_LEVEL_ID, v.GRADE_ID, v.ENTERPRISE_HIRE_DATE, v.CONTRACT_TYPE_CODE, v.PROBATION_DAYS,
+    v.REPORTING_TO_EMP_ID, v.EMPLOYMENT_STATUS, v.EFFECTIVE_START_DATE, v.EFFECTIVE_END_DATE,
+    v.ASSIGNMENT_STATUS, v.ASSIGNMENT_IS_ACTIVE,
+    v.DEMO_ID, v.DEMO_GUID, v.GENDER_CODE, v.NATIONALITY_CODE, v.MARITAL_STATUS_CODE, v.RELIGION_CODE,
+    v.CIVIL_ID_NUMBER, v.PASSPORT_NUMBER,
+    v.EMP_SCH_ID, v.EMP_SCH_GUID, v.WORK_SCHEDULE_ID, v.WS_START, v.WS_END, v.WS_STATUS, v.WS_IS_ACTIVE,
+    v.COMP_ID, v.COMP_GUID, v.BASIC_SALARY_KWD, v.COMP_START, v.COMP_END, v.COMP_STATUS, v.COMP_IS_ACTIVE,
+    v.ALLOW_ID, v.ALLOW_GUID, v.HOUSING_KWD, v.TRANSPORT_KWD, v.FOOD_KWD, v.MOBILE_KWD, v.OTHER_KWD,
+    v.ALLOW_START, v.ALLOW_END, v.ALLOW_STATUS, v.ALLOW_IS_ACTIVE,
+    v.DOC_COMP_ID, v.DOC_COMP_GUID, v.CIVIL_ID_EXPIRY, v.PASSPORT_EXPIRY, v.VISA_NUMBER, v.VISA_EXPIRY,
+    v.WORK_PERMIT_NUMBER, v.WORK_PERMIT_EXPIRY, v.DOCC_STATUS, v.DOCC_IS_ACTIVE,
+    v.DOCUMENTS_JSON, v.EMERGENCY_CONTACTS_JSON, v.BANK_ACCOUNTS_JSON, v.ADDRESSES_JSON,
+    v.WORK_SCHEDULES_JSON, v.COMPENSATION_JSON, v.ALLOWANCES_JSON, v.DOCUMENT_COMPLIANCE_JSON
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   WHERE v.ENTERPRISE_ID = :enterprise_id
     AND (:employee_id IS NULL OR v.EMPLOYEE_ID = :employee_id)
