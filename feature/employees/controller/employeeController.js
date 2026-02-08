@@ -572,6 +572,37 @@ export async function getEmployeeById(req, res) {
   }
 }
 
+const SQL_ONE_ASSIGNMENT_ROW_BY_EMPLOYEE_ID = `
+  SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
+  WHERE v.EMPLOYEE_ID = :employee_id
+  ORDER BY v.ASSIGNMENT_ID DESC NULLS LAST
+  FETCH FIRST 1 ROW ONLY
+`;
+
+/**
+ * Fetch a single employee row from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST (employee + assignment merged, org_structure_list).
+ * Used to return the same shape as the list API for a given employee_id (e.g. after update).
+ * @param {number} employeeId
+ * @returns {Promise<Object|null>} Normalized row (snake_case) or null if not found
+ */
+export async function getEmployeeListRowByEmployeeId(employeeId) {
+  let connection;
+  try {
+    connection = await getConnection();
+    const result = await connection.execute(
+      SQL_ONE_ASSIGNMENT_ROW_BY_EMPLOYEE_ID,
+      { employee_id: Number(employeeId) },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const row = result.rows?.[0] ?? null;
+    if (!row) return null;
+    const normalized = normalizeEmployeeListRow(row);
+    return toSnakeCaseKeys(normalized);
+  } finally {
+    if (connection) try { await connection.close(); } catch (_) {}
+  }
+}
+
 /**
  * GET /api/employees – fetch employee listing from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST.
  * Supports pagination and optional filters. Uses bind variables only; RAW(16) in response as hex.
@@ -979,11 +1010,11 @@ async function createEmployeeAllInOneHandler(req, res) {
   try {
     connection = await getConnection();
     const { employeeId } = await createEmployeeAllInOne(connection, body);
-    const employee = await EmployeeModel.findById(enterpriseId, employeeId);
+    const data = await getEmployeeListRowByEmployeeId(employeeId);
     res.status(201).json({
       success: true,
       employee_id: employeeId,
-      employee: employee || { employee_id: employeeId }
+      ...(data != null && { data })
     });
   } catch (err) {
     const message = err.message || String(err);

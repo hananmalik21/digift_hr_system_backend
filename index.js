@@ -47,6 +47,7 @@ import leavePolicyController from './feature/abs_leave_policies/controller/leave
 import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
+import emplEmployeesRouter from './routes/emplEmployees.js';
 
 
 
@@ -82,6 +83,8 @@ app.use('/api/enterprises', enterpriseController);
 app.use('/api/employees', employeeController);
 // Create employee (all-in-one): POST {{baseUrl}}/api/create-employee
 app.use('/api', createEmployeeRouter);
+// Update employee (all-in-one): PUT {{baseUrl}}/api/update-employee/:employeeId
+app.use('/api', emplEmployeesRouter);
 
 // HR Organization Hierarchy Level routes
 app.use('/api/hr-org-hierarchy-levels', hrOrgHierarchyLevelController);
