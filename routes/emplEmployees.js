@@ -1,17 +1,20 @@
 /**
- * Routes: /api/update-employee
- * PUT /update-employee/:employeeId - Update employee (all-in-one)
- *
- * Postman: PUT {{baseUrl}}/api/update-employee/147
- * Body: JSON (see docs/postman_update_employee_147_body.json) or form-data + optional file "document"
+ * Routes: /api/empl/employees (GET list), /api/update-employee (PUT)
+ * GET /empl/employees - cursor-based list (enterprise_id required, limit, cursor, sort_by, sort_dir, filters)
+ * PUT /update-employee/:idOrGuid - Update employee (all-in-one)
  */
 
 import express from 'express';
 import { asyncHandler } from '../middleware/asyncHandler.js';
-import { maybeMulterUpdateAllInOne, updateEmployeeAllInOneHandler } from '../controllers/emplEmployeesController.js';
+import {
+  getEmplEmployeesListHandler,
+  maybeMulterUpdateAllInOne,
+  updateEmployeeAllInOneHandler
+} from '../controllers/emplEmployeesController.js';
 
 const router = express.Router();
 
-router.put('/update-employee/:employeeId', maybeMulterUpdateAllInOne, asyncHandler(updateEmployeeAllInOneHandler));
+router.get('/empl/employees', asyncHandler(getEmplEmployeesListHandler));
+router.put('/update-employee/:idOrGuid', maybeMulterUpdateAllInOne, asyncHandler(updateEmployeeAllInOneHandler));
 
 export default router;

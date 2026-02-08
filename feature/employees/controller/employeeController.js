@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import oracledb from 'oracledb';
 import EmployeeModel from '../model/employeeModel.js';
+import PositionsModel from '../../positions/model/positions_model.js';
 import { getConnection } from '../../../config/db.js';
 import {
   validateRequired,
@@ -242,6 +243,24 @@ function rowRawToHex(row) {
 }
 
 /**
+ * Parse JSON safely so response always returns nested objects/arrays, not escaped strings.
+ * @param {*} v - value from driver (string, object, or null)
+ * @returns {*} parsed object/array, or original value, or null
+ */
+function safeJson(v) {
+  if (v == null) return null;
+  if (typeof v === 'object') return v;
+  if (typeof v === 'string') {
+    try {
+      return JSON.parse(v);
+    } catch {
+      return v;
+    }
+  }
+  return v;
+}
+
+/**
  * Parse org_structure_list from view (CLOB/string or Lob) into a JSON array.
  * With oracledb.fetchAsString = [oracledb.CLOB], the value is a string; never return Lob or object with "0"/"1" keys.
  * @param {*} value - CLOB string, null, or (legacy) Lob object
@@ -264,15 +283,28 @@ function parseOrgStructureList(value) {
 }
 
 /**
- * Normalize a single employee list row: RAW→hex and org_structure_list→array.
- * Keeps employee_guid, assignment_guid, org_unit_id, position_id as hex strings.
+ * Normalize a single employee list row: RAW→hex, org_structure_list and position_obj as parsed JSON (never escaped strings).
+ * Returns only position_obj as object; position_obj_json is removed.
  */
 function normalizeEmployeeListRow(row) {
   const r = rowRawToHex(row);
   delete r.ORG_STRUCTURE_LIST_JSON;
   delete r.org_structure_list_json;
-  const listKey = 'ORG_STRUCTURE_LIST' in r ? 'ORG_STRUCTURE_LIST' : 'org_structure_list';
-  r[listKey] = parseOrgStructureList(r[listKey]);
+
+  const listRaw = r.ORG_STRUCTURE_LIST ?? r.org_structure_list ?? r.ORG_STRUCTURE_LIST_JSON ?? r.org_structure_list_json;
+  let org_structure_list = safeJson(listRaw);
+  if (!Array.isArray(org_structure_list)) org_structure_list = [];
+  r.org_structure_list = org_structure_list;
+  delete r.ORG_STRUCTURE_LIST;
+  if ('ORG_STRUCTURE_LIST_JSON' in r) delete r.ORG_STRUCTURE_LIST_JSON;
+
+  const posRaw = r.POSITION_OBJ ?? r.position_obj ?? r.POSITION_OBJ_JSON ?? r.position_obj_json;
+  const posObj = safeJson(posRaw);
+  r.position_obj = (typeof posObj === 'object' && posObj !== null) ? posObj : null;
+  delete r.POSITION_OBJ;
+  delete r.POSITION_OBJ_JSON;
+  delete r.position_obj_json;
+
   return r;
 }
 
@@ -597,7 +629,25 @@ export async function getEmployeeListRowByEmployeeId(employeeId) {
     const row = result.rows?.[0] ?? null;
     if (!row) return null;
     const normalized = normalizeEmployeeListRow(row);
-    return toSnakeCaseKeys(normalized);
+    const data = toSnakeCaseKeys(normalized);
+    if (data.position_id) {
+      try {
+        const full = await PositionsModel.findById(data.position_id);
+        data.position = full
+          ? {
+              position_id: full.position_id ?? null,
+              position_code: full.position_code ?? null,
+              status: full.status ?? null,
+              position_title_en: full.position_title_en ?? null
+            }
+          : null;
+      } catch (_) {
+        data.position = null;
+      }
+    } else {
+      data.position = null;
+    }
+    return data;
   } finally {
     if (connection) try { await connection.close(); } catch (_) {}
   }

@@ -83,7 +83,7 @@ app.use('/api/enterprises', enterpriseController);
 app.use('/api/employees', employeeController);
 // Create employee (all-in-one): POST {{baseUrl}}/api/create-employee
 app.use('/api', createEmployeeRouter);
-// Update employee (all-in-one): PUT {{baseUrl}}/api/update-employee/:employeeId
+// Update employee (all-in-one): PUT {{baseUrl}}/api/update-employee/:idOrGuid (id or 32-char guid)
 app.use('/api', emplEmployeesRouter);
 
 // HR Organization Hierarchy Level routes
