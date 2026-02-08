@@ -508,7 +508,10 @@ function mapRowToFullDetailsShape(row) {
     address: {}
   };
 
-  const jsonColumnKeys = new Set(['DOCUMENTS_JSON', 'EMERGENCY_CONTACTS_JSON', 'BANK_ACCOUNTS_JSON', 'ADDRESSES_JSON']);
+  const jsonColumnKeys = new Set([
+    'DOCUMENTS_JSON', 'EMERGENCY_CONTACTS_JSON', 'BANK_ACCOUNTS_JSON', 'ADDRESSES_JSON',
+    'ASSIGNMENTS_JSON', 'WORK_SCHEDULES_JSON', 'COMPENSATION_JSON', 'ALLOWANCES_JSON', 'DOCUMENT_COMPLIANCE_JSON'
+  ]);
   for (const [key, value] of Object.entries(row)) {
     const keyUpper = key.toUpperCase && key.toUpperCase() || key;
     if (jsonColumnKeys.has(keyUpper)) continue;
@@ -528,10 +531,31 @@ function mapRowToFullDetailsShape(row) {
   const emergency_contacts = parseJsonToArray(row.EMERGENCY_CONTACTS_JSON ?? row.emergency_contacts_json);
   const bank_accounts = parseJsonToArray(row.BANK_ACCOUNTS_JSON ?? row.bank_accounts_json);
   const addresses = parseJsonToArray(row.ADDRESSES_JSON ?? row.addresses_json);
+  const assignments = parseJsonToArray(row.ASSIGNMENTS_JSON ?? row.assignments_json);
+  const work_schedules = parseJsonToArray(row.WORK_SCHEDULES_JSON ?? row.work_schedules_json);
+  const compensation_json = parseJsonToArray(row.COMPENSATION_JSON ?? row.compensation_json);
+  const allowances_json = parseJsonToArray(row.ALLOWANCES_JSON ?? row.allowances_json);
+  const document_compliance_json = parseJsonToArray(row.DOCUMENT_COMPLIANCE_JSON ?? row.document_compliance_json);
 
   const assignmentOut = toSnakeCaseKeys(groups.assignment);
   assignmentOut.org_structure_list = parseOrgStructureList(row.ORG_STRUCTURE_LIST ?? row.org_structure_list ?? row.ORG_STRUCTURE_LIST_JSON ?? row.org_structure_list_json);
   delete assignmentOut.org_structure_list_json;
+
+  const positionIdVal = row.POSITION_ID ?? row.position_id ?? groups.assignment.POSITION_ID ?? groups.assignment.position_id;
+  const positionId = positionIdVal != null && typeof positionIdVal === 'object' && Buffer.isBuffer(positionIdVal)
+    ? toHex(positionIdVal)
+    : (positionIdVal != null ? positionIdVal : null);
+  if (positionId != null) {
+    assignmentOut.position = {
+      position_id: positionId,
+      position_code: row.POSITION_CODE ?? row.position_code ?? null,
+      position_name_en: row.POSITION_NAME_EN ?? row.POSITION_TITLE_EN ?? row.position_name_en ?? row.position_title_en ?? null,
+      position_name_ar: row.POSITION_NAME_AR ?? row.POSITION_TITLE_AR ?? row.position_name_ar ?? row.position_title_ar ?? null,
+      position_status: row.POSITION_STATUS ?? row.position_status ?? null
+    };
+  } else {
+    assignmentOut.position = null;
+  }
 
   return {
     employee: toSnakeCaseKeys(groups.employee),
@@ -544,16 +568,27 @@ function mapRowToFullDetailsShape(row) {
     documents,
     emergency_contacts,
     bank_accounts,
-    addresses
+    addresses,
+    assignments,
+    work_schedules,
+    compensation_json,
+    allowances_json,
+    document_compliance_json
   };
 }
 
+/**
+ * Single row by ID (backward compatible).
+ */
 const SQL_FULL_DETAILS_BY_ID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
 `;
 
+/**
+ * Single row by GUID (backward compatible).
+ */
 const SQL_FULL_DETAILS_BY_GUID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
@@ -561,8 +596,23 @@ const SQL_FULL_DETAILS_BY_GUID = `
 `;
 
 /**
+ * Paginated query: p_enterprise_id (required), p_employee_id (optional), p_offset, p_limit.
+ * When p_employee_id is set returns that employee; when null returns list. Same for p_employee_guid_hex.
+ */
+const SQL_FULL_DETAILS_PAGINATED = `
+  SELECT v.*
+  FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
+  WHERE v.ENTERPRISE_ID = :enterprise_id
+    AND (:employee_id IS NULL OR v.EMPLOYEE_ID = :employee_id)
+    AND (:employee_guid_hex IS NULL OR v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex))
+  ORDER BY v.EMPLOYEE_ID
+  OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+`;
+
+/**
  * GET /api/employees/:idOrGuid/full-details – fetch single employee full details from EMPL.V_EMPLOYEE_FULL_DETAILS.
  * Accepts employee_id (NUMBER) or employee_guid (32-char hex). enterprise_id mandatory (x-enterprise-id or req.user.enterprise_id).
+ * Response includes assignment.position = { position_id, position_code, position_name_en, position_name_ar, position_status } (or null).
  * @param {import('express').Request} req - req.params.guid (employee_id number OR 32-char hex GUID)
  * @param {import('express').Response} res
  */
@@ -581,13 +631,19 @@ export async function getEmployeeById(req, res) {
     return sendBadRequest(res, req, 'enterprise_id is required (x-enterprise-id header or req.user.enterprise_id)');
   }
 
+  const binds = {
+    enterprise_id: enterpriseId,
+    employee_id: isNumericId ? parseInt(param, 10) : null,
+    employee_guid_hex: isGuid ? normalizedGuid : null,
+    offset: 0,
+    limit: 1
+  };
+
   let connection;
   try {
     connection = await getConnection();
     const opts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
-    const result = isNumericId
-      ? await connection.execute(SQL_FULL_DETAILS_BY_ID, { enterprise_id: enterpriseId, employee_id: parseInt(param, 10) }, opts)
-      : await connection.execute(SQL_FULL_DETAILS_BY_GUID, { enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }, opts);
+    const result = await connection.execute(SQL_FULL_DETAILS_PAGINATED, binds, opts);
     const row = result.rows?.[0] ?? null;
     if (!row) return sendNotFound(res, req, 'Employee not found');
 
