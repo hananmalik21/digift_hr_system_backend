@@ -178,13 +178,7 @@ function buildEmployeeListWhereAndBinds(filters) {
     }
   }
 
-  const countWhere = countConditions.join(' AND ');
-  const dataWhere = dataConditions.join(' AND ');
-
-  const countSql = `SELECT COUNT(*) AS total_records FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${countWhere}`;
-  const dataSql = `SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${dataWhere}
-  ORDER BY v.EMPLOYEE_ID NULLS LAST
-  OFFSET :10 ROWS FETCH NEXT :11 ROWS ONLY`;
+  const searchTrimmed = filters.search != null && String(filters.search).trim() !== '' ? String(filters.search).trim() : null;
 
   const countBinds = [
     filters.enterpriseId,
@@ -197,6 +191,13 @@ function buildEmployeeListWhereAndBinds(filters) {
     countBinds.push(filters.org_unit_id_hex);
     if (hasLevelCode) countBinds.push(filters.level_code);
   }
+  if (searchTrimmed) {
+    countConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + (countBinds.length + 1) + ") || '%'");
+    countBinds.push(searchTrimmed);
+  }
+
+  const countWhere = countConditions.join(' AND ');
+  const countSql = `SELECT COUNT(*) AS total_records FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${countWhere}`;
 
   const dataBinds = [
     filters.enterpriseId,
@@ -209,7 +210,17 @@ function buildEmployeeListWhereAndBinds(filters) {
     dataBinds.push(filters.org_unit_id_hex);
     if (hasLevelCode) dataBinds.push(filters.level_code);
   }
+  if (searchTrimmed) {
+    const dataSearchPlaceholder = 12 + (hasJsonFilter ? (hasLevelCode ? 2 : 1) : 0);
+    dataConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + dataSearchPlaceholder + ") || '%'");
+    dataBinds.push(searchTrimmed);
+  }
   dataBinds.push(filters.offset, filters.pageSize);
+
+  const dataWhere = dataConditions.join(' AND ');
+  const dataSql = `SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${dataWhere}
+  ORDER BY v.EMPLOYEE_ID NULLS LAST
+  OFFSET :10 ROWS FETCH NEXT :11 ROWS ONLY`;
 
   return { countSql, dataSql, countBinds, dataBinds };
 }
@@ -304,6 +315,8 @@ function normalizeEmployeeListRow(row) {
   delete r.POSITION_OBJ;
   delete r.POSITION_OBJ_JSON;
   delete r.position_obj_json;
+  delete r.SEARCH_KEY;
+  delete r.search_key;
 
   return r;
 }
@@ -845,6 +858,7 @@ export async function getEmployees(req, res) {
   }
 
   const offset = (page - 1) * pageSize;
+  const searchRaw = q.search != null && String(q.search).trim() !== '' ? String(q.search).trim() : null;
   const filters = {
     enterpriseId,
     org_unit_id_hex: orgUnitIdHexForJson,
@@ -854,7 +868,8 @@ export async function getEmployees(req, res) {
     jobLevelId: Number.isFinite(jobLevelId) ? jobLevelId : null,
     gradeId: Number.isFinite(gradeId) ? gradeId : null,
     offset,
-    pageSize
+    pageSize,
+    search: searchRaw
   };
   const { countSql, dataSql, countBinds, dataBinds } = buildEmployeeListWhereAndBinds(filters);
 
