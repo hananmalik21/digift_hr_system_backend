@@ -187,9 +187,13 @@ class OrgUnitModel {
   }
 
   /**
-   * Find org units by structure and level
-   * Optimized for performance with efficient JOINs and conditional COUNT
-   * @returns Array OR { orgUnits, total } when paginated
+   * Find org units by structure and level.
+   * When paginated, uses a single query with COUNT(*) OVER() (one round-trip).
+   *
+   * @param {string} structureId - Structure ID (hex32)
+   * @param {string} levelCode - Level code (e.g. 'COMPANY', 'BUSINESS_UNIT')
+   * @param {Object} [filters] - Optional parentId, search, isActive, pagination, connection
+   * @returns {Promise<Array|{ orgUnits: Array, total: number }>} Array if no pagination; else { orgUnits, total }
    */
   static async findByStructureAndLevel(structureId, levelCode, filters = {}) {
     try {
@@ -243,89 +247,160 @@ class OrgUnitModel {
 
       const whereClause = ` WHERE ${conditions.join(' AND ')}`;
 
-      // Only run COUNT query if pagination is needed
-      let totalCount = 0;
-      if (needsCount) {
-        const countQuery = `SELECT /*+ FIRST_ROWS(1) */ COUNT(*) AS total FROM ${this.TABLE_NAME} ou ${whereClause}`;
-        const countResult = await this.executeQuery(countQuery, bindParams);
-        totalCount = countResult.rows?.[0]?.total ?? 0;
-      }
-
-      // Optimized data query with efficient LEFT JOINs
-      // Join parent table for parent_unit object and structure table for structure name
-      let dataQuery = `SELECT /*+ FIRST_ROWS(${pagination?.pageSize || 100}) */
-        ou.ORG_UNIT_ID,
-        ou.ORG_STRUCTURE_ID,
-        ou.ENTERPRISE_ID,
-        ou.LEVEL_CODE,
-        ou.ORG_UNIT_CODE,
-        ou.ORG_UNIT_NAME_EN,
-        ou.ORG_UNIT_NAME_AR,
-        ou.PARENT_ORG_UNIT_ID,
-        ou.IS_ACTIVE,
-        ou.MANAGER_NAME,
-        ou.MANAGER_EMAIL,
-        ou.MANAGER_PHONE,
-        ou.LOCATION,
-        ou.CITY,
-        ou.ADDRESS,
-        ou.DESCRIPTION,
-        ou.CREATED_BY,
-        ou.CREATED_DATE,
-        ou.LAST_UPDATED_BY,
-        ou.LAST_UPDATED_DATE,
-        ou.LAST_UPDATE_LOGIN,
+      const baseSelect = `ou.ORG_UNIT_ID, ou.ORG_STRUCTURE_ID, ou.ENTERPRISE_ID, ou.LEVEL_CODE,
+        ou.ORG_UNIT_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_NAME_AR, ou.PARENT_ORG_UNIT_ID,
+        ou.IS_ACTIVE, ou.MANAGER_NAME, ou.MANAGER_EMAIL, ou.MANAGER_PHONE, ou.LOCATION,
+        ou.CITY, ou.ADDRESS, ou.DESCRIPTION, ou.CREATED_BY, ou.CREATED_DATE,
+        ou.LAST_UPDATED_BY, ou.LAST_UPDATED_DATE, ou.LAST_UPDATE_LOGIN,
         p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
         p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
-        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
-      FROM ${this.TABLE_NAME} ou
-      LEFT JOIN ${this.TABLE_NAME} p
-        ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-        AND p.ORG_STRUCTURE_ID = ou.ORG_STRUCTURE_ID
-      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
-        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
-      ${whereClause}
-      ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
+        p.LEVEL_CODE AS PARENT_ORG_LEVEL_CODE,
+        s.STRUCTURE_NAME AS ORG_STRUCTURE_NAME`;
+      const baseFrom = `FROM ${this.TABLE_NAME} ou
+      LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID AND p.ORG_STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID`;
 
-      const dataBindParams = [...bindParams];
-
-      // Add pagination to data query
       if (needsCount) {
         const offset = (pagination.page - 1) * pagination.pageSize;
-        dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
-        dataBindParams.push(offset);
-        dataBindParams.push(pagination.pageSize);
+        const dataQuery = `SELECT /*+ FIRST_ROWS(${pagination.pageSize}) */ ${baseSelect},
+          COUNT(*) OVER() AS total
+          ${baseFrom}
+          ${whereClause}
+          ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID
+          OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
+        const dataBindParams = [...bindParams, offset, pagination.pageSize];
+        const execOpts = filters.connection ? { connection: filters.connection } : {};
+        const result = await this.executeQuery(dataQuery, dataBindParams, execOpts);
+        const rows = result.rows || [];
+        const totalCount = rows.length > 0 ? (rows[0].total ?? 0) : 0;
+        const orgUnits = rows.map((r) => {
+          const { total: _total, ...row } = r;
+          return this.attachParentUnit(row);
+        });
+        return { orgUnits, total: totalCount };
       }
 
-      const result = await this.executeQuery(dataQuery, dataBindParams);
-      const orgUnits = (result.rows || []).map(r => this.attachParentUnit(r));
-
-      return needsCount ? { orgUnits, total: totalCount } : orgUnits;
+      const dataQuery = `SELECT /*+ FIRST_ROWS(100) */ ${baseSelect}
+        ${baseFrom}
+        ${whereClause}
+        ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
+      const execOpts = filters.connection ? { connection: filters.connection } : {};
+      const result = await this.executeQuery(dataQuery, bindParams, execOpts);
+      const orgUnits = (result.rows || []).map((r) => this.attachParentUnit(r));
+      return orgUnits;
     } catch (error) {
       throw new Error(`Failed to fetch org units: ${error.message}`);
     }
   }
 
   /**
-   * Find parent options for a level
+   * Map a DB row to parent-option shape { id, name, level }.
+   * @private
+   */
+  static _rowToParentOption(r) {
+    return {
+      id: r.org_unit_id,
+      name: r.org_unit_name_en || r.org_unit_name_ar || null,
+      level: r.level_code
+    };
+  }
+
+  /**
+   * Fetch parent options in one SQL round-trip: structure check, level resolution, and paginated org units.
+   * Used by GET parents endpoint for minimal latency (one connection, one query).
+   *
+   * @param {string} structureId - Structure ID (hex32)
+   * @param {string} childLevelCode - Child level code (e.g. 'BUSINESS_UNIT')
+   * @param {Object} filters - Filters
+   * @param {{ page: number, pageSize: number }} filters.pagination - Required
+   * @param {string} [filters.search] - Optional search on code/name
+   * @param {Object} [options] - Execution options
+   * @param {Object} [options.connection] - Reuse this DB connection
+   * @returns {Promise<{ structExists: number, isActive: string|null, childLevelFound: number, parentLevelCode: string|null, orgUnits: Array, total: number }>}
+   */
+  static async findParentOptionsInOneQuery(structureId, childLevelCode, filters = {}, options = {}) {
+    const pagination = filters.pagination;
+    if (!pagination?.page || !pagination?.pageSize) {
+      throw new Error('findParentOptionsInOneQuery requires pagination');
+    }
+    const offset = (pagination.page - 1) * pagination.pageSize;
+    const bindParams = [structureId, childLevelCode, offset, pagination.pageSize];
+    let paramIndex = 5;
+    const searchCondition = filters.search
+      ? ` AND (UPPER(ou.ORG_UNIT_CODE) LIKE UPPER(:${paramIndex}) OR UPPER(ou.ORG_UNIT_NAME_EN) LIKE UPPER(:${paramIndex + 1}) OR UPPER(ou.ORG_UNIT_NAME_AR) LIKE UPPER(:${paramIndex + 2}))`
+      : '';
+    if (filters.search) {
+      const v = `%${filters.search}%`;
+      bindParams.push(v, v, v);
+      paramIndex += 3;
+    }
+    const query = `WITH struct AS (SELECT STRUCTURE_ID, IS_ACTIVE FROM ENT.HR_ORG_STRUCTURES WHERE STRUCTURE_ID = HEXTORAW(:1)),
+  ordered_levels AS (
+    SELECT LEVEL_CODE, ROW_NUMBER() OVER (ORDER BY DISPLAY_ORDER, LEVEL_NUMBER) AS rn
+    FROM ENT.HR_ORG_HIERARCHY_LEVELS l
+    WHERE l.STRUCTURE_ID = (SELECT STRUCTURE_ID FROM struct) AND l.IS_ACTIVE = 'Y'
+  ),
+  child_rn AS (SELECT rn FROM ordered_levels WHERE UPPER(LEVEL_CODE) = UPPER(:2)),
+  parent_rn AS (SELECT rn - 1 AS prn FROM child_rn WHERE rn > 1),
+  parent_level AS (SELECT LEVEL_CODE AS pl FROM ordered_levels o JOIN parent_rn p ON o.rn = p.prn),
+  data_set AS (
+    SELECT ou.ORG_UNIT_ID, ou.ORG_UNIT_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_NAME_AR, ou.LEVEL_CODE,
+           COUNT(*) OVER() AS total
+    FROM ${this.TABLE_NAME} ou
+    CROSS JOIN struct
+    WHERE ou.ORG_STRUCTURE_ID = (SELECT STRUCTURE_ID FROM struct)
+      AND EXISTS (SELECT 1 FROM parent_level)
+      AND ou.LEVEL_CODE = (SELECT pl FROM parent_level)
+      AND ou.IS_ACTIVE = 'Y'${searchCondition}
+  ),
+  data_ordered AS (SELECT * FROM data_set ORDER BY ORG_UNIT_NAME_EN, ORG_UNIT_ID),
+  data_paged AS (SELECT * FROM data_ordered OFFSET :3 ROWS FETCH NEXT :4 ROWS ONLY),
+  meta_row AS (
+    SELECT 1 AS struct_exists, s.IS_ACTIVE AS is_active, (SELECT pl FROM parent_level) AS parent_level,
+           (SELECT COUNT(*) FROM child_rn) AS child_level_found,
+           (SELECT NVL(MAX(total),0) FROM data_set) AS total
+    FROM struct s
+  )
+SELECT 0 AS struct_exists, NULL AS is_active, NULL AS parent_level, 0 AS child_level_found, NULL AS org_unit_id, NULL AS org_unit_code, NULL AS org_unit_name_en, NULL AS org_unit_name_ar, NULL AS level_code, 0 AS total FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM struct)
+UNION ALL
+SELECT m.struct_exists, m.is_active, m.parent_level, m.child_level_found, NULL, NULL, NULL, NULL, NULL, m.total FROM meta_row m
+UNION ALL
+SELECT NULL, NULL, NULL, NULL, d.ORG_UNIT_ID, d.ORG_UNIT_CODE, d.ORG_UNIT_NAME_EN, d.ORG_UNIT_NAME_AR, d.LEVEL_CODE, d.total FROM data_paged d
+ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
+    const result = await this.executeQuery(query, bindParams, options);
+    const rows = result.rows || [];
+    if (rows.length === 0) {
+      return { structExists: 0, isActive: null, childLevelFound: 0, parentLevelCode: null, orgUnits: [], total: 0 };
+    }
+    const first = rows[0];
+    const structExists = first.struct_exists ?? 0;
+    const isActive = first.is_active;
+    const parentLevelCode = first.parent_level ?? first.parent_level_code;
+    const childLevelFound = first.child_level_found ?? 0;
+    const total = first.total ?? 0;
+    const dataRows = rows.filter((r) => r.org_unit_id != null);
+    const orgUnits = dataRows.map((r) => this._rowToParentOption(r));
+    return { structExists, isActive, childLevelFound, parentLevelCode, orgUnits, total };
+  }
+
+  /**
+   * Find parent options for a level (structure and level already resolved).
+   * When paginated, uses one query with COUNT(*) OVER() for total + page.
+   *
+   * @param {string} structureId - Structure ID (hex32)
+   * @param {string} parentLevelCode - Level code of parent org units
+   * @param {Object} filters - Filters
+   * @param {string} [filters.search] - Optional search on code/name
+   * @param {{ page: number, pageSize: number }} [filters.pagination] - If set, returns { orgUnits, total }
+   * @param {Object} [filters.connection] - Optional DB connection to reuse
+   * @returns {Promise<{ orgUnits: Array, total: number }|Array>} Paginated: { orgUnits, total }; else array
    */
   static async findParentOptions(structureId, parentLevelCode, filters = {}) {
     try {
-      let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ou`;
-      let dataQuery = `SELECT 
-        ou.ORG_UNIT_ID,
-        ou.ORG_UNIT_CODE,
-        ou.ORG_UNIT_NAME_EN,
-        ou.ORG_UNIT_NAME_AR,
-        ou.LEVEL_CODE
-      FROM ${this.TABLE_NAME} ou`;
-
       const conditions = [];
       const bindParams = [];
       let paramIndex = 1;
 
-      // Convert hex string GUID to RAW for Oracle comparison
       conditions.push(`ou.ORG_STRUCTURE_ID = HEXTORAW(:${paramIndex})`);
       bindParams.push(structureId);
       paramIndex++;
@@ -350,40 +425,36 @@ class OrgUnitModel {
       }
 
       const whereClause = ` WHERE ${conditions.join(' AND ')}`;
-      countQuery += whereClause;
-      dataQuery += whereClause;
-
-      dataQuery += ` ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
-
       const pagination = filters.pagination;
-      let totalCount = 0;
-
-      const countBindParams = [...bindParams];
-      const dataBindParams = [...bindParams];
 
       if (pagination && pagination.page && pagination.pageSize) {
-        const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows && countResult.rows.length > 0 ? countResult.rows[0].total : 0;
-
+        // Single query: data + total via COUNT(*) OVER() (one round-trip instead of COUNT + data)
         const offset = (pagination.page - 1) * pagination.pageSize;
-        dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
-        dataBindParams.push(offset);
-        dataBindParams.push(pagination.pageSize);
-      }
-
-      const result = await this.executeQuery(dataQuery, dataBindParams);
-
-      // ✅ return as objects: {id,name,level}
-      const parents = (result.rows || []).map(r => ({
-        id: r.org_unit_id,
-        name: r.org_unit_name_en || r.org_unit_name_ar || null,
-        level: r.level_code
-      }));
-
-      if (pagination && pagination.page && pagination.pageSize) {
+        const dataQuery = `SELECT ou.ORG_UNIT_ID, ou.ORG_UNIT_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_NAME_AR, ou.LEVEL_CODE,
+          COUNT(*) OVER() AS total
+          FROM ${this.TABLE_NAME} ou
+          ${whereClause}
+          ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID
+          OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
+        const dataBindParams = [...bindParams, offset, pagination.pageSize];
+        const result = await this.executeQuery(dataQuery, dataBindParams, filters.connection ? { connection: filters.connection } : {});
+        const rows = result.rows || [];
+        const totalCount = rows.length > 0 ? (rows[0].total ?? 0) : 0;
+        const parents = rows.map((r) => this._rowToParentOption(r));
         return { orgUnits: parents, total: totalCount };
       }
 
+      const dataQuery = `SELECT
+        ou.ORG_UNIT_ID,
+        ou.ORG_UNIT_CODE,
+        ou.ORG_UNIT_NAME_EN,
+        ou.ORG_UNIT_NAME_AR,
+        ou.LEVEL_CODE
+      FROM ${this.TABLE_NAME} ou
+      ${whereClause}
+      ORDER BY ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
+      const result = await this.executeQuery(dataQuery, bindParams, filters.connection ? { connection: filters.connection } : {});
+      const parents = (result.rows || []).map((r) => this._rowToParentOption(r));
       return parents;
     } catch (error) {
       throw new Error(`Failed to fetch parent options: ${error.message}`);

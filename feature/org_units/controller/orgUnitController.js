@@ -1,4 +1,5 @@
 import express from 'express';
+import db from '../../../config/db.js';
 import OrgUnitModel from '../model/orgUnitModel.js';
 import StructureResolverService from '../service/structureResolverService.js';
 import StructureHierarchyService from '../service/structureHierarchyService.js';
@@ -98,6 +99,38 @@ function buildPaginationMeta(page, pageSize, totalCount) {
 }
 
 /**
+ * Centralized error handling for org-unit routes. Sends one response and returns.
+ * @param {Object} res - Express response
+ * @param {Object} req - Express request
+ * @param {Error} error - Caught error (may have .code, .message)
+ * @param {string} [serverMessage] - Message for generic 500 response
+ */
+function handleOrgUnitRouteError(res, req, error, serverMessage = 'Request failed') {
+  if (error.code === 'STRUCTURE_NOT_FOUND') {
+    return sendNotFound(res, req, error.message);
+  }
+  if (error.code === 'STRUCTURE_NOT_ACTIVE' || error.code === 'LEVEL_NOT_IN_STRUCTURE') {
+    return sendBadRequest(res, req, error.message);
+  }
+  if (error.message === 'Invalid STRUCTURE_ID format' || /Invalid page/.test(error.message || '')) {
+    return sendBadRequest(res, req, error.message);
+  }
+  if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
+    return sendConflict(res, req, error.message);
+  }
+  if (error.code === 'FOREIGN_KEY_CONSTRAINT' || error.code === 'NOT_NULL_CONSTRAINT' || error.code === 'VALIDATION_ERROR') {
+    return sendBadRequest(res, req, error.message || 'Validation failed');
+  }
+  if (error.code === 'DATABASE_TRIGGER_ERROR') {
+    return sendServerError(res, req, error.message, error);
+  }
+  if (error.message?.includes('No org unit found')) {
+    return sendNotFound(res, req, error.message);
+  }
+  return sendServerError(res, req, serverMessage, error);
+}
+
+/**
  * @route   GET /org-units/tree/active
  * @desc    Get tree structure for the active org structure (minimal data, hierarchy only)
  */
@@ -136,10 +169,7 @@ router.get('/org-units/tree/active', async (req, res) => {
       }
     });
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch active structure tree', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch active structure tree');
   }
 });
 
@@ -153,7 +183,7 @@ router.get('/active/levels', async (req, res) => {
     const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels();
     sendActiveStructureLevels(res, req, structureWithLevels);
   } catch (error) {
-    sendServerError(res, req, 'Failed to fetch active structure levels', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch active structure levels');
   }
 });
 
@@ -170,13 +200,7 @@ router.get('/:structureId/levels', async (req, res) => {
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     sendOrgUnitList(res, req, resolver.levelsOrdered);
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.message === 'Invalid STRUCTURE_ID format') {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch levels', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch levels');
   }
 });
 
@@ -196,76 +220,66 @@ router.get('/:structureId/org-units', async (req, res) => {
   try {
     const structureId = parseStructureId(req.params.structureId);
     const level = req.query.level;
-    
+
     if (!level) {
       return sendBadRequest(res, req, 'level query parameter is required');
     }
 
-    // Always allow draft structures to return data regardless of active status
     const allowDraft = true;
-    const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
+    let connection;
+    try {
+      connection = await db.getConnection();
+      const resolver = await StructureResolverService.resolveStructureLight(structureId, { allowDraft, connection });
 
-    if (!resolver.levelExists(level)) {
-      return sendBadRequest(res, req, `Level '${level}' does not exist in this structure`);
-    }
-
-    const parentLevelCode = resolver.getParentLevelCode(level);
-    const filters = {};
-
-    // Validate parentId if provided - optimize by doing validation in parallel with query if possible
-    if (req.query.parentId !== undefined) {
-      if (parentLevelCode === null) {
-        return sendBadRequest(res, req, 'parentId is not allowed for root level');
+      if (!resolver.levelExists(level)) {
+        return sendBadRequest(res, req, `Level '${level}' does not exist in this structure`);
       }
 
-      const parentId = req.query.parentId.trim();
-      if (!parentId) {
-        return sendBadRequest(res, req, 'Invalid parentId format');
+      const parentLevelCode = resolver.getParentLevelCode(level);
+      const filters = {};
+
+      if (req.query.parentId !== undefined) {
+        if (parentLevelCode === null) {
+          return sendBadRequest(res, req, 'parentId is not allowed for root level');
+        }
+        const parentId = req.query.parentId.trim();
+        if (!parentId) {
+          return sendBadRequest(res, req, 'Invalid parentId format');
+        }
+        const parent = await OrgUnitModel.findById(parentId, structureId);
+        if (!parent) {
+          return sendBadRequest(res, req, `Parent org unit with ID ${parentId} not found`);
+        }
+        const parentLevel = parent.level_code || parent.LEVEL_CODE;
+        if (parentLevel !== parentLevelCode) {
+          return sendBadRequest(res, req, `Parent org unit must be of level '${parentLevelCode}'`);
+        }
+        filters.parentId = parentId;
       }
 
-      // Validate parent exists and belongs to correct level
-      // This validation ensures data integrity but adds a query
-      // Consider making it optional with a query parameter if performance is critical
-      const parent = await OrgUnitModel.findById(parentId, structureId);
-      if (!parent) {
-        return sendBadRequest(res, req, `Parent org unit with ID ${parentId} not found`);
+      if (req.query.search) filters.search = req.query.search;
+      if (req.query.is_active !== undefined) {
+        filters.isActive = req.query.is_active === 'Y' || req.query.is_active === 'true';
       }
+      const { page, pageSize } = parsePagination(req.query);
+      filters.pagination = { page, pageSize };
+      filters.connection = connection;
 
-      const parentLevel = parent.level_code || parent.LEVEL_CODE;
-      if (parentLevel !== parentLevelCode) {
-        return sendBadRequest(res, req, `Parent org unit must be of level '${parentLevelCode}'`);
+      const result = await OrgUnitModel.findByStructureAndLevel(structureId, level, filters);
+      const totalCount = result.total ?? result.length;
+      const orgUnits = result.orgUnits ?? result;
+
+      sendOrgUnitList(res, req, orgUnits, {
+        total: totalCount,
+        pagination: buildPaginationMeta(page, pageSize, totalCount)
+      });
+    } finally {
+      if (connection?.close) {
+        try { await connection.close(); } catch (_) {}
       }
-
-      filters.parentId = parentId;
     }
-
-    if (req.query.search) {
-      filters.search = req.query.search;
-    }
-
-    if (req.query.is_active !== undefined) {
-      filters.isActive = req.query.is_active === 'Y' || req.query.is_active === 'true';
-    }
-
-    const { page, pageSize } = parsePagination(req.query);
-    filters.pagination = { page, pageSize };
-
-    const result = await OrgUnitModel.findByStructureAndLevel(structureId, level, filters);
-    const totalCount = result.total ?? result.length;
-    const orgUnits = result.orgUnits ?? result;
-    
-    sendOrgUnitList(res, req, orgUnits, {
-      total: totalCount,
-      pagination: buildPaginationMeta(page, pageSize, totalCount)
-    });
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.message === 'Invalid STRUCTURE_ID format' || error.message.includes('Invalid page')) {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch org units', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch org units');
   }
 });
 
@@ -316,13 +330,7 @@ router.get('/:structureId/org-units/parents', async (req, res) => {
       pagination: buildPaginationMeta(page, pageSize, totalCount)
     });
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'LEVEL_NOT_IN_STRUCTURE' || error.message === 'Invalid STRUCTURE_ID format' || error.message.includes('Invalid page')) {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch parent options', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch parent options');
   }
 });
 
@@ -388,19 +396,7 @@ router.post('/:structureId/org-units', async (req, res) => {
     const newOrgUnit = await OrgUnitModel.create(structureId, enterpriseId, data, userId);
     sendCreated(res, req, newOrgUnit);
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'STRUCTURE_NOT_ACTIVE' || error.message === 'Invalid STRUCTURE_ID format') {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
-      return sendConflict(res, req, error.message);
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' || error.code === 'NOT_NULL_CONSTRAINT') {
-      return sendBadRequest(res, req, error.message || 'Required field cannot be null');
-    }
-    sendServerError(res, req, `Failed to create org unit: ${error.message}`, error);
+    handleOrgUnitRouteError(res, req, error, `Failed to create org unit: ${error.message}`);
   }
 });
 
@@ -496,28 +492,8 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
     const updatedOrgUnit = await OrgUnitModel.update(orgUnitId, structureId, data, userId);
     sendUpdated(res, req, updatedOrgUnit);
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.message === 'Invalid STRUCTURE_ID format' || error.message?.includes('No org unit found')) {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
-      return sendConflict(res, req, error.message);
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'DATABASE_TRIGGER_ERROR') {
-      // Database trigger errors are server-side issues
-      return sendServerError(res, req, error.message, error);
-    }
-    if (error.code === 'VALIDATION_ERROR') {
-      return sendBadRequest(res, req, error.message);
-    }
-    // Extract the actual error message from nested errors
-    const errorMessage = error.originalError?.message || error.message || 'Unknown error occurred';
-    sendServerError(res, req, `Failed to update org unit: ${errorMessage}`, error);
+    const msg = error.originalError?.message || error.message || 'Unknown error occurred';
+    handleOrgUnitRouteError(res, req, error, `Failed to update org unit: ${msg}`);
   }
 });
 
@@ -539,13 +515,7 @@ router.get('/:structureId/org-units/tree', async (req, res) => {
       tree: OrgUnitModel.buildTree(orgUnits)
     });
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.message === 'Invalid STRUCTURE_ID format') {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch tree', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch tree');
   }
 });
 
@@ -562,13 +532,7 @@ router.get('/:structureId', async (req, res) => {
     const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
     sendOrgUnit(res, req, resolver.structureRow);
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.message === 'Invalid STRUCTURE_ID format') {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch structure', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch structure');
   }
 });
 
@@ -635,16 +599,7 @@ router.delete('/:structureId/org-units/:orgUnitId', async (req, res) => {
       sendDeleted(res, req, 'Org unit deactivated (soft delete)', orgUnitId);
     }
   } catch (error) {
-    if (error.code === 'STRUCTURE_NOT_FOUND') {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'STRUCTURE_NOT_ACTIVE' || error.message === 'Invalid STRUCTURE_ID format') {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to delete org unit', error);
+    handleOrgUnitRouteError(res, req, error, 'Failed to delete org unit');
   }
 });
 

@@ -148,21 +148,24 @@ export async function getConnection() {
 }
 
 /**
- * Execute a query
+ * Execute a query.
+ * When options.connection is provided, uses that connection and does not close it (caller owns it).
+ * When omitted, gets a connection from the pool and closes it after execution.
  */
 export async function executeQuery(sql, binds = [], options = {}) {
-  let connection;
+  const { connection: existingConn, ...executeOptions } = options;
+  const owned = !existingConn;
+  const connection = existingConn || await getConnection();
   try {
-    connection = await getConnection();
     const result = await connection.execute(sql, binds, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
-      ...options
+      ...executeOptions
     });
     return result;
   } catch (error) {
     throw error;
   } finally {
-    if (connection) {
+    if (owned && connection) {
       try {
         await connection.close();
       } catch (_) {}

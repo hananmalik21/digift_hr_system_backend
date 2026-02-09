@@ -185,6 +185,66 @@ class HrOrgHierarchyLevelModel {
   }
 
   /**
+   * Fetch structure (minimal) and its active levels in one query.
+   * Single round-trip for parent-candidates flow when not using the single-query path.
+   *
+   * @param {string} structureIdHex - 32-char hex structure ID
+   * @param {Object} [options] - Execution options
+   * @param {Object} [options.connection] - Reuse this DB connection (caller must close)
+   * @returns {Promise<{ structure: { structureId: string, isActive: string }, levels: Array }|null>} null if structure not found
+   */
+  static async findStructureWithLevels(structureIdHex, options = {}) {
+    const normalizedId = typeof structureIdHex === 'string' ? this.normalizeHex32(structureIdHex) : structureIdHex;
+    if (!this.isHex32(normalizedId)) {
+      return null;
+    }
+    const query = `SELECT
+        RAWTOHEX(s.STRUCTURE_ID) AS STRUCTURE_ID,
+        s.IS_ACTIVE AS S_IS_ACTIVE,
+        l.LEVEL_ID,
+        RAWTOHEX(l.STRUCTURE_ID) AS L_STRUCTURE_ID,
+        l.LEVEL_NUMBER,
+        l.LEVEL_CODE,
+        l.LEVEL_NAME,
+        l.IS_MANDATORY,
+        l.IS_ACTIVE,
+        l.DISPLAY_ORDER,
+        l.CREATED_BY,
+        l.CREATED_DATE,
+        l.LAST_UPDATED_BY,
+        l.LAST_UPDATED_DATE,
+        l.LAST_UPDATE_LOGIN
+      FROM ENT.HR_ORG_STRUCTURES s
+      LEFT JOIN ${this.TABLE_NAME} l ON s.STRUCTURE_ID = l.STRUCTURE_ID AND l.IS_ACTIVE = 'Y'
+      WHERE s.STRUCTURE_ID = HEXTORAW(:1)
+      ORDER BY l.DISPLAY_ORDER, l.LEVEL_NUMBER`;
+    const result = await this.executeQuery(query, [normalizedId], options);
+    const rows = result.rows || [];
+    if (rows.length === 0) return null;
+    const first = rows[0];
+    const structure = {
+      structureId: first.structure_id,
+      isActive: first.s_is_active
+    };
+    const levels = rows.filter((r) => r.level_id != null).map((r) => ({
+      level_id: r.level_id,
+      structure_id: r.l_structure_id,
+      level_number: r.level_number,
+      level_code: r.level_code,
+      level_name: r.level_name,
+      is_mandatory: r.is_mandatory,
+      is_active: r.is_active,
+      display_order: r.display_order,
+      created_by: r.created_by,
+      created_date: r.created_date,
+      last_updated_by: r.last_updated_by,
+      last_updated_date: r.last_updated_date,
+      last_update_login: r.last_update_login
+    }));
+    return { structure, levels };
+  }
+
+  /**
    * Get a single hierarchy level by ID
    * @param {number} levelId - Level ID
    * @returns {Promise<Object|null>} Hierarchy level object or null
