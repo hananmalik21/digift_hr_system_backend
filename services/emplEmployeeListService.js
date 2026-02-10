@@ -191,7 +191,7 @@ function normalizeRow(row) {
 /**
  * Build WHERE conditions and bind object for list query.
  * - enterprise_id required
- * - Optional: org_unit_id (JSON_EXISTS on ORG_STRUCTURE_LIST_JSON), position_id (HEXTORAW), job_family_id, job_level_id, grade_id, employment_status, contract_type_code, work_location_id, search (LIKE on multiple text cols)
+ * - Optional: org_unit_id (JSON_EXISTS on ORG_STRUCTURE_LIST_JSON), position_id (HEXTORAW), job_family_id, job_level_id, grade_id, employment_status, employee_status (ACTIVE/PROBATION/INACTIVE), contract_type_code, work_location_id, search (LIKE on multiple text cols)
  * @param {Object} params
  * @returns {{ whereParts: string[], binds: Object }}
  */
@@ -229,6 +229,10 @@ function buildWhereAndBinds(params) {
   if (params.employment_status != null && String(params.employment_status).trim() !== '') {
     whereParts.push('v.EMPLOYMENT_STATUS = :employment_status');
     binds.employment_status = String(params.employment_status).trim();
+  }
+  if (params.employee_status != null && String(params.employee_status).trim() !== '') {
+    whereParts.push('v.EMPLOYEE_STATUS = :employee_status');
+    binds.employee_status = String(params.employee_status).trim().toUpperCase();
   }
   if (params.contract_type_code != null && String(params.contract_type_code).trim() !== '') {
     whereParts.push('v.CONTRACT_TYPE_CODE = :contract_type_code');
@@ -314,7 +318,7 @@ function buildCursorAndOrder(cursor, binds) {
 
 /**
  * Fetch one page of employees with cursor-based pagination.
- * @param {Object} params - enterprise_id (required), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, contract_type_code, work_location_id, search)
+ * @param {Object} params - enterprise_id (required), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, employee_status, contract_type_code, work_location_id, search)
  * @returns {Promise<{ data: Object[], next_cursor: string|null, has_next: boolean }>}
  */
 export async function getEmplEmployeesList(params) {

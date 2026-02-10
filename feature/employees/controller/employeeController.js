@@ -140,6 +140,7 @@ function buildPaginationMeta(page, pageSize, totalCount) {
  * - Base filters: enterpriseId, positionId, jobFamilyId, jobLevelId, gradeId (positional :1–:9).
  * - Dynamic org filter: when org_unit_id_hex is set, add JSON_EXISTS on ORG_STRUCTURE_LIST_JSON
  *   (org_unit_id as hex string; optional level_code). Count uses :10[:11]; data uses :12[:13] (offset/pageSize are :10,:11).
+ * - Optional employee_status: AND v.EMPLOYEE_STATUS = :n (ACTIVE, PROBATION, INACTIVE).
  * - Pagination: data only, OFFSET :10 FETCH :11.
  */
 function buildEmployeeListWhereAndBinds(filters) {
@@ -157,6 +158,9 @@ function buildEmployeeListWhereAndBinds(filters) {
   const g = filters.gradeId ?? null;
   const hasJsonFilter = filters.org_unit_id_hex != null && filters.org_unit_id_hex !== '';
   const hasLevelCode = hasJsonFilter && filters.level_code != null && filters.level_code !== '';
+  const employeeStatusTrimmed = filters.employee_status != null && String(filters.employee_status).trim() !== ''
+    ? String(filters.employee_status).trim().toUpperCase()
+    : null;
 
   const countConditions = [...baseConditions];
   const dataConditions = [...baseConditions];
@@ -191,6 +195,10 @@ function buildEmployeeListWhereAndBinds(filters) {
     countBinds.push(filters.org_unit_id_hex);
     if (hasLevelCode) countBinds.push(filters.level_code);
   }
+  if (employeeStatusTrimmed) {
+    countConditions.push('v.EMPLOYEE_STATUS = :' + (countBinds.length + 1));
+    countBinds.push(employeeStatusTrimmed);
+  }
   if (searchTrimmed) {
     countConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + (countBinds.length + 1) + ") || '%'");
     countBinds.push(searchTrimmed);
@@ -214,6 +222,11 @@ function buildEmployeeListWhereAndBinds(filters) {
     const dataSearchPlaceholder = 12 + (hasJsonFilter ? (hasLevelCode ? 2 : 1) : 0);
     dataConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + dataSearchPlaceholder + ") || '%'");
     dataBinds.push(searchTrimmed);
+  }
+  if (employeeStatusTrimmed) {
+    const dataStatusPlaceholder = 12 + (hasJsonFilter ? (hasLevelCode ? 2 : 1) : 0) + (searchTrimmed ? 1 : 0);
+    dataConditions.push('v.EMPLOYEE_STATUS = :' + dataStatusPlaceholder);
+    dataBinds.push(employeeStatusTrimmed);
   }
   dataBinds.push(filters.offset, filters.pageSize);
 
@@ -890,6 +903,9 @@ export async function getEmployees(req, res) {
 
   const offset = (page - 1) * pageSize;
   const searchRaw = q.search != null && String(q.search).trim() !== '' ? String(q.search).trim() : null;
+  const employeeStatusRaw = (q.employee_status ?? q.employeeStatus) != null && String(q.employee_status ?? q.employeeStatus).trim() !== ''
+    ? String(q.employee_status ?? q.employeeStatus).trim()
+    : null;
   const filters = {
     enterpriseId,
     org_unit_id_hex: orgUnitIdHexForJson,
@@ -900,7 +916,8 @@ export async function getEmployees(req, res) {
     gradeId: Number.isFinite(gradeId) ? gradeId : null,
     offset,
     pageSize,
-    search: searchRaw
+    search: searchRaw,
+    employee_status: employeeStatusRaw
   };
   const { countSql, dataSql, countBinds, dataBinds } = buildEmployeeListWhereAndBinds(filters);
 

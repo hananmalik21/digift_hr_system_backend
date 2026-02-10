@@ -57,6 +57,7 @@ export async function getEmplEmployeesListHandler(req, res) {
       job_level_id: q.job_level_id,
       grade_id: q.grade_id,
       employment_status: q.employment_status,
+      employee_status: q.employee_status ?? q.employeeStatus,
       contract_type_code: q.contract_type_code,
       work_location_id: q.work_location_id,
       search: q.search
