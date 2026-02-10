@@ -401,6 +401,26 @@ function parseJsonToArray(value) {
 }
 
 /**
+ * Parse CLOB/JSON column to object or null. If NULL or parse fails, return null and optionally log warning.
+ * @param {*} value - CLOB string, object, or null
+ * @returns {object|null}
+ */
+function parseJsonToObjectOrNull(value) {
+  if (value == null) return null;
+  if (typeof value === 'object' && !(value instanceof Buffer) && !(value instanceof Date)) return value;
+  if (typeof value !== 'string') return null;
+  const s = value.trim();
+  if (!s || s.toLowerCase() === 'null') return null;
+  try {
+    const parsed = JSON.parse(s);
+    return parsed != null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (err) {
+    console.warn('Failed to parse WORK_LOCATION_OBJ:', err?.message ?? String(err));
+    return null;
+  }
+}
+
+/**
  * Ensure date/timestamp is returned as ISO string.
  * @param {Date|string|null|undefined} val
  * @returns {string|null}
@@ -561,8 +581,9 @@ function toSnakeCaseKeys(obj) {
  * - work_schedule, compensation, allowances, document_compliance = latest flat objects.
  * - documents, emergency_contacts, bank_accounts, addresses = parsed arrays.
  * - work_schedules, compensation_history, allowances_history, document_compliance_history = parsed history arrays (no *_json keys).
+ * @package Exported for unit tests.
  */
-function mapRowToFullDetailsShape(row) {
+export function mapRowToFullDetailsShape(row) {
   const groups = {
     employee: {},
     assignment: {},
@@ -676,6 +697,13 @@ function mapRowToFullDetailsShape(row) {
     assignmentOut.grade = null;
   }
 
+  // WORK_LOCATION_OBJ from view (EMPL.EMPL_LOOKUP_VALUES); always expose key (case-insensitive row lookup)
+  const workLocationObjRaw = row.WORK_LOCATION_OBJ ?? row.work_location_obj ?? (() => {
+    const k = Object.keys(row || {}).find(key => String(key).toUpperCase() === 'WORK_LOCATION_OBJ');
+    return k != null ? row[k] : undefined;
+  })();
+  assignmentOut.workLocationObj = parseJsonToObjectOrNull(workLocationObjRaw);
+
   return {
     employee: toSnakeCaseKeys(groups.employee),
     assignment: assignmentOut,
@@ -726,7 +754,7 @@ const SQL_FULL_DETAILS_PAGINATED = `
     v.EMAIL, v.PHONE_NUMBER, v.MOBILE_NUMBER, v.DATE_OF_BIRTH,
     v.EMPLOYEE_STATUS, v.EMPLOYEE_IS_ACTIVE, v.CREATION_DATE, v.LAST_UPDATE_DATE,
     v.ASSIGNMENT_ID, v.ASSIGNMENT_GUID, v.EMPLOYEE_NUMBER, v.ORG_UNIT_ID, v.ORG_STRUCTURE_LIST,
-    v.WORK_LOCATION_ID, v.POSITION_ID, v.POSITION_CODE, v.POSITION_NAME_EN, v.POSITION_NAME_AR, v.POSITION_STATUS,
+    v.WORK_LOCATION_ID, v.WORK_LOCATION_OBJ, v.POSITION_ID, v.POSITION_CODE, v.POSITION_NAME_EN, v.POSITION_NAME_AR, v.POSITION_STATUS,
     v.JOB_FAMILY_ID, v.JOB_FAMILY_CODE, v.JOB_FAMILY_NAME_EN, v.JOB_FAMILY_NAME_AR, v.JOB_FAMILY_STATUS,
     v.JOB_LEVEL_ID, v.JOB_LEVEL_CODE, v.JOB_LEVEL_NAME_EN, v.JOB_LEVEL_MIN_GRADE_ID, v.JOB_LEVEL_MAX_GRADE_ID, v.JOB_LEVEL_STATUS,
     v.GRADE_ID, v.GRADE_NUMBER, v.GRADE_CATEGORY, v.GRADE_CURRENCY_CODE, v.GRADE_STEP_1_SALARY, v.GRADE_STEP_2_SALARY, v.GRADE_STEP_3_SALARY, v.GRADE_STEP_4_SALARY, v.GRADE_STEP_5_SALARY, v.GRADE_STATUS,
@@ -773,19 +801,16 @@ export async function getEmployeeById(req, res) {
     return sendBadRequest(res, req, 'enterprise_id is required (x-enterprise-id header or req.user.enterprise_id)');
   }
 
-  const binds = {
-    enterprise_id: enterpriseId,
-    employee_id: isNumericId ? parseInt(param, 10) : null,
-    employee_guid_hex: isGuid ? normalizedGuid : null,
-    offset: 0,
-    limit: 1
-  };
+  const binds = isGuid
+    ? { enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }
+    : { enterprise_id: enterpriseId, employee_id: parseInt(param, 10) };
 
   let connection;
   try {
     connection = await getConnection();
     const opts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
-    const result = await connection.execute(SQL_FULL_DETAILS_PAGINATED, binds, opts);
+    const sql = isGuid ? SQL_FULL_DETAILS_BY_GUID : SQL_FULL_DETAILS_BY_ID;
+    const result = await connection.execute(sql, binds, opts);
     const row = result.rows?.[0] ?? null;
     if (!row) return sendNotFound(res, req, 'Employee not found');
 
