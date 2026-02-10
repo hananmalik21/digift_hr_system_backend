@@ -118,38 +118,69 @@ function rowRawToHex(row) {
   return out;
 }
 
+function isPositionObjEmpty(obj) {
+  if (!obj || typeof obj !== 'object') return true;
+  return Object.values(obj).every(v => v == null || v === '');
+}
+
+/** Minimal position shape for all employee list APIs: position_id, position_code, status, position_title_en */
+function toMinimalPosition(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const id = obj.position_id ?? obj.POSITION_ID ?? obj.positionId;
+  if (id == null) return null;
+  return {
+    position_id: id,
+    position_code: obj.position_code ?? obj.POSITION_CODE ?? obj.positionCode ?? null,
+    status: obj.status ?? obj.STATUS ?? obj.position_status ?? obj.POSITION_STATUS ?? null,
+    position_title_en: obj.position_title_en ?? obj.POSITION_TITLE_EN ?? obj.position_name_en ?? obj.POSITION_NAME_EN ?? obj.positionTitleEn ?? null
+  };
+}
+
+function buildPositionFromRow(r) {
+  const positionId = r.POSITION_ID ?? r.position_id;
+  if (positionId == null) return null;
+  return toMinimalPosition({
+    position_id: positionId,
+    position_code: r.POSITION_CODE ?? r.position_code,
+    status: r.POSITION_STATUS ?? r.position_status,
+    position_title_en: r.POSITION_NAME_EN ?? r.POSITION_TITLE_EN ?? r.position_name_en ?? r.position_title_en
+  });
+}
+
 /**
- * Normalize a list row: RAW→hex, parse JSON fields via safeJson, single position_obj (no position_obj_json).
- * Ensures org_structure_list and position_obj are always object/array in response, never escaped strings.
+ * Normalize a list row: RAW→hex, parse JSON fields via safeJson.
+ * Returns a single position: from view position_obj when non-empty, else from flat view columns, else null.
  * @param {Object} row
  * @returns {Object}
  */
 function normalizeRow(row) {
   if (!row) return row;
   const r = rowRawToHex(row);
-  // Apply safeJson so response always has nested JSON, not escaped strings
   const listRaw = r.ORG_STRUCTURE_LIST ?? r.org_structure_list ?? r.ORG_STRUCTURE_LIST_JSON ?? r.org_structure_list_json;
   let org_structure_list = safeJson(listRaw);
   if (!Array.isArray(org_structure_list)) org_structure_list = [];
 
   const position_obj_json = safeJson(r.POSITION_OBJ_JSON ?? r.position_obj_json);
   const position_obj = safeJson(r.POSITION_OBJ ?? r.position_obj);
-  const positionObj = (typeof position_obj === 'object' && position_obj !== null)
+  let positionObj = (typeof position_obj === 'object' && position_obj !== null)
     ? position_obj
     : (typeof position_obj_json === 'object' && position_obj_json !== null)
       ? position_obj_json
       : null;
+  if (positionObj !== null && isPositionObjEmpty(positionObj)) positionObj = null;
 
-  // snake_case keys for API
   const out = {};
   for (const [key, value] of Object.entries(r)) {
     const lower = key.toLowerCase();
     out[lower] = value;
   }
   out.org_structure_list = org_structure_list;
-  out.position_obj = positionObj;
+  const rawPosition = (typeof positionObj === 'object' && positionObj !== null) ? positionObj : buildPositionFromRow(r);
+  out.position = toMinimalPosition(rawPosition);
   delete out.org_structure_list_json;
   delete out.position_obj_json;
+  delete out.position_obj;
+  delete out.search_key;
   return out;
 }
 

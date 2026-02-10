@@ -1,0 +1,22 @@
+{
+  "enterprise_id": 1,
+  "first_name_en": "Sample",
+  "last_name_en": "Employee",
+  "email": "sample.employee@example.com",
+  "phone_number": "+96550000000",
+  "date_of_birth": "1990-01-15",
+  "gender_code": "M",
+  "nationality": "KWT",
+  "contact_name": "Emergency Contact",
+  "relationship": "Spouse",
+  "emerg_phone": "+96560000000",
+  "work_schedule_id": 1,
+  "bank_code": "NBK",
+  "account_number": "123456789012",
+  "org_unit_id_hex": "49D422A34DE4B6B3E0639E1B000AEFDB",
+  "enterprise_hire_date": "2024-01-01",
+  "contract_type_code": "FULL_TIME",
+  "employment_status": "ACTIVE",
+  "employee_status": "INACTIVE",
+  "employee_is_active": "Y"
+}

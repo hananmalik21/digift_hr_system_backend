@@ -293,9 +293,38 @@ function parseOrgStructureList(value) {
   return [];
 }
 
+function isPositionObjEmpty(obj) {
+  if (!obj || typeof obj !== 'object') return true;
+  return Object.values(obj).every(v => v == null || v === '');
+}
+
+/** Minimal position shape for all employee list APIs: position_id, position_code, status, position_title_en */
+function toMinimalPosition(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const id = obj.position_id ?? obj.POSITION_ID ?? obj.positionId;
+  if (id == null) return null;
+  return {
+    position_id: id,
+    position_code: obj.position_code ?? obj.POSITION_CODE ?? obj.positionCode ?? null,
+    status: obj.status ?? obj.STATUS ?? obj.position_status ?? obj.POSITION_STATUS ?? null,
+    position_title_en: obj.position_title_en ?? obj.POSITION_TITLE_EN ?? obj.position_name_en ?? obj.POSITION_NAME_EN ?? obj.positionTitleEn ?? null
+  };
+}
+
+function buildPositionFromRow(r) {
+  const positionId = r.POSITION_ID ?? r.position_id;
+  if (positionId == null) return null;
+  return toMinimalPosition({
+    position_id: positionId,
+    position_code: r.POSITION_CODE ?? r.position_code,
+    status: r.POSITION_STATUS ?? r.position_status,
+    position_title_en: r.POSITION_NAME_EN ?? r.POSITION_TITLE_EN ?? r.position_name_en ?? r.position_title_en
+  });
+}
+
 /**
- * Normalize a single employee list row: RAW→hex, org_structure_list and position_obj as parsed JSON (never escaped strings).
- * Returns only position_obj as object; position_obj_json is removed.
+ * Normalize a single employee list row: RAW→hex, org_structure_list as parsed JSON.
+ * Returns a single position: from view position_obj when non-empty, else from flat view columns, else null.
  */
 function normalizeEmployeeListRow(row) {
   const r = rowRawToHex(row);
@@ -310,11 +339,14 @@ function normalizeEmployeeListRow(row) {
   if ('ORG_STRUCTURE_LIST_JSON' in r) delete r.ORG_STRUCTURE_LIST_JSON;
 
   const posRaw = r.POSITION_OBJ ?? r.position_obj ?? r.POSITION_OBJ_JSON ?? r.position_obj_json;
-  const posObj = safeJson(posRaw);
-  r.position_obj = (typeof posObj === 'object' && posObj !== null) ? posObj : null;
+  let posObj = safeJson(posRaw);
+  if (typeof posObj === 'object' && posObj !== null && isPositionObjEmpty(posObj)) posObj = null;
+  const rawPosition = (typeof posObj === 'object' && posObj !== null) ? posObj : buildPositionFromRow(r);
+  r.position = toMinimalPosition(rawPosition);
   delete r.POSITION_OBJ;
   delete r.POSITION_OBJ_JSON;
   delete r.position_obj_json;
+  delete r.position_obj;
   delete r.SEARCH_KEY;
   delete r.search_key;
 
@@ -570,9 +602,8 @@ function mapRowToFullDetailsShape(row) {
     assignmentOut.position = {
       position_id: positionId,
       position_code: row.POSITION_CODE ?? row.position_code ?? null,
-      position_name_en: row.POSITION_NAME_EN ?? row.POSITION_TITLE_EN ?? row.position_name_en ?? row.position_title_en ?? null,
-      position_name_ar: row.POSITION_NAME_AR ?? row.POSITION_TITLE_AR ?? row.position_name_ar ?? row.position_title_ar ?? null,
-      position_status: row.POSITION_STATUS ?? row.position_status ?? null
+      status: row.POSITION_STATUS ?? row.position_status ?? null,
+      position_title_en: row.POSITION_NAME_EN ?? row.POSITION_TITLE_EN ?? row.position_name_en ?? row.position_title_en ?? null
     };
   } else {
     assignmentOut.position = null;

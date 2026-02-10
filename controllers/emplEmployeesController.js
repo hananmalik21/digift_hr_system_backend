@@ -30,7 +30,7 @@ const uploadAllInOne = multer({
 /**
  * GET /api/empl/employees
  * Cursor-based pagination. Query: enterprise_id (required), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, contract_type_code, work_location_id, search).
- * Rows are normalized in service: org_structure_list and position_obj are always object/array (safeJson); position_obj_json is omitted.
+ * Rows are normalized in service: org_structure_list and a single position (from view or flat columns) are returned.
  * 200: { success, message, meta: { pagination: { limit, has_next, next_cursor } }, data }
  * 400: enterprise_id missing/invalid
  */

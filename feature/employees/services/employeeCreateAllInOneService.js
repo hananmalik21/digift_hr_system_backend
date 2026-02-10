@@ -104,6 +104,10 @@ import oracledb from 'oracledb';
  *
  * 12) AUDIT
  * @property {string}   [actor]
+ *
+ * 13) EMPLOYEE LIFECYCLE (optional; USER-CONTROLLED)
+ * @property {string}   [employee_status]   ACTIVE | INACTIVE | PROBATION (case-insensitive)
+ * @property {string}   [employee_is_active] Y | N (case-insensitive)
  */
 
 /** Required field keys for validation (API names). */
@@ -127,6 +131,9 @@ export const REQUIRED_FIELDS = [
   'contract_type_code',
   'employment_status'
 ];
+
+const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
+const EMPLOYEE_IS_ACTIVE_VALUES = ['Y', 'N'];
 
 const CREATE_EMPLOYEE_ALL_IN_ONE_SQL = `
 BEGIN
@@ -201,6 +208,8 @@ BEGIN
     p_doc_access_url            => :p_doc_access_url,
     p_doc_hash_sha256           => :p_doc_hash_sha256,
     p_actor                    => :p_actor,
+    p_employee_status          => :p_employee_status,
+    p_employee_is_active       => :p_employee_is_active,
     o_employee_id              => :o_employee_id
   );
 END;
@@ -262,6 +271,19 @@ function strBind(val) {
   return val != null && String(val).trim() !== ''
     ? { type: oracledb.STRING, dir: oracledb.BIND_IN, val: String(val).trim() }
     : null;
+}
+
+function normalizeEmployeeStatus(body) {
+  const v = body.employee_status ?? body.employeeStatus ?? body.EMPLOYEE_STATUS;
+  if (v == null || String(v).trim() === '') return null;
+  return String(v).trim().toUpperCase();
+}
+
+function normalizeEmployeeIsActive(body) {
+  const v = body.employee_is_active ?? body.employeeIsActive ?? body.EMPLOYEE_IS_ACTIVE ?? body.IS_ACTIVE;
+  if (v == null || String(v).trim() === '') return null;
+  const s = String(v).trim().toUpperCase();
+  return s === 'Y' || s === 'N' ? s : null;
 }
 
 /**
@@ -384,6 +406,8 @@ export function buildBinds(body) {
       };
     })(),
     p_actor: strOrNull(body.actor, body.ACTOR, body.p_actor),
+    p_employee_status: normalizeEmployeeStatus(body),
+    p_employee_is_active: normalizeEmployeeIsActive(body),
     o_employee_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
   };
 }
@@ -411,6 +435,31 @@ const FIELD_GETTERS = {
 };
 
 /**
+ * Validate optional lifecycle fields if provided.
+ * employee_status: ACTIVE | INACTIVE | PROBATION (case-insensitive).
+ * employee_is_active: Y | N (case-insensitive).
+ * @param {Object} body - Request body
+ * @returns {{ valid: boolean, message?: string }}
+ */
+export function validateLifecycleFields(body) {
+  const statusVal = body.employee_status ?? body.employeeStatus ?? body.EMPLOYEE_STATUS;
+  if (statusVal != null && String(statusVal).trim() !== '') {
+    const u = String(statusVal).trim().toUpperCase();
+    if (!EMPLOYEE_STATUS_VALUES.includes(u)) {
+      return { valid: false, message: 'employee_status must be one of: ACTIVE, INACTIVE, PROBATION' };
+    }
+  }
+  const isActiveVal = body.employee_is_active ?? body.employeeIsActive ?? body.EMPLOYEE_IS_ACTIVE ?? body.IS_ACTIVE;
+  if (isActiveVal != null && String(isActiveVal).trim() !== '') {
+    const u = String(isActiveVal).trim().toUpperCase();
+    if (u !== 'Y' && u !== 'N') {
+      return { valid: false, message: 'employee_is_active must be Y or N' };
+    }
+  }
+  return { valid: true };
+}
+
+/**
  * Validate required fields before calling PL/SQL.
  * @param {Object} body - Request body (form or JSON)
  * @returns {{ valid: boolean, missing: string[] }}
@@ -429,6 +478,10 @@ export function validateRequired(body) {
   if (!hexToBuffer(orgHex)) {
     missing.push('org_unit_id_hex (must be 32-character hex)');
     return { valid: false, missing };
+  }
+  const lifecycle = validateLifecycleFields(body);
+  if (!lifecycle.valid) {
+    return { valid: false, missing: [lifecycle.message] };
   }
   return { valid: true, missing: [] };
 }

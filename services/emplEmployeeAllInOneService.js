@@ -4,6 +4,9 @@
 
 import { getConnection } from '../config/db.js';
 
+const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
+const EMPLOYEE_IS_ACTIVE_VALUES = ['Y', 'N'];
+
 const UPDATE_EMPLOYEE_ALL_IN_ONE_SQL = `
 BEGIN
   EMPL.EMPL_EMPLOYEE_UPDATE_API_PKG.UPDATE_EMPLOYEE_ALL_IN_ONE(
@@ -76,7 +79,9 @@ BEGIN
     p_doc_mime_type            => :p_doc_mime_type,
     p_doc_access_url           => :p_doc_access_url,
     p_doc_hash_sha256          => :p_doc_hash_sha256,
-    p_actor                    => :p_actor
+    p_actor                    => :p_actor,
+    p_employee_status          => :p_employee_status,
+    p_employee_is_active       => :p_employee_is_active
   );
 END;
 `;
@@ -105,6 +110,19 @@ function normalizeHex(hex) {
   if (hex == null || hex === '') return null;
   const s = String(hex).replace(/^0x/i, '').replace(/-/g, '').trim();
   return s.length === 32 && /^[0-9A-Fa-f]+$/.test(s) ? s.toUpperCase() : null;
+}
+
+function normalizeEmployeeStatus(body) {
+  const v = body.employee_status ?? body.employeeStatus ?? body.EMPLOYEE_STATUS;
+  if (v == null || String(v).trim() === '') return null;
+  return String(v).trim().toUpperCase();
+}
+
+function normalizeEmployeeIsActive(body) {
+  const v = body.employee_is_active ?? body.employeeIsActive ?? body.EMPLOYEE_IS_ACTIVE ?? body.IS_ACTIVE;
+  if (v == null || String(v).trim() === '') return null;
+  const s = String(v).trim().toUpperCase();
+  return s === 'Y' || s === 'N' ? s : null;
 }
 
 /**
@@ -187,18 +205,35 @@ export function buildUpdateBinds(employeeId, body) {
     p_doc_mime_type: strOrNull(b.doc_mime_type, b.docMimeType),
     p_doc_access_url: strOrNull(b.doc_access_url, b.docAccessUrl),
     p_doc_hash_sha256: strOrNull(b.doc_hash_sha256, b.docHashSha256),
-    p_actor: strOrNull(b.actor)
+    p_actor: strOrNull(b.actor),
+    p_employee_status: normalizeEmployeeStatus(b),
+    p_employee_is_active: normalizeEmployeeIsActive(b)
   };
 }
 
 /**
  * Validation for update body. Returns { valid: boolean, message?: string, code?: string }.
  * No body fields are required; only employeeId in the URL must be a positive integer.
+ * If employee_status or employee_is_active are provided, they are validated.
  */
 export function validateUpdateBody(body, employeeId) {
   const empId = parseInt(employeeId, 10);
   if (!Number.isInteger(empId) || empId < 1) {
     return { valid: false, message: 'employeeId must be a positive integer', code: 'VALIDATION_ERROR' };
+  }
+  const statusVal = body?.employee_status ?? body?.employeeStatus ?? body?.EMPLOYEE_STATUS;
+  if (statusVal != null && String(statusVal).trim() !== '') {
+    const u = String(statusVal).trim().toUpperCase();
+    if (!EMPLOYEE_STATUS_VALUES.includes(u)) {
+      return { valid: false, message: 'employee_status must be one of: ACTIVE, INACTIVE, PROBATION', code: 'VALIDATION_ERROR' };
+    }
+  }
+  const isActiveVal = body?.employee_is_active ?? body?.employeeIsActive ?? body?.EMPLOYEE_IS_ACTIVE ?? body?.IS_ACTIVE;
+  if (isActiveVal != null && String(isActiveVal).trim() !== '') {
+    const u = String(isActiveVal).trim().toUpperCase();
+    if (u !== 'Y' && u !== 'N') {
+      return { valid: false, message: 'employee_is_active must be Y or N', code: 'VALIDATION_ERROR' };
+    }
   }
   return { valid: true };
 }
