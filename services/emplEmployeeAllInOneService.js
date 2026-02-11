@@ -287,9 +287,12 @@ export async function updateEmployeeAllInOne(connection, employeeId, body, fileO
     const outBinds = result.outBinds || {};
     const docId = Array.isArray(outBinds.o_document_id) ? outBinds.o_document_id[0] : outBinds.o_document_id;
     const rawGuid = Array.isArray(outBinds.o_document_guid) ? outBinds.o_document_guid?.[0] : outBinds.o_document_guid;
-    const guidHexLower = rawGuid != null && Buffer.isBuffer(rawGuid)
-      ? rawGuid.toString('hex').toLowerCase()
-      : (typeof rawGuid === 'string' ? rawGuid.toLowerCase() : null);
+    let guidHexLower = null;
+    if (rawGuid != null && Buffer.isBuffer(rawGuid) && rawGuid.length === 16) {
+      guidHexLower = rawGuid.toString('hex').toLowerCase();
+    } else if (typeof rawGuid === 'string' && rawGuid.trim().length === 32) {
+      guidHexLower = rawGuid.trim().toLowerCase();
+    }
     const docAction = normalizeDocAction(body?.doc_action ?? body?.docAction);
     return {
       documentId: docId ?? null,

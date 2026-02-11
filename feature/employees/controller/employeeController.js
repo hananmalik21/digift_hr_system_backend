@@ -521,7 +521,25 @@ export function mapRowToFullDetailsShape(row) {
     groups[group][key] = outVal;
   }
 
-  const documents = parseJsonToArray(row.DOCUMENTS_JSON ?? row.documents_json);
+  const documentsRaw = parseJsonToArray(row.DOCUMENTS_JSON ?? row.documents_json);
+  const documents = !Array.isArray(documentsRaw) || documentsRaw.length === 0
+    ? []
+    : documentsRaw.map((doc) => {
+        const guid = doc.document_guid ?? doc.documentGuid ?? doc.DOCUMENT_GUID;
+        if (guid == null) return doc;
+        const guidStr = String(guid).trim();
+        if (guidStr === '') return doc;
+        const guidHex = guidStr.replace(/-/g, '').toLowerCase();
+        if (guidHex.length !== 32) return doc;
+        const url = `/documents/${guidHex}/download`;
+        const needsAccess = doc.access_url == null || doc.access_url === '';
+        const needsDownload = doc.download_url == null || doc.download_url === '';
+        if (!needsAccess && !needsDownload) return doc;
+        const d = { ...doc };
+        if (needsAccess) d.access_url = url;
+        if (needsDownload) d.download_url = url;
+        return d;
+      });
   const emergency_contacts = parseJsonToArray(row.EMERGENCY_CONTACTS_JSON ?? row.emergency_contacts_json);
   const bank_accounts = parseJsonToArray(row.BANK_ACCOUNTS_JSON ?? row.bank_accounts_json);
   const addresses = parseJsonToArray(row.ADDRESSES_JSON ?? row.addresses_json);

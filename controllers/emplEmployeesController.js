@@ -30,6 +30,8 @@ import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
 import { getEmployeeListRowByEmployeeId } from '../feature/employees/controller/employeeController.js';
 import EmployeeModel from '../feature/employees/model/employeeModel.js';
 
+const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
+
 const uploadAllInOne = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -214,6 +216,7 @@ export async function updateEmployeeAllInOneHandler(req, res) {
     });
   }
 
+  const empId = Number(employeeId);
   let connection;
   try {
     connection = await getConnection();
@@ -224,26 +227,16 @@ export async function updateEmployeeAllInOneHandler(req, res) {
           mimeType: uploadedFile.mimetype
         }
       : {};
-    const { documentId, documentGuid, docAction } = await updateEmployeeAllInOne(connection, employeeId, body, fileOpts);
-    const data = await getEmployeeListRowByEmployeeId(parseInt(employeeId, 10));
-    const accessUrl = documentGuid ? `/documents/${documentGuid}/download` : null;
-    const document = documentGuid
-      ? {
-          document_id: documentId,
-          document_guid: documentGuid,
-          access_url: accessUrl,
-          doc_action: docAction
-        }
-      : null;
+    await updateEmployeeAllInOne(connection, employeeId, body, fileOpts);
+    const data = await getEmployeeListRowByEmployeeId(empId);
     return res.status(200).json({
       success: true,
-      employee_id: parseInt(employeeId, 10),
-      document,
+      employee_id: empId,
       ...(data != null && { data })
     });
   } catch (err) {
     const msg = err?.message ?? String(err);
-    const isOracle = err?.errorNum != null || /^ORA-\d{5}/.test(msg) || /ORA-\d{5}/.test(msg) || /-20001/.test(msg);
+    const isOracle = err?.errorNum != null || ORA_ERROR_REGEX.test(msg);
     if (isOracle) {
       return res.status(400).json({
         success: false,
