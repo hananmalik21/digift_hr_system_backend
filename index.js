@@ -40,9 +40,11 @@ import leaveRequestController from './feature/leave_requests/controller/leaveReq
 import leaveContactController from './feature/leave_contacts/controller/leaveContactController.js';
 import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
 import employeeLeaveBalanceController from './feature/employee_leave_balances/controller/employeeLeaveBalanceController.js';
-import absLookupController from './feature/abs_lookups/controller/absLookupController.js';
-import emplLookupTypeController from './feature/empl_lookup_types/controller/emplLookupTypeController.js';
-import emplLookupValueController from './feature/empl_lookup_values/controller/emplLookupValueController.js';
+import absLookupController from './feature/look_ups/abs/abs_lookups/controller/absLookupController.js';
+import emplLookupTypeController from './feature/look_ups/empl/empl_lookup_types/controller/emplLookupTypeController.js';
+import emplLookupValueController from './feature/look_ups/empl/empl_lookup_values/controller/emplLookupValueController.js';
+import entLookupTypeController from './feature/look_ups/ent/ent_lookup_types/controller/entLookupTypeController.js';
+import entLookupValueController from './feature/look_ups/ent/ent_lookup_values/controller/entLookupValueController.js';
 import leavePolicyController from './feature/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
@@ -145,6 +147,8 @@ app.use('/api/abs/leave-documents', leaveDocumentController);
 app.use('/api/abs/lookups', absLookupController);
 app.use('/api/empl/lookup-types', emplLookupTypeController);
 app.use('/api/empl/lookup-values', emplLookupValueController);
+app.use('/api/ent/lookup-types', entLookupTypeController);
+app.use('/api/ent/lookup-values', entLookupValueController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
