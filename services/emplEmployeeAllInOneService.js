@@ -2,6 +2,7 @@
  * Service: Update employee via EMPL.EMPL_EMPLOYEE_UPDATE_API_PKG.UPDATE_EMPLOYEE_ALL_IN_ONE
  */
 
+import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
 
 const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
@@ -79,9 +80,14 @@ BEGIN
     p_doc_mime_type            => :p_doc_mime_type,
     p_doc_access_url           => :p_doc_access_url,
     p_doc_hash_sha256          => :p_doc_hash_sha256,
+    p_doc_file_content         => :p_doc_file_content,
+    p_doc_action               => :p_doc_action,
+    p_replace_document_id      => :p_replace_document_id,
     p_actor                    => :p_actor,
     p_employee_status          => :p_employee_status,
-    p_employee_is_active       => :p_employee_is_active
+    p_employee_is_active       => :p_employee_is_active,
+    o_document_id              => :o_document_id,
+    o_document_guid            => :o_document_guid
   );
 END;
 `;
@@ -123,6 +129,13 @@ function normalizeEmployeeIsActive(body) {
   if (v == null || String(v).trim() === '') return null;
   const s = String(v).trim().toUpperCase();
   return s === 'Y' || s === 'N' ? s : null;
+}
+
+const DOC_ACTION_VALUES = ['ADD', 'REPLACE'];
+function normalizeDocAction(val) {
+  if (val == null || String(val).trim() === '') return 'ADD';
+  const s = String(val).trim().toUpperCase();
+  return DOC_ACTION_VALUES.includes(s) ? s : 'ADD';
 }
 
 /**
@@ -205,6 +218,8 @@ export function buildUpdateBinds(employeeId, body) {
     p_doc_mime_type: strOrNull(b.doc_mime_type, b.docMimeType),
     p_doc_access_url: strOrNull(b.doc_access_url, b.docAccessUrl),
     p_doc_hash_sha256: strOrNull(b.doc_hash_sha256, b.docHashSha256),
+    p_doc_action: normalizeDocAction(b.doc_action ?? b.docAction),
+    p_replace_document_id: toNum(b.replace_document_id, b.replaceDocumentId),
     p_actor: strOrNull(b.actor),
     p_employee_status: normalizeEmployeeStatus(b),
     p_employee_is_active: normalizeEmployeeIsActive(b)
@@ -235,21 +250,55 @@ export function validateUpdateBody(body, employeeId) {
       return { valid: false, message: 'employee_is_active must be Y or N', code: 'VALIDATION_ERROR' };
     }
   }
+  const docActionVal = body?.doc_action ?? body?.docAction;
+  if (docActionVal != null && String(docActionVal).trim() !== '') {
+    const u = String(docActionVal).trim().toUpperCase();
+    if (!DOC_ACTION_VALUES.includes(u)) {
+      return { valid: false, message: 'doc_action must be ADD or REPLACE', code: 'VALIDATION_ERROR' };
+    }
+  }
   return { valid: true };
 }
 
 /**
- * Execute UPDATE_EMPLOYEE_ALL_IN_ONE. Caller must pass employeeId and body. Connection is obtained and closed inside.
+ * Execute UPDATE_EMPLOYEE_ALL_IN_ONE. When connection is provided, caller must close it.
+ * @param {object} connection - Oracle connection (optional; if omitted, one is obtained and closed)
  * @param {number} employeeId
  * @param {Object} body - Request body (snake_case, same as create; camelCase accepted)
- * @returns {Promise<void>}
+ * @param {Object} fileOpts - Optional { fileContent: Buffer, fileName?: string, mimeType?: string } for document upload
+ * @returns {Promise<{ documentId?: number, documentGuid?: string }>} documentId/guid when procedure returns them
  */
-export async function updateEmployeeAllInOne(employeeId, body) {
-  const connection = await getConnection();
+export async function updateEmployeeAllInOne(connection, employeeId, body, fileOpts = {}) {
+  const ownConnection = connection == null;
+  const conn = connection ?? await getConnection();
   try {
     const binds = buildUpdateBinds(employeeId, body);
-    await connection.execute(UPDATE_EMPLOYEE_ALL_IN_ONE_SQL, binds, { autoCommit: true });
+    if (fileOpts.fileContent != null) {
+      binds.p_doc_file_content = fileOpts.fileContent;
+      binds.p_doc_access_url = null;
+      binds.p_doc_file_name = fileOpts.fileName ?? binds.p_doc_file_name ?? 'document';
+      binds.p_doc_mime_type = fileOpts.mimeType ?? binds.p_doc_mime_type ?? 'application/octet-stream';
+    } else {
+      binds.p_doc_file_content = null;
+    }
+    binds.o_document_id = { type: oracledb.NUMBER, dir: oracledb.BIND_OUT };
+    binds.o_document_guid = { type: oracledb.BUFFER, dir: oracledb.BIND_OUT, maxSize: 16 };
+    const result = await conn.execute(UPDATE_EMPLOYEE_ALL_IN_ONE_SQL, binds, { autoCommit: true });
+    const outBinds = result.outBinds || {};
+    const docId = Array.isArray(outBinds.o_document_id) ? outBinds.o_document_id[0] : outBinds.o_document_id;
+    const rawGuid = Array.isArray(outBinds.o_document_guid) ? outBinds.o_document_guid?.[0] : outBinds.o_document_guid;
+    const guidHexLower = rawGuid != null && Buffer.isBuffer(rawGuid)
+      ? rawGuid.toString('hex').toLowerCase()
+      : (typeof rawGuid === 'string' ? rawGuid.toLowerCase() : null);
+    const docAction = normalizeDocAction(body?.doc_action ?? body?.docAction);
+    return {
+      documentId: docId ?? null,
+      documentGuid: guidHexLower ?? null,
+      docAction
+    };
   } finally {
-    try { await connection.close(); } catch (_) {}
+    if (ownConnection) {
+      try { await conn.close(); } catch (_) {}
+    }
   }
 }

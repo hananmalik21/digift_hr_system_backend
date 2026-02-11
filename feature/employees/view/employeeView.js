@@ -1,9 +1,3 @@
-/**
- * Employee View
- * Handles response formatting for EMPLOYEES endpoints
- * EMPLOYEE_GUID is returned as hex string (32 chars) because SQL selects RAWTOHEX(EMPLOYEE_GUID)
- */
-
 const API_VERSION = '1.0.0';
 
 function convertKeysToSnakeCase(obj) {
@@ -102,7 +96,6 @@ export function sendUpdated(res, req, employee) {
 
 export function sendDeleted(res, req, message = 'Employee deleted successfully', employee = null) {
   const convertedEmployee = employee ? convertKeysToSnakeCase(employee) : null;
-  
   res.json({
     success: true,
     message,

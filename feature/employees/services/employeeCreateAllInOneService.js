@@ -1,116 +1,5 @@
-/**
- * Service: Create employee via EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.CREATE_EMPLOYEE_ALL_IN_ONE
- * No direct DML; calls package procedure only with named binds.
- */
-
 import oracledb from 'oracledb';
 
-// ---------------------------------------------------------------------------
-// REQUEST SCHEMA / DTO (field list for POST /api/v1/employees/all-in-one)
-// ---------------------------------------------------------------------------
-/**
- * @typedef {Object} CreateEmployeeAllInOneRequest
- *
- * 1) EMPLOYEE (CORE)
- * @property {number}   enterprise_id          REQUIRED
- * @property {string}   first_name_en          REQUIRED
- * @property {string}   last_name_en           REQUIRED
- * @property {string}   email                  REQUIRED
- * @property {string}   phone_number           REQUIRED
- * @property {string}   date_of_birth          REQUIRED (YYYY-MM-DD)
- * @property {string}   [middle_name_en]
- * @property {string}   [first_name_ar]
- * @property {string}   [middle_name_ar]
- * @property {string}   [last_name_ar]
- * @property {string}   [mobile_number]
- *
- * 2) DEMOGRAPHICS
- * @property {string}   gender_code            REQUIRED
- * @property {string}   nationality            REQUIRED
- * @property {string}   [marital_status_code]
- * @property {string}   [religion_code]
- * @property {string}   [civil_id_number]
- * @property {string}   [passport_number]
- *
- * 3) EMERGENCY CONTACT
- * @property {string}   contact_name           REQUIRED
- * @property {string}   relationship            REQUIRED
- * @property {string}   emerg_phone             REQUIRED
- * @property {string}   [emerg_email]
- * @property {string}   [emerg_address]
- *
- * 4) WORK SCHEDULE
- * @property {number}   work_schedule_id       REQUIRED
- * @property {string}   [ws_start]             DATE YYYY-MM-DD
- * @property {string}   [ws_end]               DATE YYYY-MM-DD
- *
- * 5) COMPENSATION - all optional
- * @property {number}   [basic_salary_kwd]
- * @property {string}   [comp_start]
- * @property {string}   [comp_end]
- *
- * 6) ALLOWANCES - optional; other_kwd defaults to 0
- * @property {number}   [housing_kwd]
- * @property {number}   [transport_kwd]
- * @property {number}   [food_kwd]
- * @property {number}   [mobile_kwd]
- * @property {number}   [other_kwd]            Default 0 if not provided
- * @property {string}   [allow_start]
- * @property {string}   [allow_end]
- *
- * 7) DOCUMENT COMPLIANCE - all optional
- * @property {string}   [civil_id_expiry]
- * @property {string}   [passport_expiry]
- * @property {string}   [visa_number]
- * @property {string}   [visa_expiry]
- * @property {string}   [work_permit_number]
- * @property {string}   [work_permit_expiry]
- *
- * 8) BANK
- * @property {string}   bank_code              REQUIRED
- * @property {string}   account_number          REQUIRED
- * @property {string}   [bank_name]            optional
- * @property {string}   [iban]
- *
- * 9) ASSIGNMENT
- * @property {string}   org_unit_id_hex         REQUIRED (32 hex chars → RAW(16))
- * @property {string}   enterprise_hire_date   REQUIRED (YYYY-MM-DD)
- * @property {string}   contract_type_code     REQUIRED
- * @property {string}   employment_status      REQUIRED
- * @property {string}   [employee_number]
- * @property {number}   [work_location_id]
- * @property {string}   [position_id_hex]     (32 hex → RAW(16))
- * @property {number}   [job_family_id]
- * @property {number}   [job_level_id]
- * @property {number}   [grade_id]
- * @property {number}   [probation_days]
- * @property {number}   [reporting_to_emp_id]
- * @property {string}   [asg_start]
- * @property {string}   [asg_end]
- *
- * 10) ADDRESS - all optional
- * @property {string}   [address_line1]
- * @property {string}   [address_line2]
- * @property {string}   [city]
- * @property {string}   [area]
- * @property {string}   [country_code]
- *
- * 11) DOCUMENT (URL) - all optional
- * @property {string}   [document_type_code]
- * @property {string}   [doc_file_name]
- * @property {string}   [doc_mime_type]
- * @property {string}   [doc_access_url]
- * @property {string}   [doc_hash_sha256]
- *
- * 12) AUDIT
- * @property {string}   [actor]
- *
- * 13) EMPLOYEE LIFECYCLE (optional; USER-CONTROLLED)
- * @property {string}   [employee_status]   ACTIVE | INACTIVE | PROBATION (case-insensitive)
- * @property {string}   [employee_is_active] Y | N (case-insensitive)
- */
-
-/** Required field keys for validation (API names). */
 export const REQUIRED_FIELDS = [
   'enterprise_id',
   'first_name_en',
@@ -215,6 +104,25 @@ BEGIN
 END;
 `;
 
+const INSERT_DOCUMENT_SQL = `
+BEGIN
+  EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.INSERT_DOCUMENT(
+    p_employee_id        => :p_employee_id,
+    p_document_type_code => :p_document_type_code,
+    p_file_name          => :p_file_name,
+    p_mime_type          => :p_mime_type,
+    p_status             => :p_status,
+    p_is_active          => :p_is_active,
+    p_created_by         => :p_created_by,
+    p_file_content       => :p_file_content,
+    p_access_url         => :p_access_url,
+    p_file_hash_sha256   => :p_file_hash_sha256,
+    o_document_id        => :o_document_id,
+    o_document_guid      => :o_document_guid
+  );
+END;
+`;
+
 function parseDate(val) {
   if (val == null || val === '') return null;
   if (typeof val === 'string' && val.trim().toLowerCase() === 'null') return null;
@@ -286,10 +194,6 @@ function normalizeEmployeeIsActive(body) {
   return s === 'Y' || s === 'N' ? s : null;
 }
 
-/**
- * Build bind object for CREATE_EMPLOYEE_ALL_IN_ONE from request body.
- * p_other_kwd defaults to 0 if not provided.
- */
 export function buildBinds(body) {
   const orgUnitIdRaw = hexToBuffer(body.org_unit_id_hex ?? body.org_unit_id);
   const positionIdRaw = (body.position_id_hex != null || body.position_id != null)
@@ -373,7 +277,6 @@ export function buildBinds(body) {
     p_city: strOrNull(body.city, body.CITY),
     p_area: strOrNull(body.area, body.AREA),
     p_country_code: strOrNull(body.country_code, body.countryCode, body.COUNTRY_CODE),
-    // Document: same as PL/SQL – only insert when p_doc_file_name is non-empty. Pass plain string/null like other IN params.
     ...(function () {
       const docFileName = strOrNull(
         body.doc_file_name,
@@ -412,7 +315,6 @@ export function buildBinds(body) {
   };
 }
 
-/** Map API field name -> list of body keys to check (for validation). */
 const FIELD_GETTERS = {
   enterprise_id: b => b.enterprise_id ?? b.ENTERPRISE_ID,
   first_name_en: b => b.first_name_en ?? b.firstNameEn ?? b.FIRST_NAME_EN ?? b.FIRST_NAME,
@@ -434,13 +336,6 @@ const FIELD_GETTERS = {
   employment_status: b => b.employment_status ?? b.employmentStatus ?? b.EMPLOYMENT_STATUS
 };
 
-/**
- * Validate optional lifecycle fields if provided.
- * employee_status: ACTIVE | INACTIVE | PROBATION (case-insensitive).
- * employee_is_active: Y | N (case-insensitive).
- * @param {Object} body - Request body
- * @returns {{ valid: boolean, message?: string }}
- */
 export function validateLifecycleFields(body) {
   const statusVal = body.employee_status ?? body.employeeStatus ?? body.EMPLOYEE_STATUS;
   if (statusVal != null && String(statusVal).trim() !== '') {
@@ -459,11 +354,6 @@ export function validateLifecycleFields(body) {
   return { valid: true };
 }
 
-/**
- * Validate required fields before calling PL/SQL.
- * @param {Object} body - Request body (form or JSON)
- * @returns {{ valid: boolean, missing: string[] }}
- */
 export function validateRequired(body) {
   const missing = [];
   for (const key of REQUIRED_FIELDS) {
@@ -486,17 +376,59 @@ export function validateRequired(body) {
   return { valid: true, missing: [] };
 }
 
-/**
- * Call EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.CREATE_EMPLOYEE_ALL_IN_ONE.
- * Caller must get and release connection.
- * @param {import('oracledb').Connection} connection
- * @param {CreateEmployeeAllInOneRequest} body - Normalized request body
- * @returns {Promise<{ employeeId: number }>}
- */
 export async function createEmployeeAllInOne(connection, body) {
   const binds = buildBinds(body);
   const result = await connection.execute(CREATE_EMPLOYEE_ALL_IN_ONE_SQL, binds, { autoCommit: true });
   const out = result.outBinds || {};
   const employeeId = Array.isArray(out.o_employee_id) ? out.o_employee_id[0] : out.o_employee_id;
   return { employeeId };
+}
+
+export async function insertDocument(connection, opts) {
+  const {
+    employeeId,
+    documentTypeCode = 'EMPLOYEE_DOC',
+    fileName,
+    mimeType = 'application/octet-stream',
+    fileContent,
+    createdBy = 'API'
+  } = opts;
+  const binds = {
+    p_employee_id: employeeId,
+    p_document_type_code: documentTypeCode,
+    p_file_name: fileName || 'document',
+    p_mime_type: mimeType,
+    p_status: 'UPLOADED',
+    p_is_active: 'Y',
+    p_created_by: createdBy,
+    p_file_content: fileContent,
+    p_access_url: null,
+    p_file_hash_sha256: null,
+    o_document_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
+    o_document_guid: { type: oracledb.BUFFER, dir: oracledb.BIND_OUT, maxSize: 16 }
+  };
+  const result = await connection.execute(INSERT_DOCUMENT_SQL, binds, { autoCommit: true });
+  const out = result.outBinds || {};
+  const documentId = Array.isArray(out.o_document_id) ? out.o_document_id[0] : out.o_document_id;
+  const rawGuid = Array.isArray(out.o_document_guid) ? out.o_document_guid?.[0] : out.o_document_guid;
+  const documentGuid = rawGuid != null && Buffer.isBuffer(rawGuid)
+    ? rawGuid.toString('hex').toLowerCase()
+    : (typeof rawGuid === 'string' ? rawGuid.toLowerCase() : null);
+  return { documentId, documentGuid };
+}
+
+const UPDATE_DOCUMENT_ACCESS_URL_SQL = `
+  UPDATE EMPL.DOCUMENTS
+  SET ACCESS_URL = :access_url
+  WHERE DOCUMENT_GUID = HEXTORAW(:guid)
+`;
+
+export async function updateDocumentAccessUrl(connection, documentGuidHex, accessUrl) {
+  const guid = String(documentGuidHex ?? '').trim().replace(/-/g, '').toUpperCase();
+  if (guid.length !== 32 || !/^[0-9A-F]+$/.test(guid)) return;
+  await connection.execute(
+    UPDATE_DOCUMENT_ACCESS_URL_SQL,
+    { access_url: accessUrl, guid },
+    { autoCommit: true }
+  );
 }

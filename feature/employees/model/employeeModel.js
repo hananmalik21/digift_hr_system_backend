@@ -3,29 +3,10 @@ import oracledb from 'oracledb';
 import { DatabaseError } from '../../../utils/errors/index.js';
 import { generateSysGuid } from '../../../utils/guidUtils.js';
 
-/**
- * Employee Model
- * Handles all database operations for EMPL.EMPLOYEES table
- *
- * Table columns (confirmed):
- * - EMPLOYEE_ID (PK)
- * - EMPLOYEE_GUID (RAW(16))
- * - ENTERPRISE_ID
- * - FIRST_NAME_EN, MIDDLE_NAME_EN, LAST_NAME_EN
- * - FIRST_NAME_AR, MIDDLE_NAME_AR, LAST_NAME_AR, FAMILY_NAME_AR
- * - EMAIL, PHONE_NUMBER, MOBILE_NUMBER
- * - DATE_OF_BIRTH
- * - STATUS
- * - IS_ACTIVE (Y/N)
- * - CREATED_BY
- */
 class EmployeeModel {
   static TABLE_NAME = 'EMPL.EMPLOYEES';
   static SEQ_NAME = 'EMPL.EMPLOYEES_SEQ';
 
-  /**
-   * Convert object keys from UPPER_CASE to lowercase snake_case
-   */
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date || obj instanceof Buffer) return obj;
@@ -48,9 +29,6 @@ class EmployeeModel {
     return converted;
   }
 
-  /**
-   * Helper method to execute queries (non-transaction)
-   */
   static async executeQuery(query, bindParams = [], options = {}) {
     const result = await db.executeQuery(query, bindParams, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
@@ -64,9 +42,6 @@ class EmployeeModel {
     return result;
   }
 
-  /**
-   * Helper method to execute operations within a transaction
-   */
   static async executeWithTransaction(callback) {
     let connection;
     try {
@@ -90,9 +65,6 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Convert date string to Date object
-   */
   static convertToDate(dateValue) {
     if (!dateValue) return null;
     if (dateValue instanceof Date) return dateValue;
@@ -100,9 +72,6 @@ class EmployeeModel {
     return isNaN(date.getTime()) ? null : date;
   }
 
-  /**
-   * Normalize boolean/Y/N to 'Y'/'N'
-   */
   static toYN(v, defaultValue = 'Y') {
     if (v === null || v === undefined) return defaultValue;
     if (typeof v === 'string') {
@@ -116,24 +85,11 @@ class EmployeeModel {
     return defaultValue;
   }
 
-  /**
-   * Find all employees with filters and pagination
-   *
-   * Accepted filter keys:
-   * - enterprise_id OR enterpriseId
-   * - status
-   * - is_active OR isActive (boolean/string)
-   * - email
-   * - name
-   * - pagination: { page, pageSize }
-   */
   static async findAll(filters = {}) {
     try {
       const conditions = [];
       const bindParams = [];
       let paramIndex = 1;
-
-      // Base queries
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} e WHERE 1=1`;
 
       let dataQuery = `SELECT 
@@ -156,7 +112,6 @@ class EmployeeModel {
         e.CREATED_BY
       FROM ${this.TABLE_NAME} e WHERE 1=1`;
 
-      // ENTERPRISE filter (fix: accept both keys)
       const enterpriseId = filters.enterprise_id ?? filters.enterpriseId;
       if (enterpriseId !== undefined && enterpriseId !== null && enterpriseId !== '' && !isNaN(Number(enterpriseId))) {
         conditions.push(`e.ENTERPRISE_ID = :${paramIndex}`);
@@ -199,8 +154,6 @@ class EmployeeModel {
       dataQuery += whereClause;
 
       dataQuery += ` ORDER BY e.EMPLOYEE_ID DESC`;
-
-      // Pagination
       const pagination = filters.pagination;
       let totalCount = 0;
 
@@ -237,9 +190,6 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Find employee by GUID (hex string)
-   */
   static async findByGuidHex(guid) {
     try {
       const guidHex = String(guid).trim().toUpperCase().replace(/-/g, '');
@@ -277,9 +227,6 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Find employee by ID
-   */
   static async findById(enterpriseId, employeeId) {
     try {
       const query = `SELECT 
@@ -314,13 +261,9 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Create a new employee
-   */
   static async create(data, enterpriseId, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        // 1) Get next EMPLOYEE_ID
         let employeeId;
         try {
           const seqQuery = `SELECT ${this.SEQ_NAME}.NEXTVAL AS NEXT_ID FROM DUAL`;
@@ -331,11 +274,7 @@ class EmployeeModel {
           const maxResult = await connection.execute(maxQuery, [Number(enterpriseId)], { outFormat: oracledb.OUT_FORMAT_OBJECT });
           employeeId = maxResult.rows[0].NEXT_ID;
         }
-
-        // 2) Generate GUID (RAW buffer)
         const { buffer: guidBuffer } = await generateSysGuid(connection);
-
-        // 3) Insert (EMPL.EMPLOYEES has no TENANT_ID column)
         const query = `INSERT INTO ${this.TABLE_NAME} (
           EMPLOYEE_ID,
           EMPLOYEE_GUID,
@@ -379,8 +318,6 @@ class EmployeeModel {
         ];
 
         await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        // 4) Return created row
         const selectQuery = `SELECT 
           e.EMPLOYEE_ID,
           RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
@@ -417,9 +354,6 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Update an existing employee
-   */
   static async update(enterpriseId, employeeId, data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
@@ -517,9 +451,6 @@ class EmployeeModel {
     }
   }
 
-  /**
-   * Remove (hard delete) an employee
-   */
   static async remove(enterpriseId, employeeId) {
     try {
       return await this.executeWithTransaction(async (connection) => {

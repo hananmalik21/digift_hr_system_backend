@@ -1,7 +1,3 @@
-/**
- * Unit tests for employee full-details mapping (workLocationObj).
- * Run: node feature/employees/controller/employeeController.test.js
- */
 import assert from 'assert';
 import { mapRowToFullDetailsShape } from './employeeController.js';
 

@@ -23,7 +23,7 @@ import hrOrgStructureController from './feature/hr_org_structures/controller/hrO
 import orgUnitController from './feature/org_units/controller/orgUnitController.js';
 import structureLevelController from './feature/structure_levels/controller/structureLevelController.js';
 import enterpriseController from './feature/enterprises/controller/enterpriseController.js';
-import employeeController, { createEmployeeRouter } from './feature/employees/controller/employeeController.js';
+import employeeController, { createEmployeeRouter, documentsDownloadRouter } from './feature/employees/controller/employeeController.js';
 import jobFamilyController from './feature/job_families/controller/jobFamilyController.js';
 import gradeController from './feature/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
@@ -63,6 +63,7 @@ app.set('trust proxy', process.env.TRUST_PROXY === 'true' || process.env.TRUST_P
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
+app.use('/documents', documentsDownloadRouter);
 
 // Company routes
 app.use('/api/companies', companyController);

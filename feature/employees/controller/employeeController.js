@@ -1,9 +1,5 @@
 import express from 'express';
 import multer from 'multer';
-import crypto from 'crypto';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
 import oracledb from 'oracledb';
 import EmployeeModel from '../model/employeeModel.js';
 import PositionsModel from '../../positions/model/positions_model.js';
@@ -11,6 +7,8 @@ import { getConnection } from '../../../config/db.js';
 import {
   validateRequired,
   createEmployeeAllInOne,
+  insertDocument,
+  updateDocumentAccessUrl,
   fromBody,
   fromBodyKeyContains
 } from '../services/employeeCreateAllInOneService.js';
@@ -24,27 +22,17 @@ import {
   sendServerError,
   sendNotFound
 } from '../view/employeeView.js';
-import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
+import { ValidationError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const router = express.Router();
-
-// Upload dir for all-in-one document (create if missing)
-const UPLOADS_EMPLOYEES_DIR = path.resolve(__dirname, '../../../../uploads/employees');
-if (!fs.existsSync(UPLOADS_EMPLOYEES_DIR)) {
-  fs.mkdirSync(UPLOADS_EMPLOYEES_DIR, { recursive: true });
-}
 
 const uploadAllInOne = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, true)
-}).single('document');
+}).fields([{ name: 'file', maxCount: 1 }, { name: 'document', maxCount: 1 }]);
 
-/** Only run multer when request is multipart (form-data with optional file). */
 function maybeMulterAllInOne(req, res, next) {
   const contentType = (req.headers['content-type'] || '').toLowerCase();
   if (!contentType.includes('multipart/form-data')) {
@@ -54,49 +42,41 @@ function maybeMulterAllInOne(req, res, next) {
     if (err) {
       const msg = err.code === 'LIMIT_FILE_SIZE'
         ? 'File too large (max 10MB)'
-        : (err.message || 'File upload error');
+        : err.code === 'LIMIT_UNEXPECTED_FILE'
+          ? 'Use only one file field: "file" or "document"'
+          : (err.message || 'File upload error');
       return res.status(400).json({ success: false, message: msg, details: err.code || null });
     }
     next();
   });
 }
 
-// Middleware to track request start time for execution time calculation
+function getUploadedFile(req) {
+  const files = req.files;
+  if (!files) return null;
+  return files.file?.[0] ?? files.document?.[0] ?? null;
+}
+
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-/**
- * Get enterprise ID from request
- * Checks query params, body, or environment variable
- */
 function getEnterprise(req) {
   const v = req.query.enterprise_id ?? req.body.ENTERPRISE_ID ?? process.env.DEFAULT_ENTERPRISE_ID;
   return Number(v);
 }
 
-/**
- * Get enterprise ID for employee full-details (req.user.enterprise_id or x-enterprise-id header first)
- */
 function getEnterpriseIdForEmployee(req) {
   const v = req.user?.enterprise_id ?? req.headers['x-enterprise-id'] ?? getEnterprise(req);
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Extract user ID from request
- */
 function getUserId(req) {
   return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
 }
 
-/**
- * Parse and validate pagination parameters (same pattern as leave_requests, leave_types).
- * @param {Object} query - req.query
- * @returns {{ page: number, pageSize: number }}
- */
 function parsePagination(query) {
   let page = 1;
   let pageSize = 10;
@@ -120,9 +100,6 @@ function parsePagination(query) {
   return { page, pageSize };
 }
 
-/**
- * Build pagination metadata (same shape as other APIs).
- */
 function buildPaginationMeta(page, pageSize, totalCount) {
   const totalPages = Math.ceil(totalCount / pageSize) || 0;
   return {
@@ -135,14 +112,6 @@ function buildPaginationMeta(page, pageSize, totalCount) {
   };
 }
 
-/**
- * Build WHERE clause and bind arrays for EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST.
- * - Base filters: enterpriseId, positionId, jobFamilyId, jobLevelId, gradeId (positional :1–:9).
- * - Dynamic org filter: when org_unit_id_hex is set, add JSON_EXISTS on ORG_STRUCTURE_LIST_JSON
- *   (org_unit_id as hex string; optional level_code). Count uses :10[:11]; data uses :12[:13] (offset/pageSize are :10,:11).
- * - Optional employee_status: AND v.EMPLOYEE_STATUS = :n (ACTIVE, PROBATION, INACTIVE).
- * - Pagination: data only, OFFSET :10 FETCH :11.
- */
 function buildEmployeeListWhereAndBinds(filters) {
   const baseConditions = [
     'v.ENTERPRISE_ID = :1',
@@ -238,11 +207,6 @@ function buildEmployeeListWhereAndBinds(filters) {
   return { countSql, dataSql, countBinds, dataBinds };
 }
 
-/**
- * Convert 32-char hex string to Buffer for Oracle RAW(16) bind.
- * @param {string|null|undefined} hex
- * @returns {Buffer|null}
- */
 function hexToBuffer(hex) {
   if (hex == null || typeof hex !== 'string') return null;
   const s = hex.trim().replace(/-/g, '');
@@ -250,11 +214,6 @@ function hexToBuffer(hex) {
   return Buffer.from(s, 'hex');
 }
 
-/**
- * Recursively convert Buffer values (RAW) to hex strings in a row object.
- * @param {Object} row
- * @returns {Object}
- */
 function rowRawToHex(row) {
   if (row === null || row === undefined) return row;
   if (row instanceof Buffer) return row.toString('hex').toUpperCase();
@@ -266,11 +225,6 @@ function rowRawToHex(row) {
   return out;
 }
 
-/**
- * Parse JSON safely so response always returns nested objects/arrays, not escaped strings.
- * @param {*} v - value from driver (string, object, or null)
- * @returns {*} parsed object/array, or original value, or null
- */
 function safeJson(v) {
   if (v == null) return null;
   if (typeof v === 'object') return v;
@@ -284,12 +238,6 @@ function safeJson(v) {
   return v;
 }
 
-/**
- * Parse org_structure_list from view (CLOB/string or Lob) into a JSON array.
- * With oracledb.fetchAsString = [oracledb.CLOB], the value is a string; never return Lob or object with "0"/"1" keys.
- * @param {*} value - CLOB string, null, or (legacy) Lob object
- * @returns {Array}
- */
 function parseOrgStructureList(value) {
   if (value == null) return [];
   if (Array.isArray(value)) return value;
@@ -311,7 +259,6 @@ function isPositionObjEmpty(obj) {
   return Object.values(obj).every(v => v == null || v === '');
 }
 
-/** Minimal position shape for all employee list APIs: position_id, position_code, status, position_title_en */
 function toMinimalPosition(obj) {
   if (!obj || typeof obj !== 'object') return null;
   const id = obj.position_id ?? obj.POSITION_ID ?? obj.positionId;
@@ -335,10 +282,6 @@ function buildPositionFromRow(r) {
   });
 }
 
-/**
- * Normalize a single employee list row: RAW→hex, org_structure_list as parsed JSON.
- * Returns a single position: from view position_obj when non-empty, else from flat view columns, else null.
- */
 function normalizeEmployeeListRow(row) {
   const r = rowRawToHex(row);
   delete r.ORG_STRUCTURE_LIST_JSON;
@@ -366,13 +309,6 @@ function normalizeEmployeeListRow(row) {
   return r;
 }
 
-// --- Full details (V_EMPLOYEE_FULL_DETAILS) helpers ---
-
-/**
- * Convert RAW GUID to hex string. Handles Buffer, null, or string.
- * @param {Buffer|string|null|undefined} val
- * @returns {string|null}
- */
 function toHex(val) {
   if (val == null) return null;
   if (val instanceof Buffer) return val.toString('hex').toUpperCase();
@@ -380,11 +316,6 @@ function toHex(val) {
   return null;
 }
 
-/**
- * Parse CLOB/JSON column to array safely. If already array keep; if object wrap in []; if string JSON.parse; null/empty → [].
- * @param {*} value - CLOB string, object, array, or null
- * @returns {Array}
- */
 function parseJsonToArray(value) {
   if (value == null) return [];
   if (Array.isArray(value)) return value;
@@ -400,11 +331,6 @@ function parseJsonToArray(value) {
   }
 }
 
-/**
- * Parse CLOB/JSON column to object or null. If NULL or parse fails, return null and optionally log warning.
- * @param {*} value - CLOB string, object, or null
- * @returns {object|null}
- */
 function parseJsonToObjectOrNull(value) {
   if (value == null) return null;
   if (typeof value === 'object' && !(value instanceof Buffer) && !(value instanceof Date)) return value;
@@ -420,11 +346,6 @@ function parseJsonToObjectOrNull(value) {
   }
 }
 
-/**
- * Ensure date/timestamp is returned as ISO string.
- * @param {Date|string|null|undefined} val
- * @returns {string|null}
- */
 function dateToIso(val) {
   if (val == null) return null;
   if (val instanceof Date) return val.toISOString();
@@ -432,7 +353,6 @@ function dateToIso(val) {
   return null;
 }
 
-/** Employee flat columns only (latest row from V_EMPLOYEE_FULL_DETAILS). */
 const EMPLOYEE_TABLE_COLUMNS = new Set([
   'EMPLOYEE_ID', 'EMPLOYEE_GUID', 'ENTERPRISE_ID',
   'FIRST_NAME_EN', 'MIDDLE_NAME_EN', 'LAST_NAME_EN',
@@ -442,9 +362,6 @@ const EMPLOYEE_TABLE_COLUMNS = new Set([
   'EMPLOYEE_STATUS', 'EMPLOYEE_IS_ACTIVE'
 ]);
 
-/**
- * Column mapping: view columns → output group. Assignment = latest assignment flat; demographics, schedule, compensation, allowances, document_compliance = latest flat.
- */
 const FULL_DETAILS_COLUMN_GROUPS = {
   ASSIGNMENT_ID: 'assignment',
   ASSIGNMENT_GUID: 'assignment',
@@ -555,9 +472,6 @@ const FULL_DETAILS_COLUMN_GROUPS = {
   ADDRESS_IS_ACTIVE: 'address'
 };
 
-/**
- * Convert object keys to snake_case (for API response).
- */
 function toSnakeCaseKeys(obj) {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj !== 'object' || obj instanceof Date || obj instanceof Buffer) return obj;
@@ -575,14 +489,6 @@ function toSnakeCaseKeys(obj) {
   return out;
 }
 
-/**
- * Map a single row from EMPL.V_EMPLOYEE_FULL_DETAILS into the required response shape.
- * - assignment = latest assignment flat columns + org_structure_list (parsed) + position object (or null).
- * - work_schedule, compensation, allowances, document_compliance = latest flat objects.
- * - documents, emergency_contacts, bank_accounts, addresses = parsed arrays.
- * - work_schedules, compensation_history, allowances_history, document_compliance_history = parsed history arrays (no *_json keys).
- * @package Exported for unit tests.
- */
 export function mapRowToFullDetailsShape(row) {
   const groups = {
     employee: {},
@@ -697,7 +603,6 @@ export function mapRowToFullDetailsShape(row) {
     assignmentOut.grade = null;
   }
 
-  // WORK_LOCATION_OBJ from view (EMPL.EMPL_LOOKUP_VALUES); always expose key (case-insensitive row lookup)
   const workLocationObjRaw = row.WORK_LOCATION_OBJ ?? row.work_location_obj ?? (() => {
     const k = Object.keys(row || {}).find(key => String(key).toUpperCase() === 'WORK_LOCATION_OBJ');
     return k != null ? row[k] : undefined;
@@ -723,29 +628,18 @@ export function mapRowToFullDetailsShape(row) {
   };
 }
 
-/**
- * Single row by ID (backward compatible).
- */
 const SQL_FULL_DETAILS_BY_ID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
 `;
 
-/**
- * Single row by GUID (backward compatible).
- */
 const SQL_FULL_DETAILS_BY_GUID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)
 `;
 
-/**
- * Paginated query from EMPL.V_EMPLOYEE_FULL_DETAILS.
- * Binds: enterprise_id (required), employee_id (optional), employee_guid_hex (optional), offset, limit.
- * Single row when employee_id or employee_guid_hex set; list when both null.
- */
 const SQL_FULL_DETAILS_PAGINATED = `
   SELECT
     v.ENTERPRISE_ID, v.EMPLOYEE_ID, v.EMPLOYEE_GUID,
@@ -779,13 +673,6 @@ const SQL_FULL_DETAILS_PAGINATED = `
   OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
 `;
 
-/**
- * GET /api/employees/:idOrGuid/full-details – fetch single employee full details from EMPL.V_EMPLOYEE_FULL_DETAILS.
- * Accepts employee_id (NUMBER) or employee_guid (32-char hex). enterprise_id mandatory (x-enterprise-id or req.user.enterprise_id).
- * Response includes assignment.position = { position_id, position_code, position_name_en, position_name_ar, position_status } (or null).
- * @param {import('express').Request} req - req.params.guid (employee_id number OR 32-char hex GUID)
- * @param {import('express').Response} res
- */
 export async function getEmployeeById(req, res) {
   const param = String(req.params.guid ?? '').trim();
   const normalizedGuid = param.replace(/-/g, '').toUpperCase();
@@ -834,12 +721,6 @@ const SQL_ONE_ASSIGNMENT_ROW_BY_EMPLOYEE_ID = `
   FETCH FIRST 1 ROW ONLY
 `;
 
-/**
- * Fetch a single employee row from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST (employee + assignment merged, org_structure_list).
- * Used to return the same shape as the list API for a given employee_id (e.g. after update).
- * @param {number} employeeId
- * @returns {Promise<Object|null>} Normalized row (snake_case) or null if not found
- */
 export async function getEmployeeListRowByEmployeeId(employeeId) {
   let connection;
   try {
@@ -876,14 +757,6 @@ export async function getEmployeeListRowByEmployeeId(employeeId) {
   }
 }
 
-/**
- * GET /api/employees – fetch employee listing from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST.
- * Supports pagination and optional filters. Uses bind variables only; RAW(16) in response as hex.
- * Pagination: same pattern as leave_requests, leave_types (page, page_size, parsePagination, buildPaginationMeta).
- *
- * @param {import('express').Request} req - req.query: enterpriseId (required), org_unit_id (hex, dynamic org filter via ORG_STRUCTURE_LIST_JSON), level_code (optional, with org_unit_id), positionId, jobFamilyId, jobLevelId, gradeId, page, page_size
- * @param {import('express').Response} res
- */
 export async function getEmployees(req, res) {
   let page;
   let pageSize;
@@ -902,7 +775,6 @@ export async function getEmployees(req, res) {
     return sendBadRequest(res, req, 'enterpriseId (or enterprise_id) is required and must be a positive number');
   }
 
-  // org_unit_id + level_code: dynamic org filter via ORG_STRUCTURE_LIST_JSON (hex string, not RAW)
   const orgUnitIdHexRaw = (q.org_unit_id ?? q.orgUnitId) != null && String(q.org_unit_id ?? q.orgUnitId).trim() !== '' ? String(q.org_unit_id ?? q.orgUnitId).trim() : null;
   const levelCodeRaw = (q.level_code ?? q.levelCode) != null && String(q.level_code ?? q.levelCode).trim() !== '' ? String(q.level_code ?? q.levelCode).trim() : null;
   if (levelCodeRaw != null && (orgUnitIdHexRaw == null || orgUnitIdHexRaw === '')) {
@@ -975,15 +847,9 @@ export async function getEmployees(req, res) {
   }
 }
 
-/**
- * Map create-employee (all-in-one) Oracle errors to user-friendly messages.
- * @param {string} message - Raw error message
- * @returns {{ message: string, status?: number }}
- */
 function getCreateEmployeeFriendlyMessage(message) {
   const m = String(message);
 
-  // Civil ID duplicate (ORA-00001 / UK_DEMO_CIVILID)
   const isCivilIdConstraint = (m.includes('ORA-00001') || m.includes('UK_DEMO_CIVILID') || m.includes('CIVIL_ID_NUMBER')) && m.includes('already exists');
   if (isCivilIdConstraint) {
     const isNullConflict = /CIVIL_ID_NUMBER\s*:\s*NULL/i.test(m);
@@ -995,7 +861,6 @@ function getCreateEmployeeFriendlyMessage(message) {
     };
   }
 
-  // ORA-20001: EMAIL already exists for this enterprise
   if (m.includes('ORA-20001') && /EMAIL\s+already\s+exists\s+for\s+this\s+enterprise/i.test(m)) {
     return {
       message: 'An employee with this email already exists for this enterprise. Please use a different email.',
@@ -1003,7 +868,6 @@ function getCreateEmployeeFriendlyMessage(message) {
     };
   }
 
-  // Other ORA-20001: use the last (most specific) ORA-20001 message as the user message
   if (m.includes('ORA-20001')) {
     const match = m.match(/ORA-20001:\s*([^.\n]+(?:\.|$))/g);
     const last = match ? match[match.length - 1] : null;
@@ -1014,9 +878,6 @@ function getCreateEmployeeFriendlyMessage(message) {
   return { message: m };
 }
 
-/**
- * Validation helper
- */
 function validateEmployeeData(data, isUpdate = false) {
   const errors = [];
 
@@ -1024,7 +885,6 @@ function validateEmployeeData(data, isUpdate = false) {
   const lastName = data.LAST_NAME_EN ?? data.LAST_NAME;
 
   if (!isUpdate) {
-    // Required fields for creation
     if (!firstName || String(firstName).trim() === '') {
       errors.push('FIRST_NAME_EN (or FIRST_NAME) is required');
     }
@@ -1051,7 +911,6 @@ function validateEmployeeData(data, isUpdate = false) {
       }
     }
   } else {
-    // For updates, validate only provided fields
     if ((data.FIRST_NAME_EN ?? data.FIRST_NAME) !== undefined && String(data.FIRST_NAME_EN ?? data.FIRST_NAME).trim() === '') {
       errors.push('FIRST_NAME_EN cannot be empty');
     }
@@ -1079,7 +938,6 @@ function validateEmployeeData(data, isUpdate = false) {
     }
   }
 
-  // Validate STATUS if provided
   if (data.STATUS !== undefined) {
     const validStatuses = ['DRAFT', 'ACTIVE', 'INACTIVE', 'TERMINATED'];
     if (!validStatuses.includes(String(data.STATUS).toUpperCase())) {
@@ -1087,7 +945,6 @@ function validateEmployeeData(data, isUpdate = false) {
     }
   }
 
-  // Validate IS_ACTIVE if provided
   if (data.IS_ACTIVE !== undefined) {
     const validValues = ['Y', 'N', true, false, 'true', 'false'];
     const value = String(data.IS_ACTIVE).toUpperCase();
@@ -1099,20 +956,8 @@ function validateEmployeeData(data, isUpdate = false) {
   return errors;
 }
 
-/**
- * @route   GET /api/employees
- * @desc    Get employee listing from EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST with pagination and filters (incl. dynamic org via org_unit_id + level_code)
- * @query   enterpriseId (required), org_unit_id (hex, filter by ORG_STRUCTURE_LIST_JSON), level_code (optional with org_unit_id), positionId, jobFamilyId, jobLevelId, gradeId, page, page_size
- * @access  Public
- */
 router.get('/', asyncHandler(getEmployees));
 
-/**
- * @route   GET /api/employees/by-guid/:guid
- * @desc    Get single employee by GUID
- * @param   guid - Employee GUID (32-char hex)
- * @access  Public
- */
 router.get('/by-guid/:guid', asyncHandler(async (req, res) => {
   try {
     const employee = await EmployeeModel.findByGuidHex(req.params.guid);
@@ -1125,54 +970,34 @@ router.get('/by-guid/:guid', asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   GET /api/employees/:idOrGuid/full-details
- * @desc    Get single employee full details from EMPL.V_EMPLOYEE_FULL_DETAILS (employee_id or employee_guid)
- * @param   idOrGuid - employee_id (numeric) OR employee_guid (32-char hex)
- * @access  Public
- */
 router.get('/:guid/full-details', asyncHandler(getEmployeeById));
 
-/**
- * Helper function to check if a string is a 32-character hex GUID
- */
 function isHex32(v) {
   return typeof v === 'string' && /^[0-9a-fA-F]{32}$/.test(v.replace(/-/g, ''));
 }
 
-/**
- * Helper function to normalize GUID (remove hyphens, uppercase)
- */
 function normalizeHex32(v) {
   return typeof v === 'string' ? v.trim().replace(/-/g, '').toUpperCase() : v;
 }
 
-/**
- * @route   GET /api/employees/:id
- * @desc    Get single employee by ID or GUID
- * @param   id - Employee ID (numeric) or GUID (32-char hex)
- * @access  Public
- */
 router.get('/:id', asyncHandler(async (req, res) => {
   try {
     const idParam = req.params.id;
     const normalizedId = normalizeHex32(idParam);
-    
-    // Check if it's a GUID (32-char hex)
+
     if (isHex32(normalizedId)) {
       const employee = await EmployeeModel.findByGuidHex(normalizedId);
       sendEmployee(res, req, employee);
       return;
     }
-    
-    // Otherwise, treat as numeric ID
+
     const enterpriseId = getEnterprise(req);
     if (!enterpriseId || isNaN(enterpriseId)) {
       return sendBadRequest(res, req, 'ENTERPRISE_ID is required');
     }
 
     const employeeId = parseInt(idParam);
-    
+
     if (isNaN(employeeId)) {
       return sendBadRequest(res, req, 'Invalid EMPLOYEE_ID format. Must be numeric ID or 32-character GUID');
     }
@@ -1187,50 +1012,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   POST /api/employees
- * @desc    Create a new employee
- * @body    { FIRST_NAME, LAST_NAME, EMAIL, PHONE_NUMBER, DATE_OF_BIRTH, ... }
- * @access  Public
- */
-/**
- * @route   POST /api/create-employee
- * @desc    Create employee via EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.CREATE_EMPLOYEE_ALL_IN_ONE (all logic in PL/SQL)
- * @body    Example request JSON (see below)
- * @access  Public
- *
- * Example request JSON:
- * {
- *   "enterprise_id": 1,
- *   "first_name_en": "Ahmed",
- *   "last_name_en": "Ali",
- *   "email": "ahmed.ali@example.com",
- *   "phone_number": "+96550000000",
- *   "date_of_birth": "1990-05-15",
- *   "gender_code": "M",
- *   "nationality": "KW",
- *   "contact_name": "Sara Ali",
- *   "relationship": "Spouse",
- *   "emerg_phone": "+96551111111",
- *   "work_schedule_id": 1,
- *   "bank_code": "BANK01",
- *   "account_number": "1234567890",
- *   "org_unit_id_hex": "A1B2C3D4E5F60718293A4B5C6D7E8F90",
- *   "enterprise_hire_date": "2024-01-01",
- *   "contract_type_code": "FULL_TIME",
- *   "employment_status": "ACTIVE",
- *   "housing_kwd": 150,
- *   "transport_kwd": 50,
- *   "other_kwd": 0
- * }
- *
- * Form-data (multipart): same fields as form fields + optional file field "document".
- * When "document" is uploaded, doc_file_name, doc_mime_type, doc_access_url, doc_hash_sha256 are set from the file.
- */
 async function createEmployeeAllInOneHandler(req, res) {
   const body = { ...(req.body || {}) };
-
-  // Force-read from raw req.body (form-data keys can vary)
   const raw = req.body || {};
   const civilVal = fromBody(raw, 'civil_id_number', 'civilIdNumber', 'CIVIL_ID_NUMBER', 'civil_id', 'CIVIL_ID', 'civil_number', 'civilID');
   let passportVal = fromBody(raw, 'passport_number', 'passportNumber', 'PASSPORT_NUMBER', 'passport', 'PASSPORT', 'passport_no', 'passportNo', 'PASSPORT_NO');
@@ -1246,33 +1029,18 @@ async function createEmployeeAllInOneHandler(req, res) {
   if (workPermitNumVal != null) body.work_permit_number = workPermitNumVal;
   if (workPermitExpiryVal != null && String(workPermitExpiryVal).trim() !== '' && String(workPermitExpiryVal).toLowerCase() !== 'null') body.work_permit_expiry = workPermitExpiryVal;
 
-  // Normalize document fields from form/JSON (so buildBinds sees them)
-  const docFileNameRaw = raw.doc_file_name ?? raw.docFileName ?? raw.DOC_FILE_NAME ?? raw.file_name ?? raw.fileName ?? raw.document_file_name;
   const docTypeRaw = raw.document_type_code ?? raw.documentTypeCode ?? raw.DOCUMENT_TYPE_CODE;
-  const docUrlRaw = raw.doc_access_url ?? raw.docAccessUrl ?? raw.DOC_ACCESS_URL;
-  const docMimeRaw = raw.doc_mime_type ?? raw.docMimeType ?? raw.DOC_MIME_TYPE;
-  const docHashRaw = raw.doc_hash_sha256 ?? raw.docHashSha256 ?? raw.DOC_HASH_SHA256;
-  if (docFileNameRaw != null && String(docFileNameRaw).trim() !== '') body.doc_file_name = String(docFileNameRaw).trim();
   if (docTypeRaw != null && String(docTypeRaw).trim() !== '') body.document_type_code = String(docTypeRaw).trim();
-  if (docUrlRaw != null && String(docUrlRaw).trim() !== '') body.doc_access_url = String(docUrlRaw).trim();
-  if (docMimeRaw != null && String(docMimeRaw).trim() !== '') body.doc_mime_type = String(docMimeRaw).trim();
-  if (docHashRaw != null && String(docHashRaw).trim() !== '') body.doc_hash_sha256 = String(docHashRaw).trim();
-
-  // If a file was uploaded, save it, compute hash, and set document fields for the procedure
-  if (req.file) {
-    const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
-    const ext = path.extname(req.file.originalname) || '';
-    const base = path.basename(req.file.originalname, ext).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filename = `${crypto.randomUUID()}${base ? `-${base}` : ''}${ext}`;
-    const filepath = path.join(UPLOADS_EMPLOYEES_DIR, filename);
-    fs.writeFileSync(filepath, req.file.buffer);
-    body.doc_file_name = req.file.originalname || filename;
-    body.doc_mime_type = req.file.mimetype || 'application/octet-stream';
-    body.doc_access_url = `/uploads/employees/${filename}`;
-    body.doc_hash_sha256 = hash;
-    if (body.document_type_code == null || body.document_type_code === '') {
-      body.document_type_code = 'EMPLOYEE_DOC';
-    }
+  const uploadedFile = getUploadedFile(req);
+  if (!uploadedFile) {
+    const docFileNameRaw = raw.doc_file_name ?? raw.docFileName ?? raw.DOC_FILE_NAME ?? raw.file_name ?? raw.fileName;
+    const docUrlRaw = raw.doc_access_url ?? raw.docAccessUrl ?? raw.DOC_ACCESS_URL;
+    const docMimeRaw = raw.doc_mime_type ?? raw.docMimeType ?? raw.DOC_MIME_TYPE;
+    const docHashRaw = raw.doc_hash_sha256 ?? raw.docHashSha256 ?? raw.DOC_HASH_SHA256;
+    if (docFileNameRaw != null && String(docFileNameRaw).trim() !== '') body.doc_file_name = String(docFileNameRaw).trim();
+    if (docUrlRaw != null && String(docUrlRaw).trim() !== '') body.doc_access_url = String(docUrlRaw).trim();
+    if (docMimeRaw != null && String(docMimeRaw).trim() !== '') body.doc_mime_type = String(docMimeRaw).trim();
+    if (docHashRaw != null && String(docHashRaw).trim() !== '') body.doc_hash_sha256 = String(docHashRaw).trim();
   }
 
   const validation = validateRequired(body);
@@ -1289,6 +1057,20 @@ async function createEmployeeAllInOneHandler(req, res) {
   try {
     connection = await getConnection();
     const { employeeId } = await createEmployeeAllInOne(connection, body);
+    if (uploadedFile) {
+      const documentTypeCode = body.document_type_code ?? raw.documentTypeCode ?? raw.document_type_code ?? 'EMPLOYEE_DOC';
+      const createdBy = req.user?.username ?? 'API';
+      const { documentGuid } = await insertDocument(connection, {
+        employeeId,
+        documentTypeCode,
+        fileName: uploadedFile.originalname || 'document',
+        mimeType: uploadedFile.mimetype || 'application/octet-stream',
+        fileContent: uploadedFile.buffer,
+        createdBy
+      });
+      const downloadUrl = `/documents/${documentGuid}/download`;
+      await updateDocumentAccessUrl(connection, documentGuid, downloadUrl);
+    }
     const data = await getEmployeeListRowByEmployeeId(employeeId);
     res.status(201).json({
       success: true,
@@ -1314,7 +1096,6 @@ async function createEmployeeAllInOneHandler(req, res) {
   }
 }
 
-// Canonical URL: POST {{baseUrl}}/api/create-employee
 const createEmployeeRouter = express.Router();
 createEmployeeRouter.post('/create-employee', maybeMulterAllInOne, asyncHandler(createEmployeeAllInOneHandler));
 
@@ -1343,13 +1124,6 @@ router.post('/', asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   PUT /api/employees/:id
- * @desc    Update an existing employee
- * @param   id - Employee ID (numeric) or GUID (32-char hex)
- * @body    { FIRST_NAME?, LAST_NAME?, EMAIL?, ... }
- * @access  Public
- */
 router.put('/:id', asyncHandler(async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -1358,10 +1132,8 @@ router.put('/:id', asyncHandler(async (req, res) => {
     let enterpriseId;
     let employeeId;
     let employeeGuid = null;
-    
-    // Check if it's a GUID (32-char hex)
+
     if (isHex32(normalizedId)) {
-      // For GUID lookup, we need to find the employee first to get enterprise_id
       const existingEmployee = await EmployeeModel.findByGuidHex(normalizedId);
       if (!existingEmployee) {
         return sendEmployee(res, req, null);
@@ -1370,7 +1142,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
       employeeId = existingEmployee.employee_id;
       employeeGuid = normalizedId;
     } else {
-      // Otherwise, treat as numeric ID
       enterpriseId = getEnterprise(req);
       if (!enterpriseId || isNaN(enterpriseId)) {
         return sendBadRequest(res, req, 'ENTERPRISE_ID is required');
@@ -1390,7 +1161,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
 
-    // Check if employee exists (if not already checked for GUID)
     if (!employeeGuid) {
       const existingEmployee = await EmployeeModel.findById(enterpriseId, employeeId);
       if (!existingEmployee) {
@@ -1409,12 +1179,6 @@ router.put('/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-/**
- * @route   DELETE /api/employees/:id
- * @desc    Delete an employee (hard delete)
- * @param   id - Employee ID (numeric) or GUID (32-char hex)
- * @access  Public
- */
 router.delete('/:id', asyncHandler(async (req, res) => {
   try {
     const idParam = req.params.id;
@@ -1424,10 +1188,8 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     let employeeId;
     
     let employeeToDelete;
-    
-    // Check if it's a GUID (32-char hex)
+
     if (isHex32(normalizedId)) {
-      // For GUID lookup, we need to find the employee first to get enterprise_id and employee_id
       employeeToDelete = await EmployeeModel.findByGuidHex(normalizedId);
       if (!employeeToDelete) {
         return sendEmployee(res, req, null);
@@ -1435,7 +1197,6 @@ router.delete('/:id', asyncHandler(async (req, res) => {
       enterpriseId = employeeToDelete.enterprise_id;
       employeeId = employeeToDelete.employee_id;
     } else {
-      // Otherwise, treat as numeric ID
       enterpriseId = getEnterprise(req);
       if (!enterpriseId || isNaN(enterpriseId)) {
         return sendBadRequest(res, req, 'ENTERPRISE_ID is required');
@@ -1446,15 +1207,12 @@ router.delete('/:id', asyncHandler(async (req, res) => {
       if (isNaN(employeeId)) {
         return sendBadRequest(res, req, 'Invalid EMPLOYEE_ID format. Must be numeric ID or 32-character GUID');
       }
-      
-      // Get the employee data before deleting
       employeeToDelete = await EmployeeModel.findById(enterpriseId, employeeId);
       if (!employeeToDelete) {
         return sendEmployee(res, req, null);
       }
     }
 
-    // Delete the employee
     const result = await EmployeeModel.remove(enterpriseId, employeeId);
     sendDeleted(res, req, 'Employee deleted successfully', employeeToDelete);
   } catch (error) {
@@ -1462,5 +1220,56 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   }
 }));
 
+function validateDocumentGuid(guid) {
+  const raw = String(guid ?? '').trim().replace(/-/g, '');
+  if (raw.length !== 32 || !/^[0-9a-fA-F]+$/.test(raw)) return null;
+  return raw.toUpperCase();
+}
+
+const SQL_DOCUMENT_BLOB_BY_GUID = `
+  SELECT FILE_NAME, MIME_TYPE, FILE_CONTENT
+  FROM EMPL.DOCUMENTS
+  WHERE DOCUMENT_GUID = HEXTORAW(:guid) AND IS_ACTIVE = 'Y'
+`;
+
+const documentsDownloadRouter = express.Router();
+documentsDownloadRouter.get('/:documentGuid/download', asyncHandler(async (req, res) => {
+  const guid = validateDocumentGuid(req.params.documentGuid);
+  if (!guid) {
+    return sendBadRequest(res, req, 'documentGuid must be a 32-character hex string');
+  }
+  let connection;
+  try {
+    connection = await getConnection();
+    const result = await connection.execute(
+      SQL_DOCUMENT_BLOB_BY_GUID,
+      { guid },
+      {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: { FILE_CONTENT: { type: oracledb.BUFFER } }
+      }
+    );
+    const row = result.rows?.[0] ?? null;
+    if (!row) {
+      return sendNotFound(res, req, 'Document not found');
+    }
+    const fileName = row.FILE_NAME ?? row.file_name ?? 'document';
+    const mimeType = row.MIME_TYPE ?? row.mime_type ?? 'application/octet-stream';
+    const fileContent = row.FILE_CONTENT ?? row.file_content;
+    if (fileContent == null) {
+      return sendNotFound(res, req, 'Document content not found');
+    }
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    res.send(Buffer.isBuffer(fileContent) ? fileContent : Buffer.from(fileContent));
+  } catch (err) {
+    sendServerError(res, req, 'Failed to download document', {
+      message: err?.message ?? String(err)
+    });
+  } finally {
+    if (connection) try { await connection.close(); } catch (_) {}
+  }
+}));
+
 export default router;
-export { createEmployeeRouter };
+export { createEmployeeRouter, documentsDownloadRouter };
