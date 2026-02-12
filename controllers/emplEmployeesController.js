@@ -110,7 +110,7 @@ export function maybeMulterUpdateAllInOne(req, res, next) {
  *   replace_document_id: number (optional; when REPLACE, target specific doc row)
  *   document_type_code, doc_file_name, doc_mime_type, doc_access_url, doc_hash_sha256, doc_file_content: optional
  *   File: field name "file" or "document" (multipart only); optional.
- * 200: { success: true, employee_id, document: { documentId, documentGuid } (may be null), data? }
+ * 200: { success: true, employee_id, data? } or with document: { documentId, documentGuid } when a doc op was performed
  * 400: validation or Oracle error
  * 404: employee not found
  */
@@ -178,12 +178,11 @@ export async function updateEmployeeAllInOneHandler(req, res) {
       : {};
     const { documentId, documentGuid } = await updateEmployeeAllInOne(connection, employeeId, body, fileOpts);
     const data = await getEmployeeListRowByEmployeeId(empId);
-    return res.status(200).json({
-      success: true,
-      employee_id: empId,
-      document: { documentId: documentId ?? null, documentGuid: documentGuid ?? null },
-      ...(data != null && { data })
-    });
+    const payload = { success: true, employee_id: empId, ...(data != null && { data }) };
+    if (documentId != null || documentGuid != null) {
+      payload.document = { documentId: documentId ?? null, documentGuid: documentGuid ?? null };
+    }
+    return res.status(200).json(payload);
   } catch (err) {
     const msg = err?.message ?? String(err);
     const isOracle = err?.errorNum != null || ORA_ERROR_REGEX.test(msg);
