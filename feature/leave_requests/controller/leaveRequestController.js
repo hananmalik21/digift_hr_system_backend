@@ -1158,6 +1158,41 @@ router.get('/:guid/documents', async (req, res) => {
 export const employeeLeaveRequestsRouter = express.Router();
 
 /**
+ * @route   GET /api/abs/employees/:employeeGuid/leave-requests/stats
+ * @desc    Get leave request counts for one employee: total, submitted, approved, rejected, with document attached
+ * @param   employeeGuid - Employee GUID (32-char hex string)
+ * @header  x-tenant-id - Required tenant ID
+ */
+employeeLeaveRequestsRouter.get('/employees/:employeeGuid/leave-requests/stats', async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    const parsed = parseGuidParam(req, res, 'employeeGuid');
+    if (!parsed) return;
+    const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, parsed.guidHex32);
+    if (!employeeId) {
+      return sendNotFound(res, req, 'Employee not found for the provided employee_guid');
+    }
+
+    const counts = await LeaveRequestModel.getCounts({ tenantId, employeeId });
+
+    res.json({
+      success: true,
+      data: [{
+        total_leave_requests: counts.total,
+        submitted_leave_requests: counts.submitted_count,
+        approved_leave_requests: counts.approved_count,
+        rejected_leave_requests: counts.rejected_count
+      }]
+    });
+  } catch (error) {
+    if (error.message?.includes('Tenant ID is required')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave request counts for employee', error);
+  }
+});
+
+/**
  * @route   GET /api/abs/employees/:employeeGuid/leave-requests
  * @desc    Get leave requests for a single employee by employee GUID
  * @param   employeeGuid - Employee GUID (32-char hex string)
@@ -1179,7 +1214,7 @@ employeeLeaveRequestsRouter.get('/employees/:employeeGuid/leave-requests', async
       return sendNotFound(res, req, 'Employee not found for the provided employee_guid');
     }
 
-    const filters = { tenantId, employeeId };
+    const filters = { tenantId, employeeId, includeFirstDocument: true };
     const parsedQuery = parseListQueryFilters(req);
     if (parsedQuery.error) {
       return sendBadRequest(res, req, parsedQuery.error);
@@ -1188,6 +1223,11 @@ employeeLeaveRequestsRouter.get('/employees/:employeeGuid/leave-requests', async
 
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;
+
+    leaveRequests.forEach((lr) => {
+      if (lr.leave_document_info) attachDocumentUrls(lr.leave_document_info, req);
+    });
+
     const paginationMeta = buildPaginationMeta(
       filters.pagination.page,
       filters.pagination.pageSize,

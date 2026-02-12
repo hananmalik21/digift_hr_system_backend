@@ -64,6 +64,16 @@ export function generateBaseMetadata(req, additionalMeta = {}) {
   };
 }
 
+/** Return only document_id, document_guid, download_url from leave_document_info. */
+function slimLeaveDocumentInfo(doc) {
+  if (doc == null || typeof doc !== 'object') return null;
+  return {
+    document_id: doc.document_id ?? null,
+    document_guid: doc.document_guid ?? null,
+    download_url: doc.download_url ?? null
+  };
+}
+
 /**
  * Send list of leave requests
  * @param {Object} res - Express response object
@@ -103,20 +113,20 @@ export function sendLeaveRequestList(res, req, leaveRequests, meta = {}) {
 
   const convertedData = convertKeysToSnakeCase(leaveRequests);
   
-  // Wrap each leave request in a "leave_details" object
-  // For list endpoint, only return leave_details (no contact/document info)
+  // Wrap each leave request in a "leave_details" object; include leave_document_info (null or object)
   const wrappedData = Array.isArray(convertedData)
     ? convertedData.map(item => {
-        // Remove leave_contact_info and leave_document_info if they exist (shouldn't for list endpoint)
         const { leave_contact_info, leave_document_info, ...leaveDetails } = item;
         return {
-          leave_details: leaveDetails
+          leave_details: leaveDetails,
+          leave_document_info: slimLeaveDocumentInfo(leave_document_info)
         };
       })
     : (() => {
         const { leave_contact_info, leave_document_info, ...leaveDetails } = convertedData;
         return [{
-          leave_details: leaveDetails
+          leave_details: leaveDetails,
+          leave_document_info: slimLeaveDocumentInfo(leave_document_info)
         }];
       })();
   
@@ -140,11 +150,11 @@ export function sendLeaveRequest(res, req, leaveRequest) {
   // Separate leave_contact_info and leave_document_info from leave_details
   const { leave_contact_info, leave_document_info, ...leaveDetails } = convertedData;
   
-  // Wrap leave request in a "leave_details" object
+  // Wrap leave request in a "leave_details" object; leave_document_info only document_id, document_guid, download_url
   const wrappedData = {
     leave_details: leaveDetails,
     leave_contact_info: leave_contact_info || null,
-    leave_document_info: leave_document_info || null
+    leave_document_info: slimLeaveDocumentInfo(leave_document_info)
   };
   
   res.json({

@@ -207,6 +207,47 @@ class LeaveDocumentModel {
   }
 
   /**
+   * Fetch first document (by CREATION_DATE DESC) per leave request for many IDs in one query.
+   * @param {number[]} leaveRequestIds - Array of LEAVE_REQUEST_ID values
+   * @returns {Promise<Map<number, Object>>} Map of leave_request_id -> document row (snake_case)
+   */
+  static async findFirstByLeaveRequestIds(leaveRequestIds) {
+    if (!Array.isArray(leaveRequestIds) || leaveRequestIds.length === 0) {
+      return new Map();
+    }
+    try {
+      const ids = leaveRequestIds.map(id => parseInt(id)).filter(n => !isNaN(n));
+      if (ids.length === 0) return new Map();
+
+      const placeholders = ids.map((_, i) => `:${i + 1}`).join(', ');
+      const query = `SELECT DOCUMENT_ID, DOCUMENT_GUID, LEAVE_REQUEST_ID, FILE_NAME, FILE_TYPE, FILE_SIZE_MB, FILE_URL, FILE_HASH, CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+        FROM (
+          SELECT a.DOCUMENT_ID, RAWTOHEX(a.DOCUMENT_GUID) AS DOCUMENT_GUID, a.LEAVE_REQUEST_ID,
+                 a.FILE_NAME, a.FILE_TYPE, a.FILE_SIZE_MB, a.FILE_URL, a.FILE_HASH,
+                 a.CREATION_DATE, a.CREATED_BY, a.LAST_UPDATE_DATE, a.LAST_UPDATED_BY,
+                 ROW_NUMBER() OVER (PARTITION BY a.LEAVE_REQUEST_ID ORDER BY a.CREATION_DATE DESC) AS rn
+          FROM ${this.TABLE_NAME} a
+          WHERE a.LEAVE_REQUEST_ID IN (${placeholders})
+        )
+        WHERE rn = 1`;
+
+      const result = await this.executeQuery(query, ids);
+      const rows = result.rows || [];
+      const map = new Map();
+      for (const row of rows) {
+        const lid = row.leave_request_id;
+        if (lid != null && !map.has(lid)) map.set(lid, row);
+      }
+      return map;
+    } catch (error) {
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+      }
+      throw new DatabaseError('Failed to fetch leave documents by request IDs', error);
+    }
+  }
+
+  /**
    * Fetch a document including BLOB (for download).
    * NOTE: This returns FILE_BLOB as whatever your driver/db helper returns.
    * If you want true streaming LOBs, handle it at controller level with a raw connection.

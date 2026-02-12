@@ -81,13 +81,21 @@ class LeaveRequestModel {
       lt_leave_name_en,
       lt_leave_name_ar,
       lt_leave_code,
+      doc_document_id,
+      doc_document_guid,
       ...leaveRequestData
     } = row;
+
+    const leaveDocumentInfo =
+      doc_document_id != null && doc_document_guid != null
+        ? { document_id: doc_document_id, document_guid: doc_document_guid }
+        : null;
 
     return {
       ...leaveRequestData,
       employee_info: employeeInfo,
-      leave_type_info: leaveTypeInfo
+      leave_type_info: leaveTypeInfo,
+      ...(leaveDocumentInfo && { leave_document_info: leaveDocumentInfo })
     };
   }
 
@@ -220,9 +228,23 @@ class LeaveRequestModel {
       const countBind = [...bindParams];
       const dataBind = [...bindParams];
 
+      const includeFirstDocument = filters.includeFirstDocument === true;
+      const docSelect = includeFirstDocument
+        ? `, doc.DOCUMENT_ID AS DOC_DOCUMENT_ID, doc.DOCUMENT_GUID AS DOC_DOCUMENT_GUID`
+        : '';
+      const docJoin = includeFirstDocument
+        ? ` LEFT JOIN (
+          SELECT LEAVE_REQUEST_ID, DOCUMENT_ID, DOCUMENT_GUID
+          FROM (
+            SELECT a.LEAVE_REQUEST_ID, a.DOCUMENT_ID, RAWTOHEX(a.DOCUMENT_GUID) AS DOCUMENT_GUID,
+                   ROW_NUMBER() OVER (PARTITION BY a.LEAVE_REQUEST_ID ORDER BY a.CREATION_DATE DESC) AS rn
+            FROM ABS.ABS_LEAVE_DOCUMENTS a
+          ) WHERE rn = 1
+        ) doc ON doc.LEAVE_REQUEST_ID = a.LEAVE_REQUEST_ID`
+        : '';
+
       // Run COUNT and data query in parallel to reduce response time
       // ORDER BY START_DATE DESC first (most selective), then CREATION_DATE DESC as tiebreaker
-      // This ordering supports efficient index scans
       // JOIN with EMPL.EMPLOYEES and ABS.ABS_LEAVE_TYPES to get employee and leave type details
       const dataQuery = `SELECT 
         a.LEAVE_REQUEST_ID,
@@ -243,7 +265,8 @@ class LeaveRequestModel {
         a.CREATED_BY,
         a.LAST_UPDATE_DATE,
         a.LAST_UPDATED_BY,
-        c.REASON_FOR_LEAVE,
+        c.REASON_FOR_LEAVE
+        ${docSelect},
         -- Employee information (limited fields)
         e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
@@ -284,6 +307,7 @@ class LeaveRequestModel {
        AND a.TENANT_ID = lt.TENANT_ID
       LEFT JOIN ABS.ABS_LEAVE_CONTACTS c
         ON a.LEAVE_REQUEST_ID = c.LEAVE_REQUEST_ID
+      ${docJoin}
       ${whereClause}
       ORDER BY a.START_DATE DESC NULLS LAST, a.CREATION_DATE DESC
       OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
@@ -307,6 +331,83 @@ class LeaveRequestModel {
       }
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to fetch leave requests', error);
+    }
+  }
+
+  /**
+   * Get counts of leave requests: total, approved, rejected, and count with document attached.
+   * @param {Object} filters - { tenantId (required), employeeId (optional, for one employee) }
+   * @returns {Promise<{ total, submitted_count, approved_count, rejected_count, with_document_count }>}
+   */
+  static async getCounts(filters = {}) {
+    try {
+      const conditions = [];
+      const bindParams = [];
+      let paramIndex = 1;
+
+      if (filters.tenantId) {
+        conditions.push(`a.TENANT_ID = :${paramIndex}`);
+        bindParams.push(parseInt(filters.tenantId));
+        paramIndex++;
+      }
+
+      if (filters.employeeId) {
+        conditions.push(`a.EMPLOYEE_ID = :${paramIndex}`);
+        bindParams.push(parseInt(filters.employeeId));
+        paramIndex++;
+      }
+
+      const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
+
+      // Query 1: total, submitted, approved, rejected (no scalar subquery to avoid ORA-00937)
+      const mainQuery = `SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN a.REQUEST_STATUS = 'SUBMITTED' THEN 1 ELSE 0 END) AS submitted_count,
+        SUM(CASE WHEN a.REQUEST_STATUS = 'APPROVED' THEN 1 ELSE 0 END) AS approved_count,
+        SUM(CASE WHEN a.REQUEST_STATUS = 'REJECTED' THEN 1 ELSE 0 END) AS rejected_count
+      FROM ${this.TABLE_NAME} a
+      ${whereClause}`;
+
+      const [mainResult, docResult] = await Promise.all([
+        this.executeQuery(mainQuery, bindParams),
+        (() => {
+          const docConditions = [];
+          const docBinds = [];
+          let di = 1;
+          if (filters.tenantId) {
+            docConditions.push(`r.TENANT_ID = :${di}`);
+            docBinds.push(parseInt(filters.tenantId));
+            di++;
+          }
+          if (filters.employeeId) {
+            docConditions.push(`r.EMPLOYEE_ID = :${di}`);
+            docBinds.push(parseInt(filters.employeeId));
+          }
+          const docWhere = docConditions.length > 0 ? ` WHERE ${docConditions.join(' AND ')}` : '';
+          const docQuery = `SELECT COUNT(DISTINCT r.LEAVE_REQUEST_ID) AS with_document_count
+            FROM ABS.ABS_LEAVE_DOCUMENTS d
+            INNER JOIN ${this.TABLE_NAME} r ON r.LEAVE_REQUEST_ID = d.LEAVE_REQUEST_ID
+            ${docWhere}`;
+          return this.executeQuery(docQuery, docBinds);
+        })()
+      ]);
+
+      const row = mainResult.rows?.[0];
+      const docRow = docResult.rows?.[0];
+
+      return {
+        total: Number(row?.total) || 0,
+        submitted_count: Number(row?.submitted_count) || 0,
+        approved_count: Number(row?.approved_count) || 0,
+        rejected_count: Number(row?.rejected_count) || 0,
+        with_document_count: Number(docRow?.with_document_count) || 0
+      };
+    } catch (error) {
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+      }
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to fetch leave request counts', error);
     }
   }
 
