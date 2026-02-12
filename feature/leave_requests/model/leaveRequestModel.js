@@ -168,6 +168,7 @@ class LeaveRequestModel {
         a.CREATED_BY,
         a.LAST_UPDATE_DATE,
         a.LAST_UPDATED_BY,
+        c.REASON_FOR_LEAVE,
         -- Employee information (limited fields)
         e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
@@ -192,6 +193,8 @@ class LeaveRequestModel {
       LEFT JOIN ABS.ABS_LEAVE_TYPES lt
         ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
        AND a.TENANT_ID = lt.TENANT_ID
+      LEFT JOIN ABS.ABS_LEAVE_CONTACTS c
+        ON a.LEAVE_REQUEST_ID = c.LEAVE_REQUEST_ID
       ${whereClause}
       ORDER BY a.START_DATE DESC NULLS LAST, a.CREATION_DATE DESC
       OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
@@ -297,6 +300,7 @@ class LeaveRequestModel {
         a.CREATED_BY,
         a.LAST_UPDATE_DATE,
         a.LAST_UPDATED_BY,
+        c.REASON_FOR_LEAVE,
         -- Employee information (limited fields)
         e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
         RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
@@ -321,6 +325,8 @@ class LeaveRequestModel {
       LEFT JOIN ABS.ABS_LEAVE_TYPES lt
         ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
        AND a.TENANT_ID = lt.TENANT_ID
+      LEFT JOIN ABS.ABS_LEAVE_CONTACTS c
+        ON a.LEAVE_REQUEST_ID = c.LEAVE_REQUEST_ID
       WHERE a.LEAVE_REQUEST_GUID = :1`;
 
       const result = await this.executeQuery(query, [guidBuffer]);

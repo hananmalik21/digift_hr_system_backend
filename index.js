@@ -36,7 +36,7 @@ import holidayController from './feature/holidays/controller/holidayController.j
 import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
 import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
 import leaveTypeAccrualController from './feature/leave_type_accrual/controller/leaveTypeAccrualController.js';
-import leaveRequestController from './feature/leave_requests/controller/leaveRequestController.js';
+import leaveRequestController, { employeeLeaveRequestsRouter } from './feature/leave_requests/controller/leaveRequestController.js';
 import leaveContactController from './feature/leave_contacts/controller/leaveContactController.js';
 import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
 import employeeLeaveBalanceController from './feature/employee_leave_balances/controller/employeeLeaveBalanceController.js';
@@ -142,6 +142,7 @@ app.use('/api/abs/accrual-plans', accrualPlanController);
 app.use('/api/abs/leave-types', leaveTypeController);
 app.use('/api/abs/leave-type-accrual', leaveTypeAccrualController);
 app.use('/api/abs/leave-requests', leaveRequestController);
+app.use('/api/abs', employeeLeaveRequestsRouter);
 app.use('/api/abs/leave-contacts', leaveContactController);
 app.use('/api/abs/leave-documents', leaveDocumentController);
 app.use('/api/abs/lookups', absLookupController);

@@ -239,7 +239,7 @@ function validateLeaveRequestData(data, isUpdate = false) {
 
 /**
  * @route   GET /api/abs/leave-requests
- * @desc    Get all leave requests with optional filtering and pagination
+ * @desc    Get all leave requests with optional filtering and pagination. Each item includes reason_for_leave (leave reason) from contact when present.
  * @query   status - Filter by REQUEST_STATUS (DRAFT, PENDING, APPROVED, REJECTED, CANCELLED)
  * @query   employee_guid - Filter by employee GUID (hex32)
  * @query   employeeId - Filter by EMPLOYEE_ID
@@ -413,7 +413,7 @@ router.get('/:guid/contact', async (req, res) => {
 
 /**
  * @route   GET /api/abs/leave-requests/:guid
- * @desc    Get a single leave request by GUID
+ * @desc    Get a single leave request by GUID. Response includes reason_for_leave (leave reason) at top level and in leave_contact_info when present.
  */
 router.get('/:guid', async (req, res) => {
   try {
@@ -1308,6 +1308,92 @@ router.get('/:guid/contact', async (req, res) => {
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to fetch leave request contact', error);
+  }
+});
+
+// =============================================================================
+// Employee-scoped leave requests (mounted at /api/abs so path is /api/abs/employees/:employeeGuid/leave-requests)
+// =============================================================================
+
+export const employeeLeaveRequestsRouter = express.Router();
+
+/**
+ * @route   GET /api/abs/employees/:employeeGuid/leave-requests
+ * @desc    Get leave requests for a single employee by employee GUID
+ * @param   employeeGuid - Employee GUID (32-char hex string)
+ * @query   status - Optional filter by REQUEST_STATUS (DRAFT, SUBMITTED, APPROVED, REJECTED, CANCELLED)
+ * @query   leaveTypeId - Optional filter by LEAVE_TYPE_ID
+ * @query   startDateFrom - Optional filter START_DATE >= date
+ * @query   startDateTo - Optional filter START_DATE <= date
+ * @query   page - Page number (default: 1)
+ * @query   page_size - Page size (default: 10, max: 100)
+ * @header  x-tenant-id - Required tenant ID
+ */
+employeeLeaveRequestsRouter.get('/employees/:employeeGuid/leave-requests', async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    let employeeGuidHex;
+    try {
+      employeeGuidHex = parseGuid(req.params.employeeGuid, 'employeeGuid');
+    } catch (parseError) {
+      return sendBadRequest(res, req, parseError.message);
+    }
+
+    const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, employeeGuidHex);
+    if (!employeeId) {
+      return sendNotFound(res, req, 'Employee not found for the provided employee_guid');
+    }
+
+    const filters = {
+      tenantId,
+      employeeId
+    };
+
+    if (req.query.status) {
+      filters.status = req.query.status.toUpperCase();
+    }
+    if (req.query.leaveTypeId !== undefined) {
+      filters.leaveTypeId = parseInt(req.query.leaveTypeId);
+      if (isNaN(filters.leaveTypeId)) {
+        return sendBadRequest(res, req, 'Invalid leaveTypeId parameter');
+      }
+    }
+    if (req.query.startDateFrom) {
+      filters.startDateFrom = new Date(req.query.startDateFrom);
+      if (isNaN(filters.startDateFrom.getTime())) {
+        return sendBadRequest(res, req, 'Invalid startDateFrom parameter');
+      }
+    }
+    if (req.query.startDateTo) {
+      filters.startDateTo = new Date(req.query.startDateTo);
+      if (isNaN(filters.startDateTo.getTime())) {
+        return sendBadRequest(res, req, 'Invalid startDateTo parameter');
+      }
+    }
+
+    try {
+      filters.pagination = parsePagination(req.query);
+    } catch (paginationError) {
+      return sendBadRequest(res, req, paginationError.message);
+    }
+
+    const result = await LeaveRequestModel.findAll(filters);
+    const { leaveRequests, total } = result;
+    const paginationMeta = buildPaginationMeta(
+      filters.pagination.page,
+      filters.pagination.pageSize,
+      total
+    );
+
+    sendLeaveRequestList(res, req, leaveRequests, {
+      total,
+      pagination: paginationMeta
+    });
+  } catch (error) {
+    if (error.message?.includes('Tenant ID is required')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave requests for employee', error);
   }
 });
 
