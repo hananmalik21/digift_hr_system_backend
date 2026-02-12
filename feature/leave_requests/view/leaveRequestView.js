@@ -53,12 +53,12 @@ function convertKeysToSnakeCase(obj) {
 }
 
 /**
- * Generate base metadata
+ * Generate base metadata (exported for controller use)
  * @param {Object} req - Express request object
  * @param {Object} additionalMeta - Additional metadata to include
  * @returns {Object} Base metadata object
  */
-function generateBaseMetadata(req, additionalMeta = {}) {
+export function generateBaseMetadata(req, additionalMeta = {}) {
   return {
     ...additionalMeta
   };
@@ -156,17 +156,15 @@ export function sendLeaveRequest(res, req, leaveRequest) {
 }
 
 /**
- * Generate base URL for document endpoints
+ * Generate base URL for document endpoints (exported for controller use)
  * @param {Object} req - Express request object
  * @returns {string} Base URL
  */
-function generateBaseUrl(req) {
+export function getDocumentBaseUrl(req) {
   const baseUrl = process.env.API_BASE_URL;
   if (baseUrl) {
     return baseUrl;
   }
-  
-  // Fallback: construct from request
   let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
   if (protocol.includes(',')) {
     protocol = protocol.split(',')[0].trim();
@@ -182,14 +180,31 @@ function generateBaseUrl(req) {
 }
 
 /**
+ * Get download and preview URLs for a leave document (shared with controller)
+ * @param {Object} req - Express request object
+ * @param {string} documentGuid - Document GUID
+ * @returns {{ download_url: string, preview_url: string }}
+ */
+export function getDocumentUrls(req, documentGuid) {
+  const baseUrl = getDocumentBaseUrl(req);
+  return {
+    download_url: `${baseUrl}/api/abs/leave-documents/${documentGuid}/download`,
+    preview_url: `${baseUrl}/api/abs/leave-documents/${documentGuid}/preview`
+  };
+}
+
+function generateBaseUrl(req) {
+  return getDocumentBaseUrl(req);
+}
+
+/**
  * Generate download URL for a document
  * @param {Object} req - Express request object
  * @param {string} documentGuid - Document GUID
  * @returns {string} Download URL
  */
 function generateDownloadUrl(req, documentGuid) {
-  const baseUrl = generateBaseUrl(req);
-  return `${baseUrl}/api/abs/leave-documents/${documentGuid}/download`;
+  return getDocumentUrls(req, documentGuid).download_url;
 }
 
 /**
@@ -199,8 +214,7 @@ function generateDownloadUrl(req, documentGuid) {
  * @returns {string} Preview URL
  */
 function generatePreviewUrl(req, documentGuid) {
-  const baseUrl = generateBaseUrl(req);
-  return `${baseUrl}/api/abs/leave-documents/${documentGuid}/preview`;
+  return getDocumentUrls(req, documentGuid).preview_url;
 }
 
 /**

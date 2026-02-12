@@ -13,29 +13,31 @@ import {
   sendBadRequest,
   sendServerError,
   sendNotFound,
-  sendConflict
+  sendConflict,
+  generateBaseMetadata,
+  getDocumentUrls
 } from '../view/leaveRequestView.js';
-
-// Helper function to generate base metadata (same as in view)
-function generateBaseMetadata(req, additionalMeta = {}) {
-  return {
-    ...additionalMeta
-  };
-}
 import { parseGuid } from '../../../utils/guidUtils.js';
 import { ValidationError } from '../../../utils/errors/index.js';
 
-// Configure multer for file uploads (memory storage)
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+const VALID_PORTIONS = ['FULL_DAY', 'HALF_AM', 'HALF_PM', 'HOURS'];
+const VALID_REQUEST_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
+const DEFAULT_PAGE = 1;
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
+const FILE_SIZE_LIMIT_MB = 10;
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit per file
+    fileSize: FILE_SIZE_LIMIT_MB * 1024 * 1024
   }
 });
 
-// Middleware to accept multiple files with field name 'documents'
-// Using array() instead of fields() to allow multiple files with the same field name
-const uploadDocuments = upload.array('documents', 10); // Allow up to 10 files
+const uploadDocuments = upload.array('documents', 10);
 
 const router = express.Router();
 
@@ -75,8 +77,8 @@ function getUserId(req) {
  * Parse and validate pagination parameters
  */
 function parsePagination(query) {
-  let page = 1;
-  let pageSize = 10;
+  let page = DEFAULT_PAGE;
+  let pageSize = DEFAULT_PAGE_SIZE;
 
   if (query.page !== undefined) {
     const parsedPage = parseInt(query.page);
@@ -91,10 +93,84 @@ function parsePagination(query) {
     if (isNaN(parsedPageSize) || parsedPageSize < 1) {
       throw new Error('Invalid page_size. Must be a positive integer.');
     }
-    pageSize = Math.min(100, parsedPageSize);
+    pageSize = Math.min(MAX_PAGE_SIZE, parsedPageSize);
   }
 
   return { page, pageSize };
+}
+
+/**
+ * Parse GUID param; on failure sends 400 and returns null.
+ * @returns {{ guidHex32: string } | null}
+ */
+function parseGuidParam(req, res, paramName) {
+  try {
+    const guidHex32 = parseGuid(req.params[paramName], paramName);
+    return { guidHex32 };
+  } catch (parseError) {
+    sendBadRequest(res, req, parseError.message);
+    return null;
+  }
+}
+
+/** Returns true if error is due to invalid GUID format. */
+function isInvalidGuidError(error) {
+  return (
+    error?.message?.includes('must be a 32-character hex GUID') ||
+    error?.message?.includes('Invalid guid format')
+  );
+}
+
+/** Normalize submit flag from body (string or boolean). */
+function normalizeSubmitValue(value) {
+  if (value === undefined) return true;
+  return value === true || value === 'true' || value === 'TRUE';
+}
+
+/** Attach download_url and preview_url to doc if it has document_guid. */
+function attachDocumentUrls(doc, req) {
+  if (doc?.document_guid) {
+    Object.assign(doc, getDocumentUrls(req, doc.document_guid));
+  }
+  return doc;
+}
+
+/**
+ * Parse common list query filters (status, leaveTypeId, dates, pagination).
+ * Returns { filters, error? }. If error is set, caller should send BadRequest and return.
+ */
+function parseListQueryFilters(req) {
+  const filters = {};
+  if (req.query.status) {
+    filters.status = req.query.status.toUpperCase();
+  }
+  if (req.query.leaveTypeId !== undefined) {
+    const leaveTypeId = parseInt(req.query.leaveTypeId);
+    if (isNaN(leaveTypeId)) {
+      return { error: 'Invalid leaveTypeId parameter' };
+    }
+    filters.leaveTypeId = leaveTypeId;
+  }
+  if (req.query.startDateFrom) {
+    const startDateFrom = new Date(req.query.startDateFrom);
+    if (isNaN(startDateFrom.getTime())) {
+      return { error: 'Invalid startDateFrom parameter' };
+    }
+    filters.startDateFrom = startDateFrom;
+  }
+  if (req.query.startDateTo) {
+    const startDateTo = new Date(req.query.startDateTo);
+    if (isNaN(startDateTo.getTime())) {
+      return { error: 'Invalid startDateTo parameter' };
+    }
+    filters.startDateTo = startDateTo;
+  }
+  try {
+    filters.pagination = parsePagination(req.query);
+  } catch (e) {
+    return { error: e.message };
+  }
+  return { filters };
 }
 
 /**
@@ -227,10 +303,9 @@ function validateLeaveRequestData(data, isUpdate = false) {
 
   // Validate REQUEST_STATUS if provided
   if (data.REQUEST_STATUS !== undefined && data.REQUEST_STATUS !== null) {
-    const validStatuses = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
     const statusUpper = data.REQUEST_STATUS.toUpperCase();
-    if (!validStatuses.includes(statusUpper)) {
-      errors.push(`REQUEST_STATUS must be one of: ${validStatuses.join(', ')}`);
+    if (!VALID_REQUEST_STATUSES.includes(statusUpper)) {
+      errors.push(`REQUEST_STATUS must be one of: ${VALID_REQUEST_STATUSES.join(', ')}`);
     }
   }
 
@@ -267,11 +342,6 @@ router.get('/', async (req, res) => {
       filters.tenantId = tenantIdFromHeader;
     }
 
-    // Filter by REQUEST_STATUS
-    if (req.query.status) {
-      filters.status = req.query.status.toUpperCase();
-    }
-
     // Filter by employee_guid (resolve to employeeId)
     if (req.query.employee_guid) {
       try {
@@ -302,34 +372,12 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Filter by LEAVE_TYPE_ID
-    if (req.query.leaveTypeId) {
-      filters.leaveTypeId = parseInt(req.query.leaveTypeId);
-      if (isNaN(filters.leaveTypeId)) {
-        return sendBadRequest(res, req, 'Invalid leaveTypeId parameter');
-      }
+    // Common query filters (leaveTypeId, dates, pagination)
+    const parsedQuery = parseListQueryFilters(req);
+    if (parsedQuery.error) {
+      return sendBadRequest(res, req, parsedQuery.error);
     }
-
-    // Date range filters
-    if (req.query.startDateFrom) {
-      filters.startDateFrom = new Date(req.query.startDateFrom);
-      if (isNaN(filters.startDateFrom.getTime())) {
-        return sendBadRequest(res, req, 'Invalid startDateFrom parameter');
-      }
-    }
-    if (req.query.startDateTo) {
-      filters.startDateTo = new Date(req.query.startDateTo);
-      if (isNaN(filters.startDateTo.getTime())) {
-        return sendBadRequest(res, req, 'Invalid startDateTo parameter');
-      }
-    }
-
-    // Parse pagination
-    try {
-      filters.pagination = parsePagination(req.query);
-    } catch (paginationError) {
-      return sendBadRequest(res, req, paginationError.message);
-    }
+    Object.assign(filters, parsedQuery.filters);
 
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;
@@ -357,24 +405,16 @@ router.get('/', async (req, res) => {
  */
 router.get('/:guid/documents', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
+    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
-
     const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
     sendLeaveRequestList(res, req, documents || [], { total: documents?.length || 0 });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
-      return sendBadRequest(res, req, error.message);
-    }
+    if (isInvalidGuidError(error)) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch leave request documents', error);
   }
 });
@@ -385,28 +425,19 @@ router.get('/:guid/documents', async (req, res) => {
  */
 router.get('/:guid/contact', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
+    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
-
     const contact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
     if (!contact) {
       return sendNotFound(res, req, 'Contact information not found for this leave request');
     }
-
     sendLeaveRequest(res, req, contact);
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
-      return sendBadRequest(res, req, error.message);
-    }
+    if (isInvalidGuidError(error)) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch leave request contact', error);
   }
 });
@@ -417,84 +448,32 @@ router.get('/:guid/contact', async (req, res) => {
  */
 router.get('/:guid', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
-    
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
+    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
-
-    // Fetch leave contact information
-    let leaveContact = null;
-    try {
-      leaveContact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-    } catch (error) {
-      console.error(`Error fetching leave contact for request ${leaveRequest.leave_request_id}:`, error);
-    }
-
-    // Fetch leave document information (only one document per request, so get first from array)
-    let leaveDocument = null;
-    try {
-      const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-      if (documents && Array.isArray(documents) && documents.length > 0) {
-        leaveDocument = documents[0];
-        // Verify document_guid exists before building URLs
-        if (leaveDocument && leaveDocument.document_guid) {
-          // Add download and preview URLs to document info
-          const baseUrl = process.env.API_BASE_URL;
-          let documentBaseUrl;
-          if (baseUrl) {
-            documentBaseUrl = baseUrl;
-          } else {
-            let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-            if (protocol.includes(',')) {
-              protocol = protocol.split(',')[0].trim();
-            }
-            let host = req.get('x-forwarded-host') || req.get('host');
-            if (!host) {
-              host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
-            }
-            if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
-              host = host.replace(':3000', '');
-            }
-            documentBaseUrl = `${protocol}://${host}`;
-          }
-          leaveDocument.download_url = `${documentBaseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/download`;
-          leaveDocument.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${leaveDocument.document_guid}/preview`;
-        } else {
-          console.warn(`Document found for leave request ${leaveRequest.leave_request_id} but document_guid is missing`);
-        }
-      } else {
-        // Log when no documents are found (this is normal if no document was uploaded)
-        console.log(`No documents found for leave request ${leaveRequest.leave_request_id}`);
-      }
-    } catch (error) {
-      console.error(`Error fetching leave document for request ${leaveRequest.leave_request_id}:`, error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        errorNum: error?.errorNum
-      });
-    }
-
-    // Add leave contact and document info to leave request
-    const leaveRequestWithContactAndDoc = {
+    const requestId = leaveRequest.leave_request_id;
+    const [leaveContact, documents] = await Promise.all([
+      LeaveContactModel.findByLeaveRequestId(requestId).catch(err => {
+        console.error(`Error fetching leave contact for request ${requestId}:`, err);
+        return null;
+      }),
+      LeaveDocumentModel.findByLeaveRequestId(requestId).catch(err => {
+        console.error(`Error fetching leave document for request ${requestId}:`, err);
+        return [];
+      })
+    ]);
+    let leaveDocument = documents?.length > 0 ? documents[0] : null;
+    if (leaveDocument) attachDocumentUrls(leaveDocument, req);
+    sendLeaveRequest(res, req, {
       ...leaveRequest,
-      leave_contact_info: leaveContact || null,
-      leave_document_info: leaveDocument || null
-    };
-
-    sendLeaveRequest(res, req, leaveRequestWithContactAndDoc);
+      leave_contact_info: leaveContact ?? null,
+      leave_document_info: leaveDocument ?? null
+    });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
-      return sendBadRequest(res, req, error.message);
-    }
+    if (isInvalidGuidError(error)) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch leave request', error);
   }
 });
@@ -535,9 +514,7 @@ router.post('/', uploadDocuments, async (req, res) => {
         emergency_contact_phone: req.body.emergency_contact_phone,
         additional_notes: req.body.additional_notes,
         delegated_employee_guid: req.body.delegated_employee_guid,
-        submit: req.body.submit !== undefined 
-          ? (req.body.submit === 'true' || req.body.submit === true || req.body.submit === 'TRUE')
-          : true
+        submit: normalizeSubmitValue(req.body.submit)
       };
 
       // Convert uploaded files to documents array format
@@ -566,9 +543,7 @@ router.post('/', uploadDocuments, async (req, res) => {
         additional_notes: req.body.additional_notes,
         delegated_employee_guid: req.body.delegated_employee_guid,
         documents: req.body.documents || [],
-        submit: req.body.submit !== undefined 
-          ? (req.body.submit === true || req.body.submit === 'true' || req.body.submit === 'TRUE')
-          : true
+        submit: normalizeSubmitValue(req.body.submit)
       };
     }
 
@@ -600,12 +575,11 @@ router.post('/', uploadDocuments, async (req, res) => {
     }
 
     // Validate portions if provided
-    const validPortions = ['FULL_DAY', 'HALF_AM', 'HALF_PM', 'HOURS'];
-    if (requestData.start_portion && !validPortions.includes(requestData.start_portion.toUpperCase())) {
-      return sendBadRequest(res, req, `start_portion must be one of: ${validPortions.join(', ')}`);
+    if (requestData.start_portion && !VALID_PORTIONS.includes(requestData.start_portion.toUpperCase())) {
+      return sendBadRequest(res, req, `start_portion must be one of: ${VALID_PORTIONS.join(', ')}`);
     }
-    if (requestData.end_portion && !validPortions.includes(requestData.end_portion.toUpperCase())) {
-      return sendBadRequest(res, req, `end_portion must be one of: ${validPortions.join(', ')}`);
+    if (requestData.end_portion && !VALID_PORTIONS.includes(requestData.end_portion.toUpperCase())) {
+      return sendBadRequest(res, req, `end_portion must be one of: ${VALID_PORTIONS.join(', ')}`);
     }
 
     // Normalize portions to uppercase
@@ -628,7 +602,7 @@ router.post('/', uploadDocuments, async (req, res) => {
     // Handle multer errors
     if (error instanceof multer.MulterError) {
       if (error.code === 'LIMIT_FILE_SIZE') {
-        return sendBadRequest(res, req, 'File size exceeds 10MB limit');
+        return sendBadRequest(res, req, `File size exceeds ${FILE_SIZE_LIMIT_MB}MB limit`);
       }
       return sendBadRequest(res, req, `File upload error: ${error.message}`);
     }
@@ -672,19 +646,11 @@ router.post('/', uploadDocuments, async (req, res) => {
  */
 router.put('/:guid', uploadDocuments, async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    // Get required headers
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-
-    // Check if leave request exists
-    const existingLeaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    const existingLeaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
@@ -738,24 +704,22 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
       normalizedBody.END_PORTION = requestBody.end_portion.toUpperCase();
     }
 
-    // Handle employee_guid if provided (resolve to employee_id)
-    if (normalizedBody.EMPLOYEE_GUID || req.body.employee_guid) {
-      const employeeGuid = normalizedBody.EMPLOYEE_GUID || req.body.employee_guid;
-      const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, employeeGuid);
-      if (!employeeId) {
+    // Resolve employee_guid and delegated_employee_guid in parallel when both provided
+    const employeeGuid = normalizedBody.EMPLOYEE_GUID ?? req.body.employee_guid;
+    const delegatedGuid = normalizedBody.DELEGATED_EMPLOYEE_GUID ?? req.body.delegated_employee_guid;
+    if (employeeGuid || delegatedGuid) {
+      const [employeeId, delegatedId] = await Promise.all([
+        employeeGuid ? LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, employeeGuid) : Promise.resolve(null),
+        delegatedGuid ? LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, delegatedGuid) : Promise.resolve(null)
+      ]);
+      if (employeeGuid && !employeeId) {
         return sendBadRequest(res, req, 'Employee not found for the provided employee_guid');
       }
-      normalizedBody.EMPLOYEE_ID = employeeId;
-    }
-
-    // Handle delegated_employee_guid if provided
-    if (normalizedBody.DELEGATED_EMPLOYEE_GUID || req.body.delegated_employee_guid) {
-      const delegatedGuid = normalizedBody.DELEGATED_EMPLOYEE_GUID || req.body.delegated_employee_guid;
-      const delegatedId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, delegatedGuid);
-      if (!delegatedId) {
+      if (delegatedGuid && !delegatedId) {
         return sendBadRequest(res, req, 'Delegated employee not found for the provided delegated_employee_guid');
       }
-      normalizedBody.DELEGATED_EMPLOYEE_ID = delegatedId;
+      if (employeeId) normalizedBody.EMPLOYEE_ID = employeeId;
+      if (delegatedId) normalizedBody.DELEGATED_EMPLOYEE_ID = delegatedId;
     }
 
     // Validate provided fields
@@ -766,8 +730,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
 
     // Handle submit field - if submit is true, set status to SUBMITTED
     if (requestBody.submit !== undefined) {
-      const submitValue = requestBody.submit === 'true' || requestBody.submit === true || requestBody.submit === 'TRUE';
-      if (submitValue) {
+      if (normalizeSubmitValue(requestBody.submit)) {
         normalizedBody.REQUEST_STATUS = 'SUBMITTED';
         // Set submitted_at if not already set
         if (existingLeaveRequest.submitted_at === null) {
@@ -876,7 +839,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
       }
     }
 
-    const updatedLeaveRequest = await LeaveRequestModel.updateByGuid(guidHex32, normalizedData, userId);
+    const updatedLeaveRequest = await LeaveRequestModel.updateByGuid(parsed.guidHex32, normalizedData, userId);
     
     // Update contact information if provided
     if (normalizedBody.REASON_FOR_LEAVE !== undefined || normalizedBody.ADDRESS_DURING_LEAVE !== undefined ||
@@ -904,7 +867,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     }
 
     // Add new documents if provided (from multipart or JSON)
-    if (requestBody.documents && Array.isArray(requestBody.documents) && requestBody.documents.length > 0) {
+    if (requestBody.documents?.length > 0) {
       try {
         for (const doc of requestBody.documents) {
           if (!doc.file_name) continue;
@@ -944,34 +907,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
       })
     ]);
 
-    // Add download and preview URLs to documents
-    const documentsWithUrls = (documents || []).map(doc => {
-      if (doc && doc.document_guid) {
-        const baseUrl = process.env.API_BASE_URL;
-        let documentBaseUrl;
-        if (baseUrl) {
-          documentBaseUrl = baseUrl;
-        } else {
-          let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-          if (protocol.includes(',')) {
-            protocol = protocol.split(',')[0].trim();
-          }
-          let host = req.get('x-forwarded-host') || req.get('host');
-          if (!host) {
-            host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
-          }
-          if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
-            host = host.replace(':3000', '');
-          }
-          documentBaseUrl = `${protocol}://${host}`;
-        }
-        doc.download_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/download`;
-        doc.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/preview`;
-      }
-      return doc;
-    });
-
-    // Use the first document or null
+    const documentsWithUrls = (documents || []).map(doc => attachDocumentUrls(doc, req));
     const leaveDocument = documentsWithUrls.length > 0 ? documentsWithUrls[0] : null;
 
     // Return all 3 objects: leave_details, leave_contact_info, leave_document_info
@@ -995,7 +931,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     if (error.code === 'MUTATING_TABLE_ERROR') {
       return sendConflict(res, req, error.message || 'Cannot update leave request due to a database constraint conflict');
     }
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+    if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.message?.includes('not found')) {
@@ -1016,17 +952,11 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
  */
 router.post('/:guid/submit', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-
-    const updatedLeaveRequest = await LeaveRequestModel.submitByGuid(guidHex32, tenantId, userId);
+    const updatedLeaveRequest = await LeaveRequestModel.submitByGuid(parsed.guidHex32, tenantId, userId);
     
     const wrappedData = { leave_details: updatedLeaveRequest };
     res.json({
@@ -1036,7 +966,7 @@ router.post('/:guid/submit', async (req, res) => {
       data: [wrappedData]
     });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+    if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.message?.includes('not found')) {
@@ -1057,17 +987,11 @@ router.post('/:guid/submit', async (req, res) => {
  */
 router.post('/:guid/approve', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-
-    const result = await LeaveRequestModel.approveByGuid(guidHex32, tenantId, userId);
+    const result = await LeaveRequestModel.approveByGuid(parsed.guidHex32, tenantId, userId);
     
     const wrappedData = { 
       leave_details: result.leaveRequest,
@@ -1080,7 +1004,7 @@ router.post('/:guid/approve', async (req, res) => {
       data: [wrappedData]
     });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+    if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.message?.includes('not found')) {
@@ -1108,22 +1032,15 @@ router.post('/:guid/approve', async (req, res) => {
  */
 router.post('/:guid/reject', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-
     const rejectionData = {
       reason: req.body.reason || null,
       comments: req.body.comments || null
     };
-
-    const updatedLeaveRequest = await LeaveRequestModel.rejectByGuid(guidHex32, tenantId, userId, rejectionData);
+    const updatedLeaveRequest = await LeaveRequestModel.rejectByGuid(parsed.guidHex32, tenantId, userId, rejectionData);
     
     const wrappedData = { leave_details: updatedLeaveRequest };
     res.json({
@@ -1133,7 +1050,7 @@ router.post('/:guid/reject', async (req, res) => {
       data: [wrappedData]
     });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+    if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.message?.includes('not found')) {
@@ -1159,29 +1076,19 @@ router.post('/:guid/reject', async (req, res) => {
  */
 router.delete('/:guid', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    // Get required headers
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-
-    // Check if leave request exists
-    const existingLeaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    const existingLeaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
 
-    // Delete or withdraw based on status
-    const result = await LeaveRequestModel.deleteByGuid(guidHex32, userId);
-    
+    const result = await LeaveRequestModel.deleteByGuid(parsed.guidHex32, userId);
+
     if (result.action === 'deleted') {
-      // Hard delete - return success message
-      sendDeleted(res, req, 'Leave request deleted successfully', guidHex32);
+      sendDeleted(res, req, 'Leave request deleted successfully', parsed.guidHex32);
     } else if (result.action === 'withdrawn') {
       // Withdrawn - fetch and return all 3 objects (leave_details, contact, documents)
       // Fetch contact and document information in parallel for optimal performance
@@ -1196,34 +1103,7 @@ router.delete('/:guid', async (req, res) => {
         })
       ]);
 
-      // Add download and preview URLs to documents
-      const documentsWithUrls = (documents || []).map(doc => {
-        if (doc && doc.document_guid) {
-          const baseUrl = process.env.API_BASE_URL;
-          let documentBaseUrl;
-          if (baseUrl) {
-            documentBaseUrl = baseUrl;
-          } else {
-            let protocol = req.get('x-forwarded-proto') || req.protocol || 'http';
-            if (protocol.includes(',')) {
-              protocol = protocol.split(',')[0].trim();
-            }
-            let host = req.get('x-forwarded-host') || req.get('host');
-            if (!host) {
-              host = process.env.NODE_ENV === 'production' ? 'localhost' : 'localhost:3000';
-            }
-            if (host.includes(':3000') && process.env.NODE_ENV === 'production') {
-              host = host.replace(':3000', '');
-            }
-            documentBaseUrl = `${protocol}://${host}`;
-          }
-          doc.download_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/download`;
-          doc.preview_url = `${documentBaseUrl}/api/abs/leave-documents/${doc.document_guid}/preview`;
-        }
-        return doc;
-      });
-
-      // Use the first document or null
+      const documentsWithUrls = (documents || []).map(doc => attachDocumentUrls(doc, req));
       const leaveDocument = documentsWithUrls.length > 0 ? documentsWithUrls[0] : null;
 
       // Return all 3 objects: leave_details, leave_contact_info, leave_document_info
@@ -1238,7 +1118,7 @@ router.delete('/:guid', async (req, res) => {
       sendServerError(res, req, 'Unexpected action returned from delete operation');
     }
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
+    if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.message?.includes('not found')) {
@@ -1257,57 +1137,17 @@ router.delete('/:guid', async (req, res) => {
  */
 router.get('/:guid/documents', async (req, res) => {
   try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
+    const parsed = parseGuidParam(req, res, 'guid');
+    if (!parsed) return;
+    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
-
     const documents = await LeaveDocumentModel.findByLeaveRequestId(leaveRequest.leave_request_id);
     sendLeaveRequestList(res, req, documents || [], { total: documents?.length || 0 });
   } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
-      return sendBadRequest(res, req, error.message);
-    }
+    if (isInvalidGuidError(error)) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch leave request documents', error);
-  }
-});
-
-/**
- * @route   GET /api/abs/leave-requests/:guid/contact
- * @desc    Get contact information for a leave request by GUID
- */
-router.get('/:guid/contact', async (req, res) => {
-  try {
-    let guidHex32;
-    try {
-      guidHex32 = parseGuid(req.params.guid, 'guid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const leaveRequest = await LeaveRequestModel.findByGuid(guidHex32);
-    if (!leaveRequest) {
-      return sendNotFound(res, req, 'Leave request not found');
-    }
-
-    const contact = await LeaveContactModel.findByLeaveRequestId(leaveRequest.leave_request_id);
-    if (!contact) {
-      return sendNotFound(res, req, 'Contact information not found for this leave request');
-    }
-
-    sendLeaveRequest(res, req, contact);
-  } catch (error) {
-    if (error.message?.includes('must be a 32-character hex GUID') || error.message?.includes('Invalid guid format')) {
-      return sendBadRequest(res, req, error.message);
-    }
-    sendServerError(res, req, 'Failed to fetch leave request contact', error);
   }
 });
 
@@ -1332,50 +1172,19 @@ export const employeeLeaveRequestsRouter = express.Router();
 employeeLeaveRequestsRouter.get('/employees/:employeeGuid/leave-requests', async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    let employeeGuidHex;
-    try {
-      employeeGuidHex = parseGuid(req.params.employeeGuid, 'employeeGuid');
-    } catch (parseError) {
-      return sendBadRequest(res, req, parseError.message);
-    }
-
-    const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, employeeGuidHex);
+    const parsed = parseGuidParam(req, res, 'employeeGuid');
+    if (!parsed) return;
+    const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(tenantId, parsed.guidHex32);
     if (!employeeId) {
       return sendNotFound(res, req, 'Employee not found for the provided employee_guid');
     }
 
-    const filters = {
-      tenantId,
-      employeeId
-    };
-
-    if (req.query.status) {
-      filters.status = req.query.status.toUpperCase();
+    const filters = { tenantId, employeeId };
+    const parsedQuery = parseListQueryFilters(req);
+    if (parsedQuery.error) {
+      return sendBadRequest(res, req, parsedQuery.error);
     }
-    if (req.query.leaveTypeId !== undefined) {
-      filters.leaveTypeId = parseInt(req.query.leaveTypeId);
-      if (isNaN(filters.leaveTypeId)) {
-        return sendBadRequest(res, req, 'Invalid leaveTypeId parameter');
-      }
-    }
-    if (req.query.startDateFrom) {
-      filters.startDateFrom = new Date(req.query.startDateFrom);
-      if (isNaN(filters.startDateFrom.getTime())) {
-        return sendBadRequest(res, req, 'Invalid startDateFrom parameter');
-      }
-    }
-    if (req.query.startDateTo) {
-      filters.startDateTo = new Date(req.query.startDateTo);
-      if (isNaN(filters.startDateTo.getTime())) {
-        return sendBadRequest(res, req, 'Invalid startDateTo parameter');
-      }
-    }
-
-    try {
-      filters.pagination = parsePagination(req.query);
-    } catch (paginationError) {
-      return sendBadRequest(res, req, paginationError.message);
-    }
+    Object.assign(filters, parsedQuery.filters);
 
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;

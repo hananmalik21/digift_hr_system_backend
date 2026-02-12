@@ -5,6 +5,9 @@ import crypto from 'crypto';
 import { DatabaseError, ValidationError } from '../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../utils/guidUtils.js';
 
+/** Status used when normalizing legacy PENDING to SUBMITTED */
+const REQUEST_STATUS_SUBMITTED = 'SUBMITTED';
+
 /**
  * Leave Request Model
  * Handles all database operations for ABS.ABS_LEAVE_REQUESTS table
@@ -12,6 +15,81 @@ import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../utils/gui
  */
 class LeaveRequestModel {
   static TABLE_NAME = 'ABS.ABS_LEAVE_REQUESTS';
+
+  /**
+   * Normalize request_status: PENDING -> SUBMITTED (in-place).
+   * @param {Object} row - Row with request_status
+   */
+  static normalizeRequestStatus(row) {
+    if (row?.request_status && String(row.request_status).toUpperCase() === 'PENDING') {
+      row.request_status = REQUEST_STATUS_SUBMITTED;
+    }
+  }
+
+  /**
+   * Build employee_info and leave_type_info from a joined row; return { employeeInfo, leaveTypeInfo, leaveRequestData }.
+   * Used by findAll and findByGuid to avoid duplication.
+   */
+  static mapRowToLeaveRequest(row) {
+    this.normalizeRequestStatus(row);
+
+    const employeeInfo = row.emp_employee_id
+      ? {
+          employee_id: row.emp_employee_id,
+          employee_guid: row.emp_employee_guid,
+          first_name_en: row.emp_first_name_en,
+          middle_name_en: row.emp_middle_name_en,
+          last_name_en: row.emp_last_name_en,
+          first_name_ar: row.emp_first_name_ar,
+          middle_name_ar: row.emp_middle_name_ar,
+          last_name_ar: row.emp_last_name_ar,
+          family_name_ar: row.emp_family_name_ar,
+          email: row.emp_email,
+          position_name_en: row.emp_position_name_en ?? null,
+          position_name_ar: row.emp_position_name_ar ?? null,
+          position_name: row.emp_position_name_en ?? row.emp_position_name_ar ?? null,
+          org_structure_list: row.emp_org_structure_list ?? null
+        }
+      : null;
+
+    const leaveTypeInfo = row.lt_leave_type_id
+      ? {
+          leave_type_id: row.lt_leave_type_id,
+          leave_type_guid: row.lt_leave_type_guid,
+          leave_name_en: row.lt_leave_name_en,
+          leave_name_ar: row.lt_leave_name_ar,
+          leave_code: row.lt_leave_code
+        }
+      : null;
+
+    const {
+      emp_employee_id,
+      emp_employee_guid,
+      emp_first_name_en,
+      emp_middle_name_en,
+      emp_last_name_en,
+      emp_first_name_ar,
+      emp_middle_name_ar,
+      emp_last_name_ar,
+      emp_family_name_ar,
+      emp_email,
+      emp_position_name_en,
+      emp_position_name_ar,
+      emp_org_structure_list,
+      lt_leave_type_id,
+      lt_leave_type_guid,
+      lt_leave_name_en,
+      lt_leave_name_ar,
+      lt_leave_code,
+      ...leaveRequestData
+    } = row;
+
+    return {
+      ...leaveRequestData,
+      employee_info: employeeInfo,
+      leave_type_info: leaveTypeInfo
+    };
+  }
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
@@ -133,19 +211,16 @@ class LeaveRequestModel {
 
       const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : '';
 
-      // Execute pagination
       const pagination = filters.pagination || {};
       const page = pagination.page || 1;
       const pageSize = pagination.pageSize || 10;
       const offset = (page - 1) * pageSize;
-      
-      // Execute COUNT query (optimized - uses same WHERE clause and bind params for plan reuse)
-      // Oracle will reuse the execution plan between COUNT and SELECT queries
-      const countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} a${whereClause}`;
-      const countResult = await this.executeQuery(countQuery, bindParams);
-      const total = countResult.rows[0]?.total || 0;
 
-      // Optimized data query with proper ordering for index usage
+      const countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} a${whereClause}`;
+      const countBind = [...bindParams];
+      const dataBind = [...bindParams];
+
+      // Run COUNT and data query in parallel to reduce response time
       // ORDER BY START_DATE DESC first (most selective), then CREATION_DATE DESC as tiebreaker
       // This ordering supports efficient index scans
       // JOIN with EMPL.EMPLOYEES and ABS.ABS_LEAVE_TYPES to get employee and leave type details
@@ -180,6 +255,9 @@ class LeaveRequestModel {
         e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
         e.FAMILY_NAME_AR AS EMP_FAMILY_NAME_AR,
         e.EMAIL AS EMP_EMAIL,
+        asg.POSITION_TITLE_EN AS EMP_POSITION_NAME_EN,
+        asg.POSITION_TITLE_AR AS EMP_POSITION_NAME_AR,
+        asg.ORG_STRUCTURE_LIST AS EMP_ORG_STRUCTURE_LIST,
         -- Leave type information (limited fields)
         lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
         RAWTOHEX(lt.LEAVE_TYPE_GUID) AS LT_LEAVE_TYPE_GUID,
@@ -190,6 +268,17 @@ class LeaveRequestModel {
       LEFT JOIN EMPL.EMPLOYEES e
         ON a.EMPLOYEE_ID = e.EMPLOYEE_ID
        AND a.TENANT_ID = e.ENTERPRISE_ID
+      LEFT JOIN (
+        SELECT t.EMPLOYEE_ID, t.ENTERPRISE_ID, p.POSITION_TITLE_EN, p.POSITION_TITLE_AR, asn.ORG_STRUCTURE_LIST
+        FROM (
+          SELECT v.EMPLOYEE_ID, v.ENTERPRISE_ID, v.POSITION_ID, v.ASSIGNMENT_ID,
+                 ROW_NUMBER() OVER (PARTITION BY v.EMPLOYEE_ID, v.ENTERPRISE_ID ORDER BY v.ASSIGNMENT_ID DESC NULLS LAST) AS rn
+          FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
+        ) t
+        LEFT JOIN ENT.POSITIONS p ON p.POSITION_ID = t.POSITION_ID
+        LEFT JOIN EMPL.ASSIGNMENTS asn ON asn.ASSIGNMENT_ID = t.ASSIGNMENT_ID
+        WHERE t.rn = 1
+      ) asg ON e.EMPLOYEE_ID = asg.EMPLOYEE_ID AND e.ENTERPRISE_ID = asg.ENTERPRISE_ID
       LEFT JOIN ABS.ABS_LEAVE_TYPES lt
         ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
        AND a.TENANT_ID = lt.TENANT_ID
@@ -198,70 +287,18 @@ class LeaveRequestModel {
       ${whereClause}
       ORDER BY a.START_DATE DESC NULLS LAST, a.CREATION_DATE DESC
       OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
-      
-      bindParams.push(offset);
-      bindParams.push(pageSize);
 
-      const dataResult = await this.executeQuery(dataQuery, bindParams);
+      dataBind.push(offset);
+      dataBind.push(pageSize);
 
-      // Convert PENDING to SUBMITTED for all rows (PENDING is not a valid status, should be SUBMITTED)
-      // Note: rows are already converted to snake_case by executeQuery
-      // Structure employee and leave type information into separate objects
-      const leaveRequests = (dataResult.rows || []).map(row => {
-        if (row.request_status && String(row.request_status).toUpperCase() === 'PENDING') {
-          row.request_status = 'SUBMITTED';
-        }
+      const [countResult, dataResult] = await Promise.all([
+        this.executeQuery(countQuery, countBind),
+        this.executeQuery(dataQuery, dataBind)
+      ]);
 
-        // Build employee_info object (limited fields)
-        const employeeInfo = row.emp_employee_id ? {
-          employee_id: row.emp_employee_id,
-          employee_guid: row.emp_employee_guid,
-          first_name_en: row.emp_first_name_en,
-          middle_name_en: row.emp_middle_name_en,
-          last_name_en: row.emp_last_name_en,
-          first_name_ar: row.emp_first_name_ar,
-          middle_name_ar: row.emp_middle_name_ar,
-          last_name_ar: row.emp_last_name_ar,
-          family_name_ar: row.emp_family_name_ar,
-          email: row.emp_email
-        } : null;
+      const total = countResult.rows[0]?.total || 0;
 
-        // Build leave_type_info object (limited fields)
-        const leaveTypeInfo = row.lt_leave_type_id ? {
-          leave_type_id: row.lt_leave_type_id,
-          leave_type_guid: row.lt_leave_type_guid,
-          leave_name_en: row.lt_leave_name_en,
-          leave_name_ar: row.lt_leave_name_ar,
-          leave_code: row.lt_leave_code
-        } : null;
-
-        // Remove prefixed fields from main row
-        const {
-          emp_employee_id,
-          emp_employee_guid,
-          emp_first_name_en,
-          emp_middle_name_en,
-          emp_last_name_en,
-          emp_first_name_ar,
-          emp_middle_name_ar,
-          emp_last_name_ar,
-          emp_family_name_ar,
-          emp_email,
-          lt_leave_type_id,
-          lt_leave_type_guid,
-          lt_leave_name_en,
-          lt_leave_name_ar,
-          lt_leave_code,
-          ...leaveRequestData
-        } = row;
-
-        // Add structured employee and leave type info
-        return {
-          ...leaveRequestData,
-          employee_info: employeeInfo,
-          leave_type_info: leaveTypeInfo
-        };
-      });
+      const leaveRequests = (dataResult.rows || []).map(row => this.mapRowToLeaveRequest(row));
 
       return { leaveRequests, total };
     } catch (error) {
@@ -312,6 +349,9 @@ class LeaveRequestModel {
         e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
         e.FAMILY_NAME_AR AS EMP_FAMILY_NAME_AR,
         e.EMAIL AS EMP_EMAIL,
+        asg.POSITION_TITLE_EN AS EMP_POSITION_NAME_EN,
+        asg.POSITION_TITLE_AR AS EMP_POSITION_NAME_AR,
+        asg.ORG_STRUCTURE_LIST AS EMP_ORG_STRUCTURE_LIST,
         -- Leave type information (limited fields)
         lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
         RAWTOHEX(lt.LEAVE_TYPE_GUID) AS LT_LEAVE_TYPE_GUID,
@@ -322,6 +362,17 @@ class LeaveRequestModel {
       LEFT JOIN EMPL.EMPLOYEES e
         ON a.EMPLOYEE_ID = e.EMPLOYEE_ID
        AND a.TENANT_ID = e.ENTERPRISE_ID
+      LEFT JOIN (
+        SELECT t.EMPLOYEE_ID, t.ENTERPRISE_ID, p.POSITION_TITLE_EN, p.POSITION_TITLE_AR, asn.ORG_STRUCTURE_LIST
+        FROM (
+          SELECT v.EMPLOYEE_ID, v.ENTERPRISE_ID, v.POSITION_ID, v.ASSIGNMENT_ID,
+                 ROW_NUMBER() OVER (PARTITION BY v.EMPLOYEE_ID, v.ENTERPRISE_ID ORDER BY v.ASSIGNMENT_ID DESC NULLS LAST) AS rn
+          FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
+        ) t
+        LEFT JOIN ENT.POSITIONS p ON p.POSITION_ID = t.POSITION_ID
+        LEFT JOIN EMPL.ASSIGNMENTS asn ON asn.ASSIGNMENT_ID = t.ASSIGNMENT_ID
+        WHERE t.rn = 1
+      ) asg ON e.EMPLOYEE_ID = asg.EMPLOYEE_ID AND e.ENTERPRISE_ID = asg.ENTERPRISE_ID
       LEFT JOIN ABS.ABS_LEAVE_TYPES lt
         ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
        AND a.TENANT_ID = lt.TENANT_ID
@@ -331,62 +382,7 @@ class LeaveRequestModel {
 
       const result = await this.executeQuery(query, [guidBuffer]);
       if (result.rows?.[0]) {
-        const row = result.rows[0];
-        // Convert PENDING to SUBMITTED (PENDING is not a valid status, should be SUBMITTED)
-        // Note: row is already converted to snake_case by executeQuery
-        if (row.request_status && String(row.request_status).toUpperCase() === 'PENDING') {
-          row.request_status = 'SUBMITTED';
-        }
-
-        // Build employee_info object (limited fields)
-        const employeeInfo = row.emp_employee_id ? {
-          employee_id: row.emp_employee_id,
-          employee_guid: row.emp_employee_guid,
-          first_name_en: row.emp_first_name_en,
-          middle_name_en: row.emp_middle_name_en,
-          last_name_en: row.emp_last_name_en,
-          first_name_ar: row.emp_first_name_ar,
-          middle_name_ar: row.emp_middle_name_ar,
-          last_name_ar: row.emp_last_name_ar,
-          family_name_ar: row.emp_family_name_ar,
-          email: row.emp_email
-        } : null;
-
-        // Build leave_type_info object (limited fields)
-        const leaveTypeInfo = row.lt_leave_type_id ? {
-          leave_type_id: row.lt_leave_type_id,
-          leave_type_guid: row.lt_leave_type_guid,
-          leave_name_en: row.lt_leave_name_en,
-          leave_name_ar: row.lt_leave_name_ar,
-          leave_code: row.lt_leave_code
-        } : null;
-
-        // Remove prefixed fields from main row
-        const {
-          emp_employee_id,
-          emp_employee_guid,
-          emp_first_name_en,
-          emp_middle_name_en,
-          emp_last_name_en,
-          emp_first_name_ar,
-          emp_middle_name_ar,
-          emp_last_name_ar,
-          emp_family_name_ar,
-          emp_email,
-          lt_leave_type_id,
-          lt_leave_type_guid,
-          lt_leave_name_en,
-          lt_leave_name_ar,
-          lt_leave_code,
-          ...leaveRequestData
-        } = row;
-
-        // Add structured employee and leave type info
-        return {
-          ...leaveRequestData,
-          employee_info: employeeInfo,
-          leave_type_info: leaveTypeInfo
-        };
+        return this.mapRowToLeaveRequest(result.rows[0]);
       }
       return null;
     } catch (error) {
