@@ -6,7 +6,6 @@ import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
 
 const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
-const EMPLOYEE_IS_ACTIVE_VALUES = ['Y', 'N'];
 
 const UPDATE_EMPLOYEE_ALL_IN_ONE_SQL = `
 BEGIN
@@ -228,13 +227,22 @@ export function buildUpdateBinds(employeeId, body) {
 
 /**
  * Validation for update body. Returns { valid: boolean, message?: string, code?: string }.
- * No body fields are required; only employeeId in the URL must be a positive integer.
- * If employee_status or employee_is_active are provided, they are validated.
+ * Required: enterprise_id (body), employee_id (URL). All document fields are optional.
+ * doc_action defaults to ADD; if provided must be ADD | REPLACE (case-insensitive).
+ * replace_document_id if provided must be a number.
  */
 export function validateUpdateBody(body, employeeId) {
   const empId = parseInt(employeeId, 10);
   if (!Number.isInteger(empId) || empId < 1) {
-    return { valid: false, message: 'employeeId must be a positive integer', code: 'VALIDATION_ERROR' };
+    return { valid: false, message: 'employee_id must be a positive integer', code: 'VALIDATION_ERROR' };
+  }
+  const entId = body?.enterprise_id ?? body?.enterpriseId ?? body?.ENTERPRISE_ID;
+  if (entId == null || entId === '') {
+    return { valid: false, message: 'enterprise_id is required', code: 'VALIDATION_ERROR' };
+  }
+  const entNum = Number(entId);
+  if (!Number.isFinite(entNum) || entNum < 1) {
+    return { valid: false, message: 'enterprise_id must be a positive number', code: 'VALIDATION_ERROR' };
   }
   const statusVal = body?.employee_status ?? body?.employeeStatus ?? body?.EMPLOYEE_STATUS;
   if (statusVal != null && String(statusVal).trim() !== '') {
@@ -257,6 +265,13 @@ export function validateUpdateBody(body, employeeId) {
       return { valid: false, message: 'doc_action must be ADD or REPLACE', code: 'VALIDATION_ERROR' };
     }
   }
+  const replaceDocId = body?.replace_document_id ?? body?.replaceDocumentId;
+  if (replaceDocId !== undefined && replaceDocId !== null && replaceDocId !== '') {
+    const n = Number(replaceDocId);
+    if (!Number.isFinite(n) || n < 0) {
+      return { valid: false, message: 'replace_document_id must be a non-negative number', code: 'VALIDATION_ERROR' };
+    }
+  }
   return { valid: true };
 }
 
@@ -276,10 +291,10 @@ export async function updateEmployeeAllInOne(connection, employeeId, body, fileO
     if (fileOpts.fileContent != null) {
       binds.p_doc_file_content = fileOpts.fileContent;
       binds.p_doc_access_url = null;
-      binds.p_doc_file_name = fileOpts.fileName ?? binds.p_doc_file_name ?? 'document';
-      binds.p_doc_mime_type = fileOpts.mimeType ?? binds.p_doc_mime_type ?? 'application/octet-stream';
+      binds.p_doc_file_name = fileOpts.fileName ?? binds.p_doc_file_name ?? null;
+      binds.p_doc_mime_type = fileOpts.mimeType ?? binds.p_doc_mime_type ?? null;
     } else {
-      binds.p_doc_file_content = null;
+      binds.p_doc_file_content = { type: oracledb.BLOB, dir: oracledb.BIND_IN, val: null };
     }
     binds.o_document_id = { type: oracledb.NUMBER, dir: oracledb.BIND_OUT };
     binds.o_document_guid = { type: oracledb.BUFFER, dir: oracledb.BIND_OUT, maxSize: 16 };
@@ -287,18 +302,13 @@ export async function updateEmployeeAllInOne(connection, employeeId, body, fileO
     const outBinds = result.outBinds || {};
     const docId = Array.isArray(outBinds.o_document_id) ? outBinds.o_document_id[0] : outBinds.o_document_id;
     const rawGuid = Array.isArray(outBinds.o_document_guid) ? outBinds.o_document_guid?.[0] : outBinds.o_document_guid;
-    let guidHexLower = null;
+    let documentGuid = null;
     if (rawGuid != null && Buffer.isBuffer(rawGuid) && rawGuid.length === 16) {
-      guidHexLower = rawGuid.toString('hex').toLowerCase();
+      documentGuid = rawGuid.toString('hex').toLowerCase();
     } else if (typeof rawGuid === 'string' && rawGuid.trim().length === 32) {
-      guidHexLower = rawGuid.trim().toLowerCase();
+      documentGuid = rawGuid.trim().toLowerCase();
     }
-    const docAction = normalizeDocAction(body?.doc_action ?? body?.docAction);
-    return {
-      documentId: docId ?? null,
-      documentGuid: guidHexLower ?? null,
-      docAction
-    };
+    return { documentId: docId ?? null, documentGuid };
   } finally {
     if (ownConnection) {
       try { await conn.close(); } catch (_) {}

@@ -1,26 +1,6 @@
 /**
  * Controller: Update Employee (All-in-One)
- * PUT /api/update-employee/:idOrGuid (employee_id or employee_guid)
- *
- * Example request payloads:
- *
- * 1) ADD with file upload (multipart/form-data):
- *    PUT /api/update-employee/123
- *    Content-Type: multipart/form-data
- *    Body: doc_action=ADD, document_type_code=EMPLOYEE_DOC, file=<binary>
- *
- * 2) REPLACE by type with file upload (multipart/form-data):
- *    PUT /api/update-employee/123
- *    Body: doc_action=REPLACE, document_type_code=EMPLOYEE_DOC, file=<binary>
- *
- * 3) REPLACE specific document_id with file upload (multipart/form-data):
- *    PUT /api/update-employee/123
- *    Body: doc_action=REPLACE, replace_document_id=68, document_type_code=EMPLOYEE_DOC, file=<binary>
- *
- * 4) ADD with access_url (application/json):
- *    PUT /api/update-employee/123
- *    Content-Type: application/json
- *    Body: { "doc_action": "ADD", "document_type_code": "EMPLOYEE_DOC", "doc_access_url": "https://...", "doc_file_name": "contract.pdf" }
+ * PUT /api/update-employee/:idOrGuid — see handler JSDoc for body/response.
  */
 
 import multer from 'multer';
@@ -125,21 +105,20 @@ export function maybeMulterUpdateAllInOne(req, res, next) {
 /**
  * PUT /api/update-employee/:idOrGuid
  * :idOrGuid = employee_id (number) or employee_guid (32-char hex).
- * Body: JSON or multipart/form-data. Document fields:
+ * Body: JSON or multipart/form-data. Required: enterprise_id. All document fields optional.
  *   doc_action: 'ADD' | 'REPLACE' (default 'ADD')
  *   replace_document_id: number (optional; when REPLACE, target specific doc row)
- *   document_type_code: required for file upload or when doc_access_url provided
- *   doc_access_url, doc_file_name: required when adding doc by URL (no file)
- *   File: field name "file" or "document" (multipart only).
- * 200: { success: true, employee_id, document?: { document_id, document_guid, access_url, doc_action }, data? }
+ *   document_type_code, doc_file_name, doc_mime_type, doc_access_url, doc_hash_sha256, doc_file_content: optional
+ *   File: field name "file" or "document" (multipart only); optional.
+ * 200: { success: true, employee_id, document: { documentId, documentGuid } (may be null), data? }
  * 400: validation or Oracle error
  * 404: employee not found
  */
 export async function updateEmployeeAllInOneHandler(req, res) {
   const param = String(req.params.idOrGuid ?? '').trim();
-  const normalizedGuid = param.replace(/-/g, '').toUpperCase();
+  const hex = param.replace(/-/g, '').toUpperCase();
   const isNumericId = /^\d+$/.test(param);
-  const isGuid = normalizedGuid.length === 32 && /^[0-9A-Fa-f]+$/.test(normalizedGuid);
+  const isGuid = hex.length === 32 && /^[0-9A-F]+$/.test(hex);
 
   let employeeId;
   if (isNumericId) {
@@ -174,37 +153,11 @@ export async function updateEmployeeAllInOneHandler(req, res) {
 
   const uploadedFile = getUploadedFile(req);
   if (uploadedFile) {
-    body.doc_file_name = uploadedFile.originalname || 'document';
-    body.doc_mime_type = uploadedFile.mimetype || 'application/octet-stream';
+    body.doc_file_name = uploadedFile.originalname?.trim() || undefined;
+    body.doc_mime_type = uploadedFile.mimetype?.trim() || undefined;
     const docType = body.document_type_code ?? body.documentTypeCode;
-    if (!docType || String(docType).trim() === '') {
-      return res.status(400).json({
-        success: false,
-        message: 'document_type_code is required when uploading a file',
-        code: 'VALIDATION_ERROR'
-      });
-    }
-    body.document_type_code = String(docType).trim();
-  } else {
-    const docAccessUrl = body.doc_access_url ?? body.docAccessUrl;
-    const docFileName = body.doc_file_name ?? body.docFileName;
-    const docType = body.document_type_code ?? body.documentTypeCode;
-    if (docAccessUrl != null && String(docAccessUrl).trim() !== '') {
-      if (!docType || String(docType).trim() === '') {
-        return res.status(400).json({
-          success: false,
-          message: 'document_type_code is required when doc_access_url is provided',
-          code: 'VALIDATION_ERROR'
-        });
-      }
-      if (!docFileName || String(docFileName).trim() === '') {
-        return res.status(400).json({
-          success: false,
-          message: 'doc_file_name is required when doc_access_url is provided',
-          code: 'VALIDATION_ERROR'
-        });
-      }
-    }
+    if (docType != null && String(docType).trim() !== '') body.document_type_code = String(docType).trim();
+    if (body.doc_access_url != null || body.docAccessUrl != null) body.doc_access_url = null;
   }
 
   const validation = validateUpdateBody(body, employeeId);
@@ -221,17 +174,14 @@ export async function updateEmployeeAllInOneHandler(req, res) {
   try {
     connection = await getConnection();
     const fileOpts = uploadedFile
-      ? {
-          fileContent: uploadedFile.buffer,
-          fileName: uploadedFile.originalname,
-          mimeType: uploadedFile.mimetype
-        }
+      ? { fileContent: uploadedFile.buffer, fileName: uploadedFile.originalname, mimeType: uploadedFile.mimetype }
       : {};
-    await updateEmployeeAllInOne(connection, employeeId, body, fileOpts);
+    const { documentId, documentGuid } = await updateEmployeeAllInOne(connection, employeeId, body, fileOpts);
     const data = await getEmployeeListRowByEmployeeId(empId);
     return res.status(200).json({
       success: true,
       employee_id: empId,
+      document: { documentId: documentId ?? null, documentGuid: documentGuid ?? null },
       ...(data != null && { data })
     });
   } catch (err) {
