@@ -443,8 +443,11 @@ router.get('/leave-balances/:balanceGuid', async (req, res) => {
       return sendNotFound(res, req, 'Leave balance not found');
     }
 
+    // Build employee name for response (balance has first_name_en, last_name_en from join)
+    const employeeName = [balance.first_name_en, balance.last_name_en].filter(Boolean).map(String).join(' ').trim() || '';
+
     // Return response
-    sendLeaveBalance(res, req, balance);
+    sendLeaveBalance(res, req, balance, { employee_name: employeeName });
   } catch (error) {
     if (error instanceof ValidationError) {
       return sendBadRequest(res, req, error.message);

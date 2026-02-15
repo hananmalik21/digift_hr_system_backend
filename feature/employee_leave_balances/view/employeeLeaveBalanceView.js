@@ -233,8 +233,9 @@ export function sendLeaveBalanceList(res, req, employeeGuid, balances, meta = {}
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {Object} balance - Leave balance object
+ * @param {Object} meta - Optional metadata (e.g. employee_name for GET /leave-balances/:balanceGuid)
  */
-export function sendLeaveBalance(res, req, balance) {
+export function sendLeaveBalance(res, req, balance, meta = {}) {
   if (!balance) {
     return sendNotFound(res, req, 'Leave balance not found');
   }
@@ -242,12 +243,15 @@ export function sendLeaveBalance(res, req, balance) {
   const convertedBalance = convertKeysToSnakeCase(balance);
   const enriched = enrichBalanceWithEmployeeInfo(convertedBalance);
 
+  const data = { item: enriched };
+  if (meta.employee_name !== undefined) {
+    data.employee_name = meta.employee_name;
+  }
+
   res.json({
     success: true,
     message: 'Leave balance fetched',
-    data: {
-      item: enriched
-    }
+    data
   });
 }
 
