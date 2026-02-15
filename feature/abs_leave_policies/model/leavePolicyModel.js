@@ -39,6 +39,19 @@ class LeavePolicyModel {
   }
 
   /**
+   * Set session options on a connection (schema, disable parallel). Used for read queries.
+   * @param {object} connection - Oracle connection
+   */
+  static async _setSession(connection) {
+    await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
+    try {
+      await connection.execute(`ALTER SESSION DISABLE PARALLEL QUERY`, [], { autoCommit: false });
+    } catch {
+      // Ignore if not supported
+    }
+  }
+
+  /**
    * Parse value to Date for Oracle DATE bind (avoids ORA-01861 format string).
    * Returns Date or null; oracledb binds Date correctly to Oracle DATE.
    */
@@ -139,7 +152,8 @@ class LeavePolicyModel {
         grade_to: row.grade_to,
         grade_entitlement_days: row.grade_entitlement_days,
         grade_accrual_rate: row.grade_accrual_rate,
-        grade_status: row.grade_status
+        grade_status: row.grade_status,
+        accrual_method_code: row.accrual_method_code ?? row.policy_accrual_method
       });
     }
 
@@ -155,24 +169,13 @@ class LeavePolicyModel {
    */
   static async findAll(filters = {}) {
     let connection;
-    
+
     try {
       if (!filters.tenantId) {
         throw new DatabaseError('tenant_id is required');
       }
 
-      connection = await db.getConnection();
-      
-      // Set current schema and optimize session settings
-      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
-      // Disable parallel query to avoid ORA-12801 and improve single-threaded performance
-      try {
-        await connection.execute(`ALTER SESSION DISABLE PARALLEL QUERY`, [], { autoCommit: false });
-      } catch (e) {
-        // Ignore if already disabled or not supported
-      }
-
-      // Build WHERE conditions using positional parameters
+      // Build WHERE conditions using positional parameters (no connection yet)
       const conditions = [`TENANT_ID = :1`];
       const bindParams = [filters.tenantId];
       let paramIndex = 2;
@@ -204,17 +207,12 @@ class LeavePolicyModel {
         const pageSize = pagination.pageSize || 10;
         const offset = (page - 1) * pageSize;
 
-        // Count distinct policies for pagination metadata - optimized
-        const countQuery = `SELECT /*+ FIRST_ROWS */ COUNT(DISTINCT POLICY_ID) AS total FROM ${this.VIEW_NAME}${whereClause}`;
-        const countResult = await connection.execute(countQuery, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT,
-          fetchArraySize: 1
-        });
-        total = countResult.rows[0]?.TOTAL || 0;
-
         // Build WHERE clause with table alias for main query
         const mainQueryConditions = conditions.map(cond => cond.replace(/^(TENANT_ID|POLICY_ID|LEAVE_TYPE_ID)/, 'v.$1'));
         const mainWhereClause = ` WHERE ${mainQueryConditions.join(' AND ')}`;
+
+        // Count distinct policies for pagination metadata
+        const countQuery = `SELECT /*+ FIRST_ROWS */ COUNT(DISTINCT POLICY_ID) AS total FROM ${this.VIEW_NAME}${whereClause}`;
 
         // Single query with WITH clause to handle pagination at policy level - optimized
         query = `
@@ -338,13 +336,28 @@ class LeavePolicyModel {
         ORDER BY POLICY_ID DESC, GRADE_FROM ASC`;
       }
 
-      // Optimize fetch array size based on pagination
       const fetchSize = hasPagination ? Math.min((pagination.pageSize || 10) * 10, 200) : 100;
-      
-      const result = await connection.execute(query, finalBindParams, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT,
-        fetchArraySize: fetchSize
-      });
+      const execOpts = { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchArraySize: fetchSize };
+
+      let result;
+      if (hasPagination) {
+        const [conn1, conn2] = await Promise.all([db.getConnection(), db.getConnection()]);
+        try {
+          await Promise.all([this._setSession(conn1), this._setSession(conn2)]);
+          const [countResult, dataResult] = await Promise.all([
+            conn1.execute(countQuery, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchArraySize: 1 }),
+            conn2.execute(query, finalBindParams, execOpts)
+          ]);
+          total = countResult.rows?.[0]?.TOTAL ?? 0;
+          result = dataResult;
+        } finally {
+          await Promise.all([conn1.close().catch(() => {}), conn2.close().catch(() => {})]);
+        }
+      } else {
+        connection = await db.getConnection();
+        await this._setSession(connection);
+        result = await connection.execute(query, finalBindParams, execOpts);
+      }
 
       const rows = result.rows || [];
       const convertedRows = this.convertKeysToSnakeCase(rows);

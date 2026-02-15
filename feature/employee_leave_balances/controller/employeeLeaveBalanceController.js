@@ -17,10 +17,24 @@ import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
 
 const router = express.Router();
 
-// Middleware to track request start time
+// Middleware: track request start time
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
+});
+
+// Middleware: parse and validate x-tenant-id (and optional x-user-id) once for all routes
+router.use((req, res, next) => {
+  try {
+    req.tenantId = getTenantId(req);
+    req.userId = getUserId(req);
+    next();
+  } catch (e) {
+    if (e instanceof ValidationError) {
+      return sendBadRequest(res, req, e.message);
+    }
+    next(e);
+  }
 });
 
 /**
@@ -95,19 +109,7 @@ async function getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, lim
  */
 router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract optional user ID
-    const userId = getUserId(req);
+    const tenantId = req.tenantId;
 
     // Extract and normalize employee GUID
     let employeeGuid;
@@ -192,19 +194,7 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
  */
 router.get('/leave-balances', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract optional user ID
-    const userId = getUserId(req);
+    const tenantId = req.tenantId;
 
     // Build filters from query parameters
     const filters = {};
@@ -356,19 +346,7 @@ router.post('/leave-balances/adjust', async (req, res) => {
  */
 router.get('/leave-balances/:balanceGuid', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract optional user ID
-    const userId = getUserId(req);
+    const tenantId = req.tenantId;
 
     // Extract and normalize balance GUID
     let balanceGuid;
@@ -564,19 +542,8 @@ function normalizeRequestBody(data) {
  */
 router.post('/leave-balances', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract user ID
-    const userId = getUserId(req);
+    const tenantId = req.tenantId;
+    const userId = req.userId;
 
     // Normalize request body keys (lowercase to uppercase)
     const normalizedBody = normalizeRequestBody(req.body);
@@ -690,7 +657,7 @@ function validateOpeningBalanceData(data) {
  */
 router.put('/leave-balances/:balanceGuid', async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.tenantId;
     const userId = getRequiredUserId(req);
 
     // Extract and validate balance GUID
@@ -837,25 +804,12 @@ router.put('/leave-balances/:balanceGuid', async (req, res) => {
  */
 router.post('/balances/opening', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract and validate user ID (required for this endpoint)
+    const tenantId = req.tenantId;
     let userId;
     try {
       userId = getRequiredUserId(req);
     } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
+      if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
       throw error;
     }
 
@@ -1091,25 +1045,12 @@ function validateAccrualRunData(data) {
  */
 router.post('/accrual/run', async (req, res) => {
   try {
-    // Extract and validate tenant ID
-    let tenantId;
-    try {
-      tenantId = getTenantId(req);
-    } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
-      throw error;
-    }
-
-    // Extract and validate user ID (required for this endpoint)
+    const tenantId = req.tenantId;
     let userId;
     try {
       userId = getRequiredUserId(req);
     } catch (error) {
-      if (error instanceof ValidationError) {
-        return sendBadRequest(res, req, error.message);
-      }
+      if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
       throw error;
     }
 
@@ -1301,7 +1242,7 @@ router.post('/accrual/run', async (req, res) => {
  */
 router.post('/admin/leave-balances/rebuild', async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.tenantId;
     const userId = getRequiredUserId(req);
 
     const {
@@ -1449,7 +1390,7 @@ router.post('/admin/leave-balances/rebuild', async (req, res) => {
  */
 router.post('/admin/leave-balances/rebuild/bulk', async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
+    const tenantId = req.tenantId;
     const userId = getRequiredUserId(req);
 
     const {
