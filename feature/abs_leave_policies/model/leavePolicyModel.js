@@ -200,6 +200,7 @@ class LeavePolicyModel {
       
       let total = 0;
       let query;
+      let countQuery;
       let finalBindParams = [...bindParams];
 
       if (hasPagination) {
@@ -212,7 +213,7 @@ class LeavePolicyModel {
         const mainWhereClause = ` WHERE ${mainQueryConditions.join(' AND ')}`;
 
         // Count distinct policies for pagination metadata
-        const countQuery = `SELECT /*+ FIRST_ROWS */ COUNT(DISTINCT POLICY_ID) AS total FROM ${this.VIEW_NAME}${whereClause}`;
+        countQuery = `SELECT /*+ FIRST_ROWS */ COUNT(DISTINCT POLICY_ID) AS total FROM ${this.VIEW_NAME}${whereClause}`;
 
         // Single query with WITH clause to handle pagination at policy level - optimized
         query = `
