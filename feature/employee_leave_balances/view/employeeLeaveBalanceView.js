@@ -140,6 +140,43 @@ export function sendLeaveBalanceSummaryList(res, req, items, meta = {}) {
 }
 
 /**
+ * Send paginated leave balance summary (same structure as other paginated APIs: success, message, data, meta.pagination)
+ * @param {Object} res - Express response object
+ * @param {Object} req - Express request object
+ * @param {Array} data - Summary rows (snake_case)
+ * @param {number} total - Total row count
+ * @param {number} page - Current page
+ * @param {number} pageSize - Page size
+ */
+export function sendLeaveBalanceSummaryPaginated(res, req, data, total, page, pageSize) {
+  const totalNum = parseInt(total, 10) || 0;
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(pageSize, 10) || 10;
+  const totalPages = pageSizeNum > 0 ? Math.ceil(totalNum / pageSizeNum) : 0;
+  const startTime = req._startTime || Date.now();
+  const executionTime = Date.now() - startTime;
+
+  const responseMeta = {
+    pagination: {
+      page: pageNum,
+      page_size: pageSizeNum,
+      total: totalNum,
+      total_pages: totalPages,
+      has_next: pageNum < totalPages,
+      has_previous: pageNum > 1
+    },
+    execution_time: `${executionTime}ms`
+  };
+
+  res.json({
+    success: true,
+    message: 'Leave balance summary fetched',
+    data: Array.isArray(data) ? data : [],
+    meta: responseMeta
+  });
+}
+
+/**
  * Send list of leave balances
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object

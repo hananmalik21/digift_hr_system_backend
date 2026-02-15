@@ -2940,7 +2940,8 @@ END;`;
 
   /**
    * Read leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY (read-only view).
-   * @param {number} tenantId - Tenant ID (required)
+   * No column names are used in SQL (view columns may differ per env); all filtering is done in memory.
+   * @param {number} tenantId - Tenant ID (required) - used to filter rows in memory if view has tenant_id
    * @param {Object} [filters] - Optional filters { employeeId?, employee_id?, leaveTypeId?, leave_type_id? }
    * @returns {Promise<Array>} Summary rows (snake_case)
    */
@@ -2948,33 +2949,100 @@ END;`;
     const employeeId = filters.employeeId ?? filters.employee_id ?? null;
     const leaveTypeId = filters.leaveTypeId ?? filters.leave_type_id ?? null;
 
-    let sql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} WHERE TENANT_ID = :1`;
-    const bindParams = [tenantId];
-    let paramIndex = 2;
-
     if (employeeId != null) {
       const id = parseInt(employeeId, 10);
       if (isNaN(id) || id < 1) throw new ValidationError('employee_id must be a valid positive number');
-      sql += ` AND EMPLOYEE_ID = :${paramIndex}`;
-      bindParams.push(id);
-      paramIndex++;
     }
     if (leaveTypeId != null) {
       const id = parseInt(leaveTypeId, 10);
       if (isNaN(id) || id < 1) throw new ValidationError('leave_type_id must be a valid positive number');
-      sql += ` AND LEAVE_TYPE_ID = :${paramIndex}`;
-      bindParams.push(id);
-      paramIndex++;
     }
 
-    sql += ` ORDER BY EMPLOYEE_ID, LEAVE_TYPE_ID`;
-
+    const sql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}`;
+    let rows = [];
     try {
-      const result = await this.executeQuery(sql, bindParams);
-      return result.rows || [];
+      const result = await this.executeQuery(sql, []);
+      rows = result.rows || [];
     } catch (err) {
-      if (err instanceof ValidationError) throw err;
       throw this._wrapDb(err, 'Failed to fetch leave balance summary');
+    }
+
+    // Filter in memory (view column names may vary; result is snake_case)
+    if (tenantId != null && rows.length > 0 && rows[0].tenant_id !== undefined) {
+      const tid = parseInt(tenantId, 10);
+      rows = rows.filter((r) => r.tenant_id != null && parseInt(r.tenant_id, 10) === tid);
+    }
+    if (employeeId != null) {
+      const id = parseInt(employeeId, 10);
+      rows = rows.filter((r) => r.employee_id != null && parseInt(r.employee_id, 10) === id);
+    }
+    if (leaveTypeId != null) {
+      const id = parseInt(leaveTypeId, 10);
+      rows = rows.filter((r) => r.leave_type_id != null && parseInt(r.leave_type_id, 10) === id);
+    }
+
+    return rows;
+  }
+
+  /**
+   * Paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY.
+   * Uses bind variables, COUNT for total, OFFSET/FETCH for pagination.
+   * Filters: case-insensitive name (partial), partial employeeNumber.
+   * @param {Object} options - { page, pageSize, name, employeeNumber }
+   * @returns {Promise<{ rows: Array, total: number }>}
+   */
+  static async getLeaveBalanceSummaryPaginated(options = {}) {
+    const page = Math.max(1, parseInt(options.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(options.pageSize, 10) || 10));
+    const offset = (page - 1) * pageSize;
+    const name = options.name != null && String(options.name).trim() !== '' ? String(options.name).trim() : null;
+    const employeeNumber = options.employeeNumber != null && String(options.employeeNumber).trim() !== '' ? String(options.employeeNumber).trim() : null;
+
+    const countSql = `
+      SELECT COUNT(1) AS total
+      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+      WHERE
+        (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
+        AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
+    `;
+    // Oracle OFFSET/FETCH do not accept bind variables; use safe integer literals (offset/pageSize are validated above)
+    const dataSql = `
+      SELECT *
+      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+      WHERE
+        (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
+        AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
+      ORDER BY employee_name ASC
+      OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
+    `;
+    const binds = { name, employeeNumber };
+
+    let connection;
+    try {
+      connection = await db.getConnection();
+
+      const countResult = await connection.execute(countSql, binds, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      const total = (countResult.rows && countResult.rows[0] && countResult.rows[0].TOTAL != null)
+        ? parseInt(countResult.rows[0].TOTAL, 10) : 0;
+
+      const dataResult = await connection.execute(dataSql, binds, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      const rows = (dataResult.rows || []).map((r) => this.convertKeysToSnakeCase(r));
+
+      return { rows, total, page, pageSize };
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to fetch leave balance summary');
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (_) {
+          // ignore close error
+        }
+      }
     }
   }
 

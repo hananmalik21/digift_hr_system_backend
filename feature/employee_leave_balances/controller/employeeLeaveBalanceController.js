@@ -4,6 +4,7 @@ import { adjustLeaveBalance } from '../services/leaveBalance.service.js';
 import {
   sendLeaveBalanceList,
   sendLeaveBalanceSummaryList,
+  sendLeaveBalanceSummaryPaginated,
   sendLeaveBalance,
   sendCreated,
   sendOk,
@@ -226,35 +227,20 @@ router.get('/employees/:employeeGuid/leave-balances/summary', async (req, res) =
 });
 
 /**
- * @route   GET /api/abs/leave-balances
- * @desc    Get all leave balances for all employees (tenant-scoped)
+ * @route   GET /api/abs/leave-balances/list
+ * @desc    Get all leave balances from table (tenant-scoped) - optional filters
  * @query   employee_id - Optional filter by employee ID (numeric)
  * @query   leave_type_id - Optional filter by leave type ID (numeric)
  * @query   status - Optional filter by status (ACTIVE, INACTIVE, CLOSED)
  * @header  x-tenant-id - Required tenant ID
- * @header  x-user-id - Optional acting user ID (admin/hr/system) for audit, NOT employee_guid
  * @access  Public
- * 
- * Note: Returns 200 with items: [] if no balances found (not 404)
- * 
+ *
  * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances" \
- *   -H "x-tenant-id: 1" \
- *   -H "x-user-id: admin"
- * 
- * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances?employee_id=123&leave_type_id=1" \
- *   -H "x-tenant-id: 1"
- * 
- * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances?status=ACTIVE" \
- *   -H "x-tenant-id: 1"
+ * GET /api/abs/leave-balances/list?employee_id=123&leave_type_id=1
  */
-router.get('/leave-balances', async (req, res) => {
+router.get('/leave-balances/list', async (req, res) => {
   try {
     const tenantId = req.tenantId;
-
-    // Build filters from query parameters
     const filters = {};
     const appliedFilters = {};
 
@@ -262,22 +248,17 @@ router.get('/leave-balances', async (req, res) => {
       filters.employeeId = req.query.employee_id;
       appliedFilters.employee_id = req.query.employee_id;
     }
-
     if (req.query.leave_type_id !== undefined) {
       filters.leaveTypeId = req.query.leave_type_id;
       appliedFilters.leave_type_id = req.query.leave_type_id;
     }
-
     if (req.query.status !== undefined) {
       filters.status = req.query.status;
       appliedFilters.status = req.query.status;
     }
 
-    // Fetch all leave balances
     const balances = await EmployeeLeaveBalanceModel.findAll(tenantId, filters);
-
-    // Return response (always 200, even if empty) with meta information
-    sendLeaveBalanceList(res, req, null, balances, { 
+    sendLeaveBalanceList(res, req, null, balances, {
       total: balances.length,
       filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined
     });
@@ -290,38 +271,35 @@ router.get('/leave-balances', async (req, res) => {
 });
 
 /**
- * @route   GET /api/abs/leave-balances/summary
- * @desc    Get leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view (tenant-scoped)
- * @query   employee_id - Optional filter by employee ID (numeric)
- * @query   leave_type_id - Optional filter by leave type ID (numeric)
+ * @route   GET /api/abs/leave-balances
+ * @desc    Get paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view
+ * @query   page - Page number (default 1)
+ * @query   pageSize - Page size (default 10)
+ * @query   name - Optional; case-insensitive partial match on employee name
+ * @query   employeeNumber - Optional; partial match on employee number
  * @header  x-tenant-id - Required tenant ID
  * @access  Public
+ * @response { success, message, data: [], meta: { pagination: { page, page_size, total, total_pages, has_next, has_previous }, execution_time } }
  *
  * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances/summary" -H "x-tenant-id: 1"
- * curl -X GET "http://localhost:3000/api/abs/leave-balances/summary?employee_id=123&leave_type_id=1" -H "x-tenant-id: 1"
+ * GET /api/abs/leave-balances?page=1&pageSize=10
+ * GET /api/abs/leave-balances?name=john&employeeNumber=EMP001
  */
-router.get('/leave-balances/summary', async (req, res) => {
+router.get('/leave-balances', async (req, res) => {
   try {
-    const tenantId = req.tenantId;
-    const filters = {};
-    const appliedFilters = {};
+    const page = parseInt(req.query.page, 10) || 1;
+    const pageSize = parseInt(req.query.pageSize, 10) || 10;
+    const name = req.query.name || null;
+    const employeeNumber = req.query.employeeNumber || null;
 
-    if (req.query.employee_id !== undefined) {
-      filters.employeeId = req.query.employee_id;
-      appliedFilters.employee_id = req.query.employee_id;
-    }
-    if (req.query.leave_type_id !== undefined) {
-      filters.leaveTypeId = req.query.leave_type_id;
-      appliedFilters.leave_type_id = req.query.leave_type_id;
-    }
-
-    const summary = await EmployeeLeaveBalanceModel.getLeaveBalanceSummary(tenantId, filters);
-
-    sendLeaveBalanceSummaryList(res, req, summary, {
-      total: summary.length,
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined
+    const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
+      page,
+      pageSize,
+      name,
+      employeeNumber
     });
+
+    sendLeaveBalanceSummaryPaginated(res, req, result.rows, result.total, result.page, result.pageSize);
   } catch (error) {
     if (error instanceof ValidationError) {
       return sendBadRequest(res, req, error.message);
