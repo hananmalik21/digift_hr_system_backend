@@ -113,6 +113,33 @@ function enrichBalanceWithEmployeeInfo(balance) {
 }
 
 /**
+ * Send list of leave balance summary (from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view)
+ * @param {Object} res - Express response object
+ * @param {Object} req - Express request object
+ * @param {Array} items - Summary rows (already snake_case from model)
+ * @param {Object} meta - Optional metadata (total, filters, execution_time)
+ */
+export function sendLeaveBalanceSummaryList(res, req, items, meta = {}) {
+  const list = Array.isArray(items) ? items : [];
+  const total = meta.total !== undefined ? meta.total : list.length;
+  const startTime = req._startTime || Date.now();
+  const executionTime = Date.now() - startTime;
+
+  const responseMeta = {
+    total: total,
+    execution_time: `${executionTime}ms`,
+    ...(meta.filters && Object.keys(meta.filters).length > 0 && { filters: meta.filters })
+  };
+
+  res.json({
+    success: true,
+    message: 'Leave balance summary fetched',
+    meta: responseMeta,
+    data: list
+  });
+}
+
+/**
  * Send list of leave balances
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object

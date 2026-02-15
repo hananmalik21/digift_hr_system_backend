@@ -3,6 +3,7 @@ import EmployeeLeaveBalanceModel from '../model/employeeLeaveBalanceModel.js';
 import { adjustLeaveBalance } from '../services/leaveBalance.service.js';
 import {
   sendLeaveBalanceList,
+  sendLeaveBalanceSummaryList,
   sendLeaveBalance,
   sendCreated,
   sendOk,
@@ -168,6 +169,63 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
 });
 
 /**
+ * @route   GET /api/abs/employees/:employeeGuid/leave-balances/summary
+ * @desc    Get leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view for an employee (by GUID)
+ * @param   employeeGuid - Employee GUID (32-char hex string)
+ * @query   leave_type_id - Optional filter by leave type ID (numeric)
+ * @header  x-tenant-id - Required tenant ID
+ * @access  Public
+ *
+ * @example
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary" -H "x-tenant-id: 1"
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary?leave_type_id=1" -H "x-tenant-id: 1"
+ */
+router.get('/employees/:employeeGuid/leave-balances/summary', async (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+
+    let employeeGuid;
+    try {
+      employeeGuid = ensureHex32(req.params.employeeGuid, 'employeeGuid');
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        return sendBadRequest(res, req, error.message);
+      }
+      throw error;
+    }
+
+    const employeeId = await EmployeeLeaveBalanceModel.resolveEmployeeIdByGuid(tenantId, employeeGuid);
+    if (!employeeId) {
+      return sendNotFound(res, req, 'Employee not found');
+    }
+
+    const filters = { employeeId };
+    const appliedFilters = { employee_guid: employeeGuid };
+
+    if (req.query.leave_type_id !== undefined) {
+      const leaveTypeId = parseInt(req.query.leave_type_id, 10);
+      if (isNaN(leaveTypeId) || leaveTypeId < 1) {
+        return sendBadRequest(res, req, 'leave_type_id must be a valid positive number');
+      }
+      filters.leaveTypeId = leaveTypeId;
+      appliedFilters.leave_type_id = leaveTypeId;
+    }
+
+    const summary = await EmployeeLeaveBalanceModel.getLeaveBalanceSummary(tenantId, filters);
+
+    sendLeaveBalanceSummaryList(res, req, summary, {
+      total: summary.length,
+      filters: appliedFilters
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave balance summary', error);
+  }
+});
+
+/**
  * @route   GET /api/abs/leave-balances
  * @desc    Get all leave balances for all employees (tenant-scoped)
  * @query   employee_id - Optional filter by employee ID (numeric)
@@ -228,6 +286,47 @@ router.get('/leave-balances', async (req, res) => {
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to fetch leave balances', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-balances/summary
+ * @desc    Get leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view (tenant-scoped)
+ * @query   employee_id - Optional filter by employee ID (numeric)
+ * @query   leave_type_id - Optional filter by leave type ID (numeric)
+ * @header  x-tenant-id - Required tenant ID
+ * @access  Public
+ *
+ * @example
+ * curl -X GET "http://localhost:3000/api/abs/leave-balances/summary" -H "x-tenant-id: 1"
+ * curl -X GET "http://localhost:3000/api/abs/leave-balances/summary?employee_id=123&leave_type_id=1" -H "x-tenant-id: 1"
+ */
+router.get('/leave-balances/summary', async (req, res) => {
+  try {
+    const tenantId = req.tenantId;
+    const filters = {};
+    const appliedFilters = {};
+
+    if (req.query.employee_id !== undefined) {
+      filters.employeeId = req.query.employee_id;
+      appliedFilters.employee_id = req.query.employee_id;
+    }
+    if (req.query.leave_type_id !== undefined) {
+      filters.leaveTypeId = req.query.leave_type_id;
+      appliedFilters.leave_type_id = req.query.leave_type_id;
+    }
+
+    const summary = await EmployeeLeaveBalanceModel.getLeaveBalanceSummary(tenantId, filters);
+
+    sendLeaveBalanceSummaryList(res, req, summary, {
+      total: summary.length,
+      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch leave balance summary', error);
   }
 });
 

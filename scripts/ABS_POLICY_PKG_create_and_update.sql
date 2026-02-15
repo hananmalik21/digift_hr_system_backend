@@ -1,6 +1,13 @@
 -- =============================================================================
 -- ABS_POLICY_PKG: CREATE and UPDATE procedures with all policy header fields
--- Run as schema owner (ABS). Table ABS_LEAVE_POLICIES must have:
+-- Run as schema owner (ABS).
+--
+-- IMPORTANT: This version reads per-grade accrual_method_code from grade_rows JSON.
+-- You MUST run this entire script and then "ALTER PACKAGE ... COMPILE BODY" so that
+-- INSERT into ABS_LEAVE_POLICY_ENTITLEMENTS uses j.accrual_method_code (YEARLY,
+-- WEEKLY, etc. per grade). Otherwise all rows get the policy-level value only.
+--
+-- Table ABS_LEAVE_POLICIES must have:
 --   POLICY_GUID, TENANT_ID, LEAVE_TYPE_ID, LEAVE_TYPE_EN, LEAVE_TYPE_AR,
 --   POLICY_NAME, ENTITLEMENT_DAYS, ACCRUAL_METHOD_CODE, STATUS,
 --   KUWAIT_LABOR_COMPLIANT, CREATED_BY, CREATED_DATE,
@@ -196,17 +203,18 @@ CREATE OR REPLACE PACKAGE BODY ABS.ABS_POLICY_PKG AS
       l_policy_id, p_tenant_id, p_allow_encashment, p_encashment_limit_days, p_encashment_rate_pct
     );
 
-    -- Grade entitlements (from p_grade_rows_json; ACCRUAL_METHOD_CODE from policy)
+    -- Grade entitlements (from p_grade_rows_json; ACCRUAL_METHOD_CODE per grade or policy default)
     INSERT INTO ABS.ABS_LEAVE_POLICY_ENTITLEMENTS (
       POLICY_ID, TENANT_ID, GRADE_FROM, GRADE_TO, ENTITLEMENT_DAYS, ACCRUAL_RATE, STATUS, ACCRUAL_METHOD_CODE
     )
-    SELECT l_policy_id, p_tenant_id, j.grade_from, j.grade_to, j.entitlement_days, j.accrual_rate, NVL(j.status, 'ACTIVE'), p_accrual_method_code
+    SELECT l_policy_id, p_tenant_id, j.grade_from, j.grade_to, j.entitlement_days, j.accrual_rate, NVL(j.status, 'ACTIVE'), NVL(j.accrual_method_code, p_accrual_method_code)
       FROM JSON_TABLE(p_grade_rows_json, '$[*]' COLUMNS (
-        grade_from        NUMBER PATH '$.grade_from',
-        grade_to          NUMBER PATH '$.grade_to',
-        entitlement_days  NUMBER PATH '$.entitlement_days',
-        accrual_rate      NUMBER PATH '$.accrual_rate',
-        status            VARCHAR2(20) PATH '$.status'
+        grade_from           NUMBER PATH '$.grade_from',
+        grade_to             NUMBER PATH '$.grade_to',
+        entitlement_days     NUMBER PATH '$.entitlement_days',
+        accrual_rate         NUMBER PATH '$.accrual_rate',
+        status               VARCHAR2(20) PATH '$.status',
+        accrual_method_code  VARCHAR2(50) PATH '$.accrual_method_code'
       )) j;
 
     COMMIT;
@@ -302,19 +310,20 @@ CREATE OR REPLACE PACKAGE BODY ABS.ABS_POLICY_PKG AS
         ENCASHMENT_RATE_PCT = p_encashment_rate_pct
     WHERE POLICY_ID = p_policy_id AND TENANT_ID = p_tenant_id;
 
-    -- Grade entitlements: replace with new rows from JSON (ACCRUAL_METHOD_CODE from policy)
+    -- Grade entitlements: replace with new rows from JSON (ACCRUAL_METHOD_CODE per grade or policy default)
     DELETE FROM ABS.ABS_LEAVE_POLICY_ENTITLEMENTS
      WHERE POLICY_ID = p_policy_id AND TENANT_ID = p_tenant_id;
     INSERT INTO ABS.ABS_LEAVE_POLICY_ENTITLEMENTS (
       POLICY_ID, TENANT_ID, GRADE_FROM, GRADE_TO, ENTITLEMENT_DAYS, ACCRUAL_RATE, STATUS, ACCRUAL_METHOD_CODE
     )
-    SELECT p_policy_id, p_tenant_id, j.grade_from, j.grade_to, j.entitlement_days, j.accrual_rate, NVL(j.status, 'ACTIVE'), p_accrual_method_code
+    SELECT p_policy_id, p_tenant_id, j.grade_from, j.grade_to, j.entitlement_days, j.accrual_rate, NVL(j.status, 'ACTIVE'), NVL(j.accrual_method_code, p_accrual_method_code)
       FROM JSON_TABLE(p_grade_rows_json, '$[*]' COLUMNS (
-        grade_from        NUMBER PATH '$.grade_from',
-        grade_to          NUMBER PATH '$.grade_to',
-        entitlement_days  NUMBER PATH '$.entitlement_days',
-        accrual_rate      NUMBER PATH '$.accrual_rate',
-        status            VARCHAR2(20) PATH '$.status'
+        grade_from           NUMBER PATH '$.grade_from',
+        grade_to             NUMBER PATH '$.grade_to',
+        entitlement_days     NUMBER PATH '$.entitlement_days',
+        accrual_rate         NUMBER PATH '$.accrual_rate',
+        status               VARCHAR2(20) PATH '$.status',
+        accrual_method_code  VARCHAR2(50) PATH '$.accrual_method_code'
       )) j;
 
     COMMIT;

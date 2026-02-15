@@ -15,6 +15,8 @@ class EmployeeLeaveBalanceModel {
   static ACCRUAL_PLANS_TABLE = 'ABS.ABS_ACCRUAL_PLANS';
   static TXN_TABLE = 'ABS.ABS_LEAVE_BALANCE_TXNS';
   static ACCRUAL_RUNS_TABLE = 'ABS.ABS_LEAVE_ACCRUAL_RUNS';
+  /** Read-only view: employee leave balance summary (aggregated/summary data) */
+  static EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW = 'ABS.EMPLOYEE_LEAVE_BAL_SUMMARY';
 
   /* ------------------------------------------------------------------ */
   /* Helpers                                                            */
@@ -2934,6 +2936,46 @@ END;`;
       : undefined;
 
     return { adjId, adjGuid, adjLines, updatedBalancesJson, linesCount, warning };
+  }
+
+  /**
+   * Read leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY (read-only view).
+   * @param {number} tenantId - Tenant ID (required)
+   * @param {Object} [filters] - Optional filters { employeeId?, employee_id?, leaveTypeId?, leave_type_id? }
+   * @returns {Promise<Array>} Summary rows (snake_case)
+   */
+  static async getLeaveBalanceSummary(tenantId, filters = {}) {
+    const employeeId = filters.employeeId ?? filters.employee_id ?? null;
+    const leaveTypeId = filters.leaveTypeId ?? filters.leave_type_id ?? null;
+
+    let sql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} WHERE TENANT_ID = :1`;
+    const bindParams = [tenantId];
+    let paramIndex = 2;
+
+    if (employeeId != null) {
+      const id = parseInt(employeeId, 10);
+      if (isNaN(id) || id < 1) throw new ValidationError('employee_id must be a valid positive number');
+      sql += ` AND EMPLOYEE_ID = :${paramIndex}`;
+      bindParams.push(id);
+      paramIndex++;
+    }
+    if (leaveTypeId != null) {
+      const id = parseInt(leaveTypeId, 10);
+      if (isNaN(id) || id < 1) throw new ValidationError('leave_type_id must be a valid positive number');
+      sql += ` AND LEAVE_TYPE_ID = :${paramIndex}`;
+      bindParams.push(id);
+      paramIndex++;
+    }
+
+    sql += ` ORDER BY EMPLOYEE_ID, LEAVE_TYPE_ID`;
+
+    try {
+      const result = await this.executeQuery(sql, bindParams);
+      return result.rows || [];
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      throw this._wrapDb(err, 'Failed to fetch leave balance summary');
+    }
   }
 
   /**

@@ -145,6 +145,7 @@ export class DatabaseError extends AppError {
           'ABS_LEAVE_POLICIES_C3': 'Invalid entitlement days. Entitlement days must be a positive number.',
           'ABS_LEAVE_POLICIES_C4': 'Invalid grade range. Grade from must be less than or equal to grade to.',
           'ABS_LEAVE_POLICIES_C5': 'Invalid grade entitlement. Grade entitlement days must be a positive number.',
+          'CK_ABS_LP_ENT_ACCRUAL_METHOD': 'Invalid accrual_method_code. The value is not allowed by the database. Set ALLOWED_ACCRUAL_METHOD_CODES in feature/abs_leave_policies/config.js to match the DB check constraint (e.g. MONTHLY, YEARLY, WEEKLY, DAILY, NONE) and ensure request body only uses those values.',
         };
         
         if (constraintMessages[constraintName]) {

@@ -3,6 +3,7 @@ import LeavePolicyModel from '../model/leavePolicyModel.js';
 import { sendSuccess, sendPolicy, sendValidationError, sendDatabaseError, sendError, sendPolicyList } from '../view/leavePolicyView.js';
 import { ValidationError, DatabaseError } from '../../../utils/errors/index.js';
 import { asyncHandler } from '../../../middleware/asyncHandler.js';
+import { ALLOWED_ACCRUAL_METHOD_CODES } from '../config.js';
 
 const router = express.Router();
 
@@ -83,6 +84,11 @@ function validatePolicyData(data, isUpdate = false) {
     errors.push('accrual_method_code is required');
   } else if (typeof data.accrual_method_code !== 'string' || !data.accrual_method_code.trim()) {
     errors.push('accrual_method_code must be a non-empty string');
+  } else if (ALLOWED_ACCRUAL_METHOD_CODES.length > 0) {
+    const codeUpper = data.accrual_method_code.trim().toUpperCase();
+    if (!ALLOWED_ACCRUAL_METHOD_CODES.includes(codeUpper)) {
+      errors.push(`accrual_method_code must be one of: ${ALLOWED_ACCRUAL_METHOD_CODES.join(', ')}`);
+    }
   }
 
   // policy_name is required for creates
@@ -102,6 +108,14 @@ function validatePolicyData(data, isUpdate = false) {
       errors.push('created_by is required');
     } else if (typeof data.created_by !== 'string' || !data.created_by.trim()) {
       errors.push('created_by must be a non-empty string');
+    }
+  }
+
+  // Validate optional count_weekends_as_leave (policy-level; if provided must be "Y" or "N")
+  if (data.count_weekends_as_leave !== undefined && data.count_weekends_as_leave !== null) {
+    const val = typeof data.count_weekends_as_leave === 'string' ? data.count_weekends_as_leave.trim().toUpperCase() : '';
+    if (val !== 'Y' && val !== 'N') {
+      errors.push('count_weekends_as_leave must be "Y" or "N" when provided');
     }
   }
 
@@ -145,6 +159,18 @@ function validatePolicyData(data, isUpdate = false) {
         errors.push(`grade_rows[${i}].accrual_rate is required`);
       } else if (!Number.isFinite(row.accrual_rate) || row.accrual_rate < 0) {
         errors.push(`grade_rows[${i}].accrual_rate must be a valid non-negative number`);
+      }
+
+      // Validate optional accrual_method_code (per grade; if provided must be non-empty string; if config set, must be allowed code)
+      if (row.accrual_method_code !== undefined && row.accrual_method_code !== null) {
+        if (typeof row.accrual_method_code !== 'string' || !row.accrual_method_code.trim()) {
+          errors.push(`grade_rows[${i}].accrual_method_code must be a non-empty string when provided`);
+        } else if (ALLOWED_ACCRUAL_METHOD_CODES.length > 0) {
+          const codeUpper = row.accrual_method_code.trim().toUpperCase();
+          if (!ALLOWED_ACCRUAL_METHOD_CODES.includes(codeUpper)) {
+            errors.push(`grade_rows[${i}].accrual_method_code must be one of: ${ALLOWED_ACCRUAL_METHOD_CODES.join(', ')}`);
+          }
+        }
       }
     });
   }

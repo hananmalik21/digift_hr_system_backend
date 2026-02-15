@@ -8,6 +8,8 @@ import { DatabaseError } from '../../../utils/errors/index.js';
  */
 class LeavePolicyModel {
   static VIEW_NAME = 'ABS.V_ABS_LEAVE_POLICY_FULL';
+  static ENTITLEMENTS_TABLE = 'ABS.ABS_LEAVE_POLICY_ENTITLEMENTS';
+  static MAX_IN_LIST = 1000;
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
@@ -39,6 +41,23 @@ class LeavePolicyModel {
   }
 
   /**
+   * Convert flat row keys to snake_case (single level, no recursion). Faster for view result rows.
+   */
+  static convertRowToSnakeCase(row) {
+    if (row === null || row === undefined) return row;
+    const converted = {};
+    for (const [key, value] of Object.entries(row)) {
+      const newKey = key.toLowerCase();
+      if (value instanceof Buffer) {
+        converted[newKey] = value.toString('hex').toUpperCase();
+      } else {
+        converted[newKey] = value;
+      }
+    }
+    return converted;
+  }
+
+  /**
    * Set session options on a connection (schema, disable parallel). Used for read queries.
    * @param {object} connection - Oracle connection
    */
@@ -49,6 +68,12 @@ class LeavePolicyModel {
     } catch {
       // Ignore if not supported
     }
+  }
+
+  /** Normalize optional Y/N flag for Oracle (default 'N'). */
+  static normalizeYn(value, defaultVal = 'N') {
+    if (value == null || String(value).trim() === '') return defaultVal;
+    return String(value).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
   }
 
   /**
@@ -139,12 +164,13 @@ class LeavePolicyModel {
           effective_start_date: row.effective_start_date,
           effective_end_date: row.effective_end_date,
           enable_pro_rata: row.enable_pro_rata,
+          count_weekends_as_leave: row.count_weekends_as_leave,
           grade_rows: []
         };
         policyMap.set(policyId, policy);
       }
 
-      // Add grade-specific data to grade_rows array
+      // Add grade-specific data to grade_rows array (grade_accrual_method from view GRADE_ACCRUAL_METHOD / entitlement overlay)
       const policy = policyMap.get(policyId);
       policy.grade_rows.push({
         entitlement_id: row.entitlement_id,
@@ -153,12 +179,55 @@ class LeavePolicyModel {
         grade_entitlement_days: row.grade_entitlement_days,
         grade_accrual_rate: row.grade_accrual_rate,
         grade_status: row.grade_status,
-        accrual_method_code: row.accrual_method_code ?? row.policy_accrual_method
+        grade_accrual_method: row.grade_accrual_method
       });
     }
 
     // Convert Map to Array and maintain order (by policy_id DESC)
     return Array.from(policyMap.values()).sort((a, b) => b.policy_id - a.policy_id);
+  }
+
+  /**
+   * Overlay entitlement-level ACCRUAL_METHOD_CODE onto policies' grade_rows (for GET responses).
+   * @param {Array} policies - Array of policy objects with grade_rows
+   * @param {Object} [existingConnection] - Optional connection to reuse (avoids extra round-trip)
+   */
+  static async overlayEntitlementAccrualMethods(policies, existingConnection = null) {
+    if (!policies || policies.length === 0) return;
+    const entitlementIds = [];
+    for (const p of policies) {
+      if (p.grade_rows) for (const gr of p.grade_rows) if (gr.entitlement_id != null) entitlementIds.push(gr.entitlement_id);
+    }
+    if (entitlementIds.length === 0) return;
+    const ids = entitlementIds.slice(0, this.MAX_IN_LIST);
+    let connection = existingConnection;
+    const ownConnection = !connection;
+    try {
+      if (ownConnection) {
+        connection = await db.getConnection();
+        await this._setSession(connection);
+      }
+      const placeholders = ids.map((_, i) => `:e${i + 1}`).join(', ');
+      const query = `SELECT ENTITLEMENT_ID, ACCRUAL_METHOD_CODE FROM ${this.ENTITLEMENTS_TABLE} WHERE ENTITLEMENT_ID IN (${placeholders})`;
+      const binds = {};
+      ids.forEach((id, i) => { binds[`e${i + 1}`] = id; });
+      const result = await connection.execute(query, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const map = new Map();
+      for (const row of result.rows || []) {
+        const id = row.ENTITLEMENT_ID;
+        const code = row.ACCRUAL_METHOD_CODE;
+        if (id != null) map.set(id, code);
+      }
+      for (const p of policies) {
+        if (p.grade_rows) for (const gr of p.grade_rows) {
+          if (gr.entitlement_id != null && map.has(gr.entitlement_id)) gr.grade_accrual_method = map.get(gr.entitlement_id);
+        }
+      }
+    } catch (err) {
+      // If overlay fails (e.g. column missing), leave grade_accrual_method as from view
+    } finally {
+      if (ownConnection && connection) await connection.close().catch(() => {});
+    }
   }
 
   /**
@@ -268,12 +337,14 @@ class LeavePolicyModel {
             v.EFFECTIVE_START_DATE,
             v.EFFECTIVE_END_DATE,
             v.ENABLE_PRO_RATA,
+            v.COUNT_WEEKENDS_AS_LEAVE,
             v.ENTITLEMENT_ID,
             v.GRADE_FROM,
             v.GRADE_TO,
             v.GRADE_ENTITLEMENT_DAYS,
             v.GRADE_ACCRUAL_RATE,
-            v.GRADE_STATUS
+            v.GRADE_STATUS,
+            v.GRADE_ACCRUAL_METHOD
           FROM ${this.VIEW_NAME} v
           INNER JOIN paginated_policies p ON v.POLICY_ID = p.POLICY_ID
           ${mainWhereClause}
@@ -326,22 +397,27 @@ class LeavePolicyModel {
           EFFECTIVE_START_DATE,
           EFFECTIVE_END_DATE,
           ENABLE_PRO_RATA,
+          COUNT_WEEKENDS_AS_LEAVE,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
           GRADE_ENTITLEMENT_DAYS,
           GRADE_ACCRUAL_RATE,
-          GRADE_STATUS
+          GRADE_STATUS,
+          GRADE_ACCRUAL_METHOD
         FROM ${this.VIEW_NAME}
         ${whereClause}
         ORDER BY POLICY_ID DESC, GRADE_FROM ASC`;
       }
 
-      const fetchSize = hasPagination ? Math.min((pagination.pageSize || 10) * 10, 200) : 100;
+      const fetchSize = hasPagination ? Math.min((pagination.pageSize || 10) * 25, 500) : 200;
       const execOpts = { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchArraySize: fetchSize };
 
+      // When policy_id is set, at most one policy: skip count query and use single connection
+      const skipCount = hasPagination && (filters.policyId !== undefined && filters.policyId !== null);
+
       let result;
-      if (hasPagination) {
+      if (hasPagination && !skipCount) {
         const [conn1, conn2] = await Promise.all([db.getConnection(), db.getConnection()]);
         try {
           await Promise.all([this._setSession(conn1), this._setSession(conn2)]);
@@ -361,10 +437,17 @@ class LeavePolicyModel {
       }
 
       const rows = result.rows || [];
-      const convertedRows = this.convertKeysToSnakeCase(rows);
+      const convertedRows = rows.map(row => this.convertRowToSnakeCase(row));
       
       // Group rows by policy_id and nest grade rows
       const policies = this.groupPoliciesByGrade(convertedRows);
+
+      if (skipCount) {
+        total = policies.length;
+      }
+
+      // Overlay entitlement-level accrual_method (reuse connection when single-connection path)
+      await this.overlayEntitlementAccrualMethods(policies, connection || null);
 
       // Return paginated result or plain array
       if (hasPagination) {
@@ -455,12 +538,14 @@ class LeavePolicyModel {
           EFFECTIVE_START_DATE,
           EFFECTIVE_END_DATE,
           ENABLE_PRO_RATA,
+          COUNT_WEEKENDS_AS_LEAVE,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
           GRADE_ENTITLEMENT_DAYS,
           GRADE_ACCRUAL_RATE,
-          GRADE_STATUS
+          GRADE_STATUS,
+          GRADE_ACCRUAL_METHOD
         FROM ${this.VIEW_NAME}
         WHERE POLICY_ID = :policy_id
           AND TENANT_ID = :tenant_id
@@ -476,13 +561,16 @@ class LeavePolicyModel {
       });
 
       const rows = result.rows || [];
-      const convertedRows = this.convertKeysToSnakeCase(rows);
+      const convertedRows = rows.map(row => this.convertRowToSnakeCase(row));
       
       // Group rows by policy_id and nest grade rows
       const policies = this.groupPoliciesByGrade(convertedRows);
       
-      // Return the first policy (should be only one)
-      return policies.length > 0 ? policies[0] : null;
+      if (policies.length > 0) {
+        await this.overlayEntitlementAccrualMethods(policies, connection);
+        return policies[0];
+      }
+      return null;
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to fetch leave policy', error);
@@ -566,12 +654,14 @@ class LeavePolicyModel {
           EFFECTIVE_START_DATE,
           EFFECTIVE_END_DATE,
           ENABLE_PRO_RATA,
+          COUNT_WEEKENDS_AS_LEAVE,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
           GRADE_ENTITLEMENT_DAYS,
           GRADE_ACCRUAL_RATE,
-          GRADE_STATUS
+          GRADE_STATUS,
+          GRADE_ACCRUAL_METHOD
         FROM ${this.VIEW_NAME}
         WHERE POLICY_GUID = HEXTORAW(:policy_guid)
           AND TENANT_ID = :tenant_id
@@ -587,13 +677,16 @@ class LeavePolicyModel {
       });
 
       const rows = result.rows || [];
-      const convertedRows = this.convertKeysToSnakeCase(rows);
+      const convertedRows = rows.map(row => this.convertRowToSnakeCase(row));
       
       // Group rows by policy_id and nest grade rows
       const policies = this.groupPoliciesByGrade(convertedRows);
       
-      // Return the first policy (should be only one)
-      return policies.length > 0 ? policies[0] : null;
+      if (policies.length > 0) {
+        await this.overlayEntitlementAccrualMethods(policies, connection);
+        return policies[0];
+      }
+      return null;
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to fetch leave policy', error);
@@ -670,7 +763,19 @@ class LeavePolicyModel {
       // Validate leave type exists before creating policy
       await this.validateLeaveTypeExists(connection, policyData.tenant_id, policyData.leave_type_id);
       
-      const gradeRowsJson = JSON.stringify(policyData.grade_rows);
+      // Build p_grade_rows_json: include accrual_method_code per row (key exactly "accrual_method_code" for Oracle JSON_TABLE)
+      const policyAccrual = policyData.accrual_method_code ?? null;
+      const normalizedGradeRows = (policyData.grade_rows || []).map(row => ({
+        grade_from: row.grade_from,
+        grade_to: row.grade_to ?? null,
+        entitlement_days: row.entitlement_days,
+        accrual_rate: row.accrual_rate,
+        status: row.status ?? 'ACTIVE',
+        accrual_method_code: row.accrual_method_code != null && String(row.accrual_method_code).trim() !== ''
+          ? row.accrual_method_code.trim()
+          : policyAccrual
+      }));
+      const gradeRowsJson = JSON.stringify(normalizedGradeRows);
 
       const binds = {
         tenant_id: policyData.tenant_id,
@@ -702,7 +807,8 @@ class LeavePolicyModel {
         grade_rows_json: { type: oracledb.CLOB, dir: oracledb.BIND_IN, val: gradeRowsJson },
         effective_start_date: LeavePolicyModel.parseDateForOracle(policyData.effective_start_date),
         effective_end_date: LeavePolicyModel.parseDateForOracle(policyData.effective_end_date),
-        enable_pro_rata: policyData.enable_pro_rata ?? 'N'
+        enable_pro_rata: policyData.enable_pro_rata ?? 'N',
+        count_weekends_as_leave: this.normalizeYn(policyData.count_weekends_as_leave)
       };
 
       const plsqlBlock = `
@@ -737,7 +843,8 @@ class LeavePolicyModel {
             p_grade_rows_json        => :grade_rows_json,
             p_effective_start_date   => :effective_start_date,
             p_effective_end_date     => :effective_end_date,
-            p_enable_pro_rata        => :enable_pro_rata
+            p_enable_pro_rata        => :enable_pro_rata,
+            p_count_weekends_as_leave => :count_weekends_as_leave
           );
         END;
       `;
@@ -792,12 +899,14 @@ class LeavePolicyModel {
           EFFECTIVE_START_DATE,
           EFFECTIVE_END_DATE,
           ENABLE_PRO_RATA,
+          COUNT_WEEKENDS_AS_LEAVE,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
           GRADE_ENTITLEMENT_DAYS,
           GRADE_ACCRUAL_RATE,
-          GRADE_STATUS
+          GRADE_STATUS,
+          GRADE_ACCRUAL_METHOD
         FROM ${this.VIEW_NAME}
         WHERE TENANT_ID = :tenant_id
           AND LEAVE_TYPE_ID = :leave_type_id
@@ -814,14 +923,25 @@ class LeavePolicyModel {
       });
 
       const rows = fetchResult.rows || [];
-      const convertedRows = this.convertKeysToSnakeCase(rows);
+      const convertedRows = rows.map(row => this.convertRowToSnakeCase(row));
       
       // Group rows by policy_id and nest grade rows
       const policies = this.groupPoliciesByGrade(convertedRows);
       
-      // Return the first (most recent) policy
+      // Return the first (most recent) policy with entitlement-level accrual_method for each grade
       if (policies.length > 0) {
-        return policies[0];
+        const policy = policies[0];
+        // Overlay entitlement-level accrual_method_code from request (view may return policy-level for all rows)
+        if (policy.grade_rows && policyData.grade_rows && Array.isArray(policyData.grade_rows)) {
+          policy.grade_rows.forEach((gr, i) => {
+            const inputRow = policyData.grade_rows[i];
+            const entitlementMethod = inputRow && inputRow.accrual_method_code != null && String(inputRow.accrual_method_code).trim() !== ''
+              ? inputRow.accrual_method_code
+              : (policyData.accrual_method_code ?? gr.grade_accrual_method);
+            gr.grade_accrual_method = entitlementMethod;
+          });
+        }
+        return policy;
       }
       
       // If no policy found, return null (shouldn't happen)
@@ -923,7 +1043,19 @@ class LeavePolicyModel {
       // Validate leave type exists before updating policy
       await this.validateLeaveTypeExists(connection, policyData.tenant_id, policyData.leave_type_id);
       
-      const gradeRowsJson = JSON.stringify(policyData.grade_rows);
+      // Build p_grade_rows_json: include accrual_method_code per row (key exactly "accrual_method_code" for Oracle JSON_TABLE)
+      const policyAccrualUpdate = policyData.accrual_method_code ?? null;
+      const normalizedGradeRowsUpdate = (policyData.grade_rows || []).map(row => ({
+        grade_from: row.grade_from,
+        grade_to: row.grade_to ?? null,
+        entitlement_days: row.entitlement_days,
+        accrual_rate: row.accrual_rate,
+        status: row.status ?? 'ACTIVE',
+        accrual_method_code: row.accrual_method_code != null && String(row.accrual_method_code).trim() !== ''
+          ? row.accrual_method_code.trim()
+          : policyAccrualUpdate
+      }));
+      const gradeRowsJson = JSON.stringify(normalizedGradeRowsUpdate);
 
       // Prepare binds - handle null max_service_years with NUMBER type
       // If policy_name is not provided, use the current policy_name to avoid changing it
@@ -966,7 +1098,8 @@ class LeavePolicyModel {
           : existingEffectiveEndDate,
         enable_pro_rata: policyData.enable_pro_rata != null && policyData.enable_pro_rata !== ''
           ? policyData.enable_pro_rata
-          : (existingEnableProRata ?? 'N')
+          : (existingEnableProRata ?? 'N'),
+        count_weekends_as_leave: this.normalizeYn(policyData.count_weekends_as_leave)
       };
 
       // Handle null max_service_years with NUMBER type to avoid PLS-00457/SQL type issues
@@ -1009,7 +1142,8 @@ class LeavePolicyModel {
             p_grade_rows_json         => :grade_rows_json,
             p_effective_start_date    => :effective_start_date,
             p_effective_end_date      => :effective_end_date,
-            p_enable_pro_rata         => :enable_pro_rata
+            p_enable_pro_rata         => :enable_pro_rata,
+            p_count_weekends_as_leave => :count_weekends_as_leave
           );
         END;
       `;
@@ -1064,12 +1198,14 @@ class LeavePolicyModel {
           EFFECTIVE_START_DATE,
           EFFECTIVE_END_DATE,
           ENABLE_PRO_RATA,
+          COUNT_WEEKENDS_AS_LEAVE,
           ENTITLEMENT_ID,
           GRADE_FROM,
           GRADE_TO,
           GRADE_ENTITLEMENT_DAYS,
           GRADE_ACCRUAL_RATE,
-          GRADE_STATUS
+          GRADE_STATUS,
+          GRADE_ACCRUAL_METHOD
         FROM ${this.VIEW_NAME}
         WHERE POLICY_GUID = HEXTORAW(:policy_guid)
         ORDER BY GRADE_FROM ASC
@@ -1083,14 +1219,24 @@ class LeavePolicyModel {
       });
 
       const rows = fetchResult.rows || [];
-      const convertedRows = this.convertKeysToSnakeCase(rows);
+      const convertedRows = rows.map(row => this.convertRowToSnakeCase(row));
       
       // Group rows by policy_id and nest grade rows
       const policies = this.groupPoliciesByGrade(convertedRows);
       
-      // Return the updated policy (should be only one)
+      // Return the updated policy with entitlement-level accrual_method for each grade
       if (policies.length > 0) {
-        return policies[0];
+        const policy = policies[0];
+        if (policy.grade_rows && policyData.grade_rows && Array.isArray(policyData.grade_rows)) {
+          policy.grade_rows.forEach((gr, i) => {
+            const inputRow = policyData.grade_rows[i];
+            const entitlementMethod = inputRow && inputRow.accrual_method_code != null && String(inputRow.accrual_method_code).trim() !== ''
+              ? inputRow.accrual_method_code
+              : (policyData.accrual_method_code ?? gr.grade_accrual_method);
+            gr.grade_accrual_method = entitlementMethod;
+          });
+        }
+        return policy;
       }
       
       // If no policy found, return null (shouldn't happen)
