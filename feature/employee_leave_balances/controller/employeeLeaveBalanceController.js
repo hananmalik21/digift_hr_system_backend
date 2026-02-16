@@ -26,7 +26,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Middleware: parse and validate x-tenant-id (and optional x-user-id) once for all routes
+// Middleware: parse and validate tenant_id from params (query/body) and optional x-user-id
 router.use((req, res, next) => {
   try {
     req.tenantId = getTenantId(req);
@@ -41,19 +41,20 @@ router.use((req, res, next) => {
 });
 
 /**
- * Extract tenant ID from x-tenant-id header (required)
+ * Extract tenant ID from params: query.tenant_id or body.tenant_id (required)
+ * No tenant ID in headers - must be passed in params.
  * @param {Object} req - Express request object
  * @returns {number} Tenant ID
- * @throws {Error} If tenant ID is missing or invalid
+ * @throws {ValidationError} If tenant ID is missing or invalid
  */
 function getTenantId(req) {
-  const tenantIdHeader = req.headers['x-tenant-id'];
-  if (!tenantIdHeader) {
-    throw new ValidationError('Tenant ID is required');
+  const tenantIdRaw = req.query.tenant_id ?? req.body?.tenant_id;
+  if (tenantIdRaw === undefined || tenantIdRaw === null || String(tenantIdRaw).trim() === '') {
+    throw new ValidationError('tenant_id is required (pass in query params or request body)');
   }
-  const tenantId = parseInt(tenantIdHeader);
-  if (isNaN(tenantId) || tenantId < 1) {
-    throw new ValidationError('Tenant ID must be a valid positive number');
+  const tenantId = parseInt(tenantIdRaw, 10);
+  if (!Number.isFinite(tenantId) || tenantId < 1) {
+    throw new ValidationError('tenant_id must be a valid positive number');
   }
   return tenantId;
 }
@@ -95,19 +96,12 @@ async function getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, lim
 /**
  * @route   GET /api/abs/leave-balance-transactions
  * @desc    List leave balance transactions from ABS.V_LEAVE_BALANCE_TXNS_EMP with pagination.
- * @query   enterprise_id (required), employee_guid?, leave_type_id?, txn_type?, date_from?, date_to?, page? (default 1), page_size? (default 10, max 100)
+ * @query   tenant_id (required), employee_guid?, leave_type_id?, txn_type?, date_from?, date_to?, page? (default 1), page_size? (default 10, max 100)
  * @access  Public
  */
 router.get('/leave-balance-transactions', async (req, res) => {
   try {
-    const enterpriseIdRaw = req.query.enterprise_id;
-    if (enterpriseIdRaw === undefined || enterpriseIdRaw === null || String(enterpriseIdRaw).trim() === '') {
-      return sendBadRequest(res, req, 'enterprise_id is required');
-    }
-    const enterpriseId = parseInt(enterpriseIdRaw, 10);
-    if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
-      return sendBadRequest(res, req, 'enterprise_id must be a valid positive number');
-    }
+    const enterpriseId = req.tenantId;
 
     const page = parseInt(req.query.page, 10) || 1;
     const pageSize = parseInt(req.query.page_size, 10) || parseInt(req.query.pageSize, 10) || 10;
@@ -192,19 +186,17 @@ router.get('/leave-balance-transactions', async (req, res) => {
  * @route   GET /api/abs/employees/:employeeGuid/leave-balances
  * @desc    Get leave balances for an employee by employee GUID
  * @param   employeeGuid - Employee GUID (32-char hex string)
+ * @query   tenant_id - Required tenant ID
  * @query   leave_type_id - Optional filter by leave type ID (numeric)
- * @header  x-tenant-id - Required tenant ID
  * @header  x-user-id - Optional user ID for audit
  * @access  Public
  * 
  * @example
- * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances?leave_type_id=1" \
- *   -H "x-tenant-id: 1" \
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances?tenant_id=1&leave_type_id=1" \
  *   -H "x-user-id: admin"
  * 
  * @example
- * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances" \
- *   -H "x-tenant-id: 1"
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances?tenant_id=1"
  */
 router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
   try {
@@ -270,13 +262,13 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
  * @route   GET /api/abs/employees/:employeeGuid/leave-balances/summary
  * @desc    Get leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view for an employee (by GUID)
  * @param   employeeGuid - Employee GUID (32-char hex string)
+ * @query   tenant_id - Required tenant ID
  * @query   leave_type_id - Optional filter by leave type ID (numeric)
- * @header  x-tenant-id - Required tenant ID
  * @access  Public
  *
  * @example
- * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary" -H "x-tenant-id: 1"
- * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary?leave_type_id=1" -H "x-tenant-id: 1"
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary?tenant_id=1"
+ * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances/summary?tenant_id=1&leave_type_id=1"
  */
 router.get('/employees/:employeeGuid/leave-balances/summary', async (req, res) => {
   try {
@@ -326,14 +318,14 @@ router.get('/employees/:employeeGuid/leave-balances/summary', async (req, res) =
 /**
  * @route   GET /api/abs/leave-balances/list
  * @desc    Get all leave balances from table (tenant-scoped) - optional filters
+ * @query   tenant_id - Required tenant ID
  * @query   employee_id - Optional filter by employee ID (numeric)
  * @query   leave_type_id - Optional filter by leave type ID (numeric)
  * @query   status - Optional filter by status (ACTIVE, INACTIVE, CLOSED)
- * @header  x-tenant-id - Required tenant ID
  * @access  Public
  *
  * @example
- * GET /api/abs/leave-balances/list?employee_id=123&leave_type_id=1
+ * GET /api/abs/leave-balances/list?tenant_id=1&employee_id=123&leave_type_id=1
  */
 router.get('/leave-balances/list', async (req, res) => {
   try {
@@ -370,26 +362,28 @@ router.get('/leave-balances/list', async (req, res) => {
 /**
  * @route   GET /api/abs/leave-balances
  * @desc    Get paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view
+ * @query   tenant_id - Required tenant ID
  * @query   page - Page number (default 1)
  * @query   pageSize - Page size (default 10)
  * @query   name - Optional; case-insensitive partial match on employee name
  * @query   employeeNumber - Optional; partial match on employee number
- * @header  x-tenant-id - Required tenant ID
  * @access  Public
  * @response { success, message, data: [], meta: { pagination: { page, page_size, total, total_pages, has_next, has_previous }, execution_time } }
  *
  * @example
- * GET /api/abs/leave-balances?page=1&pageSize=10
- * GET /api/abs/leave-balances?name=john&employeeNumber=EMP001
+ * GET /api/abs/leave-balances?tenant_id=1&page=1&pageSize=10
+ * GET /api/abs/leave-balances?tenant_id=1&name=john&employeeNumber=EMP001
  */
 router.get('/leave-balances', async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const page = parseInt(req.query.page, 10) || 1;
     const pageSize = parseInt(req.query.pageSize, 10) || 10;
     const name = req.query.name || null;
     const employeeNumber = req.query.employeeNumber || null;
 
     const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
+      tenantId,
       page,
       pageSize,
       name,
@@ -408,21 +402,22 @@ router.get('/leave-balances', async (req, res) => {
 /**
  * @route   POST /api/abs/leave-balances/adjust
  * @desc    Adjust an employee's leave balances via ABS.ABS_LEAVE_BALANCE_PKG.ADJUST_LEAVE_BALANCE_ARRAY
- * @body    { tenant_id, employee_guid?, employee_id?, reason, source, leave_items: [{ leave_code, new_days|new_balance_days }, ...] }
+ * @query   tenant_id - Required tenant ID (or pass in body)
+ * @body    { tenant_id?, employee_guid?, employee_id?, reason, source, leave_items: [{ leave_code, new_days|new_balance_days }, ...] }
  * @access  Public
  */
 router.post('/leave-balances/adjust', async (req, res) => {
   try {
     const body = req.body || {};
-    const tenantId = req.headers['x-tenant-id'] ? parseInt(req.headers['x-tenant-id'], 10) : (body.tenant_id != null ? Number(body.tenant_id) : NaN);
+    const tenantId = req.tenantId;
     const employeeGuid = body.employee_guid ?? body.employeeGuid ?? null;
     const employeeId = body.employee_id != null ? Number(body.employee_id) : undefined;
     const reason = body.reason != null ? String(body.reason).trim() : '';
     const source = body.source != null ? String(body.source).trim() : '';
     const rawLeaveItems = Array.isArray(body.leave_items) ? body.leave_items : [];
 
-    if (isNaN(tenantId) || tenantId < 1) {
-      return sendBadRequest(res, req, 'tenant_id is required and must be a valid positive number');
+    if (!tenantId || tenantId < 1) {
+      return sendBadRequest(res, req, 'tenant_id is required and must be a valid positive number (pass in query params or request body)');
     }
     if (!employeeId && !employeeGuid) {
       return sendBadRequest(res, req, 'employee_id or employee_guid is required');
@@ -505,18 +500,16 @@ router.post('/leave-balances/adjust', async (req, res) => {
  * @route   GET /api/abs/leave-balances/:balanceGuid
  * @desc    Get a single leave balance by balance GUID
  * @param   balanceGuid - Leave balance GUID (32-char hex string, normalized: hyphens removed, uppercase)
- * @header  x-tenant-id - Required tenant ID
+ * @query   tenant_id - Required tenant ID
  * @header  x-user-id - Optional acting user ID (admin/hr/system) for audit, NOT employee_guid
  * @access  Public
  * 
  * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances/F1E2D3C4B5A697856341209876543210FEDCBA" \
- *   -H "x-tenant-id: 1" \
+ * curl -X GET "http://localhost:3000/api/abs/leave-balances/F1E2D3C4B5A697856341209876543210FEDCBA?tenant_id=1" \
  *   -H "x-user-id: admin"
  * 
  * @example
- * curl -X GET "http://localhost:3000/api/abs/leave-balances/F1E2D3C4B5A697856341209876543210FEDCBA" \
- *   -H "x-tenant-id: 1"
+ * curl -X GET "http://localhost:3000/api/abs/leave-balances/F1E2D3C4B5A697856341209876543210FEDCBA?tenant_id=1"
  */
 router.get('/leave-balances/:balanceGuid', async (req, res) => {
   try {
@@ -694,14 +687,13 @@ function normalizeRequestBody(data) {
 /**
  * @route   POST /api/abs/leave-balances
  * @desc    Create a new leave balance
- * @header  x-tenant-id - Required tenant ID
+ * @query   tenant_id - Required tenant ID (or pass in body)
  * @header  x-user-id - Optional user ID for audit
  * @body    { EMPLOYEE_ID, LEAVE_TYPE_ID, OPENING_BALANCE_DAYS?, ACCRUED_DAYS?, TAKEN_DAYS?, ADJUSTED_DAYS?, AVAILABLE_DAYS?, LAST_ACCRUAL_DATE?, PERIOD_START_DATE?, PERIOD_END_DATE?, STATUS? }
  * @access  Public
  * 
  * @example
- * curl -X POST "http://localhost:3000/api/abs/leave-balances" \
- *   -H "x-tenant-id: 1" \
+ * curl -X POST "http://localhost:3000/api/abs/leave-balances?tenant_id=1" \
  *   -H "x-user-id: admin" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -808,8 +800,8 @@ function validateOpeningBalanceData(data) {
 /**
  * @route   PUT /api/abs/leave-balances/:balanceGuid
  * @desc    Update leave balance and record adjustments in transactions table
- * @header  x-tenant-id (required)
- * @header  x-user-id (required)
+ * @query   tenant_id - Required tenant ID
+ * @header  x-user-id - Required
  * @param   balanceGuid - Balance GUID (32-char hex string)
  * @body    {
  *            "opening_balance_days": number (optional),
@@ -822,9 +814,8 @@ function validateOpeningBalanceData(data) {
  *          }
  * 
  * Example curl:
- * curl -X PUT http://localhost:3000/api/abs/leave-balances/48BADBE252279908E063E15B000A1999 \
+ * curl -X PUT "http://localhost:3000/api/abs/leave-balances/48BADBE252279908E063E15B000A1999?tenant_id=1001" \
  *   -H "Content-Type: application/json" \
- *   -H "x-tenant-id: 1001" \
  *   -H "x-user-id: ADMIN" \
  *   -d '{
  *     "opening_balance_days": 35,
@@ -946,7 +937,7 @@ router.put('/leave-balances/:balanceGuid', async (req, res) => {
 /**
  * @route   POST /api/abs/balances/opening
  * @desc    Initialize opening balance by calling PL/SQL procedure (explicitly idempotent)
- * @header  x-tenant-id - Required tenant ID
+ * @query   tenant_id - Required tenant ID (or pass in body)
  * @header  x-user-id - Required acting user ID (ADMIN/HR/SYSTEM/user GUID) for audit, NOT employee_guid
  * @body    { employee_guid (required, 32-char hex), leave_type_id (required, numeric > 0), opening_days (required), effective_date (required) }
  * @access  Public
@@ -968,8 +959,7 @@ router.put('/leave-balances/:balanceGuid', async (req, res) => {
  * NOTE: This API must NEVER update opening balance once created. It is initialization-only, not CRUD.
  * 
  * @example
- * curl -X POST "http://localhost:3000/api/abs/balances/opening" \
- *   -H "x-tenant-id: 1" \
+ * curl -X POST "http://localhost:3000/api/abs/balances/opening?tenant_id=1" \
  *   -H "x-user-id: ADMIN" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -1137,7 +1127,7 @@ function validateAccrualRunData(data) {
 /**
  * @route   POST /api/abs/accrual/run
  * @desc    Process accrual for a period (production-grade implementation)
- * @header  x-tenant-id - Required tenant ID (numeric)
+ * @query   tenant_id - Required tenant ID (or pass in body)
  * @header  x-user-id - Required acting user ID (ADMIN/HR/SYSTEM/job name like 'MONTH_END_JOB')
  * @header  x-user-role - Optional user role (ADMIN for force_recalculate)
  * @body    { 
@@ -1162,8 +1152,7 @@ function validateAccrualRunData(data) {
  * - Returns 200 with processed_count, skipped_count, balances_sample, recent_txns, skipped_balances_sample
  * 
  * @example Happy Path:
- * curl -X POST "http://localhost:3000/api/abs/accrual/run" \
- *   -H "x-tenant-id: 1001" \
+ * curl -X POST "http://localhost:3000/api/abs/accrual/run?tenant_id=1001" \
  *   -H "x-user-id: MONTH_END_JOB" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -1173,8 +1162,7 @@ function validateAccrualRunData(data) {
  *   }'
  * 
  * @example Dry Run:
- * curl -X POST "http://localhost:3000/api/abs/accrual/run" \
- *   -H "x-tenant-id: 1001" \
+ * curl -X POST "http://localhost:3000/api/abs/accrual/run?tenant_id=1001" \
  *   -H "x-user-id: ADMIN" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -1186,8 +1174,7 @@ function validateAccrualRunData(data) {
  *   }'
  * 
  * @example Force Recalculate (Admin Only):
- * curl -X POST "http://localhost:3000/api/abs/accrual/run" \
- *   -H "x-tenant-id: 1001" \
+ * curl -X POST "http://localhost:3000/api/abs/accrual/run?tenant_id=1001" \
  *   -H "x-user-id: ADMIN" \
  *   -H "x-user-role: ADMIN" \
  *   -H "Content-Type: application/json" \
@@ -1199,8 +1186,7 @@ function validateAccrualRunData(data) {
  *   }'
  * 
  * @example Missing Mapping (422):
- * curl -X POST "http://localhost:3000/api/abs/accrual/run" \
- *   -H "x-tenant-id: 1001" \
+ * curl -X POST "http://localhost:3000/api/abs/accrual/run?tenant_id=1001" \
  *   -H "x-user-id: MONTH_END_JOB" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -1210,8 +1196,7 @@ function validateAccrualRunData(data) {
  *   }'
  * 
  * @example Invalid Leave Type (404):
- * curl -X POST "http://localhost:3000/api/abs/accrual/run" \
- *   -H "x-tenant-id: 1001" \
+ * curl -X POST "http://localhost:3000/api/abs/accrual/run?tenant_id=1001" \
  *   -H "x-user-id: MONTH_END_JOB" \
  *   -H "Content-Type: application/json" \
  *   -d '{
@@ -1378,8 +1363,8 @@ router.post('/accrual/run', async (req, res) => {
 /**
  * @route   POST /api/abs/admin/leave-balances/rebuild
  * @desc    Rebuild leave balance from transactions (admin repair tool)
- * @header  x-tenant-id (required)
- * @header  x-user-id (required)
+ * @query   tenant_id - Required tenant ID (or pass in body)
+ * @header  x-user-id - Required
  * @body    {
  *            "employee_id": 11,                    // optional if employee_guid provided
  *            "employee_guid": "HEX32",             // optional if employee_id provided
@@ -1393,9 +1378,8 @@ router.post('/accrual/run', async (req, res) => {
  * Example curl commands:
  * 
  * 1) Rebuild FULL by employee_guid + leave_type_id:
- * curl -X POST http://localhost:3000/api/abs/admin/leave-balances/rebuild \
+ * curl -X POST "http://localhost:3000/api/abs/admin/leave-balances/rebuild?tenant_id=1001" \
  *   -H "Content-Type: application/json" \
- *   -H "x-tenant-id: 1001" \
  *   -H "x-user-id: ADMIN" \
  *   -d '{
  *     "employee_guid": "48825F8C3A0E63DDE063E15B000AF777",
@@ -1405,9 +1389,8 @@ router.post('/accrual/run', async (req, res) => {
  *   }'
  * 
  * 2) Dry-run SINCE_DATE mode:
- * curl -X POST http://localhost:3000/api/abs/admin/leave-balances/rebuild \
+ * curl -X POST "http://localhost:3000/api/abs/admin/leave-balances/rebuild?tenant_id=1001" \
  *   -H "Content-Type: application/json" \
- *   -H "x-tenant-id: 1001" \
  *   -H "x-user-id: ADMIN" \
  *   -d '{
  *     "employee_id": 11,
@@ -1520,8 +1503,8 @@ router.post('/admin/leave-balances/rebuild', async (req, res) => {
 /**
  * @route   POST /api/abs/admin/leave-balances/rebuild/bulk
  * @desc    Bulk rebuild leave balances from transactions (admin repair tool)
- * @header  x-tenant-id (required)
- * @header  x-user-id (required)
+ * @query   tenant_id - Required tenant ID (or pass in body)
+ * @header  x-user-id - Required
  * @body    {
  *            "employee_guids": ["HEX32", ...],     // optional
  *            "employee_ids": [1,2,3],               // optional (if both omitted, rebuilds ALL employees)
@@ -1538,9 +1521,8 @@ router.post('/admin/leave-balances/rebuild', async (req, res) => {
  * Example curl commands:
  * 
  * 1) Rebuild ALL employees for leave_type_id=2 with SAMPLE:
- * curl -X POST http://localhost:3000/api/abs/admin/leave-balances/rebuild/bulk \
+ * curl -X POST "http://localhost:3000/api/abs/admin/leave-balances/rebuild/bulk?tenant_id=1001" \
  *   -H "Content-Type: application/json" \
- *   -H "x-tenant-id: 1001" \
  *   -H "x-user-id: ADMIN" \
  *   -d '{
  *     "leave_type_id": 2,
@@ -1553,9 +1535,8 @@ router.post('/admin/leave-balances/rebuild', async (req, res) => {
  *   }'
  * 
  * 2) Rebuild ALL balances for tenant with include_items=NONE (counts only):
- * curl -X POST http://localhost:3000/api/abs/admin/leave-balances/rebuild/bulk \
+ * curl -X POST "http://localhost:3000/api/abs/admin/leave-balances/rebuild/bulk?tenant_id=1001" \
  *   -H "Content-Type: application/json" \
- *   -H "x-tenant-id: 1001" \
  *   -H "x-user-id: ADMIN" \
  *   -d '{
  *     "rebuild_mode": "FULL",

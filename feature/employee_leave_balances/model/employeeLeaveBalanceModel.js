@@ -3105,11 +3105,15 @@ END;`;
   /**
    * Paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY.
    * Uses bind variables, COUNT for total, OFFSET/FETCH for pagination.
-   * Filters: case-insensitive name (partial), partial employeeNumber.
-   * @param {Object} options - { page, pageSize, name, employeeNumber }
+   * Filters: tenantId (required), case-insensitive name (partial), partial employeeNumber.
+   * @param {Object} options - { tenantId, page, pageSize, name, employeeNumber }
    * @returns {Promise<{ rows: Array, total: number }>}
    */
   static async getLeaveBalanceSummaryPaginated(options = {}) {
+    const tenantId = options.tenantId != null ? parseInt(options.tenantId, 10) : null;
+    if (!Number.isFinite(tenantId) || tenantId < 1) {
+      throw new ValidationError('tenantId is required and must be a valid positive number');
+    }
     const page = Math.max(1, parseInt(options.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(options.pageSize, 10) || 10));
     const offset = (page - 1) * pageSize;
@@ -3119,21 +3123,21 @@ END;`;
     const countSql = `
       SELECT COUNT(1) AS total
       FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
-      WHERE
-        (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
+      WHERE tenant_id = :tenant_id
+        AND (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
         AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
     `;
     // Oracle OFFSET/FETCH do not accept bind variables; use safe integer literals (offset/pageSize are validated above)
     const dataSql = `
       SELECT *
       FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
-      WHERE
-        (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
+      WHERE tenant_id = :tenant_id
+        AND (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
         AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
       ORDER BY employee_name ASC
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
     `;
-    const binds = { name, employeeNumber };
+    const binds = { tenant_id: tenantId, name, employeeNumber };
 
     let connection;
     try {
