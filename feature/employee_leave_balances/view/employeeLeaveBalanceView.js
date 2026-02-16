@@ -113,6 +113,40 @@ function enrichBalanceWithEmployeeInfo(balance) {
 }
 
 /**
+ * Send paginated leave balance transactions list (same structure as other paginated APIs).
+ * @param {Object} res - Express response object
+ * @param {Object} req - Express request object
+ * @param {Array} data - Transaction rows (snake_case)
+ * @param {number} total - Total row count
+ * @param {number} page - Current page
+ * @param {number} pageSize - Page size
+ */
+export function sendLeaveBalanceTransactionsList(res, req, data, total, page, pageSize) {
+  const totalNum = parseInt(total, 10) || 0;
+  const pageNum = parseInt(page, 10) || 1;
+  const pageSizeNum = parseInt(pageSize, 10) || 10;
+  const totalPages = pageSizeNum > 0 ? Math.ceil(totalNum / pageSizeNum) : 0;
+
+  const responseMeta = {
+    pagination: {
+      page: pageNum,
+      page_size: pageSizeNum,
+      total: totalNum,
+      total_pages: totalPages,
+      has_next: pageNum < totalPages,
+      has_previous: pageNum > 1
+    }
+  };
+
+  res.json({
+    success: true,
+    message: 'Leave balance transactions fetched',
+    meta: responseMeta,
+    data: Array.isArray(data) ? data : []
+  });
+}
+
+/**
  * Send list of leave balance summary (from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view)
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object

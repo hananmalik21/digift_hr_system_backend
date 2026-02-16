@@ -17,6 +17,8 @@ class EmployeeLeaveBalanceModel {
   static ACCRUAL_RUNS_TABLE = 'ABS.ABS_LEAVE_ACCRUAL_RUNS';
   /** Read-only view: employee leave balance summary (aggregated/summary data) */
   static EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW = 'ABS.EMPLOYEE_LEAVE_BAL_SUMMARY';
+  /** Read-only view: leave balance transactions (employee-scoped, for list API) */
+  static V_LEAVE_BALANCE_TXNS_EMP = 'ABS.V_LEAVE_BALANCE_TXNS_EMP';
 
   /* ------------------------------------------------------------------ */
   /* Helpers                                                            */
@@ -609,6 +611,122 @@ class EmployeeLeaveBalanceModel {
       return r.rows || [];
     } catch (err) {
       throw this._wrapDb(err, 'Failed to fetch transaction history');
+    }
+  }
+
+  /**
+   * Fetch leave balance transactions from ABS.V_LEAVE_BALANCE_TXNS_EMP with page-based pagination.
+   * Multi-tenant: data filtered strictly by enterprise_id (ENTERPRISE_ID in view).
+   * Sort: TXN_DATE DESC, TXN_ID DESC.
+   *
+   * @param {number} enterpriseId - Required; tenant/enterprise ID for isolation
+   * @param {Object} filters - Optional: { employeeId?, leaveTypeId?, txnType?, dateFrom?, dateTo? }
+   * @param {number} page - Page number (1-based)
+   * @param {number} pageSize - Page size (1–100)
+   * @returns {Promise<{ rows: Array<Object>, total: number, page: number, pageSize: number }>}
+   */
+  static async getLeaveBalanceTransactionsList(enterpriseId, filters = {}, page = 1, pageSize = 10) {
+    const viewName = this.V_LEAVE_BALANCE_TXNS_EMP;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const pageSizeNum = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 10));
+    const offset = (pageNum - 1) * pageSizeNum;
+
+    const bindParams = [enterpriseId];
+    let paramIndex = 2;
+    const conditions = ['ENTERPRISE_ID = :1'];
+
+    if (filters.employeeId != null) {
+      const employeeId = parseInt(filters.employeeId, 10);
+      if (!Number.isFinite(employeeId) || employeeId < 1) {
+        throw new ValidationError('employee_id must be a valid positive number');
+      }
+      bindParams.push(employeeId);
+      conditions.push(`EMPLOYEE_ID = :${paramIndex}`);
+      paramIndex++;
+    }
+
+    if (filters.leaveTypeId != null) {
+      const leaveTypeId = parseInt(filters.leaveTypeId, 10);
+      if (!Number.isFinite(leaveTypeId) || leaveTypeId < 1) {
+        throw new ValidationError('leave_type_id must be a valid positive number');
+      }
+      bindParams.push(leaveTypeId);
+      conditions.push(`LEAVE_TYPE_ID = :${paramIndex}`);
+      paramIndex++;
+    }
+
+    if (filters.txnType != null && String(filters.txnType).trim() !== '') {
+      bindParams.push(String(filters.txnType).trim().toUpperCase());
+      conditions.push(`TXN_TYPE = :${paramIndex}`);
+      paramIndex++;
+    }
+
+    if (filters.dateFrom != null) {
+      const d = this._toDate(filters.dateFrom);
+      if (d) {
+        bindParams.push(d);
+        conditions.push(`TXN_DATE >= :${paramIndex}`);
+        paramIndex++;
+      }
+    }
+
+    if (filters.dateTo != null) {
+      const d = this._toDate(filters.dateTo);
+      if (d) {
+        bindParams.push(d);
+        conditions.push(`TXN_DATE <= :${paramIndex}`);
+        paramIndex++;
+      }
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const countSql = `
+      SELECT COUNT(1) AS total
+      FROM ${viewName} v
+      WHERE ${whereClause}
+    `;
+    const dataSql = `
+      SELECT
+        RAWTOHEX(v.TXN_GUID) AS TXN_GUID,
+        v.ENTERPRISE_ID,
+        v.TXN_ID,
+        v.EMPLOYEE_ID,
+        RAWTOHEX(v.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+        v.EMPLOYEE_NAME,
+        v.EMAIL,
+        v.MOBILE_NUMBER,
+        v.LEAVE_TYPE_ID,
+        v.LEAVE_CODE,
+        v.LEAVE_NAME_EN,
+        v.TXN_TYPE,
+        v.TXN_DATE,
+        v.AMOUNT_DAYS,
+        v.REFERENCE_TYPE,
+        v.REFERENCE_ID,
+        v.COMMENTS,
+        v.CREATION_DATE,
+        v.CREATED_BY,
+        v.LAST_UPDATE_DATE,
+        v.LAST_UPDATED_BY
+      FROM ${viewName} v
+      WHERE ${whereClause}
+      ORDER BY v.TXN_DATE DESC NULLS LAST, v.TXN_ID DESC
+      OFFSET ${offset} ROWS FETCH NEXT ${pageSizeNum} ROWS ONLY
+    `;
+
+    try {
+      const countResult = await this.executeQuery(countSql, bindParams);
+      const total = (countResult.rows && countResult.rows[0] && countResult.rows[0].total != null)
+        ? parseInt(countResult.rows[0].total, 10) : 0;
+
+      const dataResult = await this.executeQuery(dataSql, bindParams);
+      const rows = (dataResult.rows || []).map((r) => this.convertKeysToSnakeCase(r));
+
+      return { rows, total, page: pageNum, pageSize: pageSizeNum };
+    } catch (err) {
+      if (err instanceof ValidationError) throw err;
+      if (err instanceof DatabaseError) throw err;
+      throw this._wrapDb(err, 'Failed to fetch leave balance transactions');
     }
   }
 

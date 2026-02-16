@@ -6,6 +6,7 @@ import {
   sendLeaveBalanceSummaryList,
   sendLeaveBalanceSummaryPaginated,
   sendLeaveBalance,
+  sendLeaveBalanceTransactionsList,
   sendCreated,
   sendOk,
   sendBadRequest,
@@ -15,7 +16,7 @@ import {
   sendAccrualRunSuccess
 } from '../view/employeeLeaveBalanceView.js';
 import { ensureHex32 } from '../../../utils/guidUtils.js';
-import { ValidationError, NotFoundError } from '../../../utils/errors/index.js';
+import { ValidationError, NotFoundError, DatabaseError } from '../../../utils/errors/index.js';
 
 const router = express.Router();
 
@@ -90,6 +91,102 @@ async function getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, lim
     return [];
   }
 }
+
+/**
+ * @route   GET /api/abs/leave-balance-transactions
+ * @desc    List leave balance transactions from ABS.V_LEAVE_BALANCE_TXNS_EMP with pagination.
+ * @query   enterprise_id (required), employee_guid?, leave_type_id?, txn_type?, date_from?, date_to?, page? (default 1), page_size? (default 10, max 100)
+ * @access  Public
+ */
+router.get('/leave-balance-transactions', async (req, res) => {
+  try {
+    const enterpriseIdRaw = req.query.enterprise_id;
+    if (enterpriseIdRaw === undefined || enterpriseIdRaw === null || String(enterpriseIdRaw).trim() === '') {
+      return sendBadRequest(res, req, 'enterprise_id is required');
+    }
+    const enterpriseId = parseInt(enterpriseIdRaw, 10);
+    if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
+      return sendBadRequest(res, req, 'enterprise_id must be a valid positive number');
+    }
+
+    const page = parseInt(req.query.page, 10) || 1;
+    const pageSize = parseInt(req.query.page_size, 10) || parseInt(req.query.pageSize, 10) || 10;
+    if (!Number.isFinite(page) || page < 1) {
+      return sendBadRequest(res, req, 'page must be a positive number');
+    }
+    if (!Number.isFinite(pageSize) || pageSize < 1) {
+      return sendBadRequest(res, req, 'page_size must be a positive number');
+    }
+    if (pageSize > 100) {
+      return sendBadRequest(res, req, 'page_size must not exceed 100');
+    }
+
+    const dateFromRaw = req.query.date_from;
+    const dateToRaw = req.query.date_to;
+    if (dateFromRaw != null && dateToRaw != null) {
+      const dateFrom = new Date(dateFromRaw);
+      const dateTo = new Date(dateToRaw);
+      if (!Number.isNaN(dateFrom.getTime()) && !Number.isNaN(dateTo.getTime()) && dateFrom.getTime() > dateTo.getTime()) {
+        return sendBadRequest(res, req, 'date_from must be less than or equal to date_to');
+      }
+    }
+
+    let employeeId = null;
+    const employeeGuidRaw = req.query.employee_guid;
+    if (employeeGuidRaw != null && String(employeeGuidRaw).trim() !== '') {
+      let employeeGuid;
+      try {
+        employeeGuid = ensureHex32(employeeGuidRaw, 'employee_guid');
+      } catch (error) {
+        return sendBadRequest(res, req, error.message || 'Invalid employee_guid');
+      }
+      const resolvedId = await EmployeeLeaveBalanceModel.resolveEmployeeIdByGuid(enterpriseId, employeeGuid);
+      if (resolvedId == null) {
+        return sendBadRequest(res, req, 'Employee not found for the given employee_guid');
+      }
+      employeeId = resolvedId;
+    }
+
+    const leaveTypeIdRaw = req.query.leave_type_id;
+    const leaveTypeId = leaveTypeIdRaw != null && String(leaveTypeIdRaw).trim() !== '' ? parseInt(leaveTypeIdRaw, 10) : null;
+    if (leaveTypeId !== null && (!Number.isFinite(leaveTypeId) || leaveTypeId < 1)) {
+      return sendBadRequest(res, req, 'leave_type_id must be a valid positive number');
+    }
+
+    const txnTypeRaw = req.query.txn_type;
+    const txnType = txnTypeRaw != null && String(txnTypeRaw).trim() !== '' ? String(txnTypeRaw).trim() : null;
+
+    const filters = {
+      ...(employeeId != null && { employeeId }),
+      ...(leaveTypeId != null && { leaveTypeId }),
+      ...(txnType != null && { txnType }),
+      ...(dateFromRaw != null && { dateFrom: dateFromRaw }),
+      ...(dateToRaw != null && { dateTo: dateToRaw })
+    };
+
+    const result = await EmployeeLeaveBalanceModel.getLeaveBalanceTransactionsList(
+      enterpriseId,
+      filters,
+      page,
+      pageSize
+    );
+
+    return sendLeaveBalanceTransactionsList(res, req, result.rows, result.total, result.page, result.pageSize);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendBadRequest(res, req, err.message);
+    }
+    if (err instanceof NotFoundError) {
+      return sendNotFound(res, req, err.message);
+    }
+    if (err instanceof DatabaseError) {
+      console.error('Leave balance transactions list DB error:', err.message);
+      return sendServerError(res, req, err.message || 'A database error occurred. Please try again later.', err);
+    }
+    console.error('Leave balance transactions list error:', err);
+    return sendServerError(res, req, 'An unexpected error occurred. Please try again later.', err);
+  }
+});
 
 /**
  * @route   GET /api/abs/employees/:employeeGuid/leave-balances
