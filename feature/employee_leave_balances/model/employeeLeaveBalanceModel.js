@@ -3093,7 +3093,8 @@ END;`;
   /**
    * Paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY.
    * Enforces ENTERPRISE_ID filter in SQL. Uses parameter binding for all filters.
-   * @param {Object} options - { enterpriseId/tenantId, page, pageSize, name, employeeNumber }
+   * Runs COUNT and data queries in parallel for better response time.
+   * @param {Object} options - { enterpriseId/tenantId, page, pageSize, search?, name?, employeeNumber? }
    * @returns {Promise<{ rows: Array, total: number, page: number, pageSize: number }>}
    */
   static async getLeaveBalanceSummaryPaginated(options = {}) {
@@ -3105,51 +3106,67 @@ END;`;
     const page = Math.max(1, parseInt(options.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(options.pageSize, 10) || 10));
     const offset = (page - 1) * pageSize;
-    const name = options.name != null && String(options.name).trim() !== '' ? String(options.name).trim() : null;
-    const employeeNumber = options.employeeNumber != null && String(options.employeeNumber).trim() !== '' ? String(options.employeeNumber).trim() : null;
+
+    const search = this._trimOpt(options.search);
+    const name = this._trimOpt(options.name);
+    const employeeNumber = this._trimOpt(options.employeeNumber);
 
     const namePattern = name ? `%${name.toUpperCase()}%` : null;
     const empNumPattern = employeeNumber ? `%${employeeNumber}%` : null;
 
-    // Use distinct placeholders - Oracle expects a bind value per position
-    const baseWhere = `WHERE ENTERPRISE_ID = :1
-        AND (:2 IS NULL OR UPPER(EMPLOYEE_NAME) LIKE :3)
-        AND (:4 IS NULL OR EMPLOYEE_NUMBER LIKE :5)`;
+    const viewAlias = 'v';
+    const baseWhere = `WHERE v.ENTERPRISE_ID = :1
+        AND (
+          :2 IS NULL
+          OR v.SEARCH_NAME LIKE '%' || LOWER(:3) || '%'
+          OR v.SEARCH_EMP_NUMBER LIKE '%' || LOWER(:4) || '%'
+        )
+        AND (:5 IS NULL OR UPPER(v.EMPLOYEE_NAME) LIKE :6)
+        AND (:7 IS NULL OR v.EMPLOYEE_NUMBER LIKE :8)`;
 
     const countSql = `SELECT COUNT(1) AS total
-      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} ${viewAlias}
       ${baseWhere}`;
 
-    const dataSql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+    const dataSql = `SELECT v.*
+      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} ${viewAlias}
       ${baseWhere}
-      ORDER BY EMPLOYEE_NAME ASC
+      ORDER BY v.EMPLOYEE_NAME ASC
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY`;
 
-    const binds = [parsed, namePattern, namePattern, empNumPattern, empNumPattern];
+    const binds = [parsed, search, search, search, namePattern, namePattern, empNumPattern, empNumPattern];
 
-    let connection;
+    const connOpts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+    let conn1;
+    let conn2;
     try {
-      connection = await db.getConnection();
+      [conn1, conn2] = await Promise.all([db.getConnection(), db.getConnection()]);
 
-      const countResult = await connection.execute(countSql, binds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
+      const [countResult, dataResult] = await Promise.all([
+        conn1.execute(countSql, binds, connOpts),
+        conn2.execute(dataSql, binds, connOpts)
+      ]);
+
       const total = (countResult.rows?.[0]?.TOTAL != null)
         ? parseInt(countResult.rows[0].TOTAL, 10) : 0;
-
-      const dataResult = await connection.execute(dataSql, binds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
       const rows = (dataResult.rows || []).map((r) => this.convertKeysToSnakeCase(r));
 
       return { rows, total, page, pageSize };
     } catch (err) {
       throw this._wrapDb(err, 'Failed to fetch leave balance summary');
     } finally {
-      if (connection) {
-        try { await connection.close(); } catch (_) { /* ignore */ }
-      }
+      await Promise.all([
+        conn1?.close?.().catch(() => {}),
+        conn2?.close?.().catch(() => {})
+      ]);
     }
+  }
+
+  /** Return trimmed string or null for optional params. */
+  static _trimOpt(val) {
+    if (val == null) return null;
+    const s = String(val).trim();
+    return s === '' ? null : s;
   }
 
   /**

@@ -369,6 +369,7 @@ router.get('/leave-balances/list', async (req, res) => {
  * @query   tenant_id - Required tenant ID
  * @query   page - Page number (default 1)
  * @query   pageSize - Page size (default 10)
+ * @query   search - Optional; matches employee name OR employee number (case-insensitive)
  * @query   name - Optional; case-insensitive partial match on employee name
  * @query   employeeNumber - Optional; partial match on employee number
  * @access  Public
@@ -376,22 +377,25 @@ router.get('/leave-balances/list', async (req, res) => {
  *
  * @example
  * GET /api/abs/leave-balances?tenant_id=1&page=1&pageSize=10
+ * GET /api/abs/leave-balances?tenant_id=1&search=john
  * GET /api/abs/leave-balances?tenant_id=1&name=john&employeeNumber=EMP001
  */
 router.get('/leave-balances', async (req, res) => {
   try {
     const tenantId = req.tenantId;
-    const page = parseInt(req.query.page, 10) || 1;
-    const pageSize = parseInt(req.query.pageSize, 10) || 10;
-    const name = req.query.name || null;
-    const employeeNumber = req.query.employeeNumber || null;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 10));
+    if (page < 1 || pageSize < 1) {
+      return sendBadRequest(res, req, 'page and pageSize must be positive numbers');
+    }
 
     const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
       tenantId,
       page,
       pageSize,
-      name,
-      employeeNumber
+      search: req.query.search ?? null,
+      name: req.query.name ?? null,
+      employeeNumber: req.query.employeeNumber ?? null
     });
 
     sendLeaveBalanceSummaryPaginated(res, req, result.rows, result.total, result.page, result.pageSize);
