@@ -17,13 +17,9 @@ const API_VERSION = '1.0.0';
  * @returns {Object} Base metadata object
  */
 function generateBaseMetadata(req, additionalMeta = {}) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   return {
     count: additionalMeta.count !== undefined ? additionalMeta.count : 0,
     total: additionalMeta.total !== undefined ? additionalMeta.total : 0,
-    execution_time: `${executionTime}ms`,
     ...additionalMeta
   };
 }
@@ -151,17 +147,14 @@ export function sendLeaveBalanceTransactionsList(res, req, data, total, page, pa
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {Array} items - Summary rows (already snake_case from model)
- * @param {Object} meta - Optional metadata (total, filters, execution_time)
+ * @param {Object} meta - Optional metadata (total, filters)
  */
 export function sendLeaveBalanceSummaryList(res, req, items, meta = {}) {
   const list = Array.isArray(items) ? items : [];
   const total = meta.total !== undefined ? meta.total : list.length;
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
 
   const responseMeta = {
     total: total,
-    execution_time: `${executionTime}ms`,
     ...(meta.filters && Object.keys(meta.filters).length > 0 && { filters: meta.filters })
   };
 
@@ -187,8 +180,6 @@ export function sendLeaveBalanceSummaryPaginated(res, req, data, total, page, pa
   const pageNum = parseInt(page, 10) || 1;
   const pageSizeNum = parseInt(pageSize, 10) || 10;
   const totalPages = pageSizeNum > 0 ? Math.ceil(totalNum / pageSizeNum) : 0;
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
 
   const responseMeta = {
     pagination: {
@@ -198,8 +189,7 @@ export function sendLeaveBalanceSummaryPaginated(res, req, data, total, page, pa
       total_pages: totalPages,
       has_next: pageNum < totalPages,
       has_previous: pageNum > 1
-    },
-    execution_time: `${executionTime}ms`
+    }
   };
 
   res.json({
@@ -245,11 +235,6 @@ export function sendLeaveBalanceList(res, req, employeeGuid, balances, meta = {}
   if (meta.filters) {
     responseMeta.filters = meta.filters;
   }
-
-  // Add execution time
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-  responseMeta.execution_time = `${executionTime}ms`;
 
   // Build data object (each item includes employee_info)
   const responseData = enrichedBalances;

@@ -26,7 +26,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Middleware: parse and validate tenant_id from params (query/body) and optional x-user-id
+// Middleware: parse enterprise ID (x-enterprise-id header, user context, or params) and optional x-user-id
 router.use((req, res, next) => {
   try {
     req.tenantId = getTenantId(req);
@@ -41,18 +41,22 @@ router.use((req, res, next) => {
 });
 
 /**
- * Extract tenant ID from params: query.tenant_id or body.tenant_id (required)
- * No tenant ID in headers - must be passed in params.
+ * Extract tenant_id (enterprise ID) from: params first, then header, then user context.
+ * Use tenant_id in query or body for API requests.
  * @param {Object} req - Express request object
- * @returns {number} Tenant ID
- * @throws {ValidationError} If tenant ID is missing or invalid
+ * @returns {number} Tenant ID (enterprise ID)
+ * @throws {ValidationError} If tenant_id is missing or invalid
  */
 function getTenantId(req) {
-  const tenantIdRaw = req.query.tenant_id ?? req.body?.tenant_id;
-  if (tenantIdRaw === undefined || tenantIdRaw === null || String(tenantIdRaw).trim() === '') {
+  const raw =
+    req.query.tenant_id ??
+    req.body?.tenant_id ??
+    req.headers['x-enterprise-id'] ??
+    req.user?.enterprise_id;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
     throw new ValidationError('tenant_id is required (pass in query params or request body)');
   }
-  const tenantId = parseInt(tenantIdRaw, 10);
+  const tenantId = parseInt(raw, 10);
   if (!Number.isFinite(tenantId) || tenantId < 1) {
     throw new ValidationError('tenant_id must be a valid positive number');
   }
@@ -368,7 +372,7 @@ router.get('/leave-balances/list', async (req, res) => {
  * @query   name - Optional; case-insensitive partial match on employee name
  * @query   employeeNumber - Optional; partial match on employee number
  * @access  Public
- * @response { success, message, data: [], meta: { pagination: { page, page_size, total, total_pages, has_next, has_previous }, execution_time } }
+ * @response { success, message, data: [], meta: { pagination: { page, page_size, total, total_pages, has_next, has_previous } } }
  *
  * @example
  * GET /api/abs/leave-balances?tenant_id=1&page=1&pageSize=10

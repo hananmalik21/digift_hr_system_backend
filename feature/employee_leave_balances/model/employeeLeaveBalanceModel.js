@@ -3058,12 +3058,12 @@ END;`;
 
   /**
    * Read leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY (read-only view).
-   * No column names are used in SQL (view columns may differ per env); all filtering is done in memory.
-   * @param {number} tenantId - Tenant ID (required) - used to filter rows in memory if view has tenant_id
+   * Enforces ENTERPRISE_ID filter in SQL. Optional employee/leave filters use parameter binding.
+   * @param {number} enterpriseId - Enterprise ID (tenant ID, required)
    * @param {Object} [filters] - Optional filters { employeeId?, employee_id?, leaveTypeId?, leave_type_id? }
    * @returns {Promise<Array>} Summary rows (snake_case)
    */
-  static async getLeaveBalanceSummary(tenantId, filters = {}) {
+  static async getLeaveBalanceSummary(enterpriseId, filters = {}) {
     const employeeId = filters.employeeId ?? filters.employee_id ?? null;
     const leaveTypeId = filters.leaveTypeId ?? filters.leave_type_id ?? null;
 
@@ -3076,43 +3076,31 @@ END;`;
       if (isNaN(id) || id < 1) throw new ValidationError('leave_type_id must be a valid positive number');
     }
 
-    const sql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}`;
-    let rows = [];
+    const sql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+      WHERE ENTERPRISE_ID = :1
+        AND (:2 IS NULL OR EMPLOYEE_ID = :2)
+        AND (:3 IS NULL OR LEAVE_TYPE_ID = :3)`;
+    const binds = [enterpriseId, employeeId ?? null, leaveTypeId ?? null];
+
     try {
-      const result = await this.executeQuery(sql, []);
-      rows = result.rows || [];
+      const result = await this.executeQuery(sql, binds);
+      return result.rows || [];
     } catch (err) {
       throw this._wrapDb(err, 'Failed to fetch leave balance summary');
     }
-
-    // Filter in memory (view column names may vary; result is snake_case)
-    if (tenantId != null && rows.length > 0 && rows[0].tenant_id !== undefined) {
-      const tid = parseInt(tenantId, 10);
-      rows = rows.filter((r) => r.tenant_id != null && parseInt(r.tenant_id, 10) === tid);
-    }
-    if (employeeId != null) {
-      const id = parseInt(employeeId, 10);
-      rows = rows.filter((r) => r.employee_id != null && parseInt(r.employee_id, 10) === id);
-    }
-    if (leaveTypeId != null) {
-      const id = parseInt(leaveTypeId, 10);
-      rows = rows.filter((r) => r.leave_type_id != null && parseInt(r.leave_type_id, 10) === id);
-    }
-
-    return rows;
   }
 
   /**
    * Paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY.
-   * Uses bind variables, COUNT for total, OFFSET/FETCH for pagination.
-   * Filters: tenantId (required), case-insensitive name (partial), partial employeeNumber.
-   * @param {Object} options - { tenantId, page, pageSize, name, employeeNumber }
-   * @returns {Promise<{ rows: Array, total: number }>}
+   * Enforces ENTERPRISE_ID filter in SQL. Uses parameter binding for all filters.
+   * @param {Object} options - { enterpriseId/tenantId, page, pageSize, name, employeeNumber }
+   * @returns {Promise<{ rows: Array, total: number, page: number, pageSize: number }>}
    */
   static async getLeaveBalanceSummaryPaginated(options = {}) {
-    const tenantId = options.tenantId != null ? parseInt(options.tenantId, 10) : null;
-    if (!Number.isFinite(tenantId) || tenantId < 1) {
-      throw new ValidationError('tenantId is required and must be a valid positive number');
+    const enterpriseId = options.enterpriseId ?? options.tenantId;
+    const parsed = enterpriseId != null ? parseInt(enterpriseId, 10) : null;
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      throw new ValidationError('Enterprise ID is required and must be a valid positive number');
     }
     const page = Math.max(1, parseInt(options.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(options.pageSize, 10) || 10));
@@ -3120,24 +3108,24 @@ END;`;
     const name = options.name != null && String(options.name).trim() !== '' ? String(options.name).trim() : null;
     const employeeNumber = options.employeeNumber != null && String(options.employeeNumber).trim() !== '' ? String(options.employeeNumber).trim() : null;
 
-    const countSql = `
-      SELECT COUNT(1) AS total
+    const namePattern = name ? `%${name.toUpperCase()}%` : null;
+    const empNumPattern = employeeNumber ? `%${employeeNumber}%` : null;
+
+    // Use distinct placeholders - Oracle expects a bind value per position
+    const baseWhere = `WHERE ENTERPRISE_ID = :1
+        AND (:2 IS NULL OR UPPER(EMPLOYEE_NAME) LIKE :3)
+        AND (:4 IS NULL OR EMPLOYEE_NUMBER LIKE :5)`;
+
+    const countSql = `SELECT COUNT(1) AS total
       FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
-      WHERE tenant_id = :tenant_id
-        AND (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
-        AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
-    `;
-    // Oracle OFFSET/FETCH do not accept bind variables; use safe integer literals (offset/pageSize are validated above)
-    const dataSql = `
-      SELECT *
-      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
-      WHERE tenant_id = :tenant_id
-        AND (:name IS NULL OR UPPER(employee_name) LIKE '%' || UPPER(:name) || '%')
-        AND (:employeeNumber IS NULL OR employee_number LIKE '%' || :employeeNumber || '%')
-      ORDER BY employee_name ASC
-      OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY
-    `;
-    const binds = { tenant_id: tenantId, name, employeeNumber };
+      ${baseWhere}`;
+
+    const dataSql = `SELECT * FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW}
+      ${baseWhere}
+      ORDER BY EMPLOYEE_NAME ASC
+      OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY`;
+
+    const binds = [parsed, namePattern, namePattern, empNumPattern, empNumPattern];
 
     let connection;
     try {
@@ -3146,7 +3134,7 @@ END;`;
       const countResult = await connection.execute(countSql, binds, {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
-      const total = (countResult.rows && countResult.rows[0] && countResult.rows[0].TOTAL != null)
+      const total = (countResult.rows?.[0]?.TOTAL != null)
         ? parseInt(countResult.rows[0].TOTAL, 10) : 0;
 
       const dataResult = await connection.execute(dataSql, binds, {
@@ -3159,11 +3147,7 @@ END;`;
       throw this._wrapDb(err, 'Failed to fetch leave balance summary');
     } finally {
       if (connection) {
-        try {
-          await connection.close();
-        } catch (_) {
-          // ignore close error
-        }
+        try { await connection.close(); } catch (_) { /* ignore */ }
       }
     }
   }
