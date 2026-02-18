@@ -34,6 +34,7 @@ import workScheduleController from './feature/work_schedules/controller/workSche
 import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
 import attendanceController from './feature/attendance/controller/attendanceController.js';
 import projectController from './feature/project/controller/projectController.js';
+import timesheetController from './feature/tm_timesheets/controller/timesheetController.js';
 import holidayController from './feature/holidays/controller/holidayController.js';
 import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
 import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
@@ -141,6 +142,9 @@ app.use('/api/tm/attendance', attendanceController);
 
 // Project management (TM.TM_PROJECT_PKG: upsert project+tasks, remove task(s), remove project)
 app.use('/api/tm/projects', projectController);
+
+// Timesheets (TM.TM_TIMESHEET_PKG: upsert, submit/approve/reject, delete line, list, get)
+app.use('/api/tm/timesheets', timesheetController);
 
 // Time Management Stats routes
 app.use('/api/tm/stats', timeManagementStatsController);

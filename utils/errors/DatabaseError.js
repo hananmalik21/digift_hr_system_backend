@@ -95,6 +95,13 @@ export class DatabaseError extends AppError {
 
     // Foreign key constraint - parent key not found
     if (errorNum === 2291 || message.includes('ORA-02291')) {
+      const constraint = DatabaseError.extractConstraint(oracleError) || '';
+      if (constraint.includes('FK_TM_TSL_PROJECT')) {
+        return 'Invalid project_id. Parent record not found.';
+      }
+      if (constraint.includes('FK_TM_TSL_TASK')) {
+        return 'Invalid task_id. Parent record not found.';
+      }
       // Check for specific entity types in error message
       const upperMessage = message.toUpperCase();
       if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE')) {
