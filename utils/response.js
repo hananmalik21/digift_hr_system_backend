@@ -21,12 +21,9 @@
  * @param {number} options.statusCode - HTTP status code (default: 200)
  */
 export function sendSuccess(res, { message = 'Success', data = null, meta = {}, statusCode = 200 }) {
-  res.status(statusCode).json({
-    status: true,
-    message,
-    data,
-    meta
-  });
+  const body = { status: true, message, data };
+  if (meta != null && Object.keys(meta).length > 0) body.meta = meta;
+  res.status(statusCode).json(body);
 }
 
 /**

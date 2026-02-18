@@ -103,6 +103,9 @@ export class DatabaseError extends AppError {
       if (upperMessage.includes('TENANT') || upperMessage.includes('TENANT_ID')) {
         return 'The tenant does not exist. Please verify that the tenant_id is valid.';
       }
+      if (upperMessage.includes('EMPLOYEE') || upperMessage.includes('ENTERPRISE')) {
+        return 'Invalid employee/enterprise reference.';
+      }
       return 'The referenced record does not exist. Please check your input.';
     }
 
@@ -209,14 +212,15 @@ export class DatabaseError extends AppError {
       // Extract the actual error message from ORA-06550 (it usually contains the real error)
       const match = message.match(/ORA-06550[^\n]*\n([^\n]+)/);
       const actualError = match ? match[1].trim() : message;
-      
+      // Try to extract procedure/package name from message (e.g. UPSERT_MARK_ATTENDANCE, CREATE_POLICY_WITH_GRADES)
+      const procMatch = message.match(/call to '([^']+)'/i) || message.match(/['"](\w+\.\w+)['"]/);
+      const procedureRef = procMatch ? procMatch[1] : 'procedure';
       // Check for leave type related errors
       const upperError = actualError.toUpperCase();
       if (upperError.includes('LEAVE_TYPE') || upperError.includes('LEAVE TYPE') || upperError.includes('NOT FOUND')) {
         return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
       }
-      
-      return `PL/SQL compilation error: ${actualError}. Please verify that ABS.ABS_POLICY_PKG.CREATE_POLICY_WITH_GRADES procedure exists and all parameters are correct.`;
+      return `PL/SQL compilation error: ${actualError}. Please verify that ${procedureRef} exists and parameter names, types and count match the package specification.`;
     }
 
     // Parallel query server error (ORA-12801) - wrapper error, extract underlying error
@@ -252,8 +256,12 @@ export class DatabaseError extends AppError {
       // Remove "Help: https://..." links
       userMessage = userMessage.replace(/Help:\s*https?:\/\/[^\n]*/gi, '').trim();
       
-      // Check for specific lookup validation errors
+      // Check for project-not-found (before generic NOT FOUND / leave type)
       const upperMessage = userMessage.toUpperCase();
+      if (upperMessage.includes('PROJECT') && upperMessage.includes('NOT FOUND')) {
+        return 'Project not found for update. Check project_id or project_guid and enterprise_id.';
+      }
+      // Check for specific lookup validation errors (leave type)
       if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE') || upperMessage.includes('NOT FOUND')) {
         return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
       }
@@ -308,6 +316,8 @@ export class DatabaseError extends AppError {
     if (errorNum === 2292 || message.includes('ORA-02292')) return 409; // Conflict
     if (errorNum === 1400 || message.includes('ORA-01400')) return 400; // Bad Request
     if (errorNum === 2290 || message.includes('ORA-02290')) return 400; // Bad Request
+    if (errorNum === 20090 || message.includes('ORA-20090')) return 400; // Check constraint (e.g. attendance)
+    if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
 
     return 500; // Internal Server Error
   }
