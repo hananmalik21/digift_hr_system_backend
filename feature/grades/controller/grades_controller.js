@@ -1,6 +1,9 @@
 import express from 'express';
 import GradeModel from '../model/grades_model.js';
 import { toUpperCaseKeys } from '../../../utils/stringUtils.js';
+import { getTenantId, requireTenantIdInBody } from '../../../utils/tenantUtils.js';
+import { getUserId } from '../../../utils/requestUtils.js';
+import { ValidationError } from '../../../utils/errors/index.js';
 import {
   sendGradeList,
   sendGrade,
@@ -18,10 +21,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 function validateGradeData(data, isUpdate = false) {
   const errors = [];
@@ -116,7 +115,8 @@ function validateGradeData(data, isUpdate = false) {
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
+    const tenantId = getTenantId(req);
+    const filters = { tenant_id: tenantId };
     const appliedFilters = {};
 
     if (req.query.grade_id) {
@@ -180,21 +180,25 @@ router.get('/', async (req, res) => {
       pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
     });
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch grades', error);
   }
 });
 
 /**
  * GET /api/grades/:id
+ * Query: tenant_id (required)
  */
 router.get('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const gradeId = parseInt(req.params.id);
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
-    const grade = await GradeModel.findById(gradeId);
+    const grade = await GradeModel.findById(gradeId, tenantId);
     sendGrade(res, req, grade);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch grade', error);
   }
 });
@@ -204,7 +208,9 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const data = toUpperCaseKeys(req.body); // ✅ accept lowercase input
+    const data = toUpperCaseKeys(req.body);
+    data.tenant_id = requireTenantIdInBody(data);
+
     const errors = validateGradeData(data, false);
     if (errors.length) return sendBadRequest(res, req, errors);
 
@@ -212,6 +218,7 @@ router.post('/', async (req, res) => {
     const created = await GradeModel.create(data, userId);
     sendCreated(res, req, created);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -224,9 +231,11 @@ router.post('/', async (req, res) => {
 
 /**
  * PUT /api/grades/:id
+ * Body/Query: tenant_id (required for filtering)
  */
 router.put('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const gradeId = parseInt(req.params.id);
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
@@ -234,13 +243,14 @@ router.put('/:id', async (req, res) => {
     const errors = validateGradeData(data, true);
     if (errors.length) return sendBadRequest(res, req, errors);
 
-    const existing = await GradeModel.findById(gradeId);
+    const existing = await GradeModel.findById(gradeId, tenantId);
     if (!existing) return sendGrade(res, req, null);
 
     const userId = getUserId(req);
-    const updated = await GradeModel.update(gradeId, data, userId);
+    const updated = await GradeModel.update(gradeId, data, userId, tenantId);
     sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -256,6 +266,7 @@ router.put('/:id', async (req, res) => {
  */
 router.patch('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const gradeId = parseInt(req.params.id);
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
@@ -263,13 +274,14 @@ router.patch('/:id', async (req, res) => {
     const errors = validateGradeData(data, true);
     if (errors.length) return sendBadRequest(res, req, errors);
 
-    const existing = await GradeModel.findById(gradeId);
+    const existing = await GradeModel.findById(gradeId, tenantId);
     if (!existing) return sendGrade(res, req, null);
 
     const userId = getUserId(req);
-    const updated = await GradeModel.update(gradeId, data, userId);
+    const updated = await GradeModel.update(gradeId, data, userId, tenantId);
     sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -282,28 +294,29 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * DELETE /api/grades/:id
- *  - default soft delete
- *  - hard delete with ?hard=true
+ * Query: tenant_id (required), hard?
  */
 router.delete('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const gradeId = parseInt(req.params.id);
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
-    const existing = await GradeModel.findById(gradeId);
+    const existing = await GradeModel.findById(gradeId, tenantId);
     if (!existing) return sendGrade(res, req, null);
 
     const userId = getUserId(req);
     const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
 
     if (isHardDelete) {
-      await GradeModel.hardDelete(gradeId);
+      await GradeModel.hardDelete(gradeId, tenantId);
       return sendDeleted(res, req, 'Grade permanently deleted', gradeId);
     }
 
-    await GradeModel.softDelete(gradeId, userId);
+    await GradeModel.softDelete(gradeId, userId, tenantId);
     return sendDeleted(res, req, 'Grade deactivated (soft delete)', gradeId);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to delete grade', error);
   }
 });

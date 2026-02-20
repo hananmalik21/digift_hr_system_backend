@@ -207,6 +207,7 @@ class PositionsModel {
     return `
       SELECT
         RAWTOHEX(p.POSITION_ID) AS POSITION_ID,
+        p.TENANT_ID,
         p.POSITION_CODE,
         p.STATUS,
         p.POSITION_TITLE_EN,
@@ -334,12 +335,27 @@ class PositionsModel {
   // GET ALL (paginated)
   // ----------------------------
   static async findAll(filters = {}) {
+    const tenantId = filters.tenant_id ?? filters.tenantId;
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+
     const page = Number(filters?.pagination?.page || 1);
     const pageSize = Math.min(100, Number(filters?.pagination?.pageSize || 10));
 
-    const where = [];
-    const binds = [];
-    let i = 1;
+    const where = [`p.TENANT_ID = :${1}`];
+    const binds = [tenantIdNum];
+    let i = 2;
 
     if (filters.search) {
       const v = `%${filters.search}%`;
@@ -383,23 +399,27 @@ class PositionsModel {
     const whereSql = where.length ? ` WHERE ${where.join(' AND ')}` : '';
 
     const countSql = `SELECT COUNT(*) AS TOTAL FROM ${this.TABLE_NAME} p${whereSql}`;
-    const countR = await this.executeQuery(countSql, [...binds]);
-    const total = countR?.rows?.[0]?.total ?? 0;
-
     let dataSql = this.selectBase() + whereSql + ` ORDER BY p.CREATED_DATE DESC`;
     const offset = (page - 1) * pageSize;
     dataSql += ` OFFSET :${i} ROWS FETCH NEXT :${i + 1} ROWS ONLY`;
+    const dataBinds = [...binds, offset, pageSize];
 
-    const r = await this.executeQuery(dataSql, [...binds, offset, pageSize]);
+    const [countR, r] = await Promise.all([
+      this.executeQuery(countSql, [...binds]),
+      this.executeQuery(dataSql, dataBinds),
+    ]);
+    const total = countR?.rows?.[0]?.total ?? 0;
     const rows = r.rows || [];
 
-    // org paths
+    const uniqueOrgUnitIds = [...new Set(rows.map((row) => row.org_unit_id).filter(Boolean))];
+    const orgPathArrays = await Promise.all(
+      uniqueOrgUnitIds.map((id) =>
+        this.fetchOrgPath(id).catch(() => [])
+      )
+    );
+    const orgPathByUnitId = new Map(uniqueOrgUnitIds.map((id, idx) => [id, orgPathArrays[idx]]));
     for (const row of rows) {
-      try {
-        row.org_path = await this.fetchOrgPath(row.org_unit_id);
-      } catch (err) {
-        row.org_path = [];
-      }
+      row.org_path = row.org_unit_id ? (orgPathByUnitId.get(row.org_unit_id) || []) : [];
     }
 
     return { positions: this.shapeMany(rows), total };
@@ -408,10 +428,23 @@ class PositionsModel {
   // ----------------------------
   // GET BY ID
   // ----------------------------
-  static async findById(positionIdHex32) {
+  static async findById(positionIdHex32, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     const id = this.raw16Required(positionIdHex32, 'position_id');
-    const sql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-    const r = await this.executeQuery(sql, [id]);
+    const sql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
+    const r = await this.executeQuery(sql, [id, tenantIdNum]);
     if (!r?.rows?.length) return null;
 
     const row = r.rows[0];
@@ -424,6 +457,20 @@ class PositionsModel {
   // ----------------------------
   static async create(data, userId = 'SYSTEM') {
     const payload = this.toLowerCaseKeys(data);
+    const tenantId = payload.tenant_id;
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required in request body');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
 
     const stepNo = this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 }) ?? 1;
 
@@ -459,6 +506,7 @@ class PositionsModel {
         const insertSql = `
           INSERT INTO ${this.TABLE_NAME} (
             POSITION_ID,
+            TENANT_ID,
             POSITION_CODE,
             STATUS,
             POSITION_TITLE_EN,
@@ -486,6 +534,7 @@ class PositionsModel {
             LAST_UPDATE_LOGIN
           ) VALUES (
             SYS_GUID(),
+            :tenantId,
             :positionCode, :status, :positionTitleEn, :positionTitleAr,
             :orgStructureId, :orgUnitId, :orgPathJson,
             :costCenter, :location,
@@ -500,6 +549,7 @@ class PositionsModel {
         `;
 
         const bindVars = {
+          tenantId: { val: tenantIdNum, dir: oracledb.BIND_IN },
           positionCode: { val: this.strRequired(payload.position_code, 'position_code'), dir: oracledb.BIND_IN },
           status: { val: String(payload.status ?? 'ACTIVE').toUpperCase(), dir: oracledb.BIND_IN },
           positionTitleEn: { val: this.strRequired(payload.position_title_en, 'position_title_en'), dir: oracledb.BIND_IN },
@@ -533,8 +583,8 @@ class PositionsModel {
           ? ins.outBinds.returnPositionId[0] 
           : ins.outBinds.returnPositionId;
 
-        const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-        const rr = await connection.execute(selectSql, [newIdBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
+        const rr = await connection.execute(selectSql, [newIdBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
         row.org_path = await this.fetchOrgPath(row.org_unit_id);
@@ -584,9 +634,23 @@ class PositionsModel {
   // ----------------------------
   // UPDATE
   // ----------------------------
-  static async update(positionIdHex32, data, userId = 'SYSTEM') {
+  static async update(positionIdHex32, data, userId = 'SYSTEM', tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     const payload = this.toLowerCaseKeys(data);
+    delete payload.tenant_id;
 
     return await this.executeWithTransaction(async (connection) => {
       const sets = [];
@@ -638,13 +702,13 @@ class PositionsModel {
       add('LAST_UPDATED_BY', userId);
       add('LAST_UPDATED_DATE', new Date());
 
-      binds.push(idBuf);
-      const sql = `UPDATE ${this.TABLE_NAME} SET ${sets.join(', ')} WHERE POSITION_ID = :${i}`;
+      binds.push(idBuf, tenantIdNum);
+      const sql = `UPDATE ${this.TABLE_NAME} SET ${sets.join(', ')} WHERE POSITION_ID = :${i} AND TENANT_ID = :${i + 1}`;
       const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
       if ((r.rowsAffected || 0) === 0) return null;
 
-      const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-      const rr = await connection.execute(selectSql, [idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
+      const rr = await connection.execute(selectSql, [idBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
       row.org_path = await this.fetchOrgPath(row.org_unit_id);
@@ -655,7 +719,20 @@ class PositionsModel {
   // ----------------------------
   // SOFT DELETE
   // ----------------------------
-  static async softDelete(positionIdHex32, userId = 'SYSTEM') {
+  static async softDelete(positionIdHex32, userId = 'SYSTEM', tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
       const sql = `
@@ -663,13 +740,13 @@ class PositionsModel {
         SET STATUS = 'INACTIVE',
             LAST_UPDATED_BY = :1,
             LAST_UPDATED_DATE = :2
-        WHERE POSITION_ID = :3
+        WHERE POSITION_ID = :3 AND TENANT_ID = :4
       `;
-      const r = await connection.execute(sql, [userId, new Date(), idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const r = await connection.execute(sql, [userId, new Date(), idBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
       if ((r.rowsAffected || 0) === 0) return null;
 
-      const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1`;
-      const rr = await connection.execute(selectSql, [idBuf], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
+      const rr = await connection.execute(selectSql, [idBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
       row.org_path = await this.fetchOrgPath(row.org_unit_id);
@@ -680,10 +757,23 @@ class PositionsModel {
   // ----------------------------
   // HARD DELETE
   // ----------------------------
-  static async hardDelete(positionIdHex32) {
+  static async hardDelete(positionIdHex32, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
-      const r = await connection.execute(`DELETE FROM ${this.TABLE_NAME} WHERE POSITION_ID = :1`, [idBuf], {
+      const r = await connection.execute(`DELETE FROM ${this.TABLE_NAME} WHERE POSITION_ID = :1 AND TENANT_ID = :2`, [idBuf, tenantIdNum], {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
       });
       if ((r.rowsAffected || 0) === 0) return null;
@@ -694,7 +784,20 @@ class PositionsModel {
   // ----------------------------
   // REPORTING RELATIONSHIPS TREE
   // ----------------------------
-  static async findReportingRelationships(positionIdHex32 = null, includeHierarchy = true) {
+  static async findReportingRelationships(tenantId, positionIdHex32 = null, includeHierarchy = true) {
+    if (tenantId === undefined || tenantId === null) {
+      const err = new Error('tenant_id is required');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      const err = new Error('tenant_id must be a valid positive number');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     let rootHex = null;
     if (positionIdHex32) {
       const norm = this.normalizeGuidHex32(positionIdHex32);
@@ -702,8 +805,8 @@ class PositionsModel {
       rootHex = norm;
     }
 
-    const sql = this.selectBase() + ` ORDER BY p.CREATED_DATE DESC`;
-    const r = await this.executeQuery(sql, []);
+    const sql = this.selectBase() + ` WHERE p.TENANT_ID = :1 ORDER BY p.CREATED_DATE DESC`;
+    const r = await this.executeQuery(sql, [tenantIdNum]);
     const all = this.shapeMany(r.rows || []);
 
     // Build map: parentId => children[]

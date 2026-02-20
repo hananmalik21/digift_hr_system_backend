@@ -1,6 +1,9 @@
 import express from 'express';
 import JobFamilyModel from '../model/jobFamilyModel.js';
 import { toUpperCaseKeys } from '../../../utils/stringUtils.js';
+import { getTenantId, requireTenantIdInBody } from '../../../utils/tenantUtils.js';
+import { getUserId } from '../../../utils/requestUtils.js';
+import { ValidationError } from '../../../utils/errors/index.js';
 import {
   sendJobFamilyList,
   sendJobFamily,
@@ -14,15 +17,11 @@ import {
 
 const router = express.Router();
 
-// Middleware to track request start time for execution time calculation
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-/**
- * Validation helper
- */
 function validateJobFamilyData(data, isUpdate = false) {
   const errors = [];
 
@@ -69,14 +68,6 @@ function validateJobFamilyData(data, isUpdate = false) {
 }
 
 /**
- * Extract user ID from request (can be from token, session, etc.)
- * For now, using a header or defaulting to SYSTEM
- */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
-
-/**
  * @route   GET /api/job-families
  * @desc    Get all job families
  * @query   job_family_id - Filter by job family ID
@@ -91,7 +82,8 @@ function getUserId(req) {
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
+    const tenantId = getTenantId(req);
+    const filters = { tenant_id: tenantId };
     const appliedFilters = {};
 
     if (req.query.job_family_id) {
@@ -163,6 +155,7 @@ router.get('/', async (req, res) => {
       pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
     });
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch job families', error);
   }
 });
@@ -174,15 +167,17 @@ router.get('/', async (req, res) => {
  */
 router.get('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const jobFamilyId = parseInt(req.params.id);
 
     if (isNaN(jobFamilyId)) {
       return sendBadRequest(res, req, 'Invalid JOB_FAMILY_ID format');
     }
 
-    const jobFamily = await JobFamilyModel.findById(jobFamilyId);
+    const jobFamily = await JobFamilyModel.findById(jobFamilyId, tenantId);
     sendJobFamily(res, req, jobFamily);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch job family', error);
   }
 });
@@ -194,8 +189,8 @@ router.get('/:id', async (req, res) => {
  */
 router.post('/', async (req, res) => {
   try {
-    // ✅ Normalize incoming body to UPPERCASE keys (accepts lowercase from frontend)
     const data = toUpperCaseKeys(req.body);
+    data.tenant_id = requireTenantIdInBody(data);
 
     const errors = validateJobFamilyData(data, false);
     if (errors.length > 0) {
@@ -223,29 +218,29 @@ router.post('/', async (req, res) => {
  */
 router.put('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const jobFamilyId = parseInt(req.params.id);
 
     if (isNaN(jobFamilyId)) {
       return sendBadRequest(res, req, 'Invalid JOB_FAMILY_ID format');
     }
 
-    // ✅ Normalize incoming body to UPPERCASE keys
     const data = toUpperCaseKeys(req.body);
-
     const errors = validateJobFamilyData(data, true);
     if (errors.length > 0) {
       return sendBadRequest(res, req, errors);
     }
 
-    const existing = await JobFamilyModel.findById(jobFamilyId);
+    const existing = await JobFamilyModel.findById(jobFamilyId, tenantId);
     if (!existing) {
       return sendJobFamily(res, req, null);
     }
 
     const userId = getUserId(req);
-    const updated = await JobFamilyModel.update(jobFamilyId, data, userId);
+    const updated = await JobFamilyModel.update(jobFamilyId, data, userId, tenantId);
     sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -263,29 +258,29 @@ router.put('/:id', async (req, res) => {
  */
 router.patch('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const jobFamilyId = parseInt(req.params.id);
 
     if (isNaN(jobFamilyId)) {
       return sendBadRequest(res, req, 'Invalid JOB_FAMILY_ID format');
     }
 
-    // ✅ Normalize incoming body to UPPERCASE keys
     const data = toUpperCaseKeys(req.body);
-
     const errors = validateJobFamilyData(data, true);
     if (errors.length > 0) {
       return sendBadRequest(res, req, errors);
     }
 
-    const existing = await JobFamilyModel.findById(jobFamilyId);
+    const existing = await JobFamilyModel.findById(jobFamilyId, tenantId);
     if (!existing) {
       return sendJobFamily(res, req, null);
     }
 
     const userId = getUserId(req);
-    const updated = await JobFamilyModel.update(jobFamilyId, data, userId);
+    const updated = await JobFamilyModel.update(jobFamilyId, data, userId, tenantId);
     sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -303,13 +298,14 @@ router.patch('/:id', async (req, res) => {
  */
 router.delete('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const jobFamilyId = parseInt(req.params.id);
 
     if (isNaN(jobFamilyId)) {
       return sendBadRequest(res, req, 'Invalid JOB_FAMILY_ID format');
     }
 
-    const existing = await JobFamilyModel.findById(jobFamilyId);
+    const existing = await JobFamilyModel.findById(jobFamilyId, tenantId);
     if (!existing) {
       return sendJobFamily(res, req, null);
     }
@@ -318,13 +314,14 @@ router.delete('/:id', async (req, res) => {
     const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
 
     if (isHardDelete) {
-      await JobFamilyModel.hardDelete(jobFamilyId);
+      await JobFamilyModel.hardDelete(jobFamilyId, tenantId);
       return sendDeleted(res, req, 'Job family permanently deleted', jobFamilyId);
     }
 
-    await JobFamilyModel.softDelete(jobFamilyId, userId);
+    await JobFamilyModel.softDelete(jobFamilyId, userId, tenantId);
     return sendDeleted(res, req, 'Job family deactivated (soft delete)', jobFamilyId);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to delete job family', error);
   }
 });

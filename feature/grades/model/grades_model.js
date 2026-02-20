@@ -51,9 +51,19 @@ class GradeModel {
 
   static async findAll(filters = {}) {
     try {
+      const tenantId = filters.tenant_id ?? filters.tenantId;
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} g`;
       let dataQuery = `SELECT
         g.GRADE_ID,
+        g.TENANT_ID,
         g.GRADE_NUMBER,
         g.GRADE_CATEGORY,
         g.CURRENCY_CODE,
@@ -71,9 +81,9 @@ class GradeModel {
         g.LAST_UPDATE_LOGIN
       FROM ${this.TABLE_NAME} g`;
 
-      const conditions = [];
-      const bindParams = [];
-      let paramIndex = 1;
+      const conditions = [`g.TENANT_ID = :1`];
+      const bindParams = [tenantIdNum];
+      let paramIndex = 2;
 
       if (filters.gradeId) {
         conditions.push(`g.GRADE_ID = :${paramIndex}`);
@@ -126,17 +136,20 @@ class GradeModel {
       const dataBindParams = [...bindParams];
 
       let totalCount = 0;
-
+      let result;
       if (pagination?.page && pagination?.pageSize) {
-        const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows?.[0]?.total ?? 0;
-
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
         dataBindParams.push(offset, pagination.pageSize);
+        const [dataResult, countResult] = await Promise.all([
+          this.executeQuery(dataQuery, dataBindParams),
+          this.executeQuery(countQuery, countBindParams),
+        ]);
+        totalCount = countResult.rows?.[0]?.total ?? 0;
+        result = dataResult;
+      } else {
+        result = await this.executeQuery(dataQuery, dataBindParams);
       }
-
-      const result = await this.executeQuery(dataQuery, dataBindParams);
       const grades = result.rows || [];
 
       if (pagination?.page && pagination?.pageSize) {
@@ -149,10 +162,19 @@ class GradeModel {
     }
   }
 
-  static async findById(gradeId) {
+  static async findById(gradeId, tenantId) {
     try {
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+
       const query = `SELECT
         g.GRADE_ID,
+        g.TENANT_ID,
         g.GRADE_NUMBER,
         g.GRADE_CATEGORY,
         g.CURRENCY_CODE,
@@ -169,9 +191,9 @@ class GradeModel {
         g.LAST_UPDATED_DATE,
         g.LAST_UPDATE_LOGIN
       FROM ${this.TABLE_NAME} g
-      WHERE g.GRADE_ID = :1`;
+      WHERE g.GRADE_ID = :1 AND g.TENANT_ID = :2`;
 
-      const result = await this.executeQuery(query, [gradeId]);
+      const result = await this.executeQuery(query, [gradeId, tenantIdNum]);
       return result.rows?.[0] || null;
     } catch (error) {
       throw new Error(`Failed to fetch grade: ${error.message}`);
@@ -179,6 +201,15 @@ class GradeModel {
   }
 
   static async create(data, userId) {
+    const tenantId = data.tenant_id ?? data.TENANT_ID;
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required in request body');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+
     try {
       return await this.executeWithTransaction(async (connection) => {
         let gradeId;
@@ -198,19 +229,20 @@ class GradeModel {
         const now = new Date();
 
         const query = `INSERT INTO ${this.TABLE_NAME} (
-          GRADE_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
+          GRADE_ID, TENANT_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
           STEP_1_SALARY, STEP_2_SALARY, STEP_3_SALARY, STEP_4_SALARY, STEP_5_SALARY,
           DESCRIPTION, STATUS,
           CREATED_BY, CREATED_DATE, LAST_UPDATED_BY, LAST_UPDATED_DATE, LAST_UPDATE_LOGIN
         ) VALUES (
-          :1, :2, :3, :4,
-          :5, :6, :7, :8, :9,
-          :10, :11,
-          :12, :13, :14, :15, :16
+          :1, :2, :3, :4, :5,
+          :6, :7, :8, :9, :10,
+          :11, :12,
+          :13, :14, :15, :16, :17
         )`;
 
         const bindParams = [
           gradeId,
+          tenantIdNum,
           data.GRADE_NUMBER || null,
           data.GRADE_CATEGORY || null,
           (data.CURRENCY_CODE || 'KWD').toUpperCase(),
@@ -235,13 +267,13 @@ class GradeModel {
 
         const select = await connection.execute(
           `SELECT
-            GRADE_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
+            GRADE_ID, TENANT_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
             STEP_1_SALARY, STEP_2_SALARY, STEP_3_SALARY, STEP_4_SALARY, STEP_5_SALARY,
             DESCRIPTION, STATUS,
             CREATED_BY, CREATED_DATE, LAST_UPDATED_BY, LAST_UPDATED_DATE, LAST_UPDATE_LOGIN
           FROM ${this.TABLE_NAME}
-          WHERE GRADE_ID = :1`,
-          [gradeId],
+          WHERE GRADE_ID = :1 AND TENANT_ID = :2`,
+          [gradeId, tenantIdNum],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
@@ -269,7 +301,18 @@ class GradeModel {
     }
   }
 
-  static async update(gradeId, data, userId) {
+  static async update(gradeId, data, userId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+    const payload = { ...data };
+    delete payload.tenant_id;
+    delete payload.TENANT_ID;
+
     try {
       return await this.executeWithTransaction(async (connection) => {
         const updateFields = [];
@@ -284,17 +327,17 @@ class GradeModel {
           }
         };
 
-        setIfProvided('GRADE_NUMBER', data.GRADE_NUMBER, v => v);
-        setIfProvided('GRADE_CATEGORY', data.GRADE_CATEGORY, v => v);
-        setIfProvided('CURRENCY_CODE', data.CURRENCY_CODE, v => String(v).toUpperCase());
-        setIfProvided('STEP_1_SALARY', data.STEP_1_SALARY, v => Number(v));
-        setIfProvided('STEP_2_SALARY', data.STEP_2_SALARY, v => Number(v));
-        setIfProvided('STEP_3_SALARY', data.STEP_3_SALARY, v => Number(v));
-        setIfProvided('STEP_4_SALARY', data.STEP_4_SALARY, v => Number(v));
-        setIfProvided('STEP_5_SALARY', data.STEP_5_SALARY, v => Number(v));
-        setIfProvided('DESCRIPTION', data.DESCRIPTION, v => v);
-        setIfProvided('STATUS', data.STATUS, v => String(v).toUpperCase());
-        setIfProvided('LAST_UPDATE_LOGIN', data.LAST_UPDATE_LOGIN, v => v);
+        setIfProvided('GRADE_NUMBER', payload.GRADE_NUMBER, v => v);
+        setIfProvided('GRADE_CATEGORY', payload.GRADE_CATEGORY, v => v);
+        setIfProvided('CURRENCY_CODE', payload.CURRENCY_CODE, v => String(v).toUpperCase());
+        setIfProvided('STEP_1_SALARY', payload.STEP_1_SALARY, v => Number(v));
+        setIfProvided('STEP_2_SALARY', payload.STEP_2_SALARY, v => Number(v));
+        setIfProvided('STEP_3_SALARY', payload.STEP_3_SALARY, v => Number(v));
+        setIfProvided('STEP_4_SALARY', payload.STEP_4_SALARY, v => Number(v));
+        setIfProvided('STEP_5_SALARY', payload.STEP_5_SALARY, v => Number(v));
+        setIfProvided('DESCRIPTION', payload.DESCRIPTION, v => v);
+        setIfProvided('STATUS', payload.STATUS, v => String(v).toUpperCase());
+        setIfProvided('LAST_UPDATE_LOGIN', payload.LAST_UPDATE_LOGIN, v => v);
 
         if (updateFields.length === 0) {
           throw new Error('No fields to update');
@@ -308,20 +351,20 @@ class GradeModel {
         bindParams.push(new Date());
         idx++;
 
-        bindParams.push(gradeId);
-        const query = `UPDATE ${this.TABLE_NAME} SET ${updateFields.join(', ')} WHERE GRADE_ID = :${idx}`;
+        bindParams.push(gradeId, tenantIdNum);
+        const query = `UPDATE ${this.TABLE_NAME} SET ${updateFields.join(', ')} WHERE GRADE_ID = :${idx} AND TENANT_ID = :${idx + 1}`;
 
         await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const select = await connection.execute(
           `SELECT
-            GRADE_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
+            GRADE_ID, TENANT_ID, GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE,
             STEP_1_SALARY, STEP_2_SALARY, STEP_3_SALARY, STEP_4_SALARY, STEP_5_SALARY,
             DESCRIPTION, STATUS,
             CREATED_BY, CREATED_DATE, LAST_UPDATED_BY, LAST_UPDATED_DATE, LAST_UPDATE_LOGIN
           FROM ${this.TABLE_NAME}
-          WHERE GRADE_ID = :1`,
-          [gradeId],
+          WHERE GRADE_ID = :1 AND TENANT_ID = :2`,
+          [gradeId, tenantIdNum],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
@@ -348,15 +391,22 @@ class GradeModel {
     }
   }
 
-  static async softDelete(gradeId, userId) {
+  static async softDelete(gradeId, userId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
     return await this.executeWithTransaction(async (connection) => {
       const q = `UPDATE ${this.TABLE_NAME}
         SET STATUS = 'INACTIVE',
             LAST_UPDATED_BY = :1,
             LAST_UPDATED_DATE = :2
-        WHERE GRADE_ID = :3`;
+        WHERE GRADE_ID = :3 AND TENANT_ID = :4`;
 
-      const r = await connection.execute(q, [userId || 'SYSTEM', new Date(), gradeId], {
+      const r = await connection.execute(q, [userId || 'SYSTEM', new Date(), gradeId, tenantIdNum], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
 
@@ -366,10 +416,17 @@ class GradeModel {
     });
   }
 
-  static async hardDelete(gradeId) {
+  static async hardDelete(gradeId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
     return await this.executeWithTransaction(async (connection) => {
-      const q = `DELETE FROM ${this.TABLE_NAME} WHERE GRADE_ID = :1`;
-      const r = await connection.execute(q, [gradeId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const q = `DELETE FROM ${this.TABLE_NAME} WHERE GRADE_ID = :1 AND TENANT_ID = :2`;
+      const r = await connection.execute(q, [gradeId, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const rowsAffected = r.rowsAffected || r.rowCount || 0;
       if (rowsAffected === 0) throw new Error(`No grade found with ID: ${gradeId}`);

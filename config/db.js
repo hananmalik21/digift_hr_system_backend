@@ -96,9 +96,9 @@ const dbConfig = {
   poolIncrement: parseInt(process.env.DB_POOL_INCREMENT) || 1,
   poolTimeout: parseInt(process.env.DB_POOL_TIMEOUT) || 60,
   
-  // Additional options
+  // Additional options (stmtCacheSize reduces parse overhead for repeated statements)
   externalAuth: false,
-  stmtCacheSize: 30
+  stmtCacheSize: parseInt(process.env.DB_STMT_CACHE_SIZE, 10) || 50
 };
 
 /**

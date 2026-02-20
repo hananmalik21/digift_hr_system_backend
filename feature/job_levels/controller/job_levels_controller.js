@@ -1,6 +1,9 @@
 import express from 'express';
 import JobLevelsModel from '../model/job_levels_model.js';
 import { toUpperCaseKeys } from '../../../utils/stringUtils.js';
+import { getTenantId, requireTenantIdInBody } from '../../../utils/tenantUtils.js';
+import { getUserId } from '../../../utils/requestUtils.js';
+import { ValidationError } from '../../../utils/errors/index.js';
 import {
   sendJobLevelList,
   sendJobLevel,
@@ -18,10 +21,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 function validateJobLevelData(data, isUpdate = false) {
   const errors = [];
@@ -60,7 +59,8 @@ function validateJobLevelData(data, isUpdate = false) {
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
+    const tenantId = getTenantId(req);
+    const filters = { tenant_id: tenantId };
     const appliedFilters = {};
 
     if (req.query.job_level_id) {
@@ -124,21 +124,25 @@ router.get('/', async (req, res) => {
       pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
     });
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch job levels', error);
   }
 });
 
 /**
  * GET /api/job-levels/:id
+ * Query: tenant_id (required)
  */
 router.get('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) return sendBadRequest(res, req, 'job_level_id must be a valid number');
 
-    const jobLevel = await JobLevelsModel.findById(id);
+    const jobLevel = await JobLevelsModel.findById(id, tenantId);
     return sendJobLevel(res, req, jobLevel);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch job level', error);
   }
 });
@@ -150,12 +154,15 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const data = toUpperCaseKeys(req.body);
+    data.tenant_id = requireTenantIdInBody(data);
+
     const errors = validateJobLevelData(data, false);
     if (errors.length) return sendBadRequest(res, req, errors);
 
     const created = await JobLevelsModel.create(data, getUserId(req));
     return sendCreated(res, req, created);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -174,9 +181,11 @@ router.post('/', async (req, res) => {
 
 /**
  * PUT /api/job-levels/:id
+ * Body: tenant_id (required for filtering)
  */
 router.put('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) return sendBadRequest(res, req, 'job_level_id must be a valid number');
 
@@ -184,12 +193,13 @@ router.put('/:id', async (req, res) => {
     const errors = validateJobLevelData(data, true);
     if (errors.length) return sendBadRequest(res, req, errors);
 
-    const existing = await JobLevelsModel.findById(id);
+    const existing = await JobLevelsModel.findById(id, tenantId);
     if (!existing) return sendJobLevel(res, req, null);
 
-    const updated = await JobLevelsModel.update(id, data, getUserId(req));
+    const updated = await JobLevelsModel.update(id, data, getUserId(req), tenantId);
     return sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -211,6 +221,7 @@ router.put('/:id', async (req, res) => {
  */
 router.patch('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) return sendBadRequest(res, req, 'job_level_id must be a valid number');
 
@@ -218,12 +229,13 @@ router.patch('/:id', async (req, res) => {
     const errors = validateJobLevelData(data, true);
     if (errors.length) return sendBadRequest(res, req, errors);
 
-    const existing = await JobLevelsModel.findById(id);
+    const existing = await JobLevelsModel.findById(id, tenantId);
     if (!existing) return sendJobLevel(res, req, null);
 
-    const updated = await JobLevelsModel.update(id, data, getUserId(req));
+    const updated = await JobLevelsModel.update(id, data, getUserId(req), tenantId);
     return sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
       return sendConflict(res, req, error.userMessage || error.message, {
         constraint: error.constraint,
@@ -242,27 +254,28 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * DELETE /api/job-levels/:id
- * Default: soft delete
- * Hard: ?hard=true
+ * Query: tenant_id (required), hard?
  */
 router.delete('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = parseInt(req.params.id);
     if (isNaN(id)) return sendBadRequest(res, req, 'job_level_id must be a valid number');
 
-    const existing = await JobLevelsModel.findById(id);
+    const existing = await JobLevelsModel.findById(id, tenantId);
     if (!existing) return sendJobLevel(res, req, null);
 
     const isHard = req.query.hard === 'true' || req.query.hard === '1';
 
     if (isHard) {
-      await JobLevelsModel.hardDelete(id);
+      await JobLevelsModel.hardDelete(id, tenantId);
       return sendDeleted(res, req, 'Job level permanently deleted', id);
     }
 
-    await JobLevelsModel.softDelete(id, getUserId(req));
+    await JobLevelsModel.softDelete(id, getUserId(req), tenantId);
     return sendDeleted(res, req, 'Job level deactivated (soft delete)', id);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to delete job level', error);
   }
 });

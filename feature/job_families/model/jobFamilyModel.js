@@ -51,9 +51,19 @@ class JobFamilyModel {
 
   static async findAll(filters = {}) {
     try {
+      const tenantId = filters.tenant_id ?? filters.tenantId;
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} jf`;
       let dataQuery = `SELECT
         jf.JOB_FAMILY_ID,
+        jf.TENANT_ID,
         jf.JOB_FAMILY_CODE,
         jf.JOB_FAMILY_NAME_EN,
         jf.JOB_FAMILY_NAME_AR,
@@ -65,9 +75,9 @@ class JobFamilyModel {
         jf.LAST_UPDATED_DATE
       FROM ${this.TABLE_NAME} jf`;
 
-      const conditions = [];
-      const bindParams = [];
-      let paramIndex = 1;
+      const conditions = [`jf.TENANT_ID = :1`];
+      const bindParams = [tenantIdNum];
+      let paramIndex = 2;
 
       if (filters.jobFamilyId) {
         conditions.push(`jf.JOB_FAMILY_ID = :${paramIndex}`);
@@ -120,21 +130,24 @@ class JobFamilyModel {
       dataQuery += ` ORDER BY jf.CREATED_DATE DESC, jf.JOB_FAMILY_ID DESC`;
 
       const pagination = filters.pagination;
-      let totalCount = 0;
-
       const countBindParams = [...bindParams];
       const dataBindParams = [...bindParams];
 
+      let totalCount = 0;
+      let result;
       if (pagination?.page && pagination?.pageSize) {
-        const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows?.[0]?.total || 0;
-
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
         dataBindParams.push(offset, pagination.pageSize);
+        const [dataResult, countResult] = await Promise.all([
+          this.executeQuery(dataQuery, dataBindParams),
+          this.executeQuery(countQuery, countBindParams),
+        ]);
+        totalCount = countResult.rows?.[0]?.total || 0;
+        result = dataResult;
+      } else {
+        result = await this.executeQuery(dataQuery, dataBindParams);
       }
-
-      const result = await this.executeQuery(dataQuery, dataBindParams);
       const jobFamilies = result.rows || [];
 
       if (pagination?.page && pagination?.pageSize) {
@@ -148,10 +161,19 @@ class JobFamilyModel {
     }
   }
 
-  static async findById(jobFamilyId) {
+  static async findById(jobFamilyId, tenantId) {
     try {
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+
       const query = `SELECT
         JOB_FAMILY_ID,
+        TENANT_ID,
         JOB_FAMILY_CODE,
         JOB_FAMILY_NAME_EN,
         JOB_FAMILY_NAME_AR,
@@ -162,9 +184,9 @@ class JobFamilyModel {
         LAST_UPDATED_BY,
         LAST_UPDATED_DATE
       FROM ${this.TABLE_NAME}
-      WHERE JOB_FAMILY_ID = :1`;
+      WHERE JOB_FAMILY_ID = :1 AND TENANT_ID = :2`;
 
-      const result = await this.executeQuery(query, [jobFamilyId]);
+      const result = await this.executeQuery(query, [jobFamilyId, tenantIdNum]);
       return result.rows?.length ? result.rows[0] : null;
     } catch (error) {
       console.error('Error in findById:', error);
@@ -174,6 +196,15 @@ class JobFamilyModel {
 
   static async create(data, userId) {
     try {
+      const tenantId = data.tenant_id ?? data.TENANT_ID;
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required in request body');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+
       return await this.executeWithTransaction(async (connection) => {
         let id;
         try {
@@ -190,6 +221,7 @@ class JobFamilyModel {
 
         const query = `INSERT INTO ${this.TABLE_NAME} (
           JOB_FAMILY_ID,
+          TENANT_ID,
           JOB_FAMILY_CODE,
           JOB_FAMILY_NAME_EN,
           JOB_FAMILY_NAME_AR,
@@ -200,11 +232,12 @@ class JobFamilyModel {
           LAST_UPDATED_BY,
           LAST_UPDATED_DATE
         ) VALUES (
-          :1,:2,:3,:4,:5,:6,:7,:8,:9,:10
+          :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11
         )`;
 
         const bindParams = [
           id,
+          tenantIdNum,
           data.JOB_FAMILY_CODE || null,
           data.JOB_FAMILY_NAME_EN || null,
           data.JOB_FAMILY_NAME_AR || null,
@@ -220,6 +253,7 @@ class JobFamilyModel {
 
         const selectQuery = `SELECT
           JOB_FAMILY_ID,
+          TENANT_ID,
           JOB_FAMILY_CODE,
           JOB_FAMILY_NAME_EN,
           JOB_FAMILY_NAME_AR,
@@ -230,9 +264,9 @@ class JobFamilyModel {
           LAST_UPDATED_BY,
           LAST_UPDATED_DATE
         FROM ${this.TABLE_NAME}
-        WHERE JOB_FAMILY_ID = :1`;
+        WHERE JOB_FAMILY_ID = :1 AND TENANT_ID = :2`;
 
-        const selectResult = await connection.execute(selectQuery, [id], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const selectResult = await connection.execute(selectQuery, [id, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
@@ -270,36 +304,47 @@ class JobFamilyModel {
     }
   }
 
-  static async update(jobFamilyId, data, userId) {
+  static async update(jobFamilyId, data, userId, tenantId) {
     try {
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+      const payload = { ...data };
+      delete payload.tenant_id;
+      delete payload.TENANT_ID;
+
       return await this.executeWithTransaction(async (connection) => {
         const updateFields = [];
         const bindParams = [];
         let paramIndex = 1;
 
-        if (data.JOB_FAMILY_CODE !== undefined) {
+        if (payload.JOB_FAMILY_CODE !== undefined) {
           updateFields.push(`JOB_FAMILY_CODE = :${paramIndex}`);
-          bindParams.push(data.JOB_FAMILY_CODE);
+          bindParams.push(payload.JOB_FAMILY_CODE);
           paramIndex++;
         }
-        if (data.JOB_FAMILY_NAME_EN !== undefined) {
+        if (payload.JOB_FAMILY_NAME_EN !== undefined) {
           updateFields.push(`JOB_FAMILY_NAME_EN = :${paramIndex}`);
-          bindParams.push(data.JOB_FAMILY_NAME_EN);
+          bindParams.push(payload.JOB_FAMILY_NAME_EN);
           paramIndex++;
         }
-        if (data.JOB_FAMILY_NAME_AR !== undefined) {
+        if (payload.JOB_FAMILY_NAME_AR !== undefined) {
           updateFields.push(`JOB_FAMILY_NAME_AR = :${paramIndex}`);
-          bindParams.push(data.JOB_FAMILY_NAME_AR);
+          bindParams.push(payload.JOB_FAMILY_NAME_AR);
           paramIndex++;
         }
-        if (data.DESCRIPTION !== undefined) {
+        if (payload.DESCRIPTION !== undefined) {
           updateFields.push(`DESCRIPTION = :${paramIndex}`);
-          bindParams.push(data.DESCRIPTION);
+          bindParams.push(payload.DESCRIPTION);
           paramIndex++;
         }
-        if (data.STATUS !== undefined) {
+        if (payload.STATUS !== undefined) {
           updateFields.push(`STATUS = :${paramIndex}`);
-          bindParams.push(String(data.STATUS).toUpperCase());
+          bindParams.push(String(payload.STATUS).toUpperCase());
           paramIndex++;
         }
 
@@ -313,13 +358,14 @@ class JobFamilyModel {
         bindParams.push(new Date());
         paramIndex++;
 
-        bindParams.push(jobFamilyId);
-        const query = `UPDATE ${this.TABLE_NAME} SET ${updateFields.join(', ')} WHERE JOB_FAMILY_ID = :${paramIndex}`;
+        bindParams.push(jobFamilyId, tenantIdNum);
+        const query = `UPDATE ${this.TABLE_NAME} SET ${updateFields.join(', ')} WHERE JOB_FAMILY_ID = :${paramIndex} AND TENANT_ID = :${paramIndex + 1}`;
 
         await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const selectQuery = `SELECT
           JOB_FAMILY_ID,
+          TENANT_ID,
           JOB_FAMILY_CODE,
           JOB_FAMILY_NAME_EN,
           JOB_FAMILY_NAME_AR,
@@ -330,9 +376,9 @@ class JobFamilyModel {
           LAST_UPDATED_BY,
           LAST_UPDATED_DATE
         FROM ${this.TABLE_NAME}
-        WHERE JOB_FAMILY_ID = :1`;
+        WHERE JOB_FAMILY_ID = :1 AND TENANT_ID = :2`;
 
-        const selectResult = await connection.execute(selectQuery, [jobFamilyId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const selectResult = await connection.execute(selectQuery, [jobFamilyId, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
@@ -361,16 +407,23 @@ class JobFamilyModel {
     }
   }
 
-  static async softDelete(jobFamilyId, userId) {
+  static async softDelete(jobFamilyId, userId, tenantId) {
     try {
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
       await this.executeWithTransaction(async (connection) => {
         const query = `UPDATE ${this.TABLE_NAME}
           SET STATUS = 'INACTIVE',
               LAST_UPDATED_BY = :1,
               LAST_UPDATED_DATE = :2
-          WHERE JOB_FAMILY_ID = :3`;
+          WHERE JOB_FAMILY_ID = :3 AND TENANT_ID = :4`;
 
-        const result = await connection.execute(query, [userId || 'SYSTEM', new Date(), jobFamilyId], {
+        const result = await connection.execute(query, [userId || 'SYSTEM', new Date(), jobFamilyId, tenantIdNum], {
           outFormat: oracledb.OUT_FORMAT_OBJECT
         });
 
@@ -385,11 +438,18 @@ class JobFamilyModel {
     }
   }
 
-  static async hardDelete(jobFamilyId) {
+  static async hardDelete(jobFamilyId, tenantId) {
     try {
+      if (tenantId === undefined || tenantId === null) {
+        throw new Error('tenant_id is required');
+      }
+      const tenantIdNum = Number(tenantId);
+      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
       await this.executeWithTransaction(async (connection) => {
-        const query = `DELETE FROM ${this.TABLE_NAME} WHERE JOB_FAMILY_ID = :1`;
-        const result = await connection.execute(query, [jobFamilyId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+        const query = `DELETE FROM ${this.TABLE_NAME} WHERE JOB_FAMILY_ID = :1 AND TENANT_ID = :2`;
+        const result = await connection.execute(query, [jobFamilyId, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const rowsAffected = result.rowsAffected || result.rowCount || 0;
         if (rowsAffected === 0) throw new Error(`No job family found with ID: ${jobFamilyId}`);

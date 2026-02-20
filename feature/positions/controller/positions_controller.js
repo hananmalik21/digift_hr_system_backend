@@ -2,6 +2,9 @@
 import express from 'express';
 import PositionsModel from '../model/positions_model.js';
 import { toUpperCaseKeys } from '../../../utils/stringUtils.js';
+import { getTenantId, requireTenantIdInBody } from '../../../utils/tenantUtils.js';
+import { getUserId } from '../../../utils/requestUtils.js';
+import { ValidationError } from '../../../utils/errors/index.js';
 import {
   sendPositionList,
   sendPosition,
@@ -20,10 +23,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 // GUID helpers (client input): accepts UUID or 32-hex
 function normalizeGuidString(v) {
@@ -131,10 +130,12 @@ function validatePosition(data, isUpdate = false) {
 
 /**
  * GET /api/positions
+ * Query: tenant_id (required), status?, search?, org_structure_id?, org_unit_id?, job_family_id?, job_level_id?, grade_id?, page?, page_size?
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
+    const tenantId = getTenantId(req);
+    const filters = { tenant_id: tenantId };
 
     if (req.query.status) filters.status = String(req.query.status).toUpperCase();
     if (req.query.search) filters.search = String(req.query.search);
@@ -180,15 +181,18 @@ router.get('/', async (req, res) => {
       },
     });
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to fetch positions', error);
   }
 });
 
 /**
  * GET /api/positions/reporting-relationships
+ * Query: tenant_id (required), position_id?, hierarchy?
  */
 router.get('/reporting-relationships', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     let positionId = null;
     if ('position_id' in req.query) {
       const v = String(req.query.position_id || '').trim();
@@ -200,34 +204,40 @@ router.get('/reporting-relationships', async (req, res) => {
     }
 
     const includeHierarchy = req.query.hierarchy !== 'false' && req.query.hierarchy !== '0';
-    const relationships = await PositionsModel.findReportingRelationships(positionId, includeHierarchy);
+    const relationships = await PositionsModel.findReportingRelationships(tenantId, positionId, includeHierarchy);
     return sendReportingRelationships(res, req, relationships);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to fetch reporting relationships', error);
   }
 });
 
 /**
  * GET /api/positions/:id
+ * Query: tenant_id (required)
  */
 router.get('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
     if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
-    const position = await PositionsModel.findById(id);
+    const position = await PositionsModel.findById(id, tenantId);
     return sendPosition(res, req, position);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to fetch position', error);
   }
 });
 
 /**
  * POST /api/positions
+ * Body: tenant_id (required), position_code, status, position_title_en, position_title_ar, ...
  */
 router.post('/', async (req, res) => {
   try {
     const data = toUpperCaseKeys(req.body);
+    data.tenant_id = requireTenantIdInBody(data);
 
     const errors = validatePosition(data, false);
     if (errors.length) return sendBadRequest(res, req, errors);
@@ -239,17 +249,19 @@ router.post('/', async (req, res) => {
     const created = await PositionsModel.create(data, getUserId(req));
     return sendCreated(res, req, created);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error?.code === 'UNIQUE_CONSTRAINT_VIOLATION') return sendConflict(res, req, error.userMessage || error.message, error);
-    if (error?.statusCode === 400) return sendBadRequest(res, req, error.userMessage || error.message);
     return sendServerError(res, req, 'Failed to create position', error);
   }
 });
 
 /**
  * PUT /api/positions/:id
+ * Body: tenant_id (required for filtering; cannot be changed), ...other fields
  */
 router.put('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
     if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
@@ -261,11 +273,11 @@ router.put('/:id', async (req, res) => {
     if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
     if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
 
-    const updated = await PositionsModel.update(id, data, getUserId(req));
+    const updated = await PositionsModel.update(id, data, getUserId(req), tenantId);
     return sendUpdated(res, req, updated);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     if (error?.code === 'UNIQUE_CONSTRAINT_VIOLATION') return sendConflict(res, req, error.userMessage || error.message, error);
-    if (error?.statusCode === 400) return sendBadRequest(res, req, error.userMessage || error.message);
     return sendServerError(res, req, 'Failed to update position', error);
   }
 });
@@ -280,22 +292,25 @@ router.patch('/:id', async (req, res) => {
 
 /**
  * DELETE /api/positions/:id
+ * Query: tenant_id (required), hard?
  */
 router.delete('/:id', async (req, res) => {
   try {
+    const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
     if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const hard = req.query.hard === 'true' || req.query.hard === '1';
 
     if (hard) {
-      await PositionsModel.hardDelete(id);
+      await PositionsModel.hardDelete(id, tenantId);
       return sendDeleted(res, req, 'Position deleted permanently', id);
     }
 
-    await PositionsModel.softDelete(id, getUserId(req));
+    await PositionsModel.softDelete(id, getUserId(req), tenantId);
     return sendDeleted(res, req, 'Position deactivated (soft delete)', id);
   } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to delete position', error);
   }
 });

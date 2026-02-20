@@ -104,6 +104,7 @@ class JobLevelsModel {
   static baseSelect() {
     return `SELECT
       jl.JOB_LEVEL_ID,
+      jl.TENANT_ID,
       jl.LEVEL_NAME_EN,
       jl.LEVEL_CODE,
       jl.DESCRIPTION,
@@ -177,12 +178,21 @@ class JobLevelsModel {
   }
 
   static async findAll(filters = {}) {
+    const tenantId = filters.tenant_id ?? filters.tenantId;
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+
     let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} jl`;
     let dataQuery = this.baseSelect();
 
-    const conditions = [];
-    const bind = [];
-    let idx = 1;
+    const conditions = [`jl.TENANT_ID = :1`];
+    const bind = [tenantIdNum];
+    let idx = 2;
 
     if (filters.search) {
       const sv = `%${filters.search}%`;
@@ -229,17 +239,21 @@ class JobLevelsModel {
     const countBind = [...bind];
     const dataBind = [...bind];
     let totalCount = 0;
+    let result;
 
     if (pagination?.page && pagination?.pageSize) {
-      const countResult = await this.executeQuery(countQuery, countBind);
-      totalCount = countResult.rows?.[0]?.total ?? 0;
-
       const offset = (pagination.page - 1) * pagination.pageSize;
       dataQuery += ` OFFSET :${idx} ROWS FETCH NEXT :${idx + 1} ROWS ONLY`;
       dataBind.push(offset, pagination.pageSize);
+      const [dataResult, countResult] = await Promise.all([
+        this.executeQuery(dataQuery, dataBind),
+        this.executeQuery(countQuery, countBind),
+      ]);
+      totalCount = countResult.rows?.[0]?.total ?? 0;
+      result = dataResult;
+    } else {
+      result = await this.executeQuery(dataQuery, dataBind);
     }
-
-    const result = await this.executeQuery(dataQuery, dataBind);
     const rows = result.rows || [];
     const normalized = rows.map(r => this.nestGradeObjects(r));
 
@@ -249,14 +263,30 @@ class JobLevelsModel {
     return normalized;
   }
 
-  static async findById(jobLevelId) {
-    const q = `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1`;
-    const r = await this.executeQuery(q, [jobLevelId]);
+  static async findById(jobLevelId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+    const q = `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1 AND jl.TENANT_ID = :2`;
+    const r = await this.executeQuery(q, [jobLevelId, tenantIdNum]);
     const row = r.rows?.[0] || null;
     return row ? this.nestGradeObjects(row) : null;
   }
 
   static async create(data, userId) {
+    const tenantId = data.tenant_id ?? data.TENANT_ID;
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required in request body');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+
     try {
       return await this.executeWithTransaction(async (connection) => {
         await this.validateGradeRange(connection, Number(data.MIN_GRADE_ID), Number(data.MAX_GRADE_ID));
@@ -281,15 +311,16 @@ class JobLevelsModel {
         const now = new Date();
 
         const insert = `INSERT INTO ${this.TABLE_NAME} (
-          JOB_LEVEL_ID, LEVEL_NAME_EN, LEVEL_CODE, DESCRIPTION,
+          JOB_LEVEL_ID, TENANT_ID, LEVEL_NAME_EN, LEVEL_CODE, DESCRIPTION,
           MIN_GRADE_ID, MAX_GRADE_ID, STATUS,
           CREATED_BY, CREATED_DATE, LAST_UPDATED_BY, LAST_UPDATED_DATE, LAST_UPDATE_LOGIN
         ) VALUES (
-          :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12
+          :1,:2,:3,:4,:5,:6,:7,:8,:9,:10,:11,:12,:13
         )`;
 
         const bind = [
           id,
+          tenantIdNum,
           data.LEVEL_NAME_EN,
           data.LEVEL_CODE,
           data.DESCRIPTION || null,
@@ -306,8 +337,8 @@ class JobLevelsModel {
         await connection.execute(insert, bind, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const select = await connection.execute(
-          `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1`,
-          [id],
+          `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1 AND jl.TENANT_ID = :2`,
+          [id, tenantIdNum],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
@@ -335,17 +366,27 @@ class JobLevelsModel {
     }
   }
 
-  static async update(jobLevelId, data, userId) {
+  static async update(jobLevelId, data, userId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+    const payload = { ...data };
+    delete payload.tenant_id;
+    delete payload.TENANT_ID;
+
     try {
       return await this.executeWithTransaction(async (connection) => {
-        // If user updates grades, validate range
-        const minProvided = data.MIN_GRADE_ID !== undefined;
-        const maxProvided = data.MAX_GRADE_ID !== undefined;
+        const minProvided = payload.MIN_GRADE_ID !== undefined;
+        const maxProvided = payload.MAX_GRADE_ID !== undefined;
 
         if (minProvided || maxProvided) {
           const current = await connection.execute(
-            `SELECT MIN_GRADE_ID, MAX_GRADE_ID FROM ${this.TABLE_NAME} WHERE JOB_LEVEL_ID = :1`,
-            [jobLevelId],
+            `SELECT MIN_GRADE_ID, MAX_GRADE_ID FROM ${this.TABLE_NAME} WHERE JOB_LEVEL_ID = :1 AND TENANT_ID = :2`,
+            [jobLevelId, tenantIdNum],
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
           );
 
@@ -356,8 +397,8 @@ class JobLevelsModel {
           const currentMin = current.rows[0].MIN_GRADE_ID;
           const currentMax = current.rows[0].MAX_GRADE_ID;
 
-          const minId = minProvided ? Number(data.MIN_GRADE_ID) : Number(currentMin);
-          const maxId = maxProvided ? Number(data.MAX_GRADE_ID) : Number(currentMax);
+          const minId = minProvided ? Number(payload.MIN_GRADE_ID) : Number(currentMin);
+          const maxId = maxProvided ? Number(payload.MAX_GRADE_ID) : Number(currentMax);
 
           await this.validateGradeRange(connection, minId, maxId);
         }
@@ -374,13 +415,13 @@ class JobLevelsModel {
           }
         };
 
-        setIf('LEVEL_NAME_EN', data.LEVEL_NAME_EN);
-        setIf('LEVEL_CODE', data.LEVEL_CODE);
-        setIf('DESCRIPTION', data.DESCRIPTION);
-        setIf('MIN_GRADE_ID', data.MIN_GRADE_ID, v => Number(v));
-        setIf('MAX_GRADE_ID', data.MAX_GRADE_ID, v => Number(v));
-        setIf('STATUS', data.STATUS, v => String(v).toUpperCase());
-        setIf('LAST_UPDATE_LOGIN', data.LAST_UPDATE_LOGIN);
+        setIf('LEVEL_NAME_EN', payload.LEVEL_NAME_EN);
+        setIf('LEVEL_CODE', payload.LEVEL_CODE);
+        setIf('DESCRIPTION', payload.DESCRIPTION);
+        setIf('MIN_GRADE_ID', payload.MIN_GRADE_ID, v => Number(v));
+        setIf('MAX_GRADE_ID', payload.MAX_GRADE_ID, v => Number(v));
+        setIf('STATUS', payload.STATUS, v => String(v).toUpperCase());
+        setIf('LAST_UPDATE_LOGIN', payload.LAST_UPDATE_LOGIN);
 
         if (!fields.length) throw new Error('No fields to update');
 
@@ -392,14 +433,14 @@ class JobLevelsModel {
         bind.push(new Date());
         idx++;
 
-        bind.push(jobLevelId);
+        bind.push(jobLevelId, tenantIdNum);
 
-        const q = `UPDATE ${this.TABLE_NAME} SET ${fields.join(', ')} WHERE JOB_LEVEL_ID = :${idx}`;
+        const q = `UPDATE ${this.TABLE_NAME} SET ${fields.join(', ')} WHERE JOB_LEVEL_ID = :${idx} AND TENANT_ID = :${idx + 1}`;
         await connection.execute(q, bind, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const select = await connection.execute(
-          `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1`,
-          [jobLevelId],
+          `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1 AND jl.TENANT_ID = :2`,
+          [jobLevelId, tenantIdNum],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
@@ -427,15 +468,22 @@ class JobLevelsModel {
     }
   }
 
-  static async softDelete(jobLevelId, userId) {
+  static async softDelete(jobLevelId, userId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
     return await this.executeWithTransaction(async (connection) => {
       const q = `UPDATE ${this.TABLE_NAME}
         SET STATUS = 'INACTIVE',
             LAST_UPDATED_BY = :1,
             LAST_UPDATED_DATE = :2
-        WHERE JOB_LEVEL_ID = :3`;
+        WHERE JOB_LEVEL_ID = :3 AND TENANT_ID = :4`;
 
-      const r = await connection.execute(q, [userId || 'SYSTEM', new Date(), jobLevelId], {
+      const r = await connection.execute(q, [userId || 'SYSTEM', new Date(), jobLevelId, tenantIdNum], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
 
@@ -445,10 +493,17 @@ class JobLevelsModel {
     });
   }
 
-  static async hardDelete(jobLevelId) {
+  static async hardDelete(jobLevelId, tenantId) {
+    if (tenantId === undefined || tenantId === null) {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
     return await this.executeWithTransaction(async (connection) => {
-      const q = `DELETE FROM ${this.TABLE_NAME} WHERE JOB_LEVEL_ID = :1`;
-      const r = await connection.execute(q, [jobLevelId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const q = `DELETE FROM ${this.TABLE_NAME} WHERE JOB_LEVEL_ID = :1 AND TENANT_ID = :2`;
+      const r = await connection.execute(q, [jobLevelId, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const rows = r.rowsAffected || r.rowCount || 0;
       if (rows === 0) throw new Error(`No job level found with ID: ${jobLevelId}`);
