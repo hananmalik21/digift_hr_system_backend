@@ -35,6 +35,9 @@ import scheduleAssignmentController from './feature/tm_schedule_assignments/cont
 import attendanceController from './feature/attendance/controller/attendanceController.js';
 import projectController from './feature/project/controller/projectController.js';
 import timesheetController from './feature/tm_timesheets/controller/timesheetController.js';
+import overtimeConfigController from './feature/tm_overtime_configs/controller/overtimeConfigController.js';
+import overtimeConfigurationController from './feature/tm_overtime_configuration/controller/overtimeConfigurationController.js';
+import overtimeRateTypeController from './feature/tm_overtime_rate_types/controller/overtimeRateTypeController.js';
 import holidayController from './feature/holidays/controller/holidayController.js';
 import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
 import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
@@ -145,6 +148,15 @@ app.use('/api/tm/projects', projectController);
 
 // Timesheets (TM.TM_TIMESHEET_PKG: upsert, submit/approve/reject, delete line, list, get)
 app.use('/api/tm/timesheets', timesheetController);
+
+// Overtime configs with limits (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete with labor limits, single transaction)
+app.use('/api/tm/overtime/configs', overtimeConfigController);
+
+// GET overtime configuration (TM.V_OT_TENANT_SETUP_FULL only, single query)
+app.use('/api/tm/overtime/configuration', overtimeConfigurationController);
+
+// Overtime rate types with multiplier (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete rate type + multiplier, single transaction)
+app.use('/api/tm/overtime/rate-types', overtimeRateTypeController);
 
 // Time Management Stats routes
 app.use('/api/tm/stats', timeManagementStatsController);
