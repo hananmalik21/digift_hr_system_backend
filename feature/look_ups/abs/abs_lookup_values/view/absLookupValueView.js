@@ -87,18 +87,11 @@ export function sendLookupValue(res, req, value) {
 }
 
 export function sendCreated(res, req, value) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
   const convertedValue = convertKeysToSnakeCase(value);
 
   res.status(201).json({
     success: true,
     message: 'Lookup value created successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      lookup_value_id: convertedValue.lookup_value_id || value.LOOKUP_VALUE_ID,
-      action: 'created'
-    }),
     data: convertedValue
   });
 }
@@ -121,17 +114,9 @@ export function sendUpdated(res, req, value) {
 }
 
 export function sendDeleted(res, req, message = 'Lookup value deleted successfully', valueId = null) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   res.json({
     success: true,
-    message,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      lookup_value_id: valueId || req.params?.value_id,
-      action: 'deleted'
-    })
+    message
   });
 }
 

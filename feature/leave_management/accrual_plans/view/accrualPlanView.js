@@ -163,29 +163,11 @@ export function sendCreated(res, req, accrualPlan) {
     return sendError(res, req, 'Failed to create accrual plan: No data returned', 500, 'INTERNAL_SERVER_ERROR');
   }
 
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const convertedData = convertKeysToSnakeCase(accrualPlan);
   
   res.status(201).json({
     success: true,
     message: 'Accrual plan created successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      accrual_plan_guid: convertedData?.accrual_plan_guid || accrualPlan?.ACCRUAL_PLAN_GUID || null,
-      action: 'created',
-      count: 1,
-      total: 1,
-      pagination: {
-        page: 1,
-        page_size: 1,
-        total: 1,
-        total_pages: 1,
-        has_next: false,
-        has_previous: false
-      }
-    }),
     data: convertedData
   });
 }
@@ -197,29 +179,11 @@ export function sendCreated(res, req, accrualPlan) {
  * @param {Object} accrualPlan - Updated accrual plan object
  */
 export function sendUpdated(res, req, accrualPlan) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const convertedData = convertKeysToSnakeCase(accrualPlan);
   
   res.json({
     success: true,
     message: 'Accrual plan updated successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      accrual_plan_guid: convertedData?.accrual_plan_guid || accrualPlan?.ACCRUAL_PLAN_GUID || null,
-      action: 'updated',
-      count: 1,
-      total: 1,
-      pagination: {
-        page: 1,
-        page_size: 1,
-        total: 1,
-        total_pages: 1,
-        has_next: false,
-        has_previous: false
-      }
-    }),
     data: convertedData
   });
 }
@@ -232,27 +196,9 @@ export function sendUpdated(res, req, accrualPlan) {
  * @param {number} accrualPlanId - Accrual Plan ID
  */
 export function sendDeleted(res, req, message, accrualPlanGuid) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   res.json({
     success: true,
-    message: message,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      accrual_plan_guid: accrualPlanGuid,
-      action: 'deleted',
-      count: 1,
-      total: 1,
-      pagination: {
-        page: 1,
-        page_size: 1,
-        total: 1,
-        total_pages: 1,
-        has_next: false,
-        has_previous: false
-      }
-    })
+    message: message
   });
 }
 

@@ -87,52 +87,29 @@ export function sendLookup(res, req, lookup) {
 }
 
 export function sendCreated(res, req, lookup) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
   const convertedLookup = convertKeysToSnakeCase(lookup);
 
   res.status(201).json({
     success: true,
     message: 'Lookup created successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      lookup_id: convertedLookup.lookup_id || lookup.LOOKUP_ID,
-      action: 'created'
-    }),
     data: convertedLookup
   });
 }
 
 export function sendUpdated(res, req, lookup) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
   const convertedLookup = convertKeysToSnakeCase(lookup);
 
   res.json({
     success: true,
     message: 'Lookup updated successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      lookup_id: convertedLookup.lookup_id || lookup.LOOKUP_ID,
-      action: 'updated',
-      last_updated: convertedLookup.last_update_date || lookup.LAST_UPDATE_DATE
-    }),
     data: convertedLookup
   });
 }
 
 export function sendDeleted(res, req, message = 'Lookup deleted successfully', lookupId = null) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   res.json({
     success: true,
-    message,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      lookup_id: lookupId || req.params?.lookup_id,
-      action: 'deleted'
-    })
+    message
   });
 }
 

@@ -161,8 +161,7 @@ router.post('/', asyncHandler(async (req, res) => {
   const result = await upsertWeeklyTimesheet(body);
   sendCreated(res, {
     message: 'Timesheet created successfully',
-    data: buildUpsertResponsePayload(result),
-    meta: { success: true }
+    data: buildUpsertResponsePayload(result)
   });
 }));
 
@@ -191,13 +190,12 @@ router.put('/:timesheetGuid', asyncHandler(async (req, res) => {
   const result = await upsertWeeklyTimesheet(body);
   sendUpdated(res, {
     message: 'Timesheet updated successfully',
-    data: buildUpsertResponsePayload(result),
-    meta: { success: true }
+    data: buildUpsertResponsePayload(result)
   });
 }));
 
 function sendStatusChange(res, message, data) {
-  sendSuccess(res, { message, data, meta: { success: true }, statusCode: 200 });
+  sendSuccess(res, { message, data, statusCode: 200 });
 }
 
 /**
@@ -260,8 +258,7 @@ router.delete('/:timesheetGuid', asyncHandler(async (req, res) => {
   const result = await deleteTimesheetByGuid(timesheetGuid, updatedBy);
   sendDeleted(res, {
     message: 'Timesheet deleted or withdrawn',
-    data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid) },
-    meta: { success: true }
+    data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid) }
   });
 }));
 
@@ -283,8 +280,7 @@ router.delete('/:timesheetGuid/lines/:lineGuid', asyncHandler(async (req, res) =
   const result = await deleteLineByResolvedId(meta.id, lineGuid, updatedBy);
   sendDeleted(res, {
     message: 'Line deleted successfully',
-    data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid), line_guid: normalizeGuidForResponse(lineGuid) },
-    meta: { success: true }
+    data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid), line_guid: normalizeGuidForResponse(lineGuid) }
   });
 }));
 

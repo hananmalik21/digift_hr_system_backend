@@ -23,21 +23,11 @@ function getExecutionTime(req) {
  * @param {boolean} isUpdate - Whether this is an update operation (default: false)
  */
 export function sendSuccess(res, req, policy = null, isUpdate = false) {
-  const response = {
+  res.status(isUpdate ? 200 : 201).json({
     success: true,
     message: isUpdate ? 'Policy updated successfully' : 'Policy created successfully',
     data: policy
-  };
-
-  // Add execution time if available
-  const executionTime = getExecutionTime(req);
-  if (executionTime !== null) {
-    response.meta = {
-      execution_time_ms: executionTime
-    };
-  }
-
-  res.status(isUpdate ? 200 : 201).json(response);
+  });
 }
 
 /**

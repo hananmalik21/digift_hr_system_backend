@@ -554,7 +554,6 @@ export function sendAccrualRunSuccess(res, req, data) {
   res.json({
     success: true,
     message: message,
-    meta: meta,
     data: responseData
   });
 }

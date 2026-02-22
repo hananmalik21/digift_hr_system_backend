@@ -163,19 +163,11 @@ export function sendLevel(res, req, level) {
  * @param {Object} level - Created hierarchy level
  */
 export function sendCreated(res, req, level) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const convertedLevel = convertKeysToSnakeCase(level);
   
   res.status(201).json({
     success: true,
     message: 'Hierarchy level created successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      level_id: convertedLevel.level_id || level.LEVEL_ID,
-      action: 'created'
-    }),
     data: convertedLevel
   });
 }
@@ -187,20 +179,11 @@ export function sendCreated(res, req, level) {
  * @param {Object} level - Updated hierarchy level
  */
 export function sendUpdated(res, req, level) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const convertedLevel = convertKeysToSnakeCase(level);
   
   res.json({
     success: true,
     message: 'Hierarchy level updated successfully',
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      level_id: convertedLevel.level_id || level.LEVEL_ID,
-      action: 'updated',
-      last_updated: convertedLevel.last_updated_date || level.LAST_UPDATED_DATE
-    }),
     data: convertedLevel
   });
 }
@@ -213,17 +196,9 @@ export function sendUpdated(res, req, level) {
  * @param {number} levelId - Deleted level ID
  */
 export function sendDeleted(res, req, message = 'Hierarchy level deleted successfully', levelId = null) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   res.json({
     success: true,
-    message,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      level_id: levelId || req.params?.id,
-      action: 'deleted'
-    })
+    message
   });
 }
 

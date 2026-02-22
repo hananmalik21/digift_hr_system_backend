@@ -233,12 +233,6 @@ router.post('/bulk', async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Hierarchy levels created successfully',
-      meta: {
-        execution_time: `${executionTime}ms`,
-        structure_id: structureId,
-        count: createdLevels.length,
-        action: 'bulk_created'
-      },
       data: createdLevels
     });
   } catch (error) {

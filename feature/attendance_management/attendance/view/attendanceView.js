@@ -17,7 +17,7 @@ function getExecutionTime(req) {
  * enterprise_id, employee_id, attendance_date, attendance (refreshed view when available).
  */
 export function sendSuccess(res, req, data, isUpdate = false) {
-  const response = {
+  res.status(isUpdate ? 200 : 201).json({
     success: true,
     message: isUpdate ? 'Attendance updated successfully' : 'Attendance created successfully',
     data: {
@@ -36,14 +36,7 @@ export function sendSuccess(res, req, data, isUpdate = false) {
       attendance_date: data.attendance_date ?? null,
       ...(data.attendance && { attendance: data.attendance })
     }
-  };
-
-  const executionTime = getExecutionTime(req);
-  if (executionTime !== null) {
-    response.meta = { execution_time_ms: executionTime };
-  }
-
-  res.status(isUpdate ? 200 : 201).json(response);
+  });
 }
 
 /**

@@ -1659,7 +1659,6 @@ router.post('/admin/leave-balances/rebuild/bulk', async (req, res) => {
     return res.json({
       success: true,
       message,
-      meta: result.meta,
       data
     });
   } catch (error) {

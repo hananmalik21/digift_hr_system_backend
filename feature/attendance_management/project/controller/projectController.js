@@ -211,8 +211,7 @@ router.delete('/task', asyncHandler(async (req, res) => {
   const result = await ProjectModel.removeProjectTask(payload);
   sendDeleted(res, {
     message: 'Task removed successfully',
-    data: result,
-    meta: result.rowsAffected != null ? { rowsAffected: result.rowsAffected } : {}
+    data: result
   });
 }));
 
@@ -230,8 +229,7 @@ router.delete('/tasks', asyncHandler(async (req, res) => {
   const result = await ProjectModel.removeProjectTasksJson(payload);
   sendDeleted(res, {
     message: 'Tasks removed successfully',
-    data: result,
-    meta: result.rowsAffected != null ? { rowsAffected: result.rowsAffected } : {}
+    data: result
   });
 }));
 

@@ -139,7 +139,6 @@ export function sendCreated(res, req, mapping) {
   res.status(201).json({
     success: true,
     message: 'Leave type accrual mapping created successfully',
-    meta: generateBaseMetadata(req, {}),
     data: convertedData
   });
 }
@@ -156,7 +155,6 @@ export function sendUpdated(res, req, mapping) {
   res.json({
     success: true,
     message: 'Leave type accrual mapping updated successfully',
-    meta: generateBaseMetadata(req, {}),
     data: convertedData
   });
 }
@@ -170,8 +168,7 @@ export function sendUpdated(res, req, mapping) {
 export function sendDeleted(res, req) {
   res.json({
     success: true,
-    message: 'Leave type accrual mapping deleted successfully',
-    meta: generateBaseMetadata(req, {})
+    message: 'Leave type accrual mapping deleted successfully'
   });
 }
 

@@ -74,7 +74,6 @@ export function sendWorkSchedule(res, req, workSchedule) {
 export function sendCreated(res, req, workSchedule) {
   res.status(201).json({
     success: true,
-    meta: generateBaseMetadata(req),
     message: 'Work schedule created successfully',
     data: workSchedule
   });
@@ -89,7 +88,6 @@ export function sendCreated(res, req, workSchedule) {
 export function sendUpdated(res, req, workSchedule) {
   res.json({
     success: true,
-    meta: generateBaseMetadata(req),
     message: 'Work schedule updated successfully',
     data: workSchedule
   });
@@ -127,7 +125,6 @@ export function sendDeleted(res, req, message = 'Work schedule deleted successfu
   
   res.json({
     success: true,
-    meta: generateBaseMetadata(req),
     message,
     data
   });

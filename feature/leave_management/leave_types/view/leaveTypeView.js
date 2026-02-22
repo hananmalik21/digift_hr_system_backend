@@ -139,7 +139,6 @@ export function sendCreated(res, req, leaveType) {
   res.status(201).json({
     success: true,
     message: 'Leave type created successfully',
-    meta: generateBaseMetadata(req, {}),
     data: convertedData
   });
 }
@@ -156,7 +155,6 @@ export function sendUpdated(res, req, leaveType) {
   res.json({
     success: true,
     message: 'Leave type updated successfully',
-    meta: generateBaseMetadata(req, {}),
     data: convertedData
   });
 }
@@ -171,8 +169,7 @@ export function sendUpdated(res, req, leaveType) {
 export function sendDeleted(res, req, message, leaveTypeGuid) {
   res.json({
     success: true,
-    message: message || 'Leave type deleted successfully',
-    meta: generateBaseMetadata(req, {})
+    message: message || 'Leave type deleted successfully'
   });
 }
 

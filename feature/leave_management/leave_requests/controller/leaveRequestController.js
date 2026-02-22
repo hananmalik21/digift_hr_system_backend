@@ -962,7 +962,6 @@ router.post('/:guid/submit', async (req, res) => {
     res.json({
       success: true,
       message: 'Leave request submitted successfully',
-      meta: generateBaseMetadata(req, {}),
       data: [wrappedData]
     });
   } catch (error) {
@@ -1000,7 +999,6 @@ router.post('/:guid/approve', async (req, res) => {
     res.json({
       success: true,
       message: 'Leave request approved successfully and balance deducted',
-      meta: generateBaseMetadata(req, {}),
       data: [wrappedData]
     });
   } catch (error) {
@@ -1046,7 +1044,6 @@ router.post('/:guid/reject', async (req, res) => {
     res.json({
       success: true,
       message: 'Leave request rejected successfully',
-      meta: generateBaseMetadata(req, {}),
       data: [wrappedData]
     });
   } catch (error) {
