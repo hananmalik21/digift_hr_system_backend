@@ -105,7 +105,11 @@ class StructureResolverService {
       throw error;
     }
     const levelsOrdered = [...levels].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
-    const structureRow = { structureId: structure.structureId, isActive: structure.isActive };
+    const structureRow = {
+      structureId: structure.structureId,
+      isActive: structure.isActive,
+      enterprise_id: structure.enterpriseId ?? structure.enterprise_id ?? null
+    };
     return buildResolverShape(structureRow, levelsOrdered);
   }
 }

@@ -33,10 +33,11 @@ class StructureHierarchyService {
     const { search, pagination, allowDraft = false } = options;
     const useSingleQuery = Boolean(pagination?.page && pagination?.pageSize);
 
-    if (useSingleQuery) {
-      let connection;
-      try {
-        connection = await db.getConnection();
+    let connection;
+    try {
+      connection = await db.getConnection();
+
+      if (useSingleQuery) {
         const one = await OrgUnitModel.findParentOptionsInOneQuery(
           structureId,
           childLevelCode,
@@ -51,38 +52,21 @@ class StructureHierarchyService {
         return one.parentLevelCode == null
           ? { orgUnits: [], total: 0 }
           : { orgUnits: one.orgUnits || [], total: one.total ?? 0 };
-      } finally {
-        if (connection?.close) {
-          try { await connection.close(); } catch (_) {}
-        }
       }
-    }
 
-    // No pagination: resolve structure + levels, then fetch parent options (one connection, two queries)
-    let connection;
-    try {
-      connection = await db.getConnection();
       const structureWithLevels = await HrOrgHierarchyLevelModel.findStructureWithLevels(structureId, { connection });
       if (!structureWithLevels) throw hierarchyError('Structure not found', 'STRUCTURE_NOT_FOUND', 404);
 
       const { structure, levels } = structureWithLevels;
-
       if (!allowDraft && structure.isActive !== 'Y') throw hierarchyError('Structure is not active', 'STRUCTURE_NOT_ACTIVE', 400);
 
       const levelsOrdered = [...levels].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0));
-      let childLevelIndex = -1;
-      for (let i = 0; i < levelsOrdered.length; i++) {
-        const levelCode = levelsOrdered[i].level_code;
-        if (levelCode && levelCode.toUpperCase() === childLevelCode.toUpperCase()) {
-          childLevelIndex = i;
-          break;
-        }
-      }
-
+      const childLevelIndex = levelsOrdered.findIndex(
+        l => l.level_code && l.level_code.toUpperCase() === childLevelCode.toUpperCase()
+      );
       if (childLevelIndex === -1) {
         throw hierarchyError(`Level '${childLevelCode}' does not exist in structure ${structureId}`, 'LEVEL_NOT_IN_STRUCTURE', 400);
       }
-
       if (childLevelIndex === 0) return [];
 
       const parentLevelCode = levelsOrdered[childLevelIndex - 1]?.level_code;
@@ -91,11 +75,9 @@ class StructureHierarchyService {
       }
 
       const result = await OrgUnitModel.findParentOptions(structureId, parentLevelCode, { search, pagination, connection });
-
-      if (pagination?.page && pagination?.pageSize) {
-        return { orgUnits: result.orgUnits || [], total: result.total || 0 };
-      }
-      return result.orgUnits || result;
+      return pagination?.page && pagination?.pageSize
+        ? { orgUnits: result.orgUnits || [], total: result.total || 0 }
+        : (result.orgUnits ?? result);
     } finally {
       if (connection?.close) {
         try { await connection.close(); } catch (_) {}

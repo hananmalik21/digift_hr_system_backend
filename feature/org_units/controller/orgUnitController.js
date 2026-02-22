@@ -3,6 +3,7 @@ import db from '../../../config/db.js';
 import OrgUnitModel from '../model/orgUnitModel.js';
 import StructureResolverService from '../service/structureResolverService.js';
 import StructureHierarchyService from '../service/structureHierarchyService.js';
+import { validateParentForCreate, validateParentForUpdate } from '../service/orgUnitValidator.js';
 import HrOrgStructureModel from '../../hr_org_structures/model/hrOrgStructureModel.js';
 import {
   sendOrgUnitList,
@@ -246,7 +247,7 @@ router.get('/:structureId/org-units', async (req, res) => {
         if (!parentId) {
           return sendBadRequest(res, req, 'Invalid parentId format');
         }
-        const parent = await OrgUnitModel.findById(parentId, structureId);
+        const parent = await OrgUnitModel.findById(parentId, structureId, connection);
         if (!parent) {
           return sendBadRequest(res, req, `Parent org unit with ID ${parentId} not found`);
         }
@@ -359,39 +360,18 @@ router.post('/:structureId/org-units', async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
 
-    // Always allow draft structures to return data regardless of active status
     const allowDraft = true;
-    const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
+    const resolver = await StructureResolverService.resolveStructureLight(structureId, { allowDraft });
     const levelCode = data.level_code || data.LEVEL_CODE;
 
     if (!resolver.levelExists(levelCode)) {
       return sendBadRequest(res, req, `Level '${levelCode}' does not exist in this structure`);
     }
 
-    const expectedParentLevel = resolver.getParentLevelCode(levelCode);
-    const parentId = data.parent_org_unit_id ?? data.PARENT_ORG_UNIT_ID ?? null;
+    const { parentId } = await validateParentForCreate(resolver, data, structureId);
+    data.parent_org_unit_id = parentId;
 
-    if (expectedParentLevel === null) {
-      if (parentId !== null) {
-        return sendBadRequest(res, req, 'parent_org_unit_id must be null for root level');
-      }
-    } else {
-      if (!parentId) {
-        return sendBadRequest(res, req, `parent_org_unit_id is required for level '${levelCode}'`);
-      }
-
-      const parent = await OrgUnitModel.findById(parentId, structureId);
-      if (!parent) {
-        return sendBadRequest(res, req, `Parent org unit with ID ${parentId} not found`);
-      }
-
-      const parentLevel = parent.level_code || parent.LEVEL_CODE;
-      if (parentLevel !== expectedParentLevel) {
-        return sendBadRequest(res, req, `Parent org unit must be of level '${expectedParentLevel}'`);
-      }
-    }
-
-    const enterpriseId = resolver.structureRow.enterprise_id ?? resolver.structureRow.ENTERPRISE_ID ?? null;
+    const enterpriseId = resolver.structureRow?.enterprise_id ?? resolver.structureRow?.ENTERPRISE_ID ?? null;
     const userId = getUserId(req);
     const newOrgUnit = await OrgUnitModel.create(structureId, enterpriseId, data, userId);
     sendCreated(res, req, newOrgUnit);
@@ -413,80 +393,17 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
       return sendBadRequest(res, req, 'Invalid ORG_UNIT_ID format');
     }
 
-    // Always allow draft structures to return data regardless of active status
     const allowDraft = true;
-    const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
-
-    // Check if org unit exists and belongs to structure
-    const existingOrgUnit = await OrgUnitModel.findById(orgUnitId, structureId);
+    const [resolver, existingOrgUnit] = await Promise.all([
+      StructureResolverService.resolveStructureLight(structureId, { allowDraft }),
+      OrgUnitModel.findById(orgUnitId, structureId)
+    ]);
     if (!existingOrgUnit) {
       return sendNotFound(res, req, 'Org unit not found');
     }
 
     const data = req.body;
-
-    // If parent_org_unit_id is being updated, validate it
-    if (data.parent_org_unit_id !== undefined || data.PARENT_ORG_UNIT_ID !== undefined) {
-      const levelCode = existingOrgUnit.level_code || existingOrgUnit.LEVEL_CODE;
-      const expectedParentLevel = resolver.getParentLevelCode(levelCode);
-      
-      // Normalize parent ID - handle empty strings and trim whitespace
-      let newParentId = data.parent_org_unit_id ?? data.PARENT_ORG_UNIT_ID ?? null;
-      if (newParentId && typeof newParentId === 'string') {
-        newParentId = newParentId.trim();
-        if (newParentId === '') {
-          newParentId = null;
-        }
-      }
-      if (!newParentId) {
-        newParentId = null;
-      }
-
-      if (expectedParentLevel === null) {
-        // Root level - parent must be null
-        if (newParentId !== null) {
-          return sendBadRequest(res, req, 'parent_org_unit_id must be null for root level');
-        }
-      } else {
-        // Non-root level - validate parent if provided
-        if (newParentId !== null) {
-          const parent = await OrgUnitModel.findById(newParentId, structureId);
-          if (!parent) {
-            return sendBadRequest(res, req, `Parent org unit with ID ${newParentId} not found`);
-          }
-
-          const parentLevel = parent.level_code || parent.LEVEL_CODE;
-          
-          // Compare levels case-insensitively
-          const parentLevelUpper = (parentLevel || '').toUpperCase().trim();
-          const expectedParentLevelUpper = (expectedParentLevel || '').toUpperCase().trim();
-          
-          if (parentLevelUpper !== expectedParentLevelUpper) {
-            // Get available levels for better error message
-            const availableLevels = resolver.levelsOrdered.map(l => l.level_code || l.LEVEL_CODE).join(', ');
-            return sendBadRequest(res, req, 
-              `Parent org unit validation failed: ` +
-              `Current org unit level: '${levelCode}', ` +
-              `Expected parent level: '${expectedParentLevel}', ` +
-              `Provided parent level: '${parentLevel}'. ` +
-              `Available levels in structure: ${availableLevels}`
-            );
-          }
-          
-          // Additional validation: ensure parent is active
-          const parentIsActive = parent.is_active || parent.IS_ACTIVE;
-          if (parentIsActive !== 'Y' && parentIsActive !== true) {
-            return sendBadRequest(res, req, 'Parent org unit must be active');
-          }
-        } else {
-          // Non-root level requires a parent
-          return sendBadRequest(res, req, `parent_org_unit_id is required for level '${levelCode}'`);
-        }
-      }
-      
-      // Update the data object with normalized parent ID
-      data.parent_org_unit_id = newParentId;
-    }
+    await validateParentForUpdate({ existingOrgUnit, data, resolver, structureId });
 
     const userId = getUserId(req);
     const updatedOrgUnit = await OrgUnitModel.update(orgUnitId, structureId, data, userId);
@@ -504,10 +421,11 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
 router.get('/:structureId/org-units/tree', async (req, res) => {
   try {
     const structureId = parseStructureId(req.params.structureId);
-    // Always allow draft structures to return data regardless of active status
     const allowDraft = true;
-    const resolver = await StructureResolverService.resolveStructure(structureId, { allowDraft });
-    const orgUnits = await OrgUnitModel.findAllByStructure(structureId);
+    const [resolver, orgUnits] = await Promise.all([
+      StructureResolverService.resolveStructureLight(structureId, { allowDraft }),
+      OrgUnitModel.findAllByStructure(structureId)
+    ]);
 
     sendOrgUnitList(res, req, {
       levels_ordered: resolver.levelsOrdered,
@@ -555,19 +473,16 @@ router.delete('/:structureId/org-units/:orgUnitId', async (req, res) => {
 
     // Always allow draft structures to return data regardless of active status
     const allowDraft = true;
-    
-    // Validate structure exists
-    await StructureResolverService.resolveStructure(structureId, { allowDraft });
-
-    // Check if org unit exists and belongs to structure
-    const existingOrgUnit = await OrgUnitModel.findById(orgUnitId, structureId);
+    const [resolver, existingOrgUnit] = await Promise.all([
+      StructureResolverService.resolveStructureLight(structureId, { allowDraft }),
+      OrgUnitModel.findById(orgUnitId, structureId)
+    ]);
     if (!existingOrgUnit) {
       return sendNotFound(res, req, 'Org unit not found');
     }
 
     const userId = getUserId(req);
     const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-    const isSoftDelete = req.query.soft === 'true' || req.query.soft === '1';
 
     // Default to soft delete unless explicitly requesting hard delete
     if (isHardDelete) {

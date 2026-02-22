@@ -13,6 +13,22 @@ class OrgUnitModel {
   static TABLE_NAME = 'ENT.ORG_UNITS';
   static STRUCTURE_TABLE_NAME = 'ENT.HR_ORG_STRUCTURES';
 
+  /** Shared SELECT columns for org unit with parent join (used by findById, findAllByStructure, findByStructureAndLevel, create) */
+  static ORG_UNIT_SELECT_COLUMNS = `ou.ORG_UNIT_ID, ou.ORG_STRUCTURE_ID, ou.ENTERPRISE_ID, ou.LEVEL_CODE,
+    ou.ORG_UNIT_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_NAME_AR, ou.PARENT_ORG_UNIT_ID,
+    ou.IS_ACTIVE, ou.MANAGER_NAME, ou.MANAGER_EMAIL, ou.MANAGER_PHONE, ou.LOCATION,
+    ou.CITY, ou.ADDRESS, ou.DESCRIPTION, ou.CREATED_BY, ou.CREATED_DATE,
+    ou.LAST_UPDATED_BY, ou.LAST_UPDATED_DATE, ou.LAST_UPDATE_LOGIN,
+    p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
+    p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
+    p.LEVEL_CODE AS PARENT_ORG_LEVEL_CODE,
+    s.STRUCTURE_NAME AS ORG_STRUCTURE_NAME`;
+  static get _orgUnitFromJoin() {
+    return `FROM ${this.TABLE_NAME} ou
+      LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID AND p.ORG_STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID`;
+  }
+
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
    * Converts Buffer objects (Oracle RAW/GUID types) to hex strings
@@ -247,18 +263,8 @@ class OrgUnitModel {
 
       const whereClause = ` WHERE ${conditions.join(' AND ')}`;
 
-      const baseSelect = `ou.ORG_UNIT_ID, ou.ORG_STRUCTURE_ID, ou.ENTERPRISE_ID, ou.LEVEL_CODE,
-        ou.ORG_UNIT_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_NAME_AR, ou.PARENT_ORG_UNIT_ID,
-        ou.IS_ACTIVE, ou.MANAGER_NAME, ou.MANAGER_EMAIL, ou.MANAGER_PHONE, ou.LOCATION,
-        ou.CITY, ou.ADDRESS, ou.DESCRIPTION, ou.CREATED_BY, ou.CREATED_DATE,
-        ou.LAST_UPDATED_BY, ou.LAST_UPDATED_DATE, ou.LAST_UPDATE_LOGIN,
-        p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
-        p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE AS PARENT_ORG_LEVEL_CODE,
-        s.STRUCTURE_NAME AS ORG_STRUCTURE_NAME`;
-      const baseFrom = `FROM ${this.TABLE_NAME} ou
-      LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID AND p.ORG_STRUCTURE_ID = ou.ORG_STRUCTURE_ID
-      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID`;
+      const baseSelect = this.ORG_UNIT_SELECT_COLUMNS;
+      const baseFrom = this._orgUnitFromJoin;
 
       if (needsCount) {
         const offset = (pagination.page - 1) * pagination.pageSize;
@@ -464,44 +470,18 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
   /**
    * Find org unit by ID (includes parent_unit object)
    * Handles both GUID/RAW and numeric IDs
+   * @param {string} orgUnitId - Org unit ID (GUID hex or numeric)
+   * @param {string|number|null} structureId - Structure ID (optional)
+   * @param {object} [connection] - Optional Oracle connection for use within a transaction (ensures SELECT sees uncommitted changes)
    */
-  static async findById(orgUnitId, structureId = null) {
+  static async findById(orgUnitId, structureId = null, connection = null) {
     try {
-      // Handle GUID/RAW type IDs - try both RAW and hex string formats
-      let query = `SELECT 
-        ou.ORG_UNIT_ID,
-        ou.ORG_STRUCTURE_ID,
-        ou.ENTERPRISE_ID,
-        ou.LEVEL_CODE,
-        ou.ORG_UNIT_CODE,
-        ou.ORG_UNIT_NAME_EN,
-        ou.ORG_UNIT_NAME_AR,
-        ou.PARENT_ORG_UNIT_ID,
-        ou.IS_ACTIVE,
-        ou.MANAGER_NAME,
-        ou.MANAGER_EMAIL,
-        ou.MANAGER_PHONE,
-        ou.LOCATION,
-        ou.CITY,
-        ou.ADDRESS,
-        ou.DESCRIPTION,
-        ou.CREATED_BY,
-        ou.CREATED_DATE,
-        ou.LAST_UPDATED_BY,
-        ou.LAST_UPDATED_DATE,
-        ou.LAST_UPDATE_LOGIN,
-        p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
-        p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
-        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
+      let query = `SELECT ${this.ORG_UNIT_SELECT_COLUMNS}
       FROM ${this.TABLE_NAME} ou
-      LEFT JOIN ${this.TABLE_NAME} p
-        ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
-        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
       WHERE (ou.ORG_UNIT_ID = :1 OR RAWTOHEX(ou.ORG_UNIT_ID) = :2)`;
 
-      // Prepare bind parameters - try both RAW and hex string
       const hexId = this.guidToHex(orgUnitId);
       const rawId = this.guidToBuffer(orgUnitId);
       const bindParams = [rawId, hexId];
@@ -511,7 +491,8 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
         bindParams.push(structureId);
       }
 
-      const result = await this.executeQuery(query, bindParams);
+      const options = connection ? { connection } : {};
+      const result = await this.executeQuery(query, bindParams, options);
 
       if (result.rows && result.rows.length > 0) {
         return this.attachParentUnit(result.rows[0]);
@@ -527,37 +508,10 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
    */
   static async findAllByStructure(structureId) {
     try {
-      const query = `SELECT 
-        ou.ORG_UNIT_ID,
-        ou.ORG_STRUCTURE_ID,
-        ou.ENTERPRISE_ID,
-        ou.LEVEL_CODE,
-        ou.ORG_UNIT_CODE,
-        ou.ORG_UNIT_NAME_EN,
-        ou.ORG_UNIT_NAME_AR,
-        ou.PARENT_ORG_UNIT_ID,
-        ou.IS_ACTIVE,
-        ou.MANAGER_NAME,
-        ou.MANAGER_EMAIL,
-        ou.MANAGER_PHONE,
-        ou.LOCATION,
-        ou.CITY,
-        ou.ADDRESS,
-        ou.DESCRIPTION,
-        ou.CREATED_BY,
-        ou.CREATED_DATE,
-        ou.LAST_UPDATED_BY,
-        ou.LAST_UPDATED_DATE,
-        ou.LAST_UPDATE_LOGIN,
-        p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
-        p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-        p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
-        s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
+      const query = `SELECT ${this.ORG_UNIT_SELECT_COLUMNS}
       FROM ${this.TABLE_NAME} ou
-      LEFT JOIN ${this.TABLE_NAME} p
-        ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
-        ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+      LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+      LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
       WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1)
       ORDER BY ou.LEVEL_CODE, ou.ORG_UNIT_NAME_EN, ou.ORG_UNIT_ID`;
 
@@ -735,38 +689,10 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
         const hexId = finalOrgUnitId;
         const rawId = this.guidToBuffer(orgUnitId);
 
-        // Query the freshly created record using the same transaction connection
-        const selectQuery = `SELECT 
-          ou.ORG_UNIT_ID,
-          ou.ORG_STRUCTURE_ID,
-          ou.ENTERPRISE_ID,
-          ou.LEVEL_CODE,
-          ou.ORG_UNIT_CODE,
-          ou.ORG_UNIT_NAME_EN,
-          ou.ORG_UNIT_NAME_AR,
-          ou.PARENT_ORG_UNIT_ID,
-          ou.IS_ACTIVE,
-          ou.MANAGER_NAME,
-          ou.MANAGER_EMAIL,
-          ou.MANAGER_PHONE,
-          ou.LOCATION,
-          ou.CITY,
-          ou.ADDRESS,
-          ou.DESCRIPTION,
-          ou.CREATED_BY,
-          ou.CREATED_DATE,
-          ou.LAST_UPDATED_BY,
-          ou.LAST_UPDATED_DATE,
-          ou.LAST_UPDATE_LOGIN,
-          p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
-          p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-          p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
-          s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
+        const selectQuery = `SELECT ${this.ORG_UNIT_SELECT_COLUMNS}
         FROM ${this.TABLE_NAME} ou
-        LEFT JOIN ${this.TABLE_NAME} p
-          ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-        LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
-          ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+        LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+        LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
         WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1) 
           AND (ou.ORG_UNIT_ID = :2 OR RAWTOHEX(ou.ORG_UNIT_ID) = :3)`;
 
@@ -776,37 +702,10 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
 
         // If that didn't work, try using ROWID (get the most recently inserted row for this structure)
         if (!selectResult.rows || selectResult.rows.length === 0) {
-          const rowidQuery = `SELECT 
-            ou.ORG_UNIT_ID,
-            ou.ORG_STRUCTURE_ID,
-            ou.ENTERPRISE_ID,
-            ou.LEVEL_CODE,
-            ou.ORG_UNIT_CODE,
-            ou.ORG_UNIT_NAME_EN,
-            ou.ORG_UNIT_NAME_AR,
-            ou.PARENT_ORG_UNIT_ID,
-            ou.IS_ACTIVE,
-            ou.MANAGER_NAME,
-            ou.MANAGER_EMAIL,
-            ou.MANAGER_PHONE,
-            ou.LOCATION,
-            ou.CITY,
-            ou.ADDRESS,
-            ou.DESCRIPTION,
-            ou.CREATED_BY,
-            ou.CREATED_DATE,
-            ou.LAST_UPDATED_BY,
-            ou.LAST_UPDATED_DATE,
-            ou.LAST_UPDATE_LOGIN,
-            p.ORG_UNIT_NAME_EN AS PARENT_ORG_UNIT_NAME_EN,
-            p.ORG_UNIT_NAME_AR AS PARENT_ORG_UNIT_NAME_AR,
-            p.LEVEL_CODE       AS PARENT_ORG_LEVEL_CODE,
-            s.STRUCTURE_NAME   AS ORG_STRUCTURE_NAME
+          const rowidQuery = `SELECT ${this.ORG_UNIT_SELECT_COLUMNS}
           FROM ${this.TABLE_NAME} ou
-          LEFT JOIN ${this.TABLE_NAME} p
-            ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
-          LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s
-            ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
+          LEFT JOIN ${this.TABLE_NAME} p ON p.ORG_UNIT_ID = ou.PARENT_ORG_UNIT_ID
+          LEFT JOIN ${this.STRUCTURE_TABLE_NAME} s ON s.STRUCTURE_ID = ou.ORG_STRUCTURE_ID
           WHERE ou.ORG_STRUCTURE_ID = HEXTORAW(:1)
             AND ou.ORG_UNIT_CODE = :2
             AND ou.LEVEL_CODE = :3
@@ -950,7 +849,8 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
           throw new Error(`No org unit found with ID ${orgUnitId} in structure ${structureId}`);
         }
 
-        return await this.findById(orgUnitId, structureId);
+        // Use same connection so SELECT sees uncommitted UPDATE (avoids stale data in response)
+        return await this.findById(orgUnitId, structureId, connection);
       });
     } catch (error) {
       if (error.errorNum === 1 || error.message?.includes('ORA-00001')) {

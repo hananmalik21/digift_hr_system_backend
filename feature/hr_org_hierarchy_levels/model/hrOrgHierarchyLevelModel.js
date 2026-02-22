@@ -201,6 +201,7 @@ class HrOrgHierarchyLevelModel {
     const query = `SELECT
         RAWTOHEX(s.STRUCTURE_ID) AS STRUCTURE_ID,
         s.IS_ACTIVE AS S_IS_ACTIVE,
+        s.ENTERPRISE_ID AS S_ENTERPRISE_ID,
         l.LEVEL_ID,
         RAWTOHEX(l.STRUCTURE_ID) AS L_STRUCTURE_ID,
         l.LEVEL_NUMBER,
@@ -224,7 +225,8 @@ class HrOrgHierarchyLevelModel {
     const first = rows[0];
     const structure = {
       structureId: first.structure_id,
-      isActive: first.s_is_active
+      isActive: first.s_is_active,
+      enterpriseId: first.s_enterprise_id ?? first.enterprise_id ?? null
     };
     const levels = rows.filter((r) => r.level_id != null).map((r) => ({
       level_id: r.level_id,

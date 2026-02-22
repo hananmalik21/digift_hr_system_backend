@@ -3,8 +3,6 @@
  * Handles response formatting for ORG_UNITS endpoints
  */
 
-const API_VERSION = '1.0.0';
-
 /**
  * Convert object keys from UPPER_CASE to lowercase snake_case
  */
@@ -47,18 +45,25 @@ function generateBaseMetadata(req, additionalMeta = {}) {
 }
 
 /**
- * Generate a unique request ID
- */
-function generateRequestId() {
-  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-/**
  * Send standardized response
+ * @param {Object} res - Express response
+ * @param {Object} req - Express request
+ * @param {*} data - Response data
+ * @param {Object} meta - Meta overrides
+ * @param {Object} options - { fullMeta: true } - when false, meta includes only execution_time (for PUT/POST/DELETE)
  */
-function sendResponse(res, req, data, meta = {}) {
+function sendResponse(res, req, data, meta = {}, options = {}) {
+  const { fullMeta = true } = options;
   const startTime = req._startTime || Date.now();
   const executionTime = Date.now() - startTime;
+
+  if (!fullMeta) {
+    const convertedData = convertKeysToSnakeCase(data);
+    return res.json({
+      success: true,
+      data: convertedData
+    });
+  }
 
   const responseMeta = {
     ...generateBaseMetadata(req, {
@@ -69,7 +74,7 @@ function sendResponse(res, req, data, meta = {}) {
     })
   };
 
-  // Add pagination metadata
+  // Add pagination metadata (GET only)
   if (meta.pagination) {
     responseMeta.pagination = {
       page: meta.pagination.page || 1,
@@ -80,7 +85,6 @@ function sendResponse(res, req, data, meta = {}) {
       has_previous: meta.pagination.hasPrevious || false
     };
   } else if (Array.isArray(data)) {
-    // Even for non-paginated endpoints, include pagination
     const count = data.length;
     responseMeta.pagination = {
       page: 1,
@@ -102,7 +106,7 @@ function sendResponse(res, req, data, meta = {}) {
   }
 
   const convertedData = convertKeysToSnakeCase(data);
-  
+
   res.json({
     success: true,
     meta: responseMeta,
@@ -128,47 +132,24 @@ export function sendOrgUnit(res, req, orgUnit) {
 }
 
 /**
- * Send created response
+ * Send created response (minimal meta - full meta only on GET)
  */
 export function sendCreated(res, req, orgUnit) {
   if (!orgUnit) {
     return sendError(res, req, 'Failed to create org unit: No data returned', 500, 'INTERNAL_SERVER_ERROR');
   }
-
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const convertedOrgUnit = convertKeysToSnakeCase(orgUnit);
-  
   res.status(201).json({
     success: true,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      org_unit_id: convertedOrgUnit?.org_unit_id || orgUnit?.ORG_UNIT_ID || null,
-      action: 'created',
-      count: 1,
-      total: 1,
-      pagination: {
-        page: 1,
-        page_size: 1,
-        total: 1,
-        total_pages: 1,
-        has_next: false,
-        has_previous: false
-      }
-    }),
     data: convertedOrgUnit
   });
 }
 
 /**
- * Send updated response
+ * Send updated response (minimal meta - full meta only on GET)
  */
 export function sendUpdated(res, req, orgUnit) {
-  sendResponse(res, req, orgUnit, {
-    org_unit_id: (orgUnit.org_unit_id || orgUnit.ORG_UNIT_ID),
-    action: 'updated'
-  });
+  sendResponse(res, req, orgUnit, {}, { fullMeta: false });
 }
 
 /**
@@ -298,30 +279,12 @@ export function sendConflict(res, req, message = 'Conflict', errorDetails = null
 }
 
 /**
- * Send deleted response
+ * Send deleted response (minimal meta - full meta only on GET)
  */
 export function sendDeleted(res, req, message, orgUnitId) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   res.json({
     success: true,
-    message: message,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      org_unit_id: orgUnitId,
-      action: 'deleted',
-      count: 1,
-      total: 1,
-      pagination: {
-        page: 1,
-        page_size: 1,
-        total: 1,
-        total_pages: 1,
-        has_next: false,
-        has_previous: false
-      }
-    })
+    message: message
   });
 }
 
