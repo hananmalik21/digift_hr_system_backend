@@ -7,8 +7,8 @@ import multer from 'multer';
 import { updateEmployeeAllInOne, validateUpdateBody } from '../services/emplEmployeeAllInOneService.js';
 import { getConnection } from '../config/db.js';
 import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
-import { getEmployeeListRowByEmployeeId } from '../feature/employees/controller/employeeController.js';
-import EmployeeModel from '../feature/employees/model/employeeModel.js';
+import { getEmployeeListRowByEmployeeId } from '../feature/employee_management/employees/controller/employeeController.js';
+import EmployeeModel from '../feature/employee_management/employees/model/employeeModel.js';
 
 const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
 

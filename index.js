@@ -14,46 +14,46 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 import { createPool, closePool } from './config/db.js';
-import companyController from './feature/companies/controller/companyController.js';
-import divisionController from './feature/divisions/controller/divisionController.js';
-import businessUnitController from './feature/business_units/controller/businessUnitController.js';
-import departmentController from './feature/departments/controller/departmentController.js';
-import hrOrgHierarchyLevelController from './feature/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
-import hrOrgStructureController from './feature/hr_org_structures/controller/hrOrgStructureController.js';
-import orgUnitController from './feature/org_units/controller/orgUnitController.js';
-import structureLevelController from './feature/structure_levels/controller/structureLevelController.js';
-import enterpriseController from './feature/enterprises/controller/enterpriseController.js';
-import employeeController, { createEmployeeRouter, documentsDownloadRouter } from './feature/employees/controller/employeeController.js';
-import jobFamilyController from './feature/job_families/controller/jobFamilyController.js';
-import gradeController from './feature/grades/controller/grades_controller.js';
-import jobLevelsController from './feature/job_levels/controller/job_levels_controller.js';
-import positionsController from './feature/positions/controller/positions_controller.js';
-import shiftController from './feature/shifts/controller/shiftController.js';
-import workPatternController from './feature/work_patterns/controller/workPatternController.js';
-import workScheduleController from './feature/work_schedules/controller/workScheduleController.js';
-import scheduleAssignmentController from './feature/tm_schedule_assignments/controller/scheduleAssignmentController.js';
-import attendanceController from './feature/attendance/controller/attendanceController.js';
-import projectController from './feature/project/controller/projectController.js';
-import timesheetController from './feature/tm_timesheets/controller/timesheetController.js';
-import overtimeConfigController from './feature/tm_overtime_configs/controller/overtimeConfigController.js';
-import overtimeConfigurationController from './feature/tm_overtime_configuration/controller/overtimeConfigurationController.js';
-import overtimeRateTypeController from './feature/tm_overtime_rate_types/controller/overtimeRateTypeController.js';
-import holidayController from './feature/holidays/controller/holidayController.js';
-import accrualPlanController from './feature/accrual_plans/controller/accrualPlanController.js';
-import leaveTypeController from './feature/leave_types/controller/leaveTypeController.js';
-import leaveTypeAccrualController from './feature/leave_type_accrual/controller/leaveTypeAccrualController.js';
-import leaveRequestController, { employeeLeaveRequestsRouter } from './feature/leave_requests/controller/leaveRequestController.js';
-import leaveContactController from './feature/leave_contacts/controller/leaveContactController.js';
-import leaveDocumentController from './feature/leave_documents/controller/leaveDocumentController.js';
-import employeeLeaveBalanceController from './feature/employee_leave_balances/controller/employeeLeaveBalanceController.js';
+import companyController from './feature/enterprise_structure/companies/controller/companyController.js';
+import divisionController from './feature/enterprise_structure/divisions/controller/divisionController.js';
+import businessUnitController from './feature/enterprise_structure/business_units/controller/businessUnitController.js';
+import departmentController from './feature/enterprise_structure/departments/controller/departmentController.js';
+import hrOrgHierarchyLevelController from './feature/enterprise_structure/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
+import hrOrgStructureController from './feature/enterprise_structure/hr_org_structures/controller/hrOrgStructureController.js';
+import orgUnitController from './feature/enterprise_structure/org_units/controller/orgUnitController.js';
+import structureLevelController from './feature/enterprise_structure/structure_levels/controller/structureLevelController.js';
+import enterpriseController from './feature/enterprise_structure/enterprises/controller/enterpriseController.js';
+import employeeController, { createEmployeeRouter, documentsDownloadRouter } from './feature/employee_management/employees/controller/employeeController.js';
+import jobFamilyController from './feature/enterprise_structure/job_families/controller/jobFamilyController.js';
+import gradeController from './feature/enterprise_structure/grades/controller/grades_controller.js';
+import jobLevelsController from './feature/enterprise_structure/job_levels/controller/job_levels_controller.js';
+import positionsController from './feature/enterprise_structure/positions/controller/positions_controller.js';
+import shiftController from './feature/time_management/shifts/controller/shiftController.js';
+import workPatternController from './feature/time_management/work_patterns/controller/workPatternController.js';
+import workScheduleController from './feature/time_management/work_schedules/controller/workScheduleController.js';
+import scheduleAssignmentController from './feature/time_management/tm_schedule_assignments/controller/scheduleAssignmentController.js';
+import projectController from './feature/attendance_management/project/controller/projectController.js';
+import timesheetController from './feature/attendance_management/tm_timesheets/controller/timesheetController.js';
+import overtimeConfigController from './feature/attendance_management/tm_overtime_configs/controller/overtimeConfigController.js';
+import overtimeConfigurationRouter from './feature/attendance_management/tm_overtime_configs/controller/overtimeConfigurationRouter.js';
+import overtimeRateTypeController from './feature/attendance_management/tm_overtime_rate_types/controller/overtimeRateTypeController.js';
+import attendanceController from './feature/attendance_management/attendance/controller/attendanceController.js';
+import holidayController from './feature/time_management/holidays/controller/holidayController.js';
+import accrualPlanController from './feature/leave_management/accrual_plans/controller/accrualPlanController.js';
+import leaveTypeController from './feature/leave_management/leave_types/controller/leaveTypeController.js';
+import leaveTypeAccrualController from './feature/leave_management/leave_type_accrual/controller/leaveTypeAccrualController.js';
+import leaveRequestController, { employeeLeaveRequestsRouter } from './feature/leave_management/leave_requests/controller/leaveRequestController.js';
+import leaveContactController from './feature/leave_management/leave_contacts/controller/leaveContactController.js';
+import leaveDocumentController from './feature/leave_management/leave_documents/controller/leaveDocumentController.js';
+import employeeLeaveBalanceController from './feature/leave_management/employee_leave_balances/controller/employeeLeaveBalanceController.js';
 import absLookupController from './feature/look_ups/abs/abs_lookups/controller/absLookupController.js';
 import emplLookupTypeController from './feature/look_ups/empl/empl_lookup_types/controller/emplLookupTypeController.js';
 import emplLookupValueController from './feature/look_ups/empl/empl_lookup_values/controller/emplLookupValueController.js';
 import entLookupTypeController from './feature/look_ups/ent/ent_lookup_types/controller/entLookupTypeController.js';
 import entLookupValueController from './feature/look_ups/ent/ent_lookup_values/controller/entLookupValueController.js';
-import leavePolicyController from './feature/abs_leave_policies/controller/leavePolicyController.js';
-import workforceStatsController from './feature/workforce_stats/controller/workforceStatsController.js';
-import timeManagementStatsController from './feature/time_management_stats/controller/timeManagementStatsController.js';
+import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
+import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
+import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
 
@@ -140,20 +140,20 @@ app.use('/api/tm/work-schedules', workScheduleController);
 // Schedule Assignments routes
 app.use('/api/tm/schedule-assignments', scheduleAssignmentController);
 
-// Attendance (mark/edit) routes – Create: POST, Update: PUT (same procedure TM.TM_MARK_ATTENDANCE_PKG.UPSERT_MARK_ATTENDANCE)
-app.use('/api/tm/attendance', attendanceController);
-
 // Project management (TM.TM_PROJECT_PKG: upsert project+tasks, remove task(s), remove project)
 app.use('/api/tm/projects', projectController);
 
 // Timesheets (TM.TM_TIMESHEET_PKG: upsert, submit/approve/reject, delete line, list, get)
 app.use('/api/tm/timesheets', timesheetController);
 
+// Attendance (TM.V_ATTENDANCE_FULL, TM.ATTENDANCE_PKG: logs, upsert mark/edit)
+app.use('/api/tm/attendance', attendanceController);
+
 // Overtime configs with limits (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete with labor limits, single transaction)
 app.use('/api/tm/overtime/configs', overtimeConfigController);
 
 // GET overtime configuration (TM.V_OT_TENANT_SETUP_FULL only, single query)
-app.use('/api/tm/overtime/configuration', overtimeConfigurationController);
+app.use('/api/tm/overtime/configuration', overtimeConfigurationRouter);
 
 // Overtime rate types with multiplier (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete rate type + multiplier, single transaction)
 app.use('/api/tm/overtime/rate-types', overtimeRateTypeController);
