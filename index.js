@@ -32,6 +32,7 @@ import shiftController from './feature/time_management/shifts/controller/shiftCo
 import workPatternController from './feature/time_management/work_patterns/controller/workPatternController.js';
 import workScheduleController from './feature/time_management/work_schedules/controller/workScheduleController.js';
 import scheduleAssignmentController from './feature/time_management/tm_schedule_assignments/controller/scheduleAssignmentController.js';
+import employeeScheduleController from './feature/attendance_management/employee_schedule/controller/employeeScheduleController.js';
 import projectController from './feature/attendance_management/project/controller/projectController.js';
 import timesheetController from './feature/attendance_management/tm_timesheets/controller/timesheetController.js';
 import overtimeConfigController from './feature/attendance_management/tm_overtime_configs/controller/overtimeConfigController.js';
@@ -139,6 +140,9 @@ app.use('/api/tm/work-schedules', workScheduleController);
 
 // Schedule Assignments routes
 app.use('/api/tm/schedule-assignments', scheduleAssignmentController);
+
+// Employee Schedule Generation (TM.TM_SCHEDULE_GENERATION_PKG.generate_employee_schedule)
+app.use('/api/tm/employee-schedule', employeeScheduleController);
 
 // Project management (TM.TM_PROJECT_PKG: upsert project+tasks, remove task(s), remove project)
 app.use('/api/tm/projects', projectController);
