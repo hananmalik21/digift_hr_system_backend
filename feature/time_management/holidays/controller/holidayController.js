@@ -27,6 +27,7 @@ function validateHolidayData(data, isUpdate = false) {
     if (!data.HOLIDAY_DATE) {
       errors.push('HOLIDAY_DATE is required');
     }
+    // HOLIDAY_NAME_AR and DESCRIPTION_AR (Arabic name/description) are optional
   } else {
     // For updates, validate only provided fields
     if (data.HOLIDAY_NAME_EN !== undefined && data.HOLIDAY_NAME_EN.trim() === '') {
@@ -242,7 +243,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 /**
  * @route   POST /api/holidays
  * @desc    Create a new holiday
- * @body    { HOLIDAY_NAME_EN, HOLIDAY_DATE, TENANT_ID?, HOLIDAY_NAME_AR?, HOLIDAY_YEAR?, HOLIDAY_TYPE?, DESCRIPTION_EN?, DESCRIPTION_AR?, APPLIES_TO?, STATUS? }
+ * @body    { HOLIDAY_NAME_EN, HOLIDAY_DATE, TENANT_ID?, HOLIDAY_NAME_AR? (optional), HOLIDAY_YEAR?, HOLIDAY_TYPE?, DESCRIPTION_EN?, DESCRIPTION_AR? (optional), APPLIES_TO?, STATUS? }
  * @access  Public
  */
 router.post('/', asyncHandler(async (req, res) => {

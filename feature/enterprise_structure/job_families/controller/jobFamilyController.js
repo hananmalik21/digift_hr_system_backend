@@ -33,9 +33,7 @@ function validateJobFamilyData(data, isUpdate = false) {
     if (!data.JOB_FAMILY_NAME_EN || String(data.JOB_FAMILY_NAME_EN).trim() === '') {
       errors.push('JOB_FAMILY_NAME_EN is required');
     }
-    if (!data.JOB_FAMILY_NAME_AR || String(data.JOB_FAMILY_NAME_AR).trim() === '') {
-      errors.push('JOB_FAMILY_NAME_AR is required');
-    }
+    // JOB_FAMILY_NAME_AR (Arabic name) is optional
   } else {
     // For updates, validate only provided fields
     if (data.JOB_FAMILY_CODE !== undefined && String(data.JOB_FAMILY_CODE).trim() === '') {
@@ -44,9 +42,7 @@ function validateJobFamilyData(data, isUpdate = false) {
     if (data.JOB_FAMILY_NAME_EN !== undefined && String(data.JOB_FAMILY_NAME_EN).trim() === '') {
       errors.push('JOB_FAMILY_NAME_EN cannot be empty');
     }
-    if (data.JOB_FAMILY_NAME_AR !== undefined && String(data.JOB_FAMILY_NAME_AR).trim() === '') {
-      errors.push('JOB_FAMILY_NAME_AR cannot be empty');
-    }
+    // JOB_FAMILY_NAME_AR (Arabic name) is optional; empty string is allowed to clear
   }
 
   // Validate STATUS if provided

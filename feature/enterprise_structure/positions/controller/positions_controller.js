@@ -43,7 +43,7 @@ function validatePosition(data, isUpdate = false) {
   reqIfCreate('POSITION_CODE', 'position_code is required');
   reqIfCreate('STATUS', 'status is required');
   reqIfCreate('POSITION_TITLE_EN', 'position_title_en is required');
-  reqIfCreate('POSITION_TITLE_AR', 'position_title_ar is required');
+  // position_title_ar (Arabic name) is optional
 
   reqIfCreate('ORG_STRUCTURE_ID', 'org_structure_id is required');
   reqIfCreate('ORG_UNIT_ID', 'org_unit_id is required');

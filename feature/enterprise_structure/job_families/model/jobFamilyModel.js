@@ -240,7 +240,7 @@ class JobFamilyModel {
           tenantIdNum,
           data.JOB_FAMILY_CODE || null,
           data.JOB_FAMILY_NAME_EN || null,
-          data.JOB_FAMILY_NAME_AR || null,
+          (data.JOB_FAMILY_NAME_AR != null && String(data.JOB_FAMILY_NAME_AR).trim() !== '') ? String(data.JOB_FAMILY_NAME_AR).trim() : null,
           data.DESCRIPTION || null,
           data.STATUS || 'ACTIVE',
           userId || 'SYSTEM',
@@ -334,7 +334,7 @@ class JobFamilyModel {
         }
         if (payload.JOB_FAMILY_NAME_AR !== undefined) {
           updateFields.push(`JOB_FAMILY_NAME_AR = :${paramIndex}`);
-          bindParams.push(payload.JOB_FAMILY_NAME_AR);
+          bindParams.push(String(payload.JOB_FAMILY_NAME_AR).trim() || null);
           paramIndex++;
         }
         if (payload.DESCRIPTION !== undefined) {

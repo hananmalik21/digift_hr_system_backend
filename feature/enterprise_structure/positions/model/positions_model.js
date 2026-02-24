@@ -78,6 +78,11 @@ class PositionsModel {
     return String(v).trim();
   }
 
+  static strOptional(v) {
+    if (this.isMissing(v) || String(v).trim() === '') return null;
+    return String(v).trim();
+  }
+
   static numRequired(v, field) {
     if (this.isMissing(v)) {
       const err = new Error(`${field} is required and must be a valid number`);
@@ -553,7 +558,7 @@ class PositionsModel {
           positionCode: { val: this.strRequired(payload.position_code, 'position_code'), dir: oracledb.BIND_IN },
           status: { val: String(payload.status ?? 'ACTIVE').toUpperCase(), dir: oracledb.BIND_IN },
           positionTitleEn: { val: this.strRequired(payload.position_title_en, 'position_title_en'), dir: oracledb.BIND_IN },
-          positionTitleAr: { val: this.strRequired(payload.position_title_ar, 'position_title_ar'), dir: oracledb.BIND_IN },
+          positionTitleAr: { val: this.strOptional(payload.position_title_ar), dir: oracledb.BIND_IN },
           orgStructureId: { val: this.raw16Required(payload.org_structure_id, 'org_structure_id'), dir: oracledb.BIND_IN },
           orgUnitId: { val: this.raw16Required(payload.org_unit_id, 'org_unit_id'), dir: oracledb.BIND_IN },
           orgPathJson: { val: payload.org_path_json ? JSON.stringify(payload.org_path_json) : null, dir: oracledb.BIND_IN },
@@ -666,7 +671,7 @@ class PositionsModel {
       if (payload.position_code !== undefined) add('POSITION_CODE', this.strRequired(payload.position_code, 'position_code'));
       if (payload.status !== undefined) add('STATUS', String(payload.status).toUpperCase());
       if (payload.position_title_en !== undefined) add('POSITION_TITLE_EN', this.strRequired(payload.position_title_en, 'position_title_en'));
-      if (payload.position_title_ar !== undefined) add('POSITION_TITLE_AR', this.strRequired(payload.position_title_ar, 'position_title_ar'));
+      if (payload.position_title_ar !== undefined) add('POSITION_TITLE_AR', this.strOptional(payload.position_title_ar));
 
       if (payload.org_structure_id !== undefined) add('ORG_STRUCTURE_ID', this.raw16Required(payload.org_structure_id, 'org_structure_id'));
       if (payload.org_unit_id !== undefined) add('ORG_UNIT_ID', this.raw16Required(payload.org_unit_id, 'org_unit_id'));

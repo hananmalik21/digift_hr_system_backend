@@ -356,16 +356,17 @@ class HolidayModel {
           :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15
         )`;
 
+        const optStr = (v) => (v != null && String(v).trim() !== '') ? String(v).trim() : null;
         const bindParams = [
           holidayId,
           data.TENANT_ID || null,
           data.HOLIDAY_NAME_EN || null,
-          data.HOLIDAY_NAME_AR || null,
+          optStr(data.HOLIDAY_NAME_AR),
           this.convertToDate(data.HOLIDAY_DATE),
           holidayYear || null,
           data.HOLIDAY_TYPE || null,
           data.DESCRIPTION_EN || null,
-          data.DESCRIPTION_AR || null,
+          optStr(data.DESCRIPTION_AR),
           data.APPLIES_TO || null,
           data.STATUS || 'ACTIVE',
           now,
@@ -452,7 +453,7 @@ class HolidayModel {
         }
         if (data.HOLIDAY_NAME_AR !== undefined) {
           updateFields.push(`HOLIDAY_NAME_AR = :${paramIndex}`);
-          bindParams.push(data.HOLIDAY_NAME_AR);
+          bindParams.push((data.HOLIDAY_NAME_AR != null && String(data.HOLIDAY_NAME_AR).trim() !== '') ? String(data.HOLIDAY_NAME_AR).trim() : null);
           paramIndex++;
         }
         if (data.HOLIDAY_DATE !== undefined) {
@@ -486,7 +487,7 @@ class HolidayModel {
         }
         if (data.DESCRIPTION_AR !== undefined) {
           updateFields.push(`DESCRIPTION_AR = :${paramIndex}`);
-          bindParams.push(data.DESCRIPTION_AR);
+          bindParams.push((data.DESCRIPTION_AR != null && String(data.DESCRIPTION_AR).trim() !== '') ? String(data.DESCRIPTION_AR).trim() : null);
           paramIndex++;
         }
         if (data.APPLIES_TO !== undefined) {
