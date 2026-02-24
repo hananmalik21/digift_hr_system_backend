@@ -104,6 +104,12 @@ function strOrNull(...vals) {
   return v != null ? String(v).trim() : null;
 }
 
+/** Arabic name fields are optional; returns null for missing, empty, or whitespace-only. */
+function optionalStrAr(...vals) {
+  const v = vals.find(x => x != null && String(x).trim() !== '');
+  return v != null ? String(v).trim() : null;
+}
+
 function toNum(...vals) {
   const v = vals.find(x => x != null && x !== '');
   if (v == null || v === '') return null;
@@ -153,9 +159,9 @@ export function buildUpdateBinds(employeeId, body) {
     p_first_name_en: strOrNull(b.first_name_en, b.firstNameEn),
     p_middle_name_en: strOrNull(b.middle_name_en, b.middleNameEn),
     p_last_name_en: strOrNull(b.last_name_en, b.lastNameEn),
-    p_first_name_ar: strOrNull(b.first_name_ar, b.firstNameAr),
-    p_middle_name_ar: strOrNull(b.middle_name_ar, b.middleNameAr),
-    p_last_name_ar: strOrNull(b.last_name_ar, b.lastNameAr),
+    p_first_name_ar: optionalStrAr(b.first_name_ar, b.firstNameAr, b.FIRST_NAME_AR),
+    p_middle_name_ar: optionalStrAr(b.middle_name_ar, b.middleNameAr, b.MIDDLE_NAME_AR),
+    p_last_name_ar: optionalStrAr(b.last_name_ar, b.lastNameAr, b.LAST_NAME_AR),
     p_email: strOrNull(b.email),
     p_phone_number: strOrNull(b.phone_number, b.phoneNumber),
     p_mobile_number: strOrNull(b.mobile_number, b.mobileNumber),
@@ -228,6 +234,7 @@ export function buildUpdateBinds(employeeId, body) {
 /**
  * Validation for update body. Returns { valid: boolean, message?: string, code?: string }.
  * Required: enterprise_id (body), employee_id (URL). All document fields are optional.
+ * first_name_ar, middle_name_ar, last_name_ar (Arabic names) are optional.
  * doc_action defaults to ADD; if provided must be ADD | REPLACE (case-insensitive).
  * replace_document_id if provided must be a number.
  */
