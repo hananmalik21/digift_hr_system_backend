@@ -324,6 +324,7 @@ export class DatabaseError extends AppError {
     if (errorNum === 1400 || message.includes('ORA-01400')) return 400; // Bad Request
     if (errorNum === 2290 || message.includes('ORA-02290')) return 400; // Bad Request
     if (errorNum === 20090 || message.includes('ORA-20090')) return 400; // Check constraint (e.g. attendance)
+    if (errorNum === 1403 || message.includes('ORA-01403')) return 400; // No data found (e.g. attendance_day_id not found)
     if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
 
     return 500; // Internal Server Error

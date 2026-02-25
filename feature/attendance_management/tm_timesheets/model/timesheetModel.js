@@ -1,11 +1,12 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
-import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
+import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 
 const SCHEMA = 'TM';
 const STATUS_CODES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
+const DEFAULT_LIST_LIMIT = 10; // GET list default page size
 const MAX_LIMIT = 100;
 const HEADER_DATE_KEYS = ['WEEK_START_DATE', 'WEEK_END_DATE', 'SUBMITTED_DATE', 'APPROVED_DATE', 'REJECTED_DATE', 'CREATION_DATE', 'LAST_UPDATE_DATE'];
 const GUID_HEX_LEN = 32;
@@ -203,6 +204,57 @@ export async function getTimesheetByGuid(timesheetGuid) {
   return id != null ? await getTimesheetById(null, id) : null;
 }
 
+/**
+ * Get single timesheet in full view shape (employee, org_structure_list, timesheet_lines) by timesheet_id.
+ * Used when guid is missing or view lookup by guid fails. Returns null if not found.
+ */
+export async function getTimesheetByIdFromView(timesheetId) {
+  if (timesheetId == null) return null;
+  return runReadOnly(async (conn) => {
+    const result = await conn.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: timesheetId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const row = result.rows?.[0];
+    return row ? mapViewRow(row) : null;
+  });
+}
+
+/**
+ * Get single timesheet in full view shape (employee, org_structure_list, timesheet_lines).
+ * Used for create/update/delete responses. Returns null if not found.
+ */
+export async function getTimesheetByGuidFromView(timesheetGuid) {
+  const id = await getTimesheetIdByGuid(timesheetGuid);
+  if (id == null) return null;
+  return getTimesheetByIdFromView(id);
+}
+
+/**
+ * Get full timesheet payload by GUID in one connection (id lookup + view fetch). Returns null if not found.
+ */
+export async function getTimesheetByGuidFromViewSingleConn(timesheetGuid) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) return null;
+  return runReadOnly(async (conn) => {
+    const idResult = await conn.execute(
+      'SELECT TIMESHEET_ID FROM TM.TM_TIMESHEETS WHERE TIMESHEET_GUID = :g',
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const idRow = idResult.rows?.[0];
+    if (!idRow) return null;
+    const viewResult = await conn.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: idRow.TIMESHEET_ID },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const viewRow = viewResult.rows?.[0];
+    return viewRow ? mapViewRow(viewRow) : null;
+  });
+}
+
 /** Delete line by timesheet GUID and line GUID. Resolves to IDs then calls DELETE_LINE. */
 export async function deleteLineByGuid(timesheetGuid, lineGuid, updatedBy) {
   const timesheetId = await getTimesheetIdByGuid(timesheetGuid);
@@ -302,12 +354,93 @@ export async function upsertWeeklyTimesheet(payload) {
   };
 
   const returnFull = payload.returnFull !== false;
+  const returnFullFromView = payload.returnFullFromView === true;
+  const checkLinesRequireDraft = payload.checkLinesRequireDraft === true;
+
+  let resolvedEmployeeGuid = null;
 
   return runWithTransaction(async (connection) => {
-    await connection.execute(plsql, binds, { autoCommit: false });
-    const outId = outVal(timesheetIdBind);
-    const outGuid = outVal(timesheetGuidBind) || bufferToHexString(timesheetGuidBind.val);
-    const base = { timesheet_id: outId, timesheet_guid: outGuid, status_code: statusCode };
+    if (timesheetGuidStr) {
+      const guidBuf = hexStringToBuffer(timesheetGuidStr);
+      if (!guidBuf) throw new NotFoundError('Timesheet not found');
+      const resolveResult = await connection.execute(
+        `SELECT t.TIMESHEET_ID, t.STATUS_CODE, t.EMPLOYEE_ID,
+                RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID
+         FROM TM.TM_TIMESHEETS t
+         LEFT JOIN EMPL.EMPLOYEES e ON t.EMPLOYEE_ID = e.EMPLOYEE_ID
+         WHERE t.TIMESHEET_GUID = :g`,
+        { g: guidBuf },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const r = resolveResult.rows?.[0];
+      if (!r) throw new NotFoundError('Timesheet not found');
+      if (checkLinesRequireDraft && r.STATUS_CODE != null && r.STATUS_CODE !== 'DRAFT') {
+        throw new ValidationError('Lines can be modified only when timesheet status is DRAFT.');
+      }
+      timesheetIdBind.val = r.TIMESHEET_ID;
+      if (r.EMPLOYEE_GUID != null) resolvedEmployeeGuid = String(r.EMPLOYEE_GUID).trim().toUpperCase();
+    }
+
+    const execResult = await connection.execute(plsql, binds, { autoCommit: false });
+    const outBinds = execResult.outBinds || {};
+    let outId = outVal(timesheetIdBind) ?? outBinds.p_timesheet_id ?? null;
+    let outGuid =
+      outVal(timesheetGuidBind) ||
+      (timesheetGuidBind.val && bufferToHexString(timesheetGuidBind.val)) ||
+      (outBinds.p_timesheet_guid && bufferToHexString(outBinds.p_timesheet_guid)) ||
+      null;
+
+    if (outId == null && timesheetIdIn == null) {
+      const rescue = await connection.execute(
+        `SELECT TIMESHEET_ID, TIMESHEET_GUID FROM (
+           SELECT TIMESHEET_ID, TIMESHEET_GUID FROM TM.TM_TIMESHEETS
+           WHERE ENTERPRISE_ID = :eid AND EMPLOYEE_ID = :emp AND WEEK_START_DATE = :ws
+           ORDER BY TIMESHEET_ID DESC
+         ) WHERE ROWNUM = 1`,
+        {
+          eid: enterpriseId,
+          emp: employeeId,
+          ws: dateToOracle(weekStart)
+        },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const row = rescue.rows?.[0];
+      if (row) {
+        outId = row.TIMESHEET_ID;
+        outGuid = Buffer.isBuffer(row.TIMESHEET_GUID) ? bufferToHexString(row.TIMESHEET_GUID) : (row.TIMESHEET_GUID || null);
+      }
+    }
+
+    const employeeGuidFromPayload = optStr(payload.employee_guid);
+    let employeeGuid = employeeGuidFromPayload ?? resolvedEmployeeGuid;
+    if (!employeeGuid && outId != null && employeeId != null) {
+      const egResult = await connection.execute(
+        'SELECT RAWTOHEX(EMPLOYEE_GUID) AS EMPLOYEE_GUID FROM EMPL.EMPLOYEES WHERE EMPLOYEE_ID = :eid',
+        { eid: employeeId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const egRow = egResult.rows?.[0];
+      if (egRow?.EMPLOYEE_GUID) employeeGuid = String(egRow.EMPLOYEE_GUID).trim().toUpperCase();
+    }
+    const base = {
+      timesheet_id: outId,
+      timesheet_guid: outGuid,
+      status_code: statusCode,
+      employee_id: employeeId ?? null,
+      employee_guid: employeeGuid ?? null
+    };
+
+    if (returnFullFromView && outId != null) {
+      await connection.commit();
+      const viewResult = await connection.execute(
+        'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+        { tid: outId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const viewRow = viewResult.rows?.[0];
+      return viewRow ? mapViewRow(viewRow) : base;
+    }
+
     if (!returnFull) return base;
     const header = await getTimesheetById(connection, outId);
     return { ...base, ...(header && { header, lines: header.lines }) };
@@ -346,6 +479,42 @@ export async function submitTimesheet(timesheetId, payload, options = {}) {
   }, 'submit timesheet');
 }
 
+/** Submit by GUID in one connection (resolve id + execute). Returns full view payload when returnFullFromView. */
+export async function submitTimesheetByGuid(timesheetGuid, payload, options = {}) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) throw new NotFoundError('Timesheet not found');
+  const returnFullFromView = options.returnFullFromView === true;
+  const updatedBy = optStr(payload.updated_by);
+  const submittedDate = payload.submitted_date != null ? dateToOracle(payload.submitted_date) : null;
+
+  return runWithTransaction(async (connection) => {
+    const idResult = await connection.execute(
+      'SELECT TIMESHEET_ID FROM TM.TM_TIMESHEETS WHERE TIMESHEET_GUID = :g',
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const idRow = idResult.rows?.[0];
+    if (!idRow) throw new NotFoundError('Timesheet not found');
+    const timesheetId = idRow.TIMESHEET_ID;
+
+    await connection.execute(
+      `BEGIN TM.TM_TIMESHEET_PKG.SUBMIT_TIMESHEET(p_timesheet_id => :tid, p_submitted_date => :sd, p_updated_by => :ub); END;`,
+      { tid: timesheetId, sd: submittedDate, ub: updatedBy },
+      { autoCommit: false }
+    );
+
+    if (!returnFullFromView) return { timesheet_id: timesheetId, status_code: 'SUBMITTED' };
+    await connection.commit();
+    const viewResult = await connection.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: timesheetId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const viewRow = viewResult.rows?.[0];
+    return viewRow ? mapViewRow(viewRow) : { timesheet_id: timesheetId, status_code: 'SUBMITTED' };
+  }, 'submit timesheet by guid');
+}
+
 /**
  * Approve: TM.TM_TIMESHEET_PKG.APPROVE_TIMESHEET(timesheet_id, approved_date, updated_by)
  * @param {Object} [options] - options.returnFull (default true) to skip re-fetch
@@ -376,6 +545,42 @@ export async function approveTimesheet(timesheetId, payload, options = {}) {
     if (!returnFull) return { timesheet_id: timesheetId, status_code: 'APPROVED' };
     return getTimesheetById(connection, timesheetId);
   }, 'approve timesheet');
+}
+
+/** Approve by GUID in one connection. Returns full view payload when returnFullFromView. */
+export async function approveTimesheetByGuid(timesheetGuid, payload, options = {}) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) throw new NotFoundError('Timesheet not found');
+  const returnFullFromView = options.returnFullFromView === true;
+  const updatedBy = optStr(payload.updated_by);
+  const approvedDate = payload.approved_date != null ? dateToOracle(payload.approved_date) : null;
+
+  return runWithTransaction(async (connection) => {
+    const idResult = await connection.execute(
+      'SELECT TIMESHEET_ID FROM TM.TM_TIMESHEETS WHERE TIMESHEET_GUID = :g',
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const idRow = idResult.rows?.[0];
+    if (!idRow) throw new NotFoundError('Timesheet not found');
+    const timesheetId = idRow.TIMESHEET_ID;
+
+    await connection.execute(
+      `BEGIN TM.TM_TIMESHEET_PKG.APPROVE_TIMESHEET(p_timesheet_id => :tid, p_approved_date => :ad, p_updated_by => :ub); END;`,
+      { tid: timesheetId, ad: approvedDate, ub: updatedBy },
+      { autoCommit: false }
+    );
+
+    if (!returnFullFromView) return { timesheet_id: timesheetId, status_code: 'APPROVED' };
+    await connection.commit();
+    const viewResult = await connection.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: timesheetId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const viewRow = viewResult.rows?.[0];
+    return viewRow ? mapViewRow(viewRow) : { timesheet_id: timesheetId, status_code: 'APPROVED' };
+  }, 'approve timesheet by guid');
 }
 
 /**
@@ -413,6 +618,43 @@ export async function rejectTimesheet(timesheetId, payload, options = {}) {
   }, 'reject timesheet');
 }
 
+/** Reject by GUID in one connection. Returns full view payload when returnFullFromView. */
+export async function rejectTimesheetByGuid(timesheetGuid, payload, options = {}) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) throw new NotFoundError('Timesheet not found');
+  const returnFullFromView = options.returnFullFromView === true;
+  const updatedBy = optStr(payload.updated_by);
+  const rejectReason = optStr(payload.reject_reason);
+  const rejectedDate = payload.rejected_date != null ? dateToOracle(payload.rejected_date) : null;
+
+  return runWithTransaction(async (connection) => {
+    const idResult = await connection.execute(
+      'SELECT TIMESHEET_ID FROM TM.TM_TIMESHEETS WHERE TIMESHEET_GUID = :g',
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const idRow = idResult.rows?.[0];
+    if (!idRow) throw new NotFoundError('Timesheet not found');
+    const timesheetId = idRow.TIMESHEET_ID;
+
+    await connection.execute(
+      `BEGIN TM.TM_TIMESHEET_PKG.REJECT_TIMESHEET(p_timesheet_id => :tid, p_rejected_date => :rd, p_reject_reason => :rr, p_updated_by => :ub); END;`,
+      { tid: timesheetId, rd: rejectedDate, rr: rejectReason, ub: updatedBy },
+      { autoCommit: false }
+    );
+
+    if (!returnFullFromView) return { timesheet_id: timesheetId, status_code: 'REJECTED' };
+    await connection.commit();
+    const viewResult = await connection.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: timesheetId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const viewRow = viewResult.rows?.[0];
+    return viewRow ? mapViewRow(viewRow) : { timesheet_id: timesheetId, status_code: 'REJECTED' };
+  }, 'reject timesheet by guid');
+}
+
 /**
  * Delete full timesheet: TM.TM_TIMESHEET_PKG.DELETE_TIMESHEET(p_timesheet_id, p_updated_by)
  * DB behavior: DRAFT → physical delete; SUBMITTED → status becomes WITHDRAWN; APPROVED/REJECTED → raises; WITHDRAWN → cannot delete again.
@@ -444,6 +686,77 @@ export async function deleteTimesheetByGuid(timesheetGuid, updatedBy) {
   const timesheetId = await getTimesheetIdByGuid(timesheetGuid);
   if (timesheetId == null) throw new NotFoundError('Timesheet not found');
   return deleteTimesheet(timesheetId, updatedBy);
+}
+
+/**
+ * Delete timesheet by GUID and return minimal payload (timesheet_id, employee_id, employee_guid) in one connection.
+ */
+export async function deleteTimesheetByGuidReturningMeta(timesheetGuid, updatedBy) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) throw new NotFoundError('Timesheet not found');
+  const updatedByStr = optStr(updatedBy);
+
+  return runWithTransaction(async (connection) => {
+    const metaResult = await connection.execute(
+      `SELECT t.TIMESHEET_ID, t.EMPLOYEE_ID, RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID
+       FROM TM.TM_TIMESHEETS t
+       LEFT JOIN EMPL.EMPLOYEES e ON t.EMPLOYEE_ID = e.EMPLOYEE_ID
+       WHERE t.TIMESHEET_GUID = :g`,
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const row = metaResult.rows?.[0];
+    if (!row) throw new NotFoundError('Timesheet not found');
+    const timesheetId = row.TIMESHEET_ID;
+    const employeeId = row.EMPLOYEE_ID;
+    const employeeGuid = row.EMPLOYEE_GUID != null ? String(row.EMPLOYEE_GUID).trim().toUpperCase() : null;
+
+    await connection.execute(
+      `BEGIN TM.TM_TIMESHEET_PKG.DELETE_TIMESHEET(p_timesheet_id => :p_timesheet_id, p_updated_by => :p_updated_by); END;`,
+      { p_timesheet_id: timesheetId, p_updated_by: updatedByStr },
+      { autoCommit: false }
+    );
+
+    const guidStr = typeof timesheetGuid === 'string' ? timesheetGuid.replace(/-/g, '') : '';
+    return { timesheet_id: timesheetId, timesheet_guid: guidStr, employee_id: employeeId ?? null, employee_guid: employeeGuid, deleted: true };
+  }, 'delete timesheet returning meta');
+}
+
+/**
+ * Delete timesheet by GUID and return full payload in one connection (fetch from view then delete).
+ * Throws NotFoundError if timesheet not found.
+ */
+export async function deleteTimesheetByGuidWithPayload(timesheetGuid, updatedBy) {
+  const buf = hexStringToBuffer(timesheetGuid);
+  if (!buf) throw new NotFoundError('Timesheet not found');
+  const updatedByStr = optStr(updatedBy);
+
+  return runWithTransaction(async (connection) => {
+    const idResult = await connection.execute(
+      'SELECT TIMESHEET_ID FROM TM.TM_TIMESHEETS WHERE TIMESHEET_GUID = :g',
+      { g: buf },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const idRow = idResult.rows?.[0];
+    if (!idRow) throw new NotFoundError('Timesheet not found');
+    const timesheetId = idRow.TIMESHEET_ID;
+
+    const viewResult = await connection.execute(
+      'SELECT * FROM TM.V_TIMESHEETS_WITH_LINES_JSON WHERE TIMESHEET_ID = :tid',
+      { tid: timesheetId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const viewRow = viewResult.rows?.[0];
+    const payload = viewRow ? mapViewRow(viewRow) : null;
+
+    await connection.execute(
+      `BEGIN TM.TM_TIMESHEET_PKG.DELETE_TIMESHEET(p_timesheet_id => :p_timesheet_id, p_updated_by => :p_updated_by); END;`,
+      { p_timesheet_id: timesheetId, p_updated_by: updatedByStr },
+      { autoCommit: false }
+    );
+
+    return payload;
+  }, 'delete timesheet with payload');
 }
 
 /**
@@ -582,79 +895,123 @@ function mapViewRow(row) {
 }
 
 /**
+ * Lightweight mapper for list endpoint: no JSON.parse of CLOBs (saves 2–5s on large payloads).
+ * Formats GUIDs and dates, snake_case keys; sets timesheet_lines and org_structure_list to [].
+ */
+function mapViewRowForList(row) {
+  if (!row) return null;
+  const r = { ...row };
+  if (Buffer.isBuffer(r.TIMESHEET_GUID)) r.TIMESHEET_GUID = bufferToHexString(r.TIMESHEET_GUID);
+  if (Buffer.isBuffer(r.ORG_UNIT_ID)) r.ORG_UNIT_ID = bufferToHexString(r.ORG_UNIT_ID);
+  HEADER_DATE_KEYS.forEach((k) => formatDateKey(r, k));
+  delete r.TIMESHEET_LINES_JSON;
+  delete r.TIMESHEET_LINES;
+  delete r.ORG_STRUCTURE_LIST;
+  delete r.ORG_STRUCTURE_LIST_JSON;
+  r.TIMESHEET_LINES = [];
+  r.ORG_STRUCTURE_LIST = [];
+  return keysToSnake(r);
+}
+
+/**
  * List timesheets from TM.V_TIMESHEETS_WITH_LINES_JSON with filters, sort, pagination.
+ * Optional: search, status, isActive, employeeId, weekStartFrom/To, submittedFrom/To, levelCode, orgUnitId.
+ * Default sort: creation_date DESC. sortBy: creation_date | week_start_date | status_code; sortOrder: asc | desc.
  */
 export async function listTimesheetsFromView(filters) {
   const enterpriseId = optNum(filters.enterpriseId ?? filters.enterprise_id);
-  const orgUnitId = filters.orgUnitId ?? filters.org_unit_id;
-  const levelCode = filters.levelCode ?? filters.level_code;
-  const status = optStr(filters.status ?? filters.status_code);
-  const projectName = optStr(filters.projectName ?? filters.project_name);
   const search = optStr(filters.search);
+  const status = optStr(filters.status ?? filters.status_code);
+  const isActive = optStr(filters.isActive ?? filters.is_active);
+  const employeeId = optNum(filters.employeeId ?? filters.employee_id);
   const weekStartFrom = filters.weekStartFrom ?? filters.week_start_from;
   const weekStartTo = filters.weekStartTo ?? filters.week_start_to;
+  const submittedFrom = filters.submittedFrom ?? filters.submitted_from;
+  const submittedTo = filters.submittedTo ?? filters.submitted_to;
+  const levelCode = filters.levelCode ?? filters.level_code;
+  const orgUnitId = filters.orgUnitId ?? filters.org_unit_id;
+
   const page = Math.max(1, parseInt(filters.page, 10) || DEFAULT_PAGE);
-  const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(filters.limit, 10) || DEFAULT_LIMIT));
-  const offset = (page - 1) * limit;
-  const rawSortBy = String(filters.sortBy ?? 'WEEK_START_DATE').toUpperCase();
-  const sortBy = SORT_BY_WHITELIST.has(rawSortBy) ? rawSortBy : 'WEEK_START_DATE';
-  const rawSortDir = String(filters.sortDir ?? 'DESC').toUpperCase();
-  const sortDir = SORT_DIR_WHITELIST.has(rawSortDir) ? rawSortDir : 'DESC';
+  const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(filters.limit, 10) || DEFAULT_LIST_LIMIT));
+  const rawSortBy = String(filters.sortBy ?? filters.sort_by ?? 'creation_date').toLowerCase().replace(/-/g, '_');
+  const sortByMap = { creation_date: 'CREATION_DATE', week_start_date: 'WEEK_START_DATE', status_code: 'STATUS_CODE' };
+  const sortBy = sortByMap[rawSortBy] || 'CREATION_DATE';
+  const rawSortOrder = String(filters.sortOrder ?? filters.sort_order ?? filters.sortDir ?? 'desc').toLowerCase();
+  const sortOrder = rawSortOrder === 'asc' ? 'ASC' : 'DESC';
 
-  const conditions = ['v.ENTERPRISE_ID = :enterpriseId'];
-  const binds = { enterpriseId };
+  const binds = {
+    enterpriseId,
+    search: search || null,
+    status: status || null,
+    isActive: isActive || null,
+    employeeId: employeeId ?? null,
+    weekStartFrom: weekStartFrom && String(weekStartFrom).trim() !== '' ? String(weekStartFrom).slice(0, 10) : null,
+    weekStartTo: weekStartTo && String(weekStartTo).trim() !== '' ? String(weekStartTo).slice(0, 10) : null,
+    submittedFrom: submittedFrom && String(submittedFrom).trim() !== '' ? String(submittedFrom).slice(0, 10) : null,
+    submittedTo: submittedTo && String(submittedTo).trim() !== '' ? String(submittedTo).slice(0, 10) : null,
+    levelCode: levelCode && String(levelCode).trim() !== '' ? String(levelCode).trim().toUpperCase() : null,
+    orgUnitId: orgUnitId != null && String(orgUnitId).trim() !== '' ? String(orgUnitId).trim() : null,
+    sortBy,
+    sortOrder,
+    page,
+    limit
+  };
 
-  if (orgUnitId != null && String(orgUnitId).trim() !== '' && levelCode != null && String(levelCode).trim() !== '') {
-    conditions.push(
-      `JSON_EXISTS(v.ORG_STRUCTURE_LIST, 'lax $[*]?(@.org_unit_id == $ouid && @.level_code == $lcode)' PASSING :orgUnitId AS "ouid", :levelCode AS "lcode")`
-    );
-    binds.orgUnitId = String(orgUnitId).trim();
-    binds.levelCode = String(levelCode).trim().toUpperCase();
-  }
+  const whereClause = `
+    v.ENTERPRISE_ID = :enterpriseId
+    AND (:search IS NULL OR LOWER(v.SEARCH) LIKE '%' || LOWER(:search) || '%')
+    AND (:status IS NULL OR UPPER(v.STATUS_CODE) = UPPER(:status))
+    AND (:isActive IS NULL OR UPPER(NVL(v.IS_ACTIVE, 'Y')) = UPPER(:isActive))
+    AND (:employeeId IS NULL OR v.EMPLOYEE_ID = :employeeId)
+    AND (:weekStartFrom IS NULL OR v.WEEK_START_DATE >= TO_DATE(:weekStartFrom,'YYYY-MM-DD'))
+    AND (:weekStartTo IS NULL OR v.WEEK_START_DATE <= TO_DATE(:weekStartTo,'YYYY-MM-DD'))
+    AND (:submittedFrom IS NULL OR v.SUBMITTED_DATE >= TO_DATE(:submittedFrom,'YYYY-MM-DD'))
+    AND (:submittedTo IS NULL OR v.SUBMITTED_DATE <= TO_DATE(:submittedTo,'YYYY-MM-DD'))
+    AND (
+      :levelCode IS NULL
+      OR :orgUnitId IS NULL
+      OR JSON_EXISTS(
+        NVL(v.ORG_STRUCTURE_LIST_JSON, v.ORG_STRUCTURE_LIST),
+        '$[*]?(@.level_code == $lc && @.org_unit_id == $ou)'
+        PASSING UPPER(:levelCode) AS "lc",
+        :orgUnitId AS "ou"
+      )
+    )
+  `;
 
-  if (status != null) {
-    conditions.push('UPPER(v.STATUS_CODE) = UPPER(:status)');
-    binds.status = status;
-  }
-  if (projectName != null) {
-    conditions.push("UPPER(v.PROJECT_NAME) LIKE '%' || UPPER(:projectName) || '%'");
-    binds.projectName = projectName;
-  }
-  if (search != null) {
-    conditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:search) || '%'");
-    binds.search = search;
-  }
-  if (weekStartFrom != null && String(weekStartFrom).trim() !== '') {
-    conditions.push("v.WEEK_START_DATE >= TO_DATE(:weekStartFrom,'YYYY-MM-DD')");
-    binds.weekStartFrom = String(weekStartFrom).slice(0, 10);
-  }
-  if (weekStartTo != null && String(weekStartTo).trim() !== '') {
-    conditions.push("v.WEEK_START_DATE <= TO_DATE(:weekStartTo,'YYYY-MM-DD')");
-    binds.weekStartTo = String(weekStartTo).slice(0, 10);
-  }
+  // Alias for outer query (subquery returns all view columns + total_count)
+  const orderByClause = `
+    CASE WHEN :sortBy = 'WEEK_START_DATE' AND :sortOrder = 'ASC'  THEN sub.WEEK_START_DATE END ASC,
+    CASE WHEN :sortBy = 'WEEK_START_DATE' AND :sortOrder = 'DESC' THEN sub.WEEK_START_DATE END DESC,
+    CASE WHEN :sortBy = 'STATUS_CODE' AND :sortOrder = 'ASC'  THEN sub.STATUS_CODE END ASC,
+    CASE WHEN :sortBy = 'STATUS_CODE' AND :sortOrder = 'DESC' THEN sub.STATUS_CODE END DESC,
+    CASE WHEN :sortBy = 'CREATION_DATE' AND :sortOrder = 'ASC'  THEN sub.CREATION_DATE END ASC,
+    CASE WHEN :sortBy = 'CREATION_DATE' AND :sortOrder = 'DESC' THEN sub.CREATION_DATE END DESC,
+    sub.CREATION_DATE DESC
+  `;
 
-  const whereClause = conditions.join(' AND ');
-  const orderBy = `${sortBy} ${sortDir}`;
-  const dataBinds = { ...binds, p_offset: offset, p_limit: limit };
-
+  // Single query: get total via COUNT(*) OVER () and paginate in one round-trip (faster than list + count)
   const listSql = `
     SELECT * FROM (
-      SELECT v.*,
-             COUNT(*) OVER () AS total_count,
-             ROW_NUMBER() OVER (ORDER BY v.${sortBy} ${sortDir}) AS rn
+      SELECT v.*, COUNT(*) OVER () AS total_count
       FROM TM.V_TIMESHEETS_WITH_LINES_JSON v
       WHERE ${whereClause}
-    ) WHERE rn > :p_offset AND rn <= :p_offset + :p_limit
-    ORDER BY rn
+    ) sub
+    ORDER BY ${orderByClause}
+    OFFSET (:page - 1) * :limit ROWS
+    FETCH NEXT :limit ROWS ONLY
   `;
 
   try {
     return await runReadOnly(async (connection) => {
-      const result = await connection.execute(listSql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const result = await connection.execute(listSql, binds, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        fetchArraySize: Math.max(limit, 100) // fewer round-trips when fetching rows
+      });
       const rows = result.rows || [];
-      const totalRecords = rows.length > 0 ? Number(rows[0].TOTAL_COUNT) || 0 : 0;
+      const totalRecords = rows.length > 0 ? Number(rows[0].TOTAL_COUNT) ?? 0 : 0;
       const data = rows.map((row) => {
-        const { RN, TOTAL_COUNT: _tc, ...rest } = row;
+        const { TOTAL_COUNT: _tc, ...rest } = row;
         return mapViewRow(rest);
       });
       const totalPages = limit > 0 ? Math.ceil(totalRecords / limit) : 0;

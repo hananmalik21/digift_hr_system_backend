@@ -114,6 +114,36 @@ export function sendDatabaseError(res, req, error) {
 }
 
 /**
+ * Success response for punch and recompute: { success: true, attendance_day_id, action }.
+ */
+export function sendPunchRecomputeSuccess(res, req, attendanceDayId, action) {
+  res.status(action === 'PUNCH' ? 201 : 200).json({
+    success: true,
+    attendance_day_id: attendanceDayId,
+    action
+  });
+}
+
+/**
+ * Oracle error response for punch/recompute: { success: false, message, oracle_error: { code, errorNum, offset } }.
+ */
+export function sendPunchRecomputeOracleError(res, req, error) {
+  const message = error.message || error.userMessage || 'Database error';
+  const code = error.oracleCode || (error.message && error.message.match(/ORA-\d{5}/)?.[0]) || null;
+  const oracle_error = {
+    code: code || null,
+    errorNum: error.errorNum ?? null,
+    offset: error.offset ?? error.oracleError?.offset ?? null
+  };
+  const status = (error.statusCode >= 400 && error.statusCode < 600) ? error.statusCode : 400;
+  res.status(status).json({
+    success: false,
+    message,
+    oracle_error
+  });
+}
+
+/**
  * Send paginated attendance logs list (GET /api/tm/attendance/logs)
  */
 export function sendAttendanceLogsList(res, req, data, meta) {

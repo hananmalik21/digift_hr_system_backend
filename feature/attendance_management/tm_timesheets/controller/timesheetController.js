@@ -1,16 +1,15 @@
 import express from 'express';
 import {
   upsertWeeklyTimesheet,
-  submitTimesheet,
-  approveTimesheet,
-  rejectTimesheet,
-  deleteTimesheetByGuid,
+  submitTimesheetByGuid,
+  approveTimesheetByGuid,
+  rejectTimesheetByGuid,
+  deleteTimesheetByGuidReturningMeta,
+  deleteTimesheetByGuidWithPayload,
   deleteLineByResolvedId,
-  getTimesheetById,
-  getTimesheetByGuid,
-  getTimesheetIdByGuid,
+  getTimesheetByGuidFromViewSingleConn,
+  getTimesheetByIdFromView,
   getTimesheetIdAndStatusByGuid,
-  getTimesheetStatus,
   listTimesheetsFromView,
   STATUS_CODES_LIST,
   DEFAULT_PAGE_SIZE,
@@ -23,6 +22,18 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 const router = express.Router();
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// In-memory cache for list endpoint (short TTL to improve response time on repeated requests)
+const LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+const listCache = new Map();
+
+function listCacheKey(filters) {
+  return `list:${filters.enterpriseId}:${filters.page}:${filters.limit}:${filters.sortBy}:${filters.sortOrder}:${filters.search ?? ''}:${filters.status ?? ''}:${filters.isActive ?? ''}:${filters.employeeId ?? ''}:${filters.weekStartFrom ?? ''}:${filters.weekStartTo ?? ''}:${filters.submittedFrom ?? ''}:${filters.submittedTo ?? ''}:${filters.levelCode ?? ''}:${filters.orgUnitId ?? ''}`;
+}
+
+function invalidateTimesheetsListCache() {
+  listCache.clear();
+}
 
 function parseNum(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -59,14 +70,6 @@ function requireUpdatedBy(req) {
   const updatedBy = getUpdatedBy(req);
   if (!updatedBy) throw new ValidationError(UPDATED_BY_REQUIRED_MSG, [UPDATED_BY_REQUIRED_MSG]);
   return updatedBy;
-}
-
-async function resolveTimesheetGuid(guidParam) {
-  if (!isValidGuid(guidParam)) throw new ValidationError(GUID_VALIDATION_MSG);
-  const guid = String(guidParam || '').trim().replace(/-/g, '');
-  const id = await getTimesheetIdByGuid(guid);
-  if (id == null) throw new NotFoundError('Timesheet not found');
-  return id;
 }
 
 /**
@@ -136,6 +139,8 @@ function buildUpsertResponsePayload(result) {
     timesheet_id: result.timesheet_id,
     timesheet_guid: result.timesheet_guid,
     status_code: result.status_code,
+    employee_id: result.employee_id ?? null,
+    employee_guid: result.employee_guid ?? null,
     ...(result.header && { header: result.header, lines: result.lines })
   };
 }
@@ -149,48 +154,71 @@ function normalizeUpsertBody(body) {
   };
 }
 
+/** True if result is full view payload (has timesheet_lines or org_structure_list). */
+function isFullViewPayload(result) {
+  return result && (Array.isArray(result.timesheet_lines) || Array.isArray(result.org_structure_list));
+}
+
 /**
- * POST /api/tm/timesheets — create timesheet (timesheet_id omitted/null).
- * Query ?full=false for minimal response (no header/lines re-fetch).
+ * POST /api/tm/timesheets — create timesheet.
+ * Returns minimal payload (timesheet_id, timesheet_guid, status_code) immediately for fast response.
+ * Use ?full=true to wait for full payload from V_TIMESHEETS_WITH_LINES_JSON. Full details also at GET /api/tm/timesheets/:timesheetGuid.
  */
 router.post('/', asyncHandler(async (req, res) => {
-  const body = normalizeUpsertBody({ ...req.body, returnFull: req.query.full !== 'false' });
+  const body = normalizeUpsertBody(req.body);
   const errors = validateUpsertBody(body);
   if (errors.length > 0) throw new ValidationError('Validation failed', errors);
 
-  const result = await upsertWeeklyTimesheet(body);
+  const wantFull = req.query.full === 'true';
+  const result = await upsertWeeklyTimesheet({
+    ...body,
+    returnFull: false,
+    returnFullFromView: wantFull
+  });
+  let data = buildUpsertResponsePayload(result);
+  if (wantFull && result.timesheet_guid) {
+    const full = isFullViewPayload(result) ? result : (await getTimesheetByIdFromView(result.timesheet_id)) ?? data;
+    data = full;
+  }
+  if (result.timesheet_guid && !res.headersSent) {
+    res.set('Location', `${req.baseUrl}/${result.timesheet_guid}`);
+  }
+  invalidateTimesheetsListCache();
   sendCreated(res, {
     message: 'Timesheet created successfully',
-    data: buildUpsertResponsePayload(result)
+    data
   });
 }));
 
 /**
  * PUT /api/tm/timesheets/:timesheetGuid — update timesheet.
- * Query ?full=false for minimal response. Uses resolved id for DRAFT check (one less round-trip).
+ * Single DB connection (resolve guid + upsert). Minimal payload by default; use ?full=true for view payload.
  */
 router.put('/:timesheetGuid', asyncHandler(async (req, res) => {
-  const id = await resolveTimesheetGuid(req.params.timesheetGuid);
-  const body = normalizeUpsertBody({
-    ...req.body,
-    timesheet_id: id,
-    returnFull: req.query.full !== 'false'
-  });
+  const timesheetGuid = req.params.timesheetGuid;
+  if (!isValidGuid(timesheetGuid)) throw new ValidationError(GUID_VALIDATION_MSG);
+
+  const body = normalizeUpsertBody({ ...req.body, timesheet_guid: timesheetGuid });
   const errors = validateUpsertBody(body);
   if (errors.length > 0) throw new ValidationError('Validation failed', errors);
 
   const hasLines = Array.isArray(body.lines) && body.lines.length > 0;
-  if (hasLines) {
-    const currentStatus = await getTimesheetStatus(id);
-    if (currentStatus != null && currentStatus !== 'DRAFT') {
-      throw new ValidationError('Lines can be modified only when timesheet status is DRAFT.');
-    }
+  const wantFull = req.query.full === 'true';
+  const result = await upsertWeeklyTimesheet({
+    ...body,
+    checkLinesRequireDraft: hasLines,
+    returnFull: false,
+    returnFullFromView: wantFull
+  });
+  let data = buildUpsertResponsePayload(result);
+  if (wantFull && result.timesheet_id != null) {
+    const full = isFullViewPayload(result) ? result : (await getTimesheetByIdFromView(result.timesheet_id)) ?? data;
+    data = full;
   }
-
-  const result = await upsertWeeklyTimesheet(body);
+  invalidateTimesheetsListCache();
   sendUpdated(res, {
     message: 'Timesheet updated successfully',
-    data: buildUpsertResponsePayload(result)
+    data
   });
 }));
 
@@ -199,66 +227,83 @@ function sendStatusChange(res, message, data) {
 }
 
 /**
- * POST /api/tm/timesheets/:timesheetGuid/submit
- * Query ?full=false for minimal response (no re-fetch).
+ * POST /api/tm/timesheets/:timesheetGuid/submit — one connection, returns full payload.
  */
 router.post('/:timesheetGuid/submit', asyncHandler(async (req, res) => {
-  const id = await resolveTimesheetGuid(req.params.timesheetGuid);
+  const timesheetGuid = req.params.timesheetGuid;
+  if (!isValidGuid(timesheetGuid)) throw new ValidationError(GUID_VALIDATION_MSG);
   const body = req.body ?? {};
-  const returnFull = req.query.full !== 'false';
-  const data = await submitTimesheet(
-    id,
+  const data = await submitTimesheetByGuid(
+    timesheetGuid,
     { updated_by: body.updated_by, submitted_date: body.submitted_date },
-    { returnFull }
+    { returnFullFromView: true }
   );
+  invalidateTimesheetsListCache();
   sendStatusChange(res, 'Timesheet submitted', data);
 }));
 
 /**
- * POST /api/tm/timesheets/:timesheetGuid/approve
- * Query ?full=false for minimal response.
+ * POST /api/tm/timesheets/:timesheetGuid/approve — one connection, returns full payload.
  */
 router.post('/:timesheetGuid/approve', asyncHandler(async (req, res) => {
-  const id = await resolveTimesheetGuid(req.params.timesheetGuid);
+  const timesheetGuid = req.params.timesheetGuid;
+  if (!isValidGuid(timesheetGuid)) throw new ValidationError(GUID_VALIDATION_MSG);
   const body = req.body ?? {};
-  const returnFull = req.query.full !== 'false';
-  const data = await approveTimesheet(
-    id,
+  const data = await approveTimesheetByGuid(
+    timesheetGuid,
     { updated_by: body.updated_by, approved_date: body.approved_date },
-    { returnFull }
+    { returnFullFromView: true }
   );
+  invalidateTimesheetsListCache();
   sendStatusChange(res, 'Timesheet approved', data);
 }));
 
 /**
- * POST /api/tm/timesheets/:timesheetGuid/reject
- * Query ?full=false for minimal response.
+ * POST /api/tm/timesheets/:timesheetGuid/reject — one connection, returns full payload.
  */
 router.post('/:timesheetGuid/reject', asyncHandler(async (req, res) => {
-  const id = await resolveTimesheetGuid(req.params.timesheetGuid);
+  const timesheetGuid = req.params.timesheetGuid;
+  if (!isValidGuid(timesheetGuid)) throw new ValidationError(GUID_VALIDATION_MSG);
   const body = req.body ?? {};
   const reason = (body.reject_reason ?? '').trim();
   if (!reason) throw new ValidationError('reject_reason is required', ['reject_reason is required for reject']);
-  const returnFull = req.query.full !== 'false';
-  const data = await rejectTimesheet(
-    id,
+  const data = await rejectTimesheetByGuid(
+    timesheetGuid,
     { updated_by: body.updated_by, reject_reason: reason, rejected_date: body.rejected_date },
-    { returnFull }
+    { returnFullFromView: true }
   );
+  invalidateTimesheetsListCache();
   sendStatusChange(res, 'Timesheet rejected', data);
 }));
 
 /**
- * DELETE /api/tm/timesheets/:timesheetGuid — delete or withdraw timesheet (DB: DRAFT → delete; SUBMITTED → WITHDRAWN).
+ * DELETE /api/tm/timesheets/:timesheetGuid — delete or withdraw (DRAFT → delete; SUBMITTED → WITHDRAWN).
+ * Returns minimal payload immediately for speed. Use ?full=true to return full payload from view before delete.
  */
 router.delete('/:timesheetGuid', asyncHandler(async (req, res) => {
   const timesheetGuid = req.params.timesheetGuid;
   if (!isValidGuid(timesheetGuid)) throw new ValidationError(GUID_VALIDATION_MSG);
   const updatedBy = requireUpdatedBy(req);
-  const result = await deleteTimesheetByGuid(timesheetGuid, updatedBy);
+  const wantFull = req.query.full === 'true';
+  if (wantFull) {
+    const data = await deleteTimesheetByGuidWithPayload(timesheetGuid, updatedBy);
+    invalidateTimesheetsListCache();
+    return sendDeleted(res, {
+      message: 'Timesheet deleted or withdrawn',
+      data: data ?? {}
+    });
+  }
+  const result = await deleteTimesheetByGuidReturningMeta(timesheetGuid, updatedBy);
+  invalidateTimesheetsListCache();
   sendDeleted(res, {
     message: 'Timesheet deleted or withdrawn',
-    data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid) }
+    data: {
+      timesheet_id: result.timesheet_id,
+      timesheet_guid: result.timesheet_guid || normalizeGuidForResponse(timesheetGuid),
+      employee_id: result.employee_id ?? null,
+      employee_guid: result.employee_guid ?? null,
+      deleted: true
+    }
   });
 }));
 
@@ -278,6 +323,7 @@ router.delete('/:timesheetGuid/lines/:lineGuid', asyncHandler(async (req, res) =
   }
   const updatedBy = requireUpdatedBy(req);
   const result = await deleteLineByResolvedId(meta.id, lineGuid, updatedBy);
+  invalidateTimesheetsListCache();
   sendDeleted(res, {
     message: 'Line deleted successfully',
     data: { ...result, timesheet_guid: normalizeGuidForResponse(timesheetGuid), line_guid: normalizeGuidForResponse(lineGuid) }
@@ -304,6 +350,8 @@ function buildListMeta(result) {
 
 /**
  * GET /api/tm/timesheets — list from V_TIMESHEETS_WITH_LINES_JSON (pagination, filters, sort).
+ * Required: enterpriseId. Optional: page, limit, search, status, isActive, employeeId,
+ * weekStartFrom, weekStartTo, submittedFrom, submittedTo, levelCode, orgUnitId, sortBy, sortOrder.
  */
 router.get('/', asyncHandler(async (req, res) => {
   const enterpriseId = req.query.enterpriseId ?? req.query.enterprise_id;
@@ -313,19 +361,35 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const filters = {
     enterpriseId,
-    orgUnitId: req.query.orgUnitId ?? req.query.org_unit_id,
-    levelCode: req.query.levelCode ?? req.query.level_code,
-    status: req.query.status ?? req.query.status_code,
-    projectName: req.query.projectName ?? req.query.project_name,
+    page: req.query.page ?? 1,
+    limit: req.query.limit ?? 10,
     search: req.query.search,
+    status: req.query.status ?? req.query.status_code,
+    isActive: req.query.isActive ?? req.query.is_active,
+    employeeId: req.query.employeeId ?? req.query.employee_id,
     weekStartFrom: req.query.weekStartFrom ?? req.query.week_start_from,
     weekStartTo: req.query.weekStartTo ?? req.query.week_start_to,
-    page: req.query.page ?? 1,
-    limit: req.query.limit ?? DEFAULT_PAGE_SIZE,
-    sortBy: req.query.sortBy ?? 'WEEK_START_DATE',
-    sortDir: req.query.sortDir ?? 'DESC'
+    submittedFrom: req.query.submittedFrom ?? req.query.submitted_from,
+    submittedTo: req.query.submittedTo ?? req.query.submitted_to,
+    levelCode: req.query.levelCode ?? req.query.level_code,
+    orgUnitId: req.query.orgUnitId ?? req.query.org_unit_id,
+    sortBy: req.query.sortBy ?? req.query.sort_by ?? 'creation_date',
+    sortOrder: req.query.sortOrder ?? req.query.sort_order ?? req.query.sortDir ?? 'desc'
   };
+
+  const key = listCacheKey(filters);
+  const cached = listCache.get(key);
+  if (cached && Date.now() - cached.at < LIST_CACHE_TTL_MS) {
+    return sendList(res, {
+      message: 'Fetched successfully',
+      data: cached.result.data,
+      meta: buildListMeta(cached.result)
+    });
+  }
+
   const result = await listTimesheetsFromView(filters);
+  if (listCache.size >= 500) listCache.clear();
+  listCache.set(key, { result, at: Date.now() });
   sendList(res, {
     message: 'Fetched successfully',
     data: result.data,
@@ -334,10 +398,10 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/tm/timesheets/:timesheetGuid — single timesheet with lines.
+ * GET /api/tm/timesheets/:timesheetGuid — single timesheet (full view shape, one connection).
  */
 router.get('/:timesheetGuid', asyncHandler(async (req, res) => {
-  const data = await getTimesheetByGuid(req.params.timesheetGuid);
+  const data = await getTimesheetByGuidFromViewSingleConn(req.params.timesheetGuid);
   if (!data) throw new NotFoundError('Timesheet not found');
   sendSuccess(res, {
     message: 'Fetched successfully',

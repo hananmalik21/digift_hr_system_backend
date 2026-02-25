@@ -388,6 +388,346 @@ class AttendanceModel {
     }
   }
 
+  /** Strip ORA stack trace and Help URL from error message for user-facing text. */
+  static stripOracleMessage(msg) {
+    if (typeof msg !== 'string' || !msg) return '';
+    let out = msg.split(/\nORA-\d{5}:/)[0].trim();
+    return out.replace(/Help:\s*https?:\/\/[^\n]*/gi, '').trim();
+  }
+
+  /**
+   * Map Oracle errors for ADD_PUNCH to user message. Returns null for generic handling.
+   */
+  static mapAddPunchError(err) {
+    if (!err || typeof err.message !== 'string') return null;
+    const msg = (err.message || '').trim();
+    const upper = msg.toUpperCase();
+    if (err.errorNum >= 20000 && err.errorNum <= 20999) {
+      const userMsg = this.stripOracleMessage(msg);
+      return userMsg || 'Validation or business rule error from attendance system.';
+    }
+    if (err.errorNum === 2290 || upper.includes('ORA-02290')) {
+      return msg.includes('constraint') ? msg : 'Invalid punch_type or value; check constraint violation.';
+    }
+    if (err.errorNum === 1403 || upper.includes('ORA-01403')) {
+      return 'attendance_day_id not found';
+    }
+    return null;
+  }
+
+  /**
+   * Call TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH_UTC. punch_time_utc is UTC ISO string; Oracle converts to schedule tz_region.
+   * Package runs RECOMPUTE_DAY internally; do not call recompute from Node.
+   */
+  static async addPunch(payload) {
+    let connection;
+
+    try {
+      connection = await db.getConnection();
+      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
+
+      const attendanceDayId = Number(payload.attendance_day_id);
+      const punchType = String(payload.punch_type || '').trim().toUpperCase();
+      const punchTimeUtc = typeof payload.punch_time === 'string' ? payload.punch_time.trim() : String(payload.punch_time);
+      const actor = this.optStr(payload.actor) || 'ADMIN';
+      const latitude = this.optNum(payload.latitude);
+      const longitude = this.optNum(payload.longitude);
+      const locationName = this.optStr(payload.location_name);
+
+      const plsqlBlock = `
+        BEGIN
+          TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH_UTC(
+            p_attendance_day_id => :p_attendance_day_id,
+            p_punch_type        => :p_punch_type,
+            p_punch_time_utc    => :p_punch_time_utc,
+            p_actor             => :p_actor,
+            p_latitude          => :p_latitude,
+            p_longitude         => :p_longitude,
+            p_location_name     => :p_location_name
+          );
+        END;
+      `;
+
+      const binds = {
+        p_attendance_day_id: attendanceDayId,
+        p_punch_type: punchType,
+        p_punch_time_utc: punchTimeUtc,
+        p_actor: actor,
+        p_latitude: latitude,
+        p_longitude: longitude,
+        p_location_name: locationName
+      };
+
+      await connection.execute(plsqlBlock, binds, { autoCommit: false });
+      await connection.commit();
+
+      return { attendance_day_id: attendanceDayId };
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      if (error instanceof DatabaseError) throw error;
+      const userMsg = this.mapAddPunchError(error);
+      const message = userMsg || (() => {
+        const oraCode = (error.message || '').match(/ORA-\d{5}/)?.[0];
+        return oraCode ? `Database error (${oraCode}): ${error.message || 'Unknown'}` : 'Failed to add punch.';
+      })();
+      throw new DatabaseError(message, error, userMsg || message);
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /**
+   * Call TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC. Times are UTC ISO strings.
+   */
+  static async hrManualAddBothPunchesUtc(payload) {
+    let connection;
+
+    try {
+      connection = await db.getConnection();
+      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
+
+      const pDayId = Number(payload.attendance_day_id);
+      const pInUtc = typeof payload.check_in_time_utc === 'string' ? payload.check_in_time_utc.trim() : String(payload.check_in_time_utc);
+      const pOutUtc = typeof payload.check_out_time_utc === 'string' ? payload.check_out_time_utc.trim() : String(payload.check_out_time_utc);
+      const pActor = this.optStr(payload.actor) || 'HR_ADMIN';
+      const pLocIn = this.optStr(payload.location_name_in);
+      const pLatIn = this.optNum(payload.latitude_in);
+      const pLonIn = this.optNum(payload.longitude_in);
+      const pLocOut = this.optStr(payload.location_name_out);
+      const pLatOut = this.optNum(payload.latitude_out);
+      const pLonOut = this.optNum(payload.longitude_out);
+      const pReason = this.optStr(payload.reason);
+
+      const plsqlBlock = `
+        DECLARE
+          v_ret NUMBER;
+        BEGIN
+          v_ret := TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC(
+            p_attendance_day_id   => :p_day_id,
+            p_check_in_time_utc   => :p_in_utc,
+            p_check_out_time_utc  => :p_out_utc,
+            p_actor               => :p_actor,
+            p_location_name_in    => :p_loc_in,
+            p_latitude_in         => :p_lat_in,
+            p_longitude_in        => :p_lon_in,
+            p_location_name_out   => :p_loc_out,
+            p_latitude_out        => :p_lat_out,
+            p_longitude_out       => :p_lon_out,
+            p_reason              => :p_reason
+          );
+          :o_ret := v_ret;
+        END;
+      `;
+
+      const binds = {
+        p_day_id: pDayId,
+        p_in_utc: pInUtc,
+        p_out_utc: pOutUtc,
+        p_actor: pActor,
+        p_loc_in: pLocIn,
+        p_lat_in: pLatIn,
+        p_lon_in: pLonIn,
+        p_loc_out: pLocOut,
+        p_lat_out: pLatOut,
+        p_lon_out: pLonOut,
+        p_reason: pReason,
+        o_ret: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
+      };
+
+      await connection.execute(plsqlBlock, binds, { autoCommit: false });
+      await connection.commit();
+
+      const outRet = binds.o_ret?.val;
+      return { attendance_day_id: pDayId, result: outRet };
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      if (error instanceof DatabaseError) throw error;
+      const userMsg = this.mapAddPunchError(error);
+      const message = userMsg || (() => {
+        const oraCode = (error.message || '').match(/ORA-\d{5}/)?.[0];
+        return oraCode ? `Database error (${oraCode}): ${error.message || 'Unknown'}` : 'Failed to add HR manual punches.';
+      })();
+      throw new DatabaseError(message, error, userMsg || message);
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /**
+   * After ADD_PUNCH, fetch updated day snapshot in 3 round-trips: day+actuals (1 query), punches, locations (parallel).
+   */
+  static async fetchDaySnapshotAfterPunch(connection, attendanceDayId) {
+    const binds = { attendance_day_id: attendanceDayId };
+
+    const dayAndActualsSql = `
+      SELECT d.ATTENDANCE_STATUS, d.IN_STATE, d.OUT_STATE, d.LAST_UPDATE_DATE,
+             a.CHECK_IN_TIME, a.CHECK_OUT_TIME, a.HOURS_WORKED, a.OVERTIME_HOURS,
+             a.OT_CONFIG_ID, a.OT_RATE_TYPE_ID, a.OT_MULTIPLIER
+      FROM TM.TM_ATTENDANCE_DAYS d
+      LEFT JOIN TM.TM_ATTENDANCE_ACTUALS a ON a.ATTENDANCE_DAY_ID = d.ATTENDANCE_DAY_ID
+      WHERE d.ATTENDANCE_DAY_ID = :attendance_day_id
+    `;
+    const punchesSql = `
+      SELECT PUNCH_ID, PUNCH_TYPE, PUNCH_TIME
+      FROM TM.TM_ATTENDANCE_PUNCHES
+      WHERE ATTENDANCE_DAY_ID = :attendance_day_id
+      ORDER BY PUNCH_TIME DESC
+    `;
+    const locationsSql = `
+      SELECT l.LOG_TYPE, l.LOCATION_NAME, l.LATITUDE, l.LONGITUDE, l.CAPTURED_AT, l.PUNCH_ID
+      FROM TM.TM_ATTENDANCE_LOCATIONS l
+      JOIN TM.TM_ATTENDANCE_PUNCHES p ON p.PUNCH_ID = l.PUNCH_ID
+      WHERE p.ATTENDANCE_DAY_ID = :attendance_day_id
+      ORDER BY l.CAPTURED_AT DESC NULLS LAST
+    `;
+
+    try {
+      const [dayActualsResult, punchesResult, locationsResult] = await Promise.all([
+        connection.execute(dayAndActualsSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+        connection.execute(punchesSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+        connection.execute(locationsSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+      ]);
+
+      const row = dayActualsResult.rows?.[0];
+      const full = row ? this.convertRowToSnakeCase(row) : null;
+      const day = full ? {
+        attendance_status: full.attendance_status,
+        in_state: full.in_state,
+        out_state: full.out_state,
+        last_update_date: full.last_update_date
+      } : null;
+      const actuals = full ? {
+        check_in_time: full.check_in_time,
+        check_out_time: full.check_out_time,
+        hours_worked: full.hours_worked,
+        overtime_hours: full.overtime_hours,
+        ot_config_id: full.ot_config_id,
+        ot_rate_type_id: full.ot_rate_type_id,
+        ot_multiplier: full.ot_multiplier
+      } : null;
+      const punches = (punchesResult.rows || []).map(r => this.convertRowToSnakeCase(r));
+      const locations = (locationsResult.rows || []).map(r => this.convertRowToSnakeCase(r));
+
+      return { day, actuals, punches, locations };
+    } catch (err) {
+      console.error('[AttendanceModel.fetchDaySnapshotAfterPunch]', err?.message || err);
+      return null;
+    }
+  }
+
+  /**
+   * Call TM.TM_ATTENDANCE_SYSTEM_PKG.RECOMPUTE_DAY. Uses bind variables, commits on success.
+   */
+  static async recomputeDay(payload) {
+    let connection;
+
+    try {
+      connection = await db.getConnection();
+      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
+
+      const attendanceDayId = Number(payload.attendance_day_id);
+      const actor = this.optStr(payload.actor) || 'ADMIN';
+
+      const plsqlBlock = `
+        BEGIN
+          TM.TM_ATTENDANCE_SYSTEM_PKG.RECOMPUTE_DAY(
+            p_attendance_day_id => :p_attendance_day_id,
+            p_actor             => :p_actor
+          );
+        END;
+      `;
+
+      const binds = {
+        p_attendance_day_id: attendanceDayId,
+        p_actor: actor
+      };
+
+      await connection.execute(plsqlBlock, binds, { autoCommit: false });
+      await connection.commit();
+
+      return { attendance_day_id: attendanceDayId };
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      if (error instanceof DatabaseError) throw error;
+      const userMsg = this.mapAddPunchError(error);
+      const message = userMsg || (() => {
+        const oraCode = (error.message || '').match(/ORA-\d{5}/)?.[0];
+        return oraCode ? `Database error (${oraCode}): ${error.message || 'Unknown'}` : 'Failed to recompute day.';
+      })();
+      throw new DatabaseError(message, error, userMsg || message);
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (_) {}
+      }
+    }
+  }
+
+  /**
+   * Fetch day + actuals snapshot after RECOMPUTE_DAY (single query).
+   */
+  static async fetchRecomputeSnapshot(connection, attendanceDayId) {
+    const sql = `
+      SELECT d.ATTENDANCE_STATUS, d.IN_STATE, d.OUT_STATE, d.ATTENDANCE_DATE,
+             a.CHECK_IN_TIME, a.CHECK_OUT_TIME, a.HOURS_WORKED, a.OVERTIME_HOURS,
+             a.OT_CONFIG_ID, a.OT_RATE_TYPE_ID, a.OT_MULTIPLIER
+      FROM TM.TM_ATTENDANCE_DAYS d
+      LEFT JOIN TM.TM_ATTENDANCE_ACTUALS a ON a.ATTENDANCE_DAY_ID = d.ATTENDANCE_DAY_ID
+      WHERE d.ATTENDANCE_DAY_ID = :attendance_day_id
+    `;
+    try {
+      const result = await connection.execute(
+        sql,
+        { attendance_day_id: attendanceDayId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const row = result.rows?.[0];
+      if (!row) return null;
+      const full = this.convertRowToSnakeCase(row);
+      return {
+        day: {
+          attendance_status: full.attendance_status,
+          in_state: full.in_state,
+          out_state: full.out_state,
+          attendance_date: full.attendance_date
+        },
+        actuals: {
+          check_in_time: full.check_in_time,
+          check_out_time: full.check_out_time,
+          hours_worked: full.hours_worked,
+          overtime_hours: full.overtime_hours,
+          ot_config_id: full.ot_config_id,
+          ot_rate_type_id: full.ot_rate_type_id,
+          ot_multiplier: full.ot_multiplier
+        }
+      };
+    } catch (err) {
+      console.error('[AttendanceModel.fetchRecomputeSnapshot]', err?.message || err);
+      return null;
+    }
+  }
+
   /**
    * Fetch attendance by attendance_day_id from TM views/tables (days, schedules, actuals, locations, notes).
    */

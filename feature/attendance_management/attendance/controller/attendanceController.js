@@ -4,6 +4,8 @@ import {
   sendSuccess,
   sendValidationError,
   sendDatabaseError,
+  sendPunchRecomputeSuccess,
+  sendPunchRecomputeOracleError,
   sendError,
   sendAttendanceLogsList
 } from '../view/attendanceView.js';
@@ -36,6 +38,162 @@ function parseISOTime(value) {
   if (value == null || value === '') return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const PUNCH_TYPES = ['IN', 'OUT'];
+
+/** Return true if value is a valid ISO date string (any timezone). */
+function isValidISODate(value) {
+  if (value == null || value === '') return false;
+  const d = new Date(value);
+  return !Number.isNaN(d.getTime());
+}
+
+/**
+ * Validate add-punch: attendance_day_id (required, integer > 0), actor (required, non-empty string),
+ * punch_type (IN/OUT), punch_time (valid ISO date), lat/long numeric if provided, location_name optional.
+ */
+function validateAddPunchPayload(body) {
+  const errors = [];
+
+  if (body.attendance_day_id === undefined || body.attendance_day_id === null) {
+    errors.push('attendance_day_id is required');
+  } else {
+    const n = Number(body.attendance_day_id);
+    if (!Number.isInteger(n) || n <= 0) {
+      errors.push('attendance_day_id must be a positive integer');
+    }
+  }
+
+  if (body.actor === undefined || body.actor === null || typeof body.actor !== 'string') {
+    errors.push('actor is required');
+  } else if (String(body.actor).trim() === '') {
+    errors.push('actor must be a non-empty string');
+  }
+
+  if (body.punch_type === undefined || body.punch_type === null || String(body.punch_type).trim() === '') {
+    errors.push('punch_type is required');
+  } else {
+    const pt = String(body.punch_type).trim().toUpperCase();
+    if (!PUNCH_TYPES.includes(pt)) {
+      errors.push('punch_type must be IN or OUT');
+    }
+  }
+
+  if (body.punch_time === undefined || body.punch_time === null || body.punch_time === '') {
+    errors.push('punch_time is required');
+  } else if (!isValidISODate(body.punch_time)) {
+    errors.push('punch_time must be a valid ISO date');
+  }
+
+  const hasLat = body.latitude !== undefined && body.latitude !== null && body.latitude !== '';
+  const hasLng = body.longitude !== undefined && body.longitude !== null && body.longitude !== '';
+  if (hasLat || hasLng) {
+    if (hasLat && !Number.isFinite(Number(body.latitude))) errors.push('latitude must be a number');
+    if (hasLng && !Number.isFinite(Number(body.longitude))) errors.push('longitude must be a number');
+  }
+
+  if (body.location_name !== undefined && body.location_name !== null && typeof body.location_name !== 'string') {
+    errors.push('location_name must be a string when provided');
+  }
+
+  return errors;
+}
+
+/** Convert punch_time to UTC ISO string for ADD_PUNCH_UTC. Oracle expects YYYY-MM-DDTHH:mm:ssZ (no milliseconds). */
+function punchTimeToUtcISO(punchTime) {
+  const iso = new Date(punchTime).toISOString();
+  return iso.replace(/\.\d{3}Z$/, 'Z');
+}
+
+/** Convert to UTC ISO string (no milliseconds) for HR manual UTC API. */
+function toUtcISOString(value) {
+  const iso = new Date(value).toISOString();
+  return iso.replace(/\.\d{3}Z$/, 'Z');
+}
+
+/**
+ * Validate HR manual both-punches payload: attendance_day_id, actor, check_in_time, check_out_time (valid ISO, out > in), optional location/lat/long/reason.
+ */
+function validateHrManualPayload(body) {
+  const errors = [];
+
+  if (body.attendance_day_id === undefined || body.attendance_day_id === null) {
+    errors.push('attendance_day_id is required');
+  } else {
+    const n = Number(body.attendance_day_id);
+    if (!Number.isInteger(n) || n <= 0) {
+      errors.push('attendance_day_id must be a positive integer');
+    }
+  }
+
+  if (body.actor === undefined || body.actor === null || typeof body.actor !== 'string') {
+    errors.push('actor is required');
+  } else if (String(body.actor).trim() === '') {
+    errors.push('actor must be a non-empty string');
+  }
+
+  if (body.check_in_time === undefined || body.check_in_time === null || body.check_in_time === '') {
+    errors.push('check_in_time is required');
+  } else if (!isValidISODate(body.check_in_time)) {
+    errors.push('check_in_time must be a valid ISO date-time string');
+  }
+
+  if (body.check_out_time === undefined || body.check_out_time === null || body.check_out_time === '') {
+    errors.push('check_out_time is required');
+  } else if (!isValidISODate(body.check_out_time)) {
+    errors.push('check_out_time must be a valid ISO date-time string');
+  }
+
+  if (errors.length === 0 && body.check_in_time != null && body.check_out_time != null) {
+    const dIn = new Date(body.check_in_time);
+    const dOut = new Date(body.check_out_time);
+    if (!Number.isNaN(dIn.getTime()) && !Number.isNaN(dOut.getTime()) && dOut.getTime() <= dIn.getTime()) {
+      errors.push('check_out_time must be after check_in_time');
+    }
+  }
+
+  const numOpt = (v) => (v !== undefined && v !== null && v !== '' && !Number.isFinite(Number(v)));
+  if (numOpt(body.latitude_in)) errors.push('latitude_in must be a number when provided');
+  if (numOpt(body.longitude_in)) errors.push('longitude_in must be a number when provided');
+  if (numOpt(body.latitude_out)) errors.push('latitude_out must be a number when provided');
+  if (numOpt(body.longitude_out)) errors.push('longitude_out must be a number when provided');
+
+  if (body.location_name_in !== undefined && body.location_name_in !== null && typeof body.location_name_in !== 'string') {
+    errors.push('location_name_in must be a string when provided');
+  }
+  if (body.location_name_out !== undefined && body.location_name_out !== null && typeof body.location_name_out !== 'string') {
+    errors.push('location_name_out must be a string when provided');
+  }
+  if (body.reason !== undefined && body.reason !== null && typeof body.reason !== 'string') {
+    errors.push('reason must be a string when provided');
+  }
+
+  return errors;
+}
+
+/**
+ * Validate recompute: attendance_day_id (required, integer > 0), actor (required, non-empty string).
+ */
+function validateRecomputePayload(body) {
+  const errors = [];
+
+  if (body.attendance_day_id === undefined || body.attendance_day_id === null) {
+    errors.push('attendance_day_id is required');
+  } else {
+    const n = Number(body.attendance_day_id);
+    if (!Number.isInteger(n) || n <= 0) {
+      errors.push('attendance_day_id must be a positive integer');
+    }
+  }
+
+  if (body.actor === undefined || body.actor === null || typeof body.actor !== 'string') {
+    errors.push('actor is required');
+  } else if (String(body.actor).trim() === '') {
+    errors.push('actor must be a non-empty string');
+  }
+
+  return errors;
 }
 
 /**
@@ -218,6 +376,122 @@ router.put('/', asyncHandler(async (req, res) => {
     if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
     if (error.errorNum || error.message?.includes('ORA-')) {
       return sendDatabaseError(res, req, new DatabaseError(error.message || 'Failed to save attendance', error));
+    }
+    return sendError(res, req, error);
+  }
+}));
+
+/**
+ * @route   POST /api/tm/attendance/punch
+ * @desc    Add punch (IN/OUT) via TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH. Package runs RECOMPUTE_DAY internally; do not call recompute from Node.
+ */
+router.post('/punch', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const validationErrors = validateAddPunchPayload(body);
+  if (validationErrors.length > 0) {
+    return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
+  }
+
+  const attendanceDayId = parseInt(body.attendance_day_id, 10);
+  const utcTime = punchTimeToUtcISO(body.punch_time);
+
+  const payload = {
+    attendance_day_id: attendanceDayId,
+    punch_type: String(body.punch_type).trim().toUpperCase(),
+    punch_time: utcTime,
+    actor: String(body.actor).trim(),
+    latitude: body.latitude,
+    longitude: body.longitude,
+    location_name: body.location_name
+  };
+
+  try {
+    const result = await AttendanceModel.addPunch(payload);
+    return sendPunchRecomputeSuccess(res, req, result.attendance_day_id, 'PUNCH');
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (error instanceof DatabaseError) return sendPunchRecomputeOracleError(res, req, error);
+    if (error.errorNum != null || (error.message && error.message.includes('ORA-'))) {
+      return sendPunchRecomputeOracleError(res, req, new DatabaseError(error.message || 'Failed to add punch', error));
+    }
+    return sendError(res, req, error);
+  }
+}));
+
+/**
+ * @route   POST /api/tm/attendance/recompute
+ * @desc    Recompute day via TM.TM_ATTENDANCE_SYSTEM_PKG.RECOMPUTE_DAY (admin utility). Body: attendance_day_id, actor (required).
+ */
+router.post('/recompute', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const validationErrors = validateRecomputePayload(body);
+  if (validationErrors.length > 0) {
+    return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
+  }
+
+  const attendanceDayId = parseInt(body.attendance_day_id, 10);
+  const payload = {
+    attendance_day_id: attendanceDayId,
+    actor: String(body.actor).trim()
+  };
+
+  try {
+    const result = await AttendanceModel.recomputeDay(payload);
+    return sendPunchRecomputeSuccess(res, req, result.attendance_day_id, 'RECOMPUTE');
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (error instanceof DatabaseError) return sendPunchRecomputeOracleError(res, req, error);
+    if (error.errorNum != null || (error.message && error.message.includes('ORA-'))) {
+      return sendPunchRecomputeOracleError(res, req, new DatabaseError(error.message || 'Failed to recompute day', error));
+    }
+    return sendError(res, req, error);
+  }
+}));
+
+/**
+ * @route   POST /api/tm/attendance/manual
+ * @desc    HR manual add both punches (check-in + check-out) via TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC.
+ */
+router.post('/manual', asyncHandler(async (req, res) => {
+  const body = req.body || {};
+  const validationErrors = validateHrManualPayload(body);
+  if (validationErrors.length > 0) {
+    return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
+  }
+
+  const checkInUtc = toUtcISOString(body.check_in_time);
+  const checkOutUtc = toUtcISOString(body.check_out_time);
+
+  const payload = {
+    attendance_day_id: parseInt(body.attendance_day_id, 10),
+    check_in_time_utc: checkInUtc,
+    check_out_time_utc: checkOutUtc,
+    actor: String(body.actor).trim(),
+    location_name_in: body.location_name_in,
+    latitude_in: body.latitude_in,
+    longitude_in: body.longitude_in,
+    location_name_out: body.location_name_out,
+    latitude_out: body.latitude_out,
+    longitude_out: body.longitude_out,
+    reason: body.reason
+  };
+
+  try {
+    const result = await AttendanceModel.hrManualAddBothPunchesUtc(payload);
+    const response = {
+      success: true,
+      attendance_day_id: result.attendance_day_id,
+      action: 'HR_MANUAL'
+    };
+    if (result.result !== undefined && result.result !== null) {
+      response.result = result.result;
+    }
+    res.status(200).json(response);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (error instanceof DatabaseError) return sendPunchRecomputeOracleError(res, req, error);
+    if (error.errorNum != null || (error.message && error.message.includes('ORA-'))) {
+      return sendPunchRecomputeOracleError(res, req, new DatabaseError(error.message || 'Failed to add HR manual punches', error));
     }
     return sendError(res, req, error);
   }
