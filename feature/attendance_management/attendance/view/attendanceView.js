@@ -145,17 +145,17 @@ export function sendPunchRecomputeOracleError(res, req, error) {
 
 /**
  * Send success for GET /api/tm/attendance/logs (paginated list).
- * Response: { status: true, message, data: { enterprise_id, filters, pagination, rows } }
+ * Response: { status: true, message, data: { enterprise_id, pagination, data } }
+ * pagination: { page, page_size, total, total_pages, has_next, has_previous }
  */
-export function sendLogsListSuccess(res, req, enterpriseId, filters, pagination, rows) {
+export function sendLogsListSuccess(res, req, enterpriseId, pagination, listData) {
   res.status(200).json({
     status: true,
     message: 'Fetched successfully',
     data: {
       enterprise_id: enterpriseId,
-      filters: filters ?? {},
       pagination: pagination ?? {},
-      rows: rows ?? []
+      data: listData ?? []
     }
   });
 }

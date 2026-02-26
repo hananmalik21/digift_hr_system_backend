@@ -73,29 +73,15 @@ function parseDateOnly(value) {
 }
 
 /**
- * Build list query: base FROM TM.V_ATTENDANCE_FULL with optional filters and org subtree.
+ * Build list query: base FROM TM.V_ATTENDANCE_FULL with optional filters.
+ * levelCode + orgUnitId: same as timesheets API — JSON_EXISTS on ORG_STRUCTURE_LIST_JSON (employee's org list).
  * Returns { sql, countSql, binds }. Binds only include variables that appear in the SQL (avoids ORA-01036).
  */
 function buildListQuery(filters, sortBy, sortDir) {
   const orderCol = (sortBy === 'employee_number') ? 'v.EMPLOYEE_NUMBER' : 'v.ATTENDANCE_DATE';
   const orderDir = (sortDir === 'ASC') ? 'ASC' : 'DESC';
 
-  const hasOrgFilter = filters.orgUnitId != null;
-
-  const cte = hasOrgFilter
-    ? `WITH org_start AS (
-         SELECT org_unit_id FROM ent.org_units
-         WHERE enterprise_id = :enterpriseId AND org_unit_id = :orgUnitId
-           AND (:levelCode IS NULL OR UPPER(level_code) = UPPER(:levelCode))
-       ),
-       subtree AS (
-         SELECT org_unit_id FROM ent.org_units
-         WHERE enterprise_id = :enterpriseId
-         START WITH org_unit_id IN (SELECT org_unit_id FROM org_start)
-         CONNECT BY PRIOR org_unit_id = parent_org_unit_id
-       )
-       `
-    : '';
+  const hasOrgFilter = filters.levelCode != null && filters.orgUnitId != null;
 
   const whereParts = ['v.ENTERPRISE_ID = :enterpriseId'];
   if (filters.fromDate != null) whereParts.push('v.ATTENDANCE_DATE >= :fromDate');
@@ -112,27 +98,29 @@ function buildListQuery(filters, sortBy, sortDir) {
   if (filters.inState != null) whereParts.push('v.IN_STATE = :inState');
   if (filters.outState != null) whereParts.push('v.OUT_STATE = :outState');
   if (filters.sourceType != null) whereParts.push('v.SOURCE_TYPE = :sourceType');
-  if (hasOrgFilter) whereParts.push('v.ORG_UNIT_ID IN (SELECT org_unit_id FROM subtree)');
+  if (hasOrgFilter) {
+    whereParts.push(`(
+      :levelCode IS NULL
+      OR :orgUnitId IS NULL
+      OR JSON_EXISTS(
+        v.ORG_STRUCTURE_LIST,
+        '$[*]?(@.level_code == $lc && @.org_unit_id == $ou)'
+        PASSING UPPER(:levelCode) AS "lc",
+        :orgUnitId AS "ou"
+      )
+    )`);
+  }
 
   const whereClause = whereParts.join(' AND ');
   const orderColName = orderCol.replace('v.', '');
 
   const innerSelect = `SELECT v.* FROM ${VIEW} v WHERE ${whereClause}`;
-  const countSql = hasOrgFilter
-    ? `${cte} SELECT COUNT(*) AS cnt FROM ${VIEW} v WHERE ${whereClause}`
-    : `SELECT COUNT(*) AS cnt FROM ${VIEW} v WHERE ${whereClause}`;
-
-  const sql = hasOrgFilter
-    ? `${cte} SELECT * FROM (
-         SELECT inner_q.*, ROW_NUMBER() OVER (ORDER BY inner_q.${orderColName} ${orderDir}) AS rn
-         FROM (${innerSelect}) inner_q
-       ) paginated
-       WHERE rn BETWEEN :startRow AND :endRow`
-    : `SELECT * FROM (
-         SELECT inner_q.*, ROW_NUMBER() OVER (ORDER BY inner_q.${orderColName} ${orderDir}) AS rn
-         FROM (${innerSelect}) inner_q
-       ) paginated
-       WHERE rn BETWEEN :startRow AND :endRow`;
+  const countSql = `SELECT COUNT(*) AS cnt FROM ${VIEW} v WHERE ${whereClause}`;
+  const sql = `SELECT * FROM (
+    SELECT inner_q.*, ROW_NUMBER() OVER (ORDER BY inner_q.${orderColName} ${orderDir}) AS rn
+    FROM (${innerSelect}) inner_q
+  ) paginated
+  WHERE rn BETWEEN :startRow AND :endRow`;
 
   // Only include bind variables that are actually used in the SQL (avoids ORA-01036)
   const binds = { enterpriseId: filters.enterpriseId };
@@ -146,8 +134,8 @@ function buildListQuery(filters, sortBy, sortDir) {
   if (filters.outState != null) binds.outState = filters.outState;
   if (filters.sourceType != null) binds.sourceType = filters.sourceType;
   if (hasOrgFilter) {
+    binds.levelCode = filters.levelCode;
     binds.orgUnitId = filters.orgUnitId;
-    binds.levelCode = filters.levelCode ?? null;
   }
 
   return { sql, countSql, binds, orderCol: orderColName, orderDir };
@@ -170,6 +158,9 @@ export async function getAttendanceLogsList(filters, pagination, sort) {
   const sortBy = (sort?.sortBy === 'employee_number') ? 'employee_number' : 'attendance_date';
   const sortDir = (String(sort?.sortDir || 'DESC').toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
 
+  const levelCode = optStr(filters.levelCode);
+  const orgUnitId = optStr(filters.orgUnitId);
+
   const normalizedFilters = {
     enterpriseId: filters.enterpriseId,
     fromDate: filters.fromDate != null ? parseDateOnly(filters.fromDate) : null,
@@ -181,8 +172,8 @@ export async function getAttendanceLogsList(filters, pagination, sort) {
     inState: optStr(filters.inState),
     outState: optStr(filters.outState),
     sourceType: optStr(filters.sourceType),
-    levelCode: optStr(filters.levelCode),
-    orgUnitId: optNum(filters.orgUnitId)
+    levelCode: levelCode && levelCode.trim() !== '' ? levelCode.trim().toUpperCase() : null,
+    orgUnitId: orgUnitId && orgUnitId.trim() !== '' ? orgUnitId.trim() : null
   };
 
   const { sql, countSql, binds } = buildListQuery(normalizedFilters, sortBy, sortDir);

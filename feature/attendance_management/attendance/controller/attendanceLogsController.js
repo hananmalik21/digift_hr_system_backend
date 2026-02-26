@@ -29,30 +29,6 @@ function optStr(v) {
 }
 
 /**
- * Build filters object from query (for echo in response).
- */
-function buildFiltersFromQuery(query) {
-  return {
-    enterpriseId: query.enterpriseId,
-    fromDate: query.fromDate,
-    toDate: query.toDate,
-    employeeNumber: query.employeeNumber,
-    employeeId: query.employeeId,
-    attendanceStatus: query.attendanceStatus,
-    dayCategory: query.dayCategory,
-    inState: query.inState,
-    outState: query.outState,
-    sourceType: query.sourceType,
-    levelCode: query.levelCode,
-    orgUnitId: query.orgUnitId,
-    page: query.page,
-    pageSize: query.pageSize,
-    sortBy: query.sortBy,
-    sortDir: query.sortDir
-  };
-}
-
-/**
  * @route   GET /api/tm/attendance/logs
  * @query   enterpriseId (required), fromDate, toDate, employeeNumber, employeeId,
  *          attendanceStatus, dayCategory, inState, outState, sourceType, levelCode, orgUnitId,
@@ -76,14 +52,12 @@ router.get('/', asyncHandler(async (req, res) => {
     inState: optStr(q.inState),
     outState: optStr(q.outState),
     sourceType: optStr(q.sourceType),
-    levelCode: optStr(q.levelCode),
-    orgUnitId: optNum(q.orgUnitId)
+    levelCode: optStr(q.levelCode ?? q.level_code),
+    orgUnitId: optStr(q.orgUnitId ?? q.org_unit_id)
   };
 
   const page = Math.max(1, optNum(q.page) ?? 1);
   const pageSize = Math.min(100, Math.max(1, optNum(q.pageSize) ?? 25));
-  const pagination = { page, page_size: pageSize };
-
   const sort = {
     sortBy: (q.sortBy === 'employee_number') ? 'employee_number' : 'attendance_date',
     sortDir: String(q.sortDir || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
@@ -91,9 +65,16 @@ router.get('/', asyncHandler(async (req, res) => {
 
   try {
     const { rows, total } = await getAttendanceLogsList(filters, { page, pageSize }, sort);
-    pagination.total = total;
-    const filtersEcho = buildFiltersFromQuery(q);
-    return sendLogsListSuccess(res, req, enterpriseId, filtersEcho, pagination, rows);
+    const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
+    const pagination = {
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: totalPages,
+      has_next: page < totalPages,
+      has_previous: page > 1
+    };
+    return sendLogsListSuccess(res, req, enterpriseId, pagination, rows);
   } catch (error) {
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
     if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
