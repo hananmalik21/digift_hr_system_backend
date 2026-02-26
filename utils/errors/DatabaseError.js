@@ -191,8 +191,13 @@ export class DatabaseError extends AppError {
       return 'Invalid date format. Please provide a valid date.';
     }
 
-    // Schedule overlap error (user-defined error from trigger)
+    // ORA-20001: user-defined – use message for "Attendance Day does not exist", else schedule overlap
     if (errorNum === 20001 || message.includes('ORA-20001')) {
+      const upper = message.toUpperCase();
+      if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) {
+        const extracted = message.replace(/ORA-20001:\s*/i, '').split(/\n/)[0].trim();
+        return extracted || 'Attendance Day does not exist for the given enterprise, employee, and date.';
+      }
       return 'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.';
     }
 
@@ -317,7 +322,11 @@ export class DatabaseError extends AppError {
     const message = oracleError.message || '';
 
     if (errorNum === 1 || message.includes('ORA-00001')) return 409; // Conflict
-    if (errorNum === 20001 || message.includes('ORA-20001')) return 409; // Conflict - Schedule overlap
+    if (errorNum === 20001 || message.includes('ORA-20001')) {
+      const upper = (oracleError.message || '').toUpperCase();
+      if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) return 404;
+      return 409; // Conflict - Schedule overlap
+    }
     if (errorNum === 4091 || message.includes('ORA-04091')) return 409; // Conflict - Mutating table (overlap check)
     if (errorNum === 2291 || message.includes('ORA-02291')) return 400; // Bad Request
     if (errorNum === 2292 || message.includes('ORA-02292')) return 409; // Conflict
@@ -340,7 +349,11 @@ export class DatabaseError extends AppError {
     const message = oracleError.message || '';
 
     if (errorNum === 1 || message.includes('ORA-00001')) return 'UNIQUE_CONSTRAINT_VIOLATION';
-    if (errorNum === 20001 || message.includes('ORA-20001')) return 'SCHEDULE_OVERLAP_CONFLICT';
+    if (errorNum === 20001 || message.includes('ORA-20001')) {
+      const upper = (oracleError.message || '').toUpperCase();
+      if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) return 'ATTENDANCE_DAY_NOT_FOUND';
+      return 'SCHEDULE_OVERLAP_CONFLICT';
+    }
     if (errorNum === 4091 || message.includes('ORA-04091')) return 'SCHEDULE_OVERLAP_CONFLICT';
     if (errorNum === 2291 || message.includes('ORA-02291')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 2292 || message.includes('ORA-02292')) return 'FOREIGN_KEY_CONSTRAINT';

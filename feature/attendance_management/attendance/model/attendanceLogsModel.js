@@ -114,13 +114,17 @@ function buildListQuery(filters, sortBy, sortDir) {
   const whereClause = whereParts.join(' AND ');
   const orderColName = orderCol.replace('v.', '');
 
-  const innerSelect = `SELECT v.* FROM ${VIEW} v WHERE ${whereClause}`;
-  const countSql = `SELECT COUNT(*) AS cnt FROM ${VIEW} v WHERE ${whereClause}`;
-  const sql = `SELECT * FROM (
-    SELECT inner_q.*, ROW_NUMBER() OVER (ORDER BY inner_q.${orderColName} ${orderDir}) AS rn
-    FROM (${innerSelect}) inner_q
-  ) paginated
-  WHERE rn BETWEEN :startRow AND :endRow`;
+  // Single query: total via COUNT(*) OVER (), paginate with OFFSET/FETCH (one round-trip)
+  const listSql = `
+    SELECT sub.* FROM (
+      SELECT v.*, COUNT(*) OVER () AS total_count
+      FROM ${VIEW} v
+      WHERE ${whereClause}
+    ) sub
+    ORDER BY sub.${orderColName} ${orderDir}
+    OFFSET (:page - 1) * :pageSize ROWS
+    FETCH NEXT :pageSize ROWS ONLY
+  `;
 
   // Only include bind variables that are actually used in the SQL (avoids ORA-01036)
   const binds = { enterpriseId: filters.enterpriseId };
@@ -138,7 +142,7 @@ function buildListQuery(filters, sortBy, sortDir) {
     binds.orgUnitId = filters.orgUnitId;
   }
 
-  return { sql, countSql, binds, orderCol: orderColName, orderDir };
+  return { listSql, binds, orderCol: orderColName, orderDir };
 }
 
 /**
@@ -152,8 +156,6 @@ function buildListQuery(filters, sortBy, sortDir) {
 export async function getAttendanceLogsList(filters, pagination, sort) {
   const page = Math.max(1, optNum(pagination?.page) ?? 1);
   const pageSize = Math.min(100, Math.max(1, optNum(pagination?.pageSize) ?? 25));
-  const startRow = (page - 1) * pageSize + 1;
-  const endRow = page * pageSize;
 
   const sortBy = (sort?.sortBy === 'employee_number') ? 'employee_number' : 'attendance_date';
   const sortDir = (String(sort?.sortDir || 'DESC').toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
@@ -176,23 +178,24 @@ export async function getAttendanceLogsList(filters, pagination, sort) {
     orgUnitId: orgUnitId && orgUnitId.trim() !== '' ? orgUnitId.trim() : null
   };
 
-  const { sql, countSql, binds } = buildListQuery(normalizedFilters, sortBy, sortDir);
-  const dataBinds = { ...binds, startRow, endRow };
+  const { listSql, binds } = buildListQuery(normalizedFilters, sortBy, sortDir);
+  const listBinds = { ...binds, page, pageSize };
 
   let connection;
   try {
     connection = await db.getConnection();
     await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = TM`, [], { autoCommit: false });
 
-    const [countResult, dataResult] = await Promise.all([
-      connection.execute(countSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-      connection.execute(sql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT })
-    ]);
+    const result = await connection.execute(listSql, listBinds, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT,
+      fetchArraySize: Math.max(pageSize, 100)
+    });
 
-    const total = countResult.rows?.[0]?.CNT != null ? Number(countResult.rows[0].CNT) : 0;
-    const rows = (dataResult.rows || []).map((r) => {
+    const rawRows = result.rows || [];
+    const total = rawRows.length > 0 ? Number(rawRows[0].TOTAL_COUNT) : 0;
+    const rows = rawRows.map((r) => {
       const row = { ...r };
-      delete row.RN;
+      delete row.TOTAL_COUNT;
       return parseJsonFields(convertRowToSnakeCase(row));
     });
 
@@ -244,3 +247,4 @@ export async function getAttendanceLogById(enterpriseId, attendanceDayId) {
     }
   }
 }
+
