@@ -1,13 +1,13 @@
 import express from 'express';
 import AttendanceModel from '../model/attendanceModel.js';
+import attendanceLogsController from './attendanceLogsController.js';
 import {
   sendSuccess,
   sendValidationError,
   sendDatabaseError,
   sendPunchRecomputeSuccess,
   sendPunchRecomputeOracleError,
-  sendError,
-  sendAttendanceLogsList
+  sendError
 } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
@@ -19,6 +19,9 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
+
+// Attendance logs from TM.V_ATTENDANCE_FULL: GET /logs, GET /logs/:attendance_day_id
+router.use('/logs', attendanceLogsController);
 
 const ID_GUID_KEYS = [
   'attendance_day_id', 'attendance_day_guid', 'schedule_id', 'schedule_guid',
@@ -266,72 +269,6 @@ function validateAttendancePayload(body) {
 
   return errors;
 }
-
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 20;
-const MAX_PAGE_SIZE = 100;
-
-/**
- * @route   GET /api/tm/attendance/logs
- * @desc    Get attendance logs from TM.V_ATTENDANCE_FULL (attendance, schedule, actuals, locations, notes, employee_number, org_structure_list, position_code, position_title_en, position_title_ar)
- * @query   enterprise_id (required), page, pageSize, employee_number, employee_id, attendance_status, from_date, to_date, org_unit_hex (single: node + all children)
- */
-router.get('/logs', asyncHandler(async (req, res) => {
-  const enterpriseId = req.query.enterprise_id ?? req.query.enterpriseId;
-  if (enterpriseId === undefined || enterpriseId === null || String(enterpriseId).trim() === '') {
-    return sendValidationError(res, req, new ValidationError('enterprise_id is required'));
-  }
-  const enterpriseIdNum = parseInt(enterpriseId, 10);
-  if (!Number.isFinite(enterpriseIdNum) || enterpriseIdNum <= 0) {
-    return sendValidationError(res, req, new ValidationError('enterprise_id must be a valid positive number'));
-  }
-
-  const page = Math.max(1, parseInt(req.query.page, 10) || DEFAULT_PAGE);
-  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.pageSize, 10) || DEFAULT_PAGE_SIZE));
-
-  const fromDateRaw = req.query.from_date;
-  const toDateRaw = req.query.to_date;
-  if (fromDateRaw && toDateRaw) {
-    const fromD = new Date(fromDateRaw);
-    const toD = new Date(toDateRaw);
-    if (!Number.isNaN(fromD.getTime()) && !Number.isNaN(toD.getTime()) && fromD.getTime() > toD.getTime()) {
-      return sendValidationError(res, req, new ValidationError('from_date must be less than or equal to to_date'));
-    }
-  }
-
-  const orgUnitHex = req.query.org_unit_hex != null && String(req.query.org_unit_hex).trim() !== ''
-    ? String(req.query.org_unit_hex).trim()
-    : null;
-
-  const filters = {
-    enterprise_id: enterpriseIdNum,
-    page,
-    pageSize,
-    employee_number: req.query.employee_number,
-    employee_id: req.query.employee_id,
-    attendance_status: req.query.attendance_status,
-    from_date: fromDateRaw,
-    to_date: toDateRaw,
-    org_unit_hex: orgUnitHex
-  };
-
-  try {
-    const { rows, totalRecords, page: p, pageSize: ps } = await AttendanceModel.getAttendanceLogs(filters);
-    const totalPages = Math.ceil(totalRecords / ps) || 0;
-    return sendAttendanceLogsList(res, req, rows, {
-      page: p,
-      pageSize: ps,
-      totalRecords,
-      totalPages
-    });
-  } catch (error) {
-    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
-    if (error.errorNum || error.message?.includes('ORA-')) {
-      return sendDatabaseError(res, req, new DatabaseError(error.message || 'Failed to fetch attendance logs', error));
-    }
-    return sendError(res, req, error);
-  }
-}));
 
 /**
  * @route   POST /api/tm/attendance

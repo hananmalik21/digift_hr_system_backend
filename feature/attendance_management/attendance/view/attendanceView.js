@@ -144,24 +144,32 @@ export function sendPunchRecomputeOracleError(res, req, error) {
 }
 
 /**
- * Send paginated attendance logs list (GET /api/tm/attendance/logs)
+ * Send success for GET /api/tm/attendance/logs (paginated list).
+ * Response: { status: true, message, data: { enterprise_id, filters, pagination, rows } }
  */
-export function sendAttendanceLogsList(res, req, data, meta) {
-  const response = {
-    success: true,
-    data: data || [],
-    meta: {
-      page: meta.page,
-      pageSize: meta.pageSize,
-      totalRecords: meta.totalRecords,
-      totalPages: meta.totalPages
+export function sendLogsListSuccess(res, req, enterpriseId, filters, pagination, rows) {
+  res.status(200).json({
+    status: true,
+    message: 'Fetched successfully',
+    data: {
+      enterprise_id: enterpriseId,
+      filters: filters ?? {},
+      pagination: pagination ?? {},
+      rows: rows ?? []
     }
-  };
-  const executionTime = getExecutionTime(req);
-  if (executionTime !== null) {
-    response.meta.execution_time_ms = executionTime;
-  }
-  res.status(200).json(response);
+  });
+}
+
+/**
+ * Send success for GET /api/tm/attendance/logs/:attendance_day_id (single record).
+ * Response: { status: true, message, data: { ...record } }
+ */
+export function sendLogDetailSuccess(res, req, record) {
+  res.status(200).json({
+    status: true,
+    message: 'Fetched successfully',
+    data: record ?? null
+  });
 }
 
 /**
