@@ -125,6 +125,9 @@ app.use('/api/holidays', holidayController);
 // Workforce Stats routes (must be BEFORE catch-all /api route)
 app.use('/api/workforce-stats', workforceStatsController);
 
+// Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
+app.use('/api/time-zones', timeZoneController);
+
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
 // NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
@@ -185,7 +188,6 @@ app.use('/api/empl/lookup-types', emplLookupTypeController);
 app.use('/api/empl/lookup-values', emplLookupValueController);
 app.use('/api/ent/lookup-types', entLookupTypeController);
 app.use('/api/ent/lookup-values', entLookupValueController);
-app.use('/api/time-zones', timeZoneController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
