@@ -39,6 +39,7 @@ import overtimeConfigController from './feature/attendance_management/tm_overtim
 import overtimeConfigurationRouter from './feature/attendance_management/tm_overtime_configs/controller/overtimeConfigurationRouter.js';
 import overtimeRateTypeController from './feature/attendance_management/tm_overtime_rate_types/controller/overtimeRateTypeController.js';
 import attendanceController from './feature/attendance_management/attendance/controller/attendanceController.js';
+import attendanceSummaryController from './feature/attendance_management/attendance/controller/attendanceSummaryController.js';
 import holidayController from './feature/time_management/holidays/controller/holidayController.js';
 import accrualPlanController from './feature/leave_management/accrual_plans/controller/accrualPlanController.js';
 import leaveTypeController from './feature/leave_management/leave_types/controller/leaveTypeController.js';
@@ -52,6 +53,8 @@ import emplLookupTypeController from './feature/look_ups/empl/empl_lookup_types/
 import emplLookupValueController from './feature/look_ups/empl/empl_lookup_values/controller/emplLookupValueController.js';
 import entLookupTypeController from './feature/look_ups/ent/ent_lookup_types/controller/entLookupTypeController.js';
 import entLookupValueController from './feature/look_ups/ent/ent_lookup_values/controller/entLookupValueController.js';
+import timeZoneController from './feature/time_management/time_zones/controller/timeZoneController.js';
+import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
@@ -152,6 +155,7 @@ app.use('/api/tm/timesheets', timesheetController);
 
 // Attendance (TM.V_ATTENDANCE_FULL, TM.ATTENDANCE_PKG: logs, upsert mark/edit)
 app.use('/api/tm/attendance', attendanceController);
+app.use('/api/tm/attendance-summary', attendanceSummaryController);
 
 // Overtime configs with limits (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete with labor limits, single transaction)
 app.use('/api/tm/overtime/configs', overtimeConfigController);
@@ -161,6 +165,9 @@ app.use('/api/tm/overtime/configuration', overtimeConfigurationRouter);
 
 // Overtime rate types with multiplier (TM.TM_OVERTIME_CONFIGS_PKG: create/update/delete rate type + multiplier, single transaction)
 app.use('/api/tm/overtime/rate-types', overtimeRateTypeController);
+
+// Overtime requests (TM.TM_OT_REQUESTS_PKG: create, update draft, submit, approve, reject, cancel)
+app.use('/api/tm/overtime/requests', tmOvertimeRequestsRoutes);
 
 // Time Management Stats routes
 app.use('/api/tm/stats', timeManagementStatsController);
@@ -178,6 +185,7 @@ app.use('/api/empl/lookup-types', emplLookupTypeController);
 app.use('/api/empl/lookup-values', emplLookupValueController);
 app.use('/api/ent/lookup-types', entLookupTypeController);
 app.use('/api/ent/lookup-values', entLookupValueController);
+app.use('/api/time-zones', timeZoneController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
