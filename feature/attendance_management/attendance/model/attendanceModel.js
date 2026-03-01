@@ -341,8 +341,9 @@ class AttendanceModel {
   }
 
   /**
-   * Call TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH_UTC. punch_time_utc is UTC ISO string; Oracle converts to schedule tz_region.
-   * Package runs RECOMPUTE_DAY internally; do not call recompute from Node.
+   * Call TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH.
+   * punch_time: JS Date (from ISO-8601 with offset); bound directly as Oracle DATE/TIMESTAMP (no string conversion).
+   * Package handles UTC storage, schedule tz_region, early/late, overtime, status. Do not call recompute from Node.
    */
   static async addPunch(payload) {
     let connection;
@@ -351,42 +352,42 @@ class AttendanceModel {
       connection = await db.getConnection();
       await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
 
-      const attendanceDayId = Number(payload.attendance_day_id);
-      const punchType = String(payload.punch_type || '').trim().toUpperCase();
-      const punchTimeUtc = typeof payload.punch_time === 'string' ? payload.punch_time.trim() : String(payload.punch_time);
+      const attendance_day_id = Number(payload.attendance_day_id);
+      const punch_type = String(payload.punch_type || '').trim().toUpperCase();
+      const punch_time = payload.punch_time instanceof Date ? payload.punch_time : new Date(payload.punch_time);
       const actor = this.optStr(payload.actor) || 'ADMIN';
-      const latitude = this.optNum(payload.latitude);
-      const longitude = this.optNum(payload.longitude);
-      const locationName = this.optStr(payload.location_name);
+      const latitude = payload.latitude ?? null;
+      const longitude = payload.longitude ?? null;
+      const location_name = payload.location_name ?? null;
 
       const plsqlBlock = `
         BEGIN
-          TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH_UTC(
-            p_attendance_day_id => :p_attendance_day_id,
-            p_punch_type        => :p_punch_type,
-            p_punch_time_utc    => :p_punch_time_utc,
-            p_actor             => :p_actor,
-            p_latitude          => :p_latitude,
-            p_longitude         => :p_longitude,
-            p_location_name     => :p_location_name
+          TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH(
+            p_attendance_day_id => :attendance_day_id,
+            p_punch_type        => :punch_type,
+            p_punch_time        => :punch_time,
+            p_actor             => :actor,
+            p_latitude          => :latitude,
+            p_longitude         => :longitude,
+            p_location_name     => :location_name
           );
         END;
       `;
 
       const binds = {
-        p_attendance_day_id: attendanceDayId,
-        p_punch_type: punchType,
-        p_punch_time_utc: punchTimeUtc,
-        p_actor: actor,
-        p_latitude: latitude,
-        p_longitude: longitude,
-        p_location_name: locationName
+        attendance_day_id,
+        punch_type,
+        punch_time,
+        actor,
+        latitude,
+        longitude,
+        location_name
       };
 
       await connection.execute(plsqlBlock, binds, { autoCommit: false });
       await connection.commit();
 
-      return { attendance_day_id: attendanceDayId };
+      return { attendance_day_id };
     } catch (error) {
       if (connection) {
         try {
@@ -410,7 +411,8 @@ class AttendanceModel {
   }
 
   /**
-   * Call TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC. Times are UTC ISO strings.
+   * Call TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC via PL/SQL block (function does DML; SELECT would raise ORA-14551).
+   * Pass check_in_time and check_out_time as ISO 8601 strings (Z or offset); do not convert in Node; DB handles tz_region.
    */
   static async hrManualAddBothPunchesUtc(payload) {
     let connection;
@@ -419,59 +421,55 @@ class AttendanceModel {
       connection = await db.getConnection();
       await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
 
-      const pDayId = Number(payload.attendance_day_id);
-      const pInUtc = typeof payload.check_in_time_utc === 'string' ? payload.check_in_time_utc.trim() : String(payload.check_in_time_utc);
-      const pOutUtc = typeof payload.check_out_time_utc === 'string' ? payload.check_out_time_utc.trim() : String(payload.check_out_time_utc);
-      const pActor = this.optStr(payload.actor) || 'HR_ADMIN';
-      const pLocIn = this.optStr(payload.location_name_in);
-      const pLatIn = this.optNum(payload.latitude_in);
-      const pLonIn = this.optNum(payload.longitude_in);
-      const pLocOut = this.optStr(payload.location_name_out);
-      const pLatOut = this.optNum(payload.latitude_out);
-      const pLonOut = this.optNum(payload.longitude_out);
-      const pReason = this.optStr(payload.reason);
+      const attendance_day_id = Number(payload.attendance_day_id);
+      const check_in_time = typeof payload.check_in_time === 'string' ? payload.check_in_time.trim() : String(payload.check_in_time);
+      const check_out_time = typeof payload.check_out_time === 'string' ? payload.check_out_time.trim() : String(payload.check_out_time);
+      const actor = this.optStr(payload.actor) || 'HR_ADMIN';
+      const location_name_in = payload.location_name_in ?? null;
+      const latitude_in = payload.latitude_in != null && payload.latitude_in !== '' ? Number(payload.latitude_in) : null;
+      const longitude_in = payload.longitude_in != null && payload.longitude_in !== '' ? Number(payload.longitude_in) : null;
+      const location_name_out = payload.location_name_out ?? null;
+      const latitude_out = payload.latitude_out != null && payload.latitude_out !== '' ? Number(payload.latitude_out) : null;
+      const longitude_out = payload.longitude_out != null && payload.longitude_out !== '' ? Number(payload.longitude_out) : null;
+      const reason = payload.reason ?? null;
 
       const plsqlBlock = `
-        DECLARE
-          v_ret NUMBER;
         BEGIN
-          v_ret := TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC(
-            p_attendance_day_id   => :p_day_id,
-            p_check_in_time_utc   => :p_in_utc,
-            p_check_out_time_utc  => :p_out_utc,
-            p_actor               => :p_actor,
-            p_location_name_in    => :p_loc_in,
-            p_latitude_in         => :p_lat_in,
-            p_longitude_in        => :p_lon_in,
-            p_location_name_out   => :p_loc_out,
-            p_latitude_out        => :p_lat_out,
-            p_longitude_out       => :p_lon_out,
-            p_reason              => :p_reason
+          :result := tm.tm_attendance_hr_pkg.hr_manual_add_both_punches_utc(
+            :attendance_day_id,
+            :check_in_time,
+            :check_out_time,
+            :actor,
+            :location_name_in,
+            :latitude_in,
+            :longitude_in,
+            :location_name_out,
+            :latitude_out,
+            :longitude_out,
+            :reason
           );
-          :o_ret := v_ret;
         END;
       `;
 
       const binds = {
-        p_day_id: pDayId,
-        p_in_utc: pInUtc,
-        p_out_utc: pOutUtc,
-        p_actor: pActor,
-        p_loc_in: pLocIn,
-        p_lat_in: pLatIn,
-        p_lon_in: pLonIn,
-        p_loc_out: pLocOut,
-        p_lat_out: pLatOut,
-        p_lon_out: pLonOut,
-        p_reason: pReason,
-        o_ret: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
+        attendance_day_id,
+        check_in_time,
+        check_out_time,
+        actor,
+        location_name_in,
+        latitude_in,
+        longitude_in,
+        location_name_out,
+        latitude_out,
+        longitude_out,
+        reason,
+        result: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       };
 
-      await connection.execute(plsqlBlock, binds, { autoCommit: false });
-      await connection.commit();
+      await connection.execute(plsqlBlock, binds, { autoCommit: true });
 
-      const outRet = binds.o_ret?.val;
-      return { attendance_day_id: pDayId, result: outRet };
+      const outResult = binds.result?.val ?? binds.result?.value;
+      return { attendance_day_id: outResult != null ? outResult : attendance_day_id };
     } catch (error) {
       if (connection) {
         try {

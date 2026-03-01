@@ -189,6 +189,7 @@ class WorkScheduleModel {
           EFFECTIVE_END_DATE,
           ASSIGNMENT_MODE,
           STATUS,
+          TIME_ZONE,
           CREATION_DATE,
           CREATED_BY,
           LAST_UPDATE_DATE,
@@ -196,6 +197,7 @@ class WorkScheduleModel {
         ) VALUES (
           :workScheduleId, :tenantId, :scheduleCode, :scheduleNameEn, :scheduleNameAr,
           :workPatternId, :effectiveStartDate, :effectiveEndDate, :assignmentMode, :status,
+          :timeZone,
           :creationDate, :createdBy, :lastUpdateDate, :lastUpdatedBy
         ) RETURNING WORK_SCHEDULE_ID INTO :returnWorkScheduleId`;
 
@@ -210,6 +212,7 @@ class WorkScheduleModel {
           effectiveEndDate: { val: effectiveEndDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           assignmentMode: { val: data.ASSIGNMENT_MODE, dir: oracledb.BIND_IN },
           status: { val: data.STATUS || 'ACTIVE', dir: oracledb.BIND_IN },
+          timeZone: { val: data.TIME_ZONE ?? null, dir: oracledb.BIND_IN },
           creationDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
           createdBy: { val: createdBy, dir: oracledb.BIND_IN },
           lastUpdateDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -228,10 +231,7 @@ class WorkScheduleModel {
         // Insert weekly lines (DAY_TYPE supported)
         await this.insertWeeklyLines(connection, returnedId, data.WEEKLY_LINES, createdBy, now);
 
-        return {
-          WORK_SCHEDULE_ID: returnedId,
-          TENANT_ID: data.TENANT_ID
-        };
+        return await this.findByIdWithConnection(connection, returnedId, data.TENANT_ID);
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) throw error;
@@ -251,12 +251,19 @@ class WorkScheduleModel {
 
   static async findAll(filters = {}) {
     try {
-      let countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ws`;
+      const includeLines = filters.includeLines !== false;
       let dataSql = `SELECT
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
+        ws.TIME_ZONE,
+        ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY`;
+
+      const pagination = filters.pagination;
+      if (pagination?.page && pagination?.pageSize) {
+        dataSql += `, COUNT(*) OVER() AS total`;
+      }
+      dataSql += `
       FROM ${this.TABLE_NAME} ws
       LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID`;
 
@@ -294,18 +301,12 @@ class WorkScheduleModel {
       }
 
       const where = ` WHERE ${conditions.join(' AND ')}`;
-      countSql += where;
       dataSql += where;
       dataSql += ` ORDER BY ws.SCHEDULE_CODE`;
 
-      const pagination = filters.pagination;
       let total = 0;
-
       const dataBinds = [...binds];
       if (pagination?.page && pagination?.pageSize) {
-        const c = await db.executeQuery(countSql, [...binds]);
-        total = c.rows?.[0]?.TOTAL || 0;
-
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataSql += ` OFFSET :${p} ROWS FETCH NEXT :${p + 1} ROWS ONLY`;
         dataBinds.push(offset, pagination.pageSize);
@@ -314,14 +315,28 @@ class WorkScheduleModel {
       const res = await db.executeQuery(dataSql, dataBinds);
       const schedules = this.convertKeysToSnakeCase(res.rows || []);
 
-      // Fetch weekly_lines for all schedules
-      if (schedules.length) {
+      if (pagination?.page && pagination?.pageSize) {
+        if (schedules.length > 0) {
+          total = Number(schedules[0].total) || 0;
+          schedules.forEach(s => delete s.total);
+        } else {
+          const countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ws${where}`;
+          const countRes = await db.executeQuery(countSql, binds);
+          total = countRes.rows?.[0]?.TOTAL ?? countRes.rows?.[0]?.total ?? 0;
+        }
+      }
+
+      if (includeLines && schedules.length > 0) {
         const ids = schedules.map(x => x.work_schedule_id);
         const linesMap = await this.getLinesForSchedules(ids);
         schedules.forEach(x => { x.weekly_lines = linesMap[x.work_schedule_id] || []; });
+      } else {
+        schedules.forEach(x => { x.weekly_lines = x.weekly_lines || []; });
       }
 
-      return pagination?.page ? { workSchedules: schedules, total } : { workSchedules: schedules, total: schedules.length };
+      return pagination?.page && pagination?.pageSize
+        ? { workSchedules: schedules, total }
+        : { workSchedules: schedules, total: schedules.length };
     } catch (error) {
       if (error instanceof ValidationError) throw error;
       throw new DatabaseError(`Failed to fetch work schedules: ${error.message}`, error);
@@ -394,6 +409,77 @@ class WorkScheduleModel {
     return map;
   }
 
+  /**
+   * Fetch full work schedule (header + weekly_lines) using existing connection.
+   * Use from create/update to avoid an extra round-trip.
+   */
+  static async findByIdWithConnection(connection, workScheduleId, tenantId) {
+    const headerSql = `SELECT
+        ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
+        ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
+        ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
+        ws.TIME_ZONE,
+        ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
+      FROM ${this.TABLE_NAME} ws
+      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
+      WHERE ws.WORK_SCHEDULE_ID = :1 AND ws.TENANT_ID = :2`;
+
+    const linesSql = `SELECT
+        wsl.DAY_OF_WEEK,
+        wsl.DAY_TYPE,
+        wsl.SHIFT_ID,
+        s.SHIFT_CODE,
+        s.SHIFT_NAME_EN,
+        s.SHIFT_NAME_AR,
+        s.START_MINUTES,
+        s.END_MINUTES,
+        s.DURATION_HOURS,
+        s.BREAK_HOURS,
+        (s.DURATION_HOURS - NVL(s.BREAK_HOURS, 0)) AS PAID_HOURS,
+        s.SHIFT_TYPE,
+        s.COLOR_HEX,
+        s.STATUS AS SHIFT_STATUS
+      FROM ${this.LINES_TABLE_NAME} wsl
+      LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
+      WHERE wsl.WORK_SCHEDULE_ID = :1
+      ORDER BY wsl.DAY_OF_WEEK`;
+
+    const [headerRes, linesRes] = await Promise.all([
+      connection.execute(headerSql, [workScheduleId, tenantId], { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(linesSql, [workScheduleId], { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    ]);
+
+    if (!headerRes.rows?.length) return null;
+
+    const schedule = this.convertKeysToSnakeCase(headerRes.rows[0]);
+    schedule.weekly_lines = (linesRes.rows || []).map(r => {
+      const converted = this.convertKeysToSnakeCase(r);
+      const dayType = this.normalizeDayType(converted.day_type);
+      return {
+        work_schedule_id: workScheduleId,
+        day_of_week: converted.day_of_week,
+        day_type: dayType,
+        shift: dayType === 'REST'
+          ? null
+          : {
+              shift_id: converted.shift_id ?? null,
+              shift_code: converted.shift_code ?? null,
+              shift_name_en: converted.shift_name_en ?? null,
+              shift_name_ar: converted.shift_name_ar ?? null,
+              start_minutes: converted.start_minutes ?? null,
+              end_minutes: converted.end_minutes ?? null,
+              duration_hours: converted.duration_hours ?? null,
+              break_hours: converted.break_hours ?? null,
+              paid_hours: converted.paid_hours ?? null,
+              shift_type: converted.shift_type ?? null,
+              color_hex: converted.color_hex ?? null,
+              status: converted.shift_status ?? null
+            }
+      };
+    });
+    return schedule;
+  }
+
   /* =========================
    * Find By Id
    * ========================= */
@@ -402,19 +488,15 @@ class WorkScheduleModel {
     try {
       if (!tenantId) throw new ValidationError('tenant_id is required');
 
-      const sql = `SELECT
+      const headerSql = `SELECT
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
+        ws.TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
       LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
       WHERE ws.WORK_SCHEDULE_ID = :1 AND ws.TENANT_ID = :2`;
-
-      const res = await db.executeQuery(sql, [workScheduleId, tenantId]);
-      if (!res.rows?.length) return null;
-
-      const schedule = this.convertKeysToSnakeCase(res.rows[0]);
 
       const linesSql = `SELECT
         wsl.DAY_OF_WEEK,
@@ -436,7 +518,14 @@ class WorkScheduleModel {
       WHERE wsl.WORK_SCHEDULE_ID = :1
       ORDER BY wsl.DAY_OF_WEEK`;
 
-      const linesRes = await db.executeQuery(linesSql, [workScheduleId]);
+      const [headerRes, linesRes] = await Promise.all([
+        db.executeQuery(headerSql, [workScheduleId, tenantId]),
+        db.executeQuery(linesSql, [workScheduleId])
+      ]);
+
+      if (!headerRes.rows?.length) return null;
+
+      const schedule = this.convertKeysToSnakeCase(headerRes.rows[0]);
 
       schedule.weekly_lines = (linesRes.rows || []).map(r => {
         const converted = this.convertKeysToSnakeCase(r);
@@ -530,6 +619,7 @@ class WorkScheduleModel {
 
         if (data.ASSIGNMENT_MODE !== undefined) { updateFields.push(`ASSIGNMENT_MODE = :${p}`); bindParams.push(data.ASSIGNMENT_MODE); p++; }
         if (data.STATUS !== undefined) { updateFields.push(`STATUS = :${p}`); bindParams.push(data.STATUS); p++; }
+        if (data.TIME_ZONE !== undefined) { updateFields.push(`TIME_ZONE = :${p}`); bindParams.push(data.TIME_ZONE === null || data.TIME_ZONE === '' ? null : data.TIME_ZONE); p++; }
 
         if (updateFields.length > 0) {
           updateFields.push(`LAST_UPDATED_BY = :${p}`); bindParams.push(actor); p++;
@@ -561,20 +651,7 @@ class WorkScheduleModel {
           throw new ValidationError('No fields to update');
         }
 
-        const selectRes = await connection.execute(
-          `SELECT
-            WORK_SCHEDULE_ID, TENANT_ID, SCHEDULE_CODE, SCHEDULE_NAME_EN, SCHEDULE_NAME_AR,
-            WORK_PATTERN_ID, EFFECTIVE_START_DATE, EFFECTIVE_END_DATE, ASSIGNMENT_MODE, STATUS,
-            CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
-           FROM ${this.TABLE_NAME}
-           WHERE WORK_SCHEDULE_ID = :1 AND TENANT_ID = :2`,
-          [workScheduleId, tenantId],
-          { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-
-        if (!selectRes.rows?.length) throw new NotFoundError('Work schedule not found');
-
-        return this.convertKeysToSnakeCase(selectRes.rows[0]);
+        return await this.findByIdWithConnection(connection, workScheduleId, tenantId);
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) throw error;

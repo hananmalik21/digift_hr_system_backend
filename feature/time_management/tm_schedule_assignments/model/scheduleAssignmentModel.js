@@ -506,24 +506,34 @@ class ScheduleAssignmentModel {
   static async batchGetOrgStructureDetails(structureIdHexArray) {
     if (!structureIdHexArray || structureIdHexArray.length === 0) return {};
     try {
-      const uniqueIds = [...new Set(structureIdHexArray.filter(id => id != null))];
-      if (uniqueIds.length === 0) return {};
+      const uniqueHex = [...new Set(
+        structureIdHexArray
+          .map(id => id ? this.normalizeHex32(id) : null)
+          .filter(id => id && /^[0-9A-F]{32}$/.test(id))
+      )];
+      if (uniqueHex.length === 0) return {};
 
+      const placeholders = uniqueHex.map((_, i) => `HEXTORAW(:${i + 1})`).join(',');
+      const sql = `
+        SELECT
+          RAWTOHEX(s.STRUCTURE_ID) AS STRUCTURE_ID,
+          s.STRUCTURE_CODE,
+          s.STRUCTURE_NAME
+        FROM ENT.HR_ORG_STRUCTURES s
+        WHERE s.STRUCTURE_ID IN (${placeholders})
+      `;
+      const result = await db.executeQuery(sql, uniqueHex);
       const structures = {};
-      await Promise.all(uniqueIds.map(async (id) => {
-        try {
-          const structure = await HrOrgStructureModel.findById(id);
-          if (structure) {
-            structures[id] = {
-              id: structure.structure_id,
-              name: structure.structure_name,
-              code: structure.structure_code
-            };
-          }
-        } catch (error) {
-          console.error(`Error fetching org structure ${id}:`, error);
+      (result.rows || []).forEach(row => {
+        const r = this.toSnake(row);
+        if (r.structure_id) {
+          structures[r.structure_id] = {
+            id: r.structure_id,
+            name: r.structure_name ?? null,
+            code: r.structure_code ?? null
+          };
         }
-      }));
+      });
       return structures;
     } catch (error) {
       console.error('Error batch fetching org structures:', error);
@@ -783,7 +793,27 @@ class ScheduleAssignmentModel {
           ? result.outBinds.returnId[0]
           : result.outBinds.returnId;
 
-        return { SCHEDULE_ASSIGNMENT_ID: returnedId, TENANT_ID: data.TENANT_ID };
+        const selRes = await connection.execute(
+          `SELECT
+            SCHEDULE_ASSIGNMENT_ID, TENANT_ID, ASSIGNMENT_LEVEL, DEPARTMENT_ID, EMPLOYEE_ID,
+            WORK_SCHEDULE_ID, EFFECTIVE_START_DATE, EFFECTIVE_END_DATE, STATUS, NOTES,
+            CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+           FROM ${this.TABLE_NAME}
+           WHERE SCHEDULE_ASSIGNMENT_ID = :1 AND TENANT_ID = :2`,
+          [returnedId, data.TENANT_ID],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+
+        if (!selRes.rows?.length) return { schedule_assignment_id: returnedId, tenant_id: data.TENANT_ID };
+
+        const a = this.toSnake(selRes.rows[0]);
+        if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
+          a.department_id = this.normalizeHex32(a.department_id);
+          a.org_unit_id = a.department_id;
+        } else if (a.department_id) {
+          a.department_id = this.normalizeHex32(a.department_id);
+        }
+        return a;
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) throw error;
@@ -805,31 +835,37 @@ class ScheduleAssignmentModel {
         throw new ValidationError('tenant_id is required');
       }
 
-      let countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
+      const includeEnrichment = filters.includeEnrichment !== false;
+      const pagination = filters.pagination;
+
       let dataSql = `
         SELECT
-          SCHEDULE_ASSIGNMENT_ID,
-          TENANT_ID,
-          ASSIGNMENT_LEVEL,
-          DEPARTMENT_ID,
-          EMPLOYEE_ID,
-          WORK_SCHEDULE_ID,
-          EFFECTIVE_START_DATE,
-          EFFECTIVE_END_DATE,
-          STATUS,
-          NOTES,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME}
-      `;
+          sa.SCHEDULE_ASSIGNMENT_ID,
+          sa.TENANT_ID,
+          sa.ASSIGNMENT_LEVEL,
+          sa.DEPARTMENT_ID,
+          sa.EMPLOYEE_ID,
+          sa.WORK_SCHEDULE_ID,
+          sa.EFFECTIVE_START_DATE,
+          sa.EFFECTIVE_END_DATE,
+          sa.STATUS,
+          sa.NOTES,
+          sa.CREATION_DATE,
+          sa.CREATED_BY,
+          sa.LAST_UPDATE_DATE,
+          sa.LAST_UPDATED_BY`;
+
+      if (pagination?.page && pagination?.pageSize) {
+        dataSql += `,
+          COUNT(*) OVER() AS total`;
+      }
+      dataSql += `
+        FROM ${this.TABLE_NAME} sa`;
 
       const conditions = [];
       const binds = [];
       let p = 1;
 
-      // Always use alias "sa" for consistency (especially needed when org_structure_id filter uses EXISTS with sa.DEPARTMENT_ID)
       conditions.push(`sa.TENANT_ID = :${p}`); binds.push(filters.tenantId); p++;
 
       if (filters.assignmentLevel) {
@@ -841,9 +877,6 @@ class ScheduleAssignmentModel {
         conditions.push(`sa.DEPARTMENT_ID = HEXTORAW(:${p})`); binds.push(depHex); p++;
       }
 
-      // ✅ org_structure_id filter (pagination-safe, NO join)
-      // Only filters DEPARTMENT assignments (where DEPARTMENT_ID is NOT NULL)
-      // EMPLOYEE assignments will be excluded since they have NULL DEPARTMENT_ID
       if (filters.orgStructureId !== undefined && filters.orgStructureId !== null) {
         const structHex = this.ensureHex32(filters.orgStructureId, 'org_structure_id');
         conditions.push(`
@@ -873,34 +906,11 @@ class ScheduleAssignmentModel {
       }
 
       const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+      dataSql += where;
+      dataSql += ` ORDER BY sa.SCHEDULE_ASSIGNMENT_ID DESC`;
 
-      // Always use alias "sa" for consistency (required when org_structure_id filter is used)
-      countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} sa${where}`;
-      dataSql = `
-        SELECT
-          sa.SCHEDULE_ASSIGNMENT_ID,
-          sa.TENANT_ID,
-          sa.ASSIGNMENT_LEVEL,
-          sa.DEPARTMENT_ID,
-          sa.EMPLOYEE_ID,
-          sa.WORK_SCHEDULE_ID,
-          sa.EFFECTIVE_START_DATE,
-          sa.EFFECTIVE_END_DATE,
-          sa.STATUS,
-          sa.NOTES,
-          sa.CREATION_DATE,
-          sa.CREATED_BY,
-          sa.LAST_UPDATE_DATE,
-          sa.LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME} sa${where}
-        ORDER BY sa.SCHEDULE_ASSIGNMENT_ID DESC
-      `;
-
-      const pagination = filters.pagination;
+      let total = 0;
       const dataBinds = [...binds];
-
-      const countResult = await db.executeQuery(countSql, [...binds]);
-      const total = countResult.rows?.[0]?.TOTAL || 0;
 
       if (pagination?.page && pagination?.pageSize) {
         const offset = (pagination.page - 1) * pagination.pageSize;
@@ -922,11 +932,33 @@ class ScheduleAssignmentModel {
         return a;
       });
 
-      const enriched = await this.enrichAssignmentsBatch(assignments, filters.tenantId);
+      if (pagination?.page && pagination?.pageSize) {
+        if (assignments.length > 0) {
+          total = Number(assignments[0].total) ?? 0;
+          assignments.forEach(a => { delete a.total; });
+        } else {
+          const countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} sa${where}`;
+          const countResult = await db.executeQuery(countSql, binds);
+          total = countResult.rows?.[0]?.TOTAL ?? countResult.rows?.[0]?.total ?? 0;
+        }
+      }
 
-      return pagination?.page
-        ? { assignments: enriched, total }
-        : { assignments: enriched, total: enriched.length };
+      let output = assignments;
+      if (includeEnrichment && assignments.length > 0) {
+        output = await this.enrichAssignmentsBatch(assignments, filters.tenantId);
+      } else if (!includeEnrichment) {
+        output = assignments.map(a => ({
+          ...a,
+          work_schedule: null,
+          org_unit: null,
+          org_structure: null,
+          org_path: []
+        }));
+      }
+
+      return pagination?.page && pagination?.pageSize
+        ? { assignments: output, total }
+        : { assignments: output, total: output.length };
     } catch (error) {
       if (error instanceof ValidationError) throw error;
       throw new DatabaseError(`Failed to fetch schedule assignments: ${error.message}`, error);
@@ -962,7 +994,14 @@ class ScheduleAssignmentModel {
       if (!result.rows?.length) return null;
 
       const assignment = this.toSnake(result.rows[0]);
-      return await this.enrichAssignment(assignment, tenantId, {});
+      if (String(assignment.assignment_level || '').toUpperCase() === 'DEPARTMENT' && assignment.department_id) {
+        assignment.department_id = this.normalizeHex32(assignment.department_id);
+        assignment.org_unit_id = assignment.department_id;
+      } else if (assignment.department_id) {
+        assignment.department_id = this.normalizeHex32(assignment.department_id);
+      }
+      const [enriched] = await this.enrichAssignmentsBatch([assignment], tenantId);
+      return enriched || assignment;
     } catch (error) {
       if (error instanceof ValidationError) throw error;
 
@@ -1100,7 +1139,14 @@ class ScheduleAssignmentModel {
         if (!sel.rows?.length) throw new NotFoundError('Schedule assignment not found');
 
         const assignment = this.toSnake(sel.rows[0]);
-        return await this.enrichAssignment(assignment, tenantId, {});
+        if (String(assignment.assignment_level || '').toUpperCase() === 'DEPARTMENT' && assignment.department_id) {
+          assignment.department_id = this.normalizeHex32(assignment.department_id);
+          assignment.org_unit_id = assignment.department_id;
+        } else if (assignment.department_id) {
+          assignment.department_id = this.normalizeHex32(assignment.department_id);
+        }
+        const [enriched] = await this.enrichAssignmentsBatch([assignment], tenantId);
+        return enriched || assignment;
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) throw error;

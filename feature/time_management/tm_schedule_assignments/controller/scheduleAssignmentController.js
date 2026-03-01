@@ -165,10 +165,11 @@ router.post('/', asyncHandler(async (req, res) => {
     delete upper.ORG_UNIT_ID;
   }
 
-  const createResult = await ScheduleAssignmentModel.create(upper, userId);
-
-  const assignmentId = createResult.SCHEDULE_ASSIGNMENT_ID || createResult.schedule_assignment_id;
-  const full = await ScheduleAssignmentModel.findById(assignmentId, tenantId);
+  const created = await ScheduleAssignmentModel.create(upper, userId);
+  const [full] = await ScheduleAssignmentModel.enrichAssignmentsBatch(
+    [created].filter(Boolean),
+    tenantId
+  );
   if (!full) throw new NotFoundError('Schedule assignment was created but could not be retrieved');
 
   if (full.department_id !== undefined && full.department_id !== null) {
@@ -229,6 +230,12 @@ router.get('/', asyncHandler(async (req, res) => {
     if (isNaN(d.getTime())) throw new ValidationError('effective_on must be a valid date (YYYY-MM-DD)');
     filters.effectiveOn = d;
     appliedFilters.effective_on = req.query.effective_on;
+  }
+
+  // include_enrichment: set to false/0 to skip work_schedule, org_unit, org_path (faster list)
+  if (req.query.include_enrichment !== undefined) {
+    const v = String(req.query.include_enrichment).toLowerCase();
+    filters.includeEnrichment = v !== 'false' && v !== '0';
   }
 
   let page = 1;

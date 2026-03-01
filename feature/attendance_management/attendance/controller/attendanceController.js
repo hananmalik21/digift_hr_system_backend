@@ -53,8 +53,8 @@ function isValidISODate(value) {
 }
 
 /**
- * Validate add-punch: attendance_day_id (required, integer > 0), actor (required, non-empty string),
- * punch_type (IN/OUT), punch_time (valid ISO date), lat/long numeric if provided, location_name optional.
+ * Validate add-punch: attendance_day_id (required), punch_type (IN|OUT), punch_time (ISO 8601 with offset),
+ * actor (required, non-empty). Optional: latitude, longitude, location_name. Return 400 if invalid.
  */
 function validateAddPunchPayload(body) {
   const errors = [];
@@ -86,7 +86,7 @@ function validateAddPunchPayload(body) {
   if (body.punch_time === undefined || body.punch_time === null || body.punch_time === '') {
     errors.push('punch_time is required');
   } else if (!isValidISODate(body.punch_time)) {
-    errors.push('punch_time must be a valid ISO date');
+    errors.push('punch_time must be a valid ISO 8601 date-time string (with offset)');
   }
 
   const hasLat = body.latitude !== undefined && body.latitude !== null && body.latitude !== '';
@@ -101,18 +101,6 @@ function validateAddPunchPayload(body) {
   }
 
   return errors;
-}
-
-/** Convert punch_time to UTC ISO string for ADD_PUNCH_UTC. Oracle expects YYYY-MM-DDTHH:mm:ssZ (no milliseconds). */
-function punchTimeToUtcISO(punchTime) {
-  const iso = new Date(punchTime).toISOString();
-  return iso.replace(/\.\d{3}Z$/, 'Z');
-}
-
-/** Convert to UTC ISO string (no milliseconds) for HR manual UTC API. */
-function toUtcISOString(value) {
-  const iso = new Date(value).toISOString();
-  return iso.replace(/\.\d{3}Z$/, 'Z');
 }
 
 /**
@@ -139,13 +127,13 @@ function validateHrManualPayload(body) {
   if (body.check_in_time === undefined || body.check_in_time === null || body.check_in_time === '') {
     errors.push('check_in_time is required');
   } else if (!isValidISODate(body.check_in_time)) {
-    errors.push('check_in_time must be a valid ISO date-time string');
+    errors.push('check_in_time must be a valid ISO 8601 date-time string (Z or offset)');
   }
 
   if (body.check_out_time === undefined || body.check_out_time === null || body.check_out_time === '') {
     errors.push('check_out_time is required');
   } else if (!isValidISODate(body.check_out_time)) {
-    errors.push('check_out_time must be a valid ISO date-time string');
+    errors.push('check_out_time must be a valid ISO 8601 date-time string (Z or offset)');
   }
 
   if (errors.length === 0 && body.check_in_time != null && body.check_out_time != null) {
@@ -319,8 +307,10 @@ router.put('/', asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/tm/attendance/punch
- * @desc    Add punch (IN/OUT) via TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH. Package runs RECOMPUTE_DAY internally; do not call recompute from Node.
+ * POST /api/tm/attendance/punch
+ * Create a punch (IN or OUT) for a given attendance_day_id.
+ * System stores punches in UTC; DB evaluates status in schedule tz_region.
+ * Timezone rule: accept punch_time with offset → parse as JS Date → bind directly to Oracle (no manual string conversion).
  */
 router.post('/punch', asyncHandler(async (req, res) => {
   const body = req.body || {};
@@ -329,17 +319,16 @@ router.post('/punch', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
-  const attendanceDayId = parseInt(body.attendance_day_id, 10);
-  const utcTime = punchTimeToUtcISO(body.punch_time);
+  const punchDate = new Date(body.punch_time);
 
   const payload = {
-    attendance_day_id: attendanceDayId,
+    attendance_day_id: Number(body.attendance_day_id),
     punch_type: String(body.punch_type).trim().toUpperCase(),
-    punch_time: utcTime,
+    punch_time: punchDate,
     actor: String(body.actor).trim(),
-    latitude: body.latitude,
-    longitude: body.longitude,
-    location_name: body.location_name
+    latitude: body.latitude ?? null,
+    longitude: body.longitude ?? null,
+    location_name: body.location_name ?? null
   };
 
   try {
@@ -386,8 +375,8 @@ router.post('/recompute', asyncHandler(async (req, res) => {
 }));
 
 /**
- * @route   POST /api/tm/attendance/manual
- * @desc    HR manual add both punches (check-in + check-out) via TM.TM_ATTENDANCE_HR_PKG.HR_MANUAL_ADD_BOTH_PUNCHES_UTC.
+ * POST /api/tm/attendance/manual
+ * HR manual add both punches (check-in + check-out). Pass check_in_time and check_out_time as ISO 8601 (Z or offset); do not convert in Node; DB handles tz_region.
  */
 router.post('/manual', asyncHandler(async (req, res) => {
   const body = req.body || {};
@@ -396,34 +385,27 @@ router.post('/manual', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
-  const checkInUtc = toUtcISOString(body.check_in_time);
-  const checkOutUtc = toUtcISOString(body.check_out_time);
-
   const payload = {
-    attendance_day_id: parseInt(body.attendance_day_id, 10),
-    check_in_time_utc: checkInUtc,
-    check_out_time_utc: checkOutUtc,
+    attendance_day_id: Number(body.attendance_day_id),
+    check_in_time: String(body.check_in_time).trim(),
+    check_out_time: String(body.check_out_time).trim(),
     actor: String(body.actor).trim(),
-    location_name_in: body.location_name_in,
-    latitude_in: body.latitude_in,
-    longitude_in: body.longitude_in,
-    location_name_out: body.location_name_out,
-    latitude_out: body.latitude_out,
-    longitude_out: body.longitude_out,
-    reason: body.reason
+    location_name_in: body.location_name_in ?? null,
+    latitude_in: body.latitude_in ?? null,
+    longitude_in: body.longitude_in ?? null,
+    location_name_out: body.location_name_out ?? null,
+    latitude_out: body.latitude_out ?? null,
+    longitude_out: body.longitude_out ?? null,
+    reason: body.reason ?? null
   };
 
   try {
     const result = await AttendanceModel.hrManualAddBothPunchesUtc(payload);
-    const response = {
+    res.status(200).json({
       success: true,
       attendance_day_id: result.attendance_day_id,
-      action: 'HR_MANUAL'
-    };
-    if (result.result !== undefined && result.result !== null) {
-      response.result = result.result;
-    }
-    res.status(200).json(response);
+      action: 'MANUAL_CORRECTION'
+    });
   } catch (error) {
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
     if (error instanceof DatabaseError) return sendPunchRecomputeOracleError(res, req, error);

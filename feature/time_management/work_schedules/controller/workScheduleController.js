@@ -239,20 +239,14 @@ router.post('/', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
 
-  const createResult = await WorkScheduleModel.create(upperCaseData, userId);
-  // Fetch the full work schedule object after creation
-  const workScheduleId = createResult.WORK_SCHEDULE_ID || createResult.work_schedule_id;
-  const fullSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+  const fullSchedule = await WorkScheduleModel.create(upperCaseData, userId);
   if (!fullSchedule) {
     throw new NotFoundError('Work schedule was created but could not be retrieved');
   }
-  
-  // Convert keys to lowercase snake_case
-  const convertedSchedule = toLowerCaseKeys(fullSchedule);
-  
+
   sendCreated(res, {
     message: 'Work schedule created successfully',
-    data: convertedSchedule
+    data: toLowerCaseKeys(fullSchedule)
   });
 }));
 
@@ -287,6 +281,12 @@ router.get('/', asyncHandler(async (req, res) => {
     if (isNaN(effectiveDate.getTime())) throw new ValidationError('effective_on must be a valid date (YYYY-MM-DD)');
     filters.effectiveOn = effectiveDate;
     appliedFilters.effective_on = req.query.effective_on;
+  }
+
+  // include_lines: set to false/0 to skip weekly_lines (faster when only header data is needed)
+  if (req.query.include_lines !== undefined) {
+    const v = String(req.query.include_lines).toLowerCase();
+    filters.includeLines = v !== 'false' && v !== '0';
   }
 
   let page = 1;
@@ -403,19 +403,14 @@ router.put('/:work_schedule_id', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
 
-  await WorkScheduleModel.update(workScheduleId, tenantId, upperCaseData, userId);
-  // Fetch the full work schedule object with weekly_lines after update
-  const fullSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
+  const fullSchedule = await WorkScheduleModel.update(workScheduleId, tenantId, upperCaseData, userId);
   if (!fullSchedule) {
     throw new NotFoundError('Work schedule was updated but could not be retrieved');
   }
-  
-  // Convert keys to lowercase snake_case
-  const convertedSchedule = toLowerCaseKeys(fullSchedule);
-  
+
   sendUpdated(res, {
     message: 'Work schedule updated successfully',
-    data: convertedSchedule
+    data: toLowerCaseKeys(fullSchedule)
   });
 }));
 
