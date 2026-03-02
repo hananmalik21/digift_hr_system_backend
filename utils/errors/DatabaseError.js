@@ -298,6 +298,16 @@ export class DatabaseError extends AppError {
       return userMessage || message;
     }
 
+    // Table or view does not exist (ORA-00942)
+    if (errorNum === 942 || message.includes('ORA-00942')) {
+      return 'The required database table or view does not exist or is not accessible. Please contact the administrator to create or grant access to the object.';
+    }
+
+    // Invalid identifier / column name (ORA-00904)
+    if (errorNum === 904 || message.includes('ORA-00904')) {
+      return 'A column or expression referenced in the query is invalid or does not exist. Please contact the administrator to align the schema with the application.';
+    }
+
     // Default database error - try to extract more details from message
     if (message && message.length > 0 && message !== 'A database error occurred. Please try again later.') {
       // If there's a detailed message, use it

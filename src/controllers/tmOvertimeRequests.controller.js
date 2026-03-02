@@ -16,7 +16,7 @@ import {
   getOneQuerySchema,
   listQuerySchema,
 } from '../validators/tmOvertimeRequests.schemas.js';
-import { sendSuccess, sendCreated, sendList } from '../../utils/response.js';
+import { sendSuccess, sendCreated } from '../../utils/response.js';
 import { ValidationError } from '../../utils/errors/index.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 
@@ -39,23 +39,28 @@ function validate(schema, data) {
   return parsed.data;
 }
 
-/** GET /api/tm/overtime/requests - list (query: tenant_id, status?, employee_guid?, limit?, offset?) */
+/** GET /api/tm/overtime/requests - list (query: tenant_id required; status?, date_from?, date_to?, search?, org_unit_id?, level_code?, page?, page_size?) */
 export const list = asyncHandler(async (req, res) => {
   const query = { ...req.query };
   if (query.tenant_id !== undefined) query.tenant_id = Number(query.tenant_id);
-  if (query.limit !== undefined) query.limit = Number(query.limit);
-  if (query.offset !== undefined) query.offset = Number(query.offset);
   const data = validate(listQuerySchema, query);
-  const { rows, total } = await listRequests(data.tenant_id, {
+  const { rows, total, page, pageSize } = await listRequests(data.tenant_id, {
     status: data.status,
-    employee_guid: data.employee_guid,
-    limit: data.limit,
-    offset: data.offset,
+    date_from: data.date_from,
+    date_to: data.date_to,
+    search: data.search,
+    org_unit_id: data.org_unit_id,
+    level_code: data.level_code,
+    page: data.page,
+    page_size: data.page_size,
   });
-  sendList(res, {
+  res.status(200).json({
+    success: true,
     message: 'Fetched successfully',
+    page,
+    page_size: pageSize,
+    total,
     data: rows,
-    meta: { pagination: { page: Math.floor(data.offset / data.limit) + 1, limit: data.limit, total } },
   });
 });
 
@@ -233,5 +238,6 @@ export const cancel = asyncHandler(async (req, res) => {
   --- GET list ---
   GET {{baseUrl}}/api/tm/overtime/requests?tenant_id=1
   GET {{baseUrl}}/api/tm/overtime/requests?tenant_id=1&status=SUBMITTED
-  GET {{baseUrl}}/api/tm/overtime/requests?tenant_id=1&employee_guid=a1b2c3d4e5f6789012345678abcdef01&limit=10&offset=0
+  GET {{baseUrl}}/api/tm/overtime/requests?tenant_id=1&date_from=2025-01-01&date_to=2025-01-31&search=john&page=1&page_size=20
+  GET {{baseUrl}}/api/tm/overtime/requests?tenant_id=1&org_unit_id=ABC123&level_code=LVL1
 */

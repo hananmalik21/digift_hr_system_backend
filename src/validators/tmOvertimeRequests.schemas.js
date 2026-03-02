@@ -47,11 +47,22 @@ export const getOneQuerySchema = z.object({
   tenant_id: z.coerce.number().int().positive(),
 });
 
-/** Query for GET list: tenant_id required, optional filters */
+/** Optional YYYY-MM-DD string; empty string treated as undefined */
+const optionalDateStr = z
+  .string()
+  .optional()
+  .transform((s) => (s == null || String(s).trim() === '' ? undefined : s))
+  .refine((s) => s === undefined || /^\d{4}-\d{2}-\d{2}$/.test(s), { message: 'Must be YYYY-MM-DD' });
+
+/** Query for GET list: tenant_id required, optional filters, pagination */
 export const listQuerySchema = z.object({
   tenant_id: z.coerce.number().int().positive(),
   status: z.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN']).optional(),
-  employee_guid: guidSchema.optional(),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
-  offset: z.coerce.number().int().min(0).optional().default(0),
+  date_from: optionalDateStr,
+  date_to: optionalDateStr,
+  search: z.string().max(500).optional().transform((s) => (s != null && String(s).trim() === '' ? undefined : s)),
+  org_unit_id: z.string().max(32).optional().transform((s) => (s != null && String(s).trim() === '' ? undefined : s)),
+  level_code: z.string().max(50).optional().transform((s) => (s != null && String(s).trim() === '' ? undefined : s)),
+  page: z.coerce.number().int().min(1).optional().default(1),
+  page_size: z.coerce.number().int().min(1).max(100).optional().default(20),
 });

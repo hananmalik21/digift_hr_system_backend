@@ -44,7 +44,7 @@ function mapOracleError(err) {
   return null;
 }
 
-/** Run read-only query (no transaction, autoCommit). */
+/** Run read-only query (no transaction, autoCommit). Wraps Oracle errors as DatabaseError. */
 async function runReadOnly(fn) {
   const connection = await db.getConnection();
   try {
@@ -54,6 +54,10 @@ async function runReadOnly(fn) {
       { autoCommit: true }
     );
     return await fn(connection);
+  } catch (err) {
+    if (err instanceof DatabaseError || err instanceof NotFoundError) throw err;
+    const msg = mapOracleError(err) || err.message;
+    throw new DatabaseError(msg || 'Database query failed.', err, msg);
   } finally {
     try {
       await connection.close();
@@ -73,6 +77,23 @@ function keysToLower(obj) {
   return Object.fromEntries(
     Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v])
   );
+}
+
+/** Parse JSON string fields (e.g. ot_rate_type_obj from view) into objects. */
+function parseJsonFields(row, keys = ['ot_rate_type_obj', 'ot_config_obj']) {
+  if (!row || typeof row !== 'object') return row;
+  const out = { ...row };
+  for (const key of keys) {
+    const val = out[key];
+    if (val !== undefined && typeof val === 'string' && val.trim() !== '') {
+      try {
+        out[key] = JSON.parse(val);
+      } catch (_) {
+        // leave as string if parse fails
+      }
+    }
+  }
+  return out;
 }
 
 function mapRequestRow(row) {
@@ -142,51 +163,135 @@ export async function getOneRequest(tenantId, otRequestGuidStr) {
 }
 
 /**
- * List overtime requests by tenant_id with optional filters.
- * @param {number} tenantId - Required tenant id
- * @param {object} filters - { status, employee_guid, limit, offset }
+ * Map a row from TM.V_OT_REQUEST_DETAILS (or similar view) to API shape: lowercase keys, hex GUIDs, formatted dates, parsed JSON obj fields.
+ */
+function mapViewRequestRow(row) {
+  if (!row) return null;
+  const out = { ...row };
+  if (Buffer.isBuffer(out.OT_REQUEST_GUID)) out.OT_REQUEST_GUID = bufferToGuidHex(out.OT_REQUEST_GUID);
+  if (Buffer.isBuffer(out.EMPLOYEE_GUID)) out.EMPLOYEE_GUID = bufferToGuidHex(out.EMPLOYEE_GUID);
+  out.CREATION_DATE = formatDate(out.CREATION_DATE);
+  out.LAST_UPDATE_DATE = formatDate(out.LAST_UPDATE_DATE);
+  out.MANAGER_APPROVED_DATE = formatDate(out.MANAGER_APPROVED_DATE);
+  out.HR_VALIDATED_DATE = formatDate(out.HR_VALIDATED_DATE);
+  if (out.ATTENDANCE_DATE != null) out.ATTENDANCE_DATE = formatDate(out.ATTENDANCE_DATE);
+  const lowered = keysToLower(out);
+  return parseJsonFields(lowered, ['ot_rate_type_obj', 'ot_config_obj']);
+}
+
+/**
+ * Resolve enterprise_id from tenant_id for TM overtime list.
+ * Uses tenant_id as enterprise_id (tenant_id mapping); replace with lookup if a mapping table exists.
+ */
+function getEnterpriseIdFromTenantId(tenantId) {
+  return tenantId;
+}
+
+const LIST_BASE_SQL = `
+SELECT v.*
+FROM   TM.V_OT_REQUEST_DETAILS v
+JOIN (
+    SELECT enterprise_id,
+           employee_id,
+           employee_number,
+           JSON_SERIALIZE(org_structure_list RETURNING CLOB) AS org_structure_list
+    FROM (
+        SELECT a.*,
+               ROW_NUMBER() OVER (
+                 PARTITION BY a.enterprise_id, a.employee_id
+                 ORDER BY a.effective_start_date DESC NULLS LAST,
+                          a.assignment_id DESC NULLS LAST
+               ) rn
+        FROM empl.assignments a
+    )
+    WHERE rn = 1
+) la
+  ON la.enterprise_id = v.enterprise_id
+ AND la.employee_id   = v.employee_id
+WHERE  1=1
+  AND (:p_enterprise_id IS NULL OR v.enterprise_id = :p_enterprise_id)
+  AND (:p_status IS NULL OR v.status = :p_status)
+  AND (:p_date_from IS NULL
+       OR TRUNC(v.attendance_date) >= TRUNC(TO_DATE(:p_date_from,'YYYY-MM-DD')))
+  AND (:p_date_to IS NULL
+       OR TRUNC(v.attendance_date) <= TRUNC(TO_DATE(:p_date_to,'YYYY-MM-DD')))
+  AND (:p_search IS NULL
+       OR INSTR(
+            UPPER(NVL(la.employee_number,'') || ' ' || NVL(v.employee_name_en,'')),
+            UPPER(:p_search)
+          ) > 0)
+  AND (:p_org_unit_id_hex IS NULL
+       OR EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+                   la.org_structure_list,
+                   '$[*]' COLUMNS (
+                     org_unit_id_hex VARCHAR2(32) PATH '$.org_unit_id'
+                   )
+                 ) jt
+            WHERE UPPER(jt.org_unit_id_hex) = UPPER(:p_org_unit_id_hex)
+       ))
+  AND (:p_level_code IS NULL
+       OR EXISTS (
+            SELECT 1
+            FROM JSON_TABLE(
+                   la.org_structure_list,
+                   '$[*]' COLUMNS (
+                     level_code VARCHAR2(50) PATH '$.level_code'
+                   )
+                 ) jt2
+            WHERE UPPER(jt2.level_code) = UPPER(:p_level_code)
+       ))
+`;
+
+/**
+ * List overtime requests from TM.V_OT_REQUEST_DETAILS with optional filters and pagination.
+ * Tenant isolation via enterprise_id from tenant_id mapping.
+ * @param {number} tenantId - Required tenant id (mapped to enterprise_id)
+ * @param {object} filters - { status, date_from, date_to, search, org_unit_id, level_code, page, page_size }
  * @returns {Promise<{ rows: object[], total: number }>}
  */
 export async function listRequests(tenantId, filters = {}) {
-  const limit = Math.min(Math.max(Number(filters.limit) || 20, 1), 100);
-  const offset = Math.max(Number(filters.offset) || 0, 0);
+  const enterpriseId = getEnterpriseIdFromTenantId(tenantId);
+  const page = Math.max(1, Math.floor(Number(filters.page)) || 1);
+  const pageSize = Math.min(100, Math.max(1, Math.floor(Number(filters.page_size)) || 20));
+  const offset = (page - 1) * pageSize;
+
   const status = filters.status ? String(filters.status).trim().toUpperCase() : null;
-  const employeeGuidBuf = filters.employee_guid ? guidToBuffer(filters.employee_guid) : null;
+  const dateFrom = filters.date_from && /^\d{4}-\d{2}-\d{2}$/.test(String(filters.date_from).trim()) ? String(filters.date_from).trim() : null;
+  const dateTo = filters.date_to && /^\d{4}-\d{2}-\d{2}$/.test(String(filters.date_to).trim()) ? String(filters.date_to).trim() : null;
+  const search = filters.search && String(filters.search).trim() !== '' ? String(filters.search).trim() : null;
+  const orgUnitIdHex = filters.org_unit_id && String(filters.org_unit_id).trim() !== '' ? String(filters.org_unit_id).trim() : null;
+  const levelCode = filters.level_code && String(filters.level_code).trim() !== '' ? String(filters.level_code).trim() : null;
+
+  const baseBinds = {
+    p_enterprise_id: enterpriseId,
+    p_status: status,
+    p_date_from: dateFrom,
+    p_date_to: dateTo,
+    p_search: search,
+    p_org_unit_id_hex: orgUnitIdHex,
+    p_level_code: levelCode,
+  };
 
   return runReadOnly(async (connection) => {
-    let whereClause = ' WHERE TENANT_ID = :tenant_id';
-    const binds = { tenant_id: tenantId };
-    if (status) {
-      whereClause += ' AND STATUS = :status';
-      binds.status = status;
-    }
-    if (employeeGuidBuf) {
-      whereClause += ' AND EMPLOYEE_GUID = :employee_guid';
-      binds.employee_guid = employeeGuidBuf;
-    }
-
-    const countSql = `SELECT COUNT(*) AS CNT FROM TM.TM_OVERTIME_REQUESTS ${whereClause}`;
-    const countResult = await connection.execute(countSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    const countSql = `
+      SELECT COUNT(*) AS CNT FROM (
+        ${LIST_BASE_SQL}
+      ) cnt_sub
+    `;
+    const countResult = await connection.execute(countSql, baseBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     const total = countResult.rows?.[0]?.CNT ?? 0;
 
     const dataSql = `
-      SELECT * FROM (
-        SELECT ROWNUM rn, T.* FROM (
-          SELECT ${REQUEST_COLUMNS}
-          FROM TM.TM_OVERTIME_REQUESTS
-          ${whereClause}
-          ORDER BY CREATION_DATE DESC, OT_REQUEST_ID DESC
-        ) T
-      ) WHERE rn > :off AND rn <= :off + :lim
+      ${LIST_BASE_SQL}
+      ORDER BY v.attendance_date DESC, v.creation_date DESC
+      OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
     `;
-    binds.off = offset;
-    binds.lim = limit;
-    const result = await connection.execute(dataSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    const rows = (result.rows || []).map((r) => {
-      const { RN, rn, ...rest } = r; // Oracle returns RN uppercase; strip pagination column
-      return mapRequestRow(rest);
-    });
-    return { rows, total };
+    const dataBinds = { ...baseBinds, p_offset: offset, p_limit: pageSize };
+    const result = await connection.execute(dataSql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    const rows = (result.rows || []).map(mapViewRequestRow);
+    return { rows, total, page, pageSize };
   });
 }
 
