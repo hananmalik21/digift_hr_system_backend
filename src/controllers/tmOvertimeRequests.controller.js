@@ -75,8 +75,8 @@ export const create = asyncHandler(async (req, res) => {
   const data = validate(createSchema, body);
   const result = await createRequest(data);
   sendCreated(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: 'Overtime request created.',
+    data: result,
   });
 });
 
@@ -89,8 +89,8 @@ export const updateDraftHandler = asyncHandler(async (req, res) => {
   const tenantId = Number(data.tenant_id);
   const result = await updateDraft(tenantId, params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: 'Draft updated.',
+    data: result,
   });
 });
 
@@ -102,8 +102,8 @@ export const submit = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await submitRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: 'Request submitted.',
+    data: result,
   });
 });
 
@@ -115,8 +115,8 @@ export const approve = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await approveRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: 'Request approved.',
+    data: result,
   });
 });
 
@@ -128,8 +128,8 @@ export const reject = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await rejectRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: 'Request rejected.',
+    data: result,
   });
 });
 
@@ -141,8 +141,8 @@ export const cancel = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await cancelRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: result.message,
-    data: { ot_request_guid: result.ot_request_guid, status: result.status },
+    message: result.status === 'DELETED' ? 'Request cancelled (deleted).' : 'Request withdrawn.',
+    data: result,
   });
 });
 

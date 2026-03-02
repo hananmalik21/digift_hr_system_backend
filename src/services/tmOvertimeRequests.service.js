@@ -67,6 +67,14 @@ function formatDate(val) {
   return val;
 }
 
+/** Convert object keys to lowercase for API response. */
+function keysToLower(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  return Object.fromEntries(
+    Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v])
+  );
+}
+
 function mapRequestRow(row) {
   if (!row) return null;
   const out = { ...row };
@@ -76,7 +84,7 @@ function mapRequestRow(row) {
   out.LAST_UPDATE_DATE = formatDate(out.LAST_UPDATE_DATE);
   out.MANAGER_APPROVED_DATE = formatDate(out.MANAGER_APPROVED_DATE);
   out.HR_VALIDATED_DATE = formatDate(out.HR_VALIDATED_DATE);
-  return out;
+  return keysToLower(out);
 }
 
 /**
@@ -175,7 +183,7 @@ export async function listRequests(tenantId, filters = {}) {
     binds.lim = limit;
     const result = await connection.execute(dataSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     const rows = (result.rows || []).map((r) => {
-      const { rn, ...rest } = r;
+      const { RN, rn, ...rest } = r; // Oracle returns RN uppercase; strip pagination column
       return mapRequestRow(rest);
     });
     return { rows, total };
@@ -228,12 +236,8 @@ export async function createRequest(payload) {
     if (!guidHex) throw new DatabaseError('Create succeeded but ot_request_guid was not returned.', null, 'Create succeeded but ot_request_guid was not returned.');
 
     const row = await getRequestByGuid(connection, payload.tenant_id, outBinds.p_ot_request_guid);
-    const status = row?.STATUS ?? (payload.status || 'DRAFT').toUpperCase();
-    return {
-      ot_request_guid: guidHex,
-      status,
-      message: 'Overtime request created.',
-    };
+    if (!row) throw new DatabaseError('Create succeeded but request could not be read back.', null);
+    return row;
   }, 'create overtime request');
 }
 
@@ -272,11 +276,7 @@ export async function updateDraft(tenantId, otRequestGuidStr, payload) {
     await callPlsql(connection, plsql, binds);
     const row = await getRequestByGuid(connection, tenantId, guidBuf);
     if (!row) throw new NotFoundError('Overtime request not found.');
-    return {
-      ot_request_guid: row.OT_REQUEST_GUID,
-      status: row.STATUS,
-      message: 'Draft updated.',
-    };
+    return row;
   }, 'update draft');
 }
 
@@ -307,11 +307,7 @@ export async function submitRequest(tenantId, otRequestGuidStr, payload) {
     await callPlsql(connection, plsql, binds);
     const row = await getRequestByGuid(connection, tenantId, guidBuf);
     if (!row) throw new NotFoundError('Overtime request not found.');
-    return {
-      ot_request_guid: row.OT_REQUEST_GUID,
-      status: row.STATUS,
-      message: 'Request submitted.',
-    };
+    return row;
   }, 'submit request');
 }
 
@@ -342,11 +338,7 @@ export async function approveRequest(tenantId, otRequestGuidStr, payload) {
     await callPlsql(connection, plsql, binds);
     const row = await getRequestByGuid(connection, tenantId, guidBuf);
     if (!row) throw new NotFoundError('Overtime request not found.');
-    return {
-      ot_request_guid: row.OT_REQUEST_GUID,
-      status: row.STATUS,
-      message: 'Request approved.',
-    };
+    return row;
   }, 'approve request');
 }
 
@@ -377,11 +369,7 @@ export async function rejectRequest(tenantId, otRequestGuidStr, payload) {
     await callPlsql(connection, plsql, binds);
     const row = await getRequestByGuid(connection, tenantId, guidBuf);
     if (!row) throw new NotFoundError('Overtime request not found.');
-    return {
-      ot_request_guid: row.OT_REQUEST_GUID,
-      status: row.STATUS,
-      message: 'Request rejected.',
-    };
+    return row;
   }, 'reject request');
 }
 
@@ -413,9 +401,26 @@ export async function cancelRequest(tenantId, otRequestGuidStr, payload) {
     await callPlsql(connection, plsql, binds);
     const row = await getRequestByGuid(connection, tenantId, guidBuf);
     const guidHex = bufferToGuidHex(guidBuf) || guidBuf.toString('hex');
-    if (row) {
-      return { ot_request_guid: guidHex, status: row.STATUS, message: 'Request withdrawn.' };
-    }
-    return { ot_request_guid: guidHex, status: 'DELETED', message: 'Request cancelled (deleted).' };
+    if (row) return row;
+    return {
+      ot_request_id: null,
+      tenant_id: tenantId,
+      ot_request_guid: guidHex,
+      employee_guid: null,
+      attendance_day_id: null,
+      requested_hours: null,
+      reason: null,
+      ot_config_id: null,
+      ot_rate_type_id: null,
+      status: 'DELETED',
+      manager_approved_by: null,
+      manager_approved_date: null,
+      hr_validated_by: null,
+      hr_validated_date: null,
+      created_by: null,
+      creation_date: null,
+      last_updated_by: null,
+      last_update_date: null,
+    };
   }, 'cancel request');
 }
