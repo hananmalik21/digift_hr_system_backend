@@ -16,7 +16,7 @@ import {
   getOneQuerySchema,
   listQuerySchema,
 } from '../validators/tmOvertimeRequests.schemas.js';
-import { sendSuccess, sendCreated } from '../../utils/response.js';
+import { sendSuccess, sendCreated, sendList } from '../../utils/response.js';
 import { ValidationError } from '../../utils/errors/index.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
 
@@ -54,13 +54,15 @@ export const list = asyncHandler(async (req, res) => {
     page: data.page,
     page_size: data.page_size,
   });
-  res.status(200).json({
-    success: true,
+  const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
+  const hasNext = page < totalPages;
+  const hasPrevious = page > 1;
+  sendList(res, {
     message: 'Fetched successfully',
-    page,
-    page_size: pageSize,
-    total,
     data: rows,
+    meta: {
+      pagination: { page, pageSize, total, totalPages, hasNext, hasPrevious },
+    },
   });
 });
 
