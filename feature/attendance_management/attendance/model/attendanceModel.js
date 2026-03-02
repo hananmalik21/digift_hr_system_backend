@@ -351,6 +351,7 @@ class AttendanceModel {
     try {
       connection = await db.getConnection();
       await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
+      await connection.execute(`ALTER SESSION SET TIME_ZONE = 'UTC'`, [], { autoCommit: false });
 
       const attendance_day_id = Number(payload.attendance_day_id);
       const punch_type = String(payload.punch_type || '').trim().toUpperCase();
