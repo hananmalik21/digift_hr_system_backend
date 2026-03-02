@@ -319,12 +319,12 @@ router.post('/punch', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
-  const punchDate = new Date(body.punch_time);
+  const punchTimeIso = String(body.punch_time).trim();
 
   const payload = {
     attendance_day_id: Number(body.attendance_day_id),
     punch_type: String(body.punch_type).trim().toUpperCase(),
-    punch_time: punchDate,
+    punch_time: punchTimeIso,
     actor: String(body.actor).trim(),
     latitude: body.latitude ?? null,
     longitude: body.longitude ?? null,

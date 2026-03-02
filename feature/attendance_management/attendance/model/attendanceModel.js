@@ -342,7 +342,8 @@ class AttendanceModel {
 
   /**
    * Call TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH.
-   * punch_time: JS Date (from ISO-8601 with offset); bound directly as Oracle DATE/TIMESTAMP (no string conversion).
+   * punch_time: ISO-8601 string with offset (e.g. "2026-02-09T09:00:00+05:00"). Passed as string; Oracle converts
+   * via TO_TIMESTAMP_TZ so the same value is stored the same in all environments (no Node/Oracle session TZ dependency).
    * Package handles UTC storage, schedule tz_region, early/late, overtime, status. Do not call recompute from Node.
    */
   static async addPunch(payload) {
@@ -351,22 +352,25 @@ class AttendanceModel {
     try {
       connection = await db.getConnection();
       await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ${this.SCHEMA}`, [], { autoCommit: false });
-      await connection.execute(`ALTER SESSION SET TIME_ZONE = 'UTC'`, [], { autoCommit: false });
 
       const attendance_day_id = Number(payload.attendance_day_id);
       const punch_type = String(payload.punch_type || '').trim().toUpperCase();
-      const punch_time = payload.punch_time instanceof Date ? payload.punch_time : new Date(payload.punch_time);
+      let punch_time = typeof payload.punch_time === 'string' ? payload.punch_time.trim() : String(payload.punch_time);
+      if (punch_time.endsWith('Z')) punch_time = punch_time.slice(0, -1) + '+00:00';
       const actor = this.optStr(payload.actor) || 'ADMIN';
       const latitude = payload.latitude ?? null;
       const longitude = payload.longitude ?? null;
       const location_name = payload.location_name ?? null;
 
       const plsqlBlock = `
+        DECLARE
+          v_punch_ts TIMESTAMP WITH TIME ZONE;
         BEGIN
+          v_punch_ts := TO_TIMESTAMP_TZ(:punch_time, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM');
           TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH(
             p_attendance_day_id => :attendance_day_id,
             p_punch_type        => :punch_type,
-            p_punch_time        => :punch_time,
+            p_punch_time        => v_punch_ts,
             p_actor             => :actor,
             p_latitude          => :latitude,
             p_longitude         => :longitude,
