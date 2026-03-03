@@ -21,13 +21,14 @@ export const createSchema = z.object({
   actor: z.string().min(1).trim(),
 });
 
-/** Update draft body */
+/** Update draft body; optional status: "SUBMITTED" to promote in same call */
 export const updateDraftSchema = z.object({
   tenant_id: tenantIdSchema,
   requested_hours: z.number().positive().optional().nullable(),
   reason: z.string().max(2000).optional().nullable(),
   ot_config_id: z.number().int().positive().optional().nullable(),
   ot_rate_type_id: z.number().int().positive().optional().nullable(),
+  status: z.enum(['DRAFT', 'SUBMITTED']).optional().nullable(),
   actor: z.string().min(1).trim(),
 });
 

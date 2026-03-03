@@ -362,11 +362,13 @@ export async function updateDraft(tenantId, otRequestGuidStr, payload) {
         p_reason          => :p_reason,
         p_ot_config_id    => :p_ot_config_id,
         p_ot_rate_type_id => :p_ot_rate_type_id,
+        p_status          => :p_status,
         p_actor           => :p_actor
       );
     END;
   `;
 
+  const statusValue = payload.status === 'SUBMITTED' ? 'SUBMITTED' : null;
   const binds = {
     p_ot_request_guid: guidBuf,
     p_tenant_id: tenantId,
@@ -374,6 +376,7 @@ export async function updateDraft(tenantId, otRequestGuidStr, payload) {
     p_reason: payload.reason ?? null,
     p_ot_config_id: payload.ot_config_id ?? null,
     p_ot_rate_type_id: payload.ot_rate_type_id ?? null,
+    p_status: statusValue,
     p_actor: payload.actor,
   };
 
