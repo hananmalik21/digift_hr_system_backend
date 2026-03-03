@@ -133,14 +133,23 @@ function handleOrgUnitRouteError(res, req, error, serverMessage = 'Request faile
 
 /**
  * @route   GET /org-units/tree/active
- * @desc    Get tree structure for the active org structure (minimal data, hierarchy only)
+ * @desc    Get tree structure for the active org structure (minimal data, hierarchy only). One active structure per enterprise.
+ * @query   enterprise_id (required)
  */
 router.get('/org-units/tree/active', async (req, res) => {
   try {
-    const activeStructure = await HrOrgStructureModel.findActive();
-    
+    const raw = req.query.enterprise_id;
+    if (raw === undefined || raw === null || raw === '') {
+      return sendBadRequest(res, req, 'enterprise_id is required');
+    }
+    const enterpriseId = parseInt(raw, 10);
+    if (isNaN(enterpriseId) || enterpriseId <= 0) {
+      return sendBadRequest(res, req, 'enterprise_id must be a valid positive number');
+    }
+    const activeStructure = await HrOrgStructureModel.findActive(enterpriseId);
+
     if (!activeStructure) {
-      return sendNotFound(res, req, 'No active structure found');
+      return sendNotFound(res, req, 'No active structure found for this enterprise');
     }
 
     const structureId = activeStructure.structure_id || activeStructure.STRUCTURE_ID;
@@ -176,12 +185,21 @@ router.get('/org-units/tree/active', async (req, res) => {
 
 /**
  * @route   GET /hr-org-structures/active/levels
- * @desc    Get active structure with its levels
+ * @desc    Get active structure with its levels (one active structure per enterprise)
+ * @query   enterprise_id (required)
  * NOTE: This specific route must come BEFORE /:structureId/levels to avoid route conflict
  */
 router.get('/active/levels', async (req, res) => {
   try {
-    const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels();
+    const raw = req.query.enterprise_id;
+    if (raw === undefined || raw === null || raw === '') {
+      return sendBadRequest(res, req, 'enterprise_id is required');
+    }
+    const enterpriseId = parseInt(raw, 10);
+    if (isNaN(enterpriseId) || enterpriseId <= 0) {
+      return sendBadRequest(res, req, 'enterprise_id must be a valid positive number');
+    }
+    const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels(enterpriseId);
     sendActiveStructureLevels(res, req, structureWithLevels);
   } catch (error) {
     handleOrgUnitRouteError(res, req, error, 'Failed to fetch active structure levels');

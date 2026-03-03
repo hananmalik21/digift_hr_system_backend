@@ -18,8 +18,26 @@ class HrOrgStructureModel {
   static TABLE_NAME = 'ENT.HR_ORG_STRUCTURES';
 
   // -----------------------------
-  // Helpersempl
+  // Helpers
   // -----------------------------
+
+  /** Shared SELECT list for structure queries (main table + enterprise name + org unit count) */
+  static get STRUCTURE_SELECT() {
+    return `RAWTOHEX(${this.TABLE_NAME}.STRUCTURE_ID) AS STRUCTURE_ID,
+        ${this.TABLE_NAME}.ENTERPRISE_ID,
+        E.ENTERPRISE_NAME,
+        ${this.TABLE_NAME}.STRUCTURE_CODE,
+        ${this.TABLE_NAME}.STRUCTURE_NAME,
+        ${this.TABLE_NAME}.STRUCTURE_TYPE,
+        ${this.TABLE_NAME}.DESCRIPTION,
+        ${this.TABLE_NAME}.IS_ACTIVE,
+        ${this.TABLE_NAME}.CREATED_BY,
+        ${this.TABLE_NAME}.CREATED_DATE,
+        ${this.TABLE_NAME}.LAST_UPDATED_BY,
+        ${this.TABLE_NAME}.LAST_UPDATED_DATE,
+        ${this.TABLE_NAME}.LAST_UPDATE_LOGIN,
+        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT`;
+  }
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date || obj instanceof Buffer) return obj;
@@ -109,21 +127,7 @@ class HrOrgStructureModel {
   static async findAll(filters = {}) {
     try {
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
-      let dataQuery = `SELECT
-        RAWTOHEX(${this.TABLE_NAME}.STRUCTURE_ID) AS STRUCTURE_ID,
-        ${this.TABLE_NAME}.ENTERPRISE_ID,
-        E.ENTERPRISE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_CODE,
-        ${this.TABLE_NAME}.STRUCTURE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_TYPE,
-        ${this.TABLE_NAME}.DESCRIPTION,
-        ${this.TABLE_NAME}.IS_ACTIVE,
-        ${this.TABLE_NAME}.CREATED_BY,
-        ${this.TABLE_NAME}.CREATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATED_BY,
-        ${this.TABLE_NAME}.LAST_UPDATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATE_LOGIN,
-        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
+      let dataQuery = `SELECT ${this.STRUCTURE_SELECT}
       FROM ${this.TABLE_NAME}
       LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
       LEFT JOIN (
@@ -168,22 +172,26 @@ class HrOrgStructureModel {
 
       const pagination = filters.pagination;
       let totalCount = 0;
-
+      let structures;
       const countBindParams = [...bindParams];
       const dataBindParams = [...bindParams];
 
       if (pagination && pagination.page && pagination.pageSize) {
-        const countResult = await this.executeQuery(countQuery, countBindParams);
-        totalCount = countResult.rows?.[0]?.total ?? 0;
-
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
         dataBindParams.push(offset);
         dataBindParams.push(pagination.pageSize);
-      }
 
-      const result = await this.executeQuery(dataQuery, dataBindParams);
-      const structures = result.rows || [];
+        const [countResult, dataResult] = await Promise.all([
+          this.executeQuery(countQuery, countBindParams),
+          this.executeQuery(dataQuery, dataBindParams)
+        ]);
+        totalCount = countResult.rows?.[0]?.total ?? 0;
+        structures = dataResult.rows || [];
+      } else {
+        const result = await this.executeQuery(dataQuery, dataBindParams);
+        structures = result.rows || [];
+      }
 
       if (structures.length > 0) {
         const structureIdsHex = structures.map(s => s.structure_id);
@@ -214,21 +222,7 @@ class HrOrgStructureModel {
 
   static async findById(structureIdHex) {
     try {
-      const query = `SELECT
-        RAWTOHEX(${this.TABLE_NAME}.STRUCTURE_ID) AS STRUCTURE_ID,
-        ${this.TABLE_NAME}.ENTERPRISE_ID,
-        E.ENTERPRISE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_CODE,
-        ${this.TABLE_NAME}.STRUCTURE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_TYPE,
-        ${this.TABLE_NAME}.DESCRIPTION,
-        ${this.TABLE_NAME}.IS_ACTIVE,
-        ${this.TABLE_NAME}.CREATED_BY,
-        ${this.TABLE_NAME}.CREATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATED_BY,
-        ${this.TABLE_NAME}.LAST_UPDATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATE_LOGIN,
-        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
+      const query = `SELECT ${this.STRUCTURE_SELECT}
       FROM ${this.TABLE_NAME}
       LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
       LEFT JOIN (
@@ -239,12 +233,14 @@ class HrOrgStructureModel {
       ) OU_COUNTS ON ${this.TABLE_NAME}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID
       WHERE ${this.TABLE_NAME}.STRUCTURE_ID = HEXTORAW(:2)`;
 
-      const result = await this.executeQuery(query, [structureIdHex, structureIdHex]);
+      const [result, levels] = await Promise.all([
+        this.executeQuery(query, [structureIdHex, structureIdHex]),
+        HrOrgHierarchyLevelModel.fetchLevelsForStructure(null, structureIdHex)
+      ]);
 
       if (result.rows?.length > 0) {
         const structure = result.rows[0];
-        const levels = await HrOrgHierarchyLevelModel.fetchLevelsForStructure(null, structureIdHex);
-        return { ...structure, levels };
+        return { ...structure, levels: levels || [] };
       }
       return null;
     } catch (error) {
@@ -253,23 +249,17 @@ class HrOrgStructureModel {
     }
   }
 
-  static async findActive() {
+  /**
+   * Find the single active structure (IS_ACTIVE='Y') for an enterprise.
+   * @param {number} enterpriseId - Required. One active structure per enterprise.
+   */
+  static async findActive(enterpriseId) {
     try {
-      const query = `SELECT
-        RAWTOHEX(${this.TABLE_NAME}.STRUCTURE_ID) AS STRUCTURE_ID,
-        ${this.TABLE_NAME}.ENTERPRISE_ID,
-        E.ENTERPRISE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_CODE,
-        ${this.TABLE_NAME}.STRUCTURE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_TYPE,
-        ${this.TABLE_NAME}.DESCRIPTION,
-        ${this.TABLE_NAME}.IS_ACTIVE,
-        ${this.TABLE_NAME}.CREATED_BY,
-        ${this.TABLE_NAME}.CREATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATED_BY,
-        ${this.TABLE_NAME}.LAST_UPDATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATE_LOGIN,
-        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT
+      if (enterpriseId == null || enterpriseId === '' || isNaN(Number(enterpriseId)) || Number(enterpriseId) <= 0) {
+        throw new Error('enterprise_id is required and must be a positive number');
+      }
+      const eid = Number(enterpriseId);
+      const query = `SELECT ${this.STRUCTURE_SELECT}
       FROM ${this.TABLE_NAME}
       LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
       LEFT JOIN (
@@ -278,10 +268,11 @@ class HrOrgStructureModel {
         GROUP BY ORG_STRUCTURE_ID
       ) OU_COUNTS ON ${this.TABLE_NAME}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID
       WHERE ${this.TABLE_NAME}.IS_ACTIVE = 'Y'
+        AND ${this.TABLE_NAME}.ENTERPRISE_ID = :1
       ORDER BY ${this.TABLE_NAME}.CREATED_DATE DESC
       FETCH FIRST 1 ROWS ONLY`;
 
-      const result = await this.executeQuery(query, []);
+      const result = await this.executeQuery(query, [eid]);
       return result.rows?.[0] ?? null;
     } catch (error) {
       console.error('Error in findActive:', error);
@@ -289,9 +280,13 @@ class HrOrgStructureModel {
     }
   }
 
-  static async getActiveStructureLevels() {
+  /**
+   * Get the active structure and its levels for an enterprise.
+   * @param {number} enterpriseId - Required. One active structure per enterprise.
+   */
+  static async getActiveStructureLevels(enterpriseId) {
     try {
-      const activeStructure = await this.findActive();
+      const activeStructure = await this.findActive(enterpriseId);
       if (!activeStructure) return null;
 
       const structureIdHex = activeStructure.structure_id;
@@ -309,20 +304,29 @@ class HrOrgStructureModel {
   }
 
   /**
-   * Deactivate all other structures when one is active
-   * excludeStructureIdHex = hex32
+   * Deactivate all other structures in the same enterprise when one is set active.
+   * Only one active structure per tenant/enterprise.
+   * @param {object} connection - DB connection
+   * @param {string} excludeStructureIdHex - hex32 structure to keep active
+   * @param {string} userId - actor
+   * @param {number} enterpriseId - same enterprise only
    */
-  static async deactivateOtherStructures(connection, excludeStructureIdHex, userId) {
+  static async deactivateOtherStructures(connection, excludeStructureIdHex, userId, enterpriseId) {
     try {
+      if (enterpriseId == null || enterpriseId === '' || isNaN(Number(enterpriseId)) || Number(enterpriseId) <= 0) {
+        throw new Error('enterprise_id is required to deactivate other structures');
+      }
+      const eid = Number(enterpriseId);
       const q = `UPDATE ${this.TABLE_NAME}
         SET IS_ACTIVE = 'N',
             LAST_UPDATED_BY = :1,
             LAST_UPDATED_DATE = :2
         WHERE IS_ACTIVE = 'Y'
-          AND STRUCTURE_ID != HEXTORAW(:3)`;
+          AND ENTERPRISE_ID = :3
+          AND STRUCTURE_ID != HEXTORAW(:4)`;
 
       const now = new Date();
-      const r = await connection.execute(q, [userId || 'SYSTEM', now, excludeStructureIdHex], {
+      const r = await connection.execute(q, [userId || 'SYSTEM', now, eid, excludeStructureIdHex], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
 
@@ -400,7 +404,7 @@ class HrOrgStructureModel {
         );
 
         if (isActive === 'Y') {
-          await this.deactivateOtherStructures(connection, structureIdHex, userId);
+          await this.deactivateOtherStructures(connection, structureIdHex, userId, enterpriseId);
         }
 
         const createdStructure = await this.findById(structureIdHex);
@@ -481,9 +485,17 @@ class HrOrgStructureModel {
     }
   }
 
-  static async update(structureIdHex, data, userId) {
+  /**
+   * @param {string} structureIdHex - hex32 structure id
+   * @param {object} data - fields to update
+   * @param {string} userId - actor
+   * @param {object} [options] - optional; options.enterpriseId avoids extra SELECT when activating
+   */
+  static async update(structureIdHex, data, userId, options = {}) {
     try {
       return await this.executeWithTransaction(async (connection) => {
+        let enterpriseId = options.enterpriseId ?? (data.ENTERPRISE_ID !== undefined ? Number(data.ENTERPRISE_ID) : null);
+
         const updateFields = [];
         const bindParams = [];
         let paramIndex = 1;
@@ -547,7 +559,17 @@ class HrOrgStructureModel {
         await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         if (isActivating) {
-          await this.deactivateOtherStructures(connection, structureIdHex, userId);
+          if (enterpriseId == null) {
+            const existing = await connection.execute(
+              `SELECT ENTERPRISE_ID FROM ${this.TABLE_NAME} WHERE STRUCTURE_ID = HEXTORAW(:1)`,
+              [structureIdHex],
+              { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+            enterpriseId = existing.rows?.[0]?.ENTERPRISE_ID ?? existing.rows?.[0]?.enterprise_id;
+          }
+          if (enterpriseId != null) {
+            await this.deactivateOtherStructures(connection, structureIdHex, userId, enterpriseId);
+          }
         }
 
         return await this.findById(structureIdHex);

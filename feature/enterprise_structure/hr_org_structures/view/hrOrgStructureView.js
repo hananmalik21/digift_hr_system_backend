@@ -4,8 +4,6 @@
  * STRUCTURE_ID is returned as hex string (32 chars) because SQL selects RAWTOHEX(STRUCTURE_ID)
  */
 
-const API_VERSION = '1.0.0';
-
 function convertKeysToSnakeCase(obj) {
   if (obj === null || obj === undefined) return obj;
   if (obj instanceof Date || obj instanceof Buffer) return obj;
@@ -28,30 +26,19 @@ function generateBaseMetadata(req, additionalMeta = {}) {
 }
 
 export function sendStructureList(res, req, structures, meta = {}) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   const responseMeta = {
-    ...generateBaseMetadata(req, {
-      count: structures.length,
-      total: meta.total !== undefined ? meta.total : structures.length,
-      execution_time: `${executionTime}ms`,
-      ...meta
-    })
+    ...generateBaseMetadata(req)
   };
 
   if (meta.pagination) {
     responseMeta.pagination = {
       page: meta.pagination.page || 1,
       page_size: meta.pagination.pageSize || structures.length,
-      total: meta.total !== undefined ? meta.total : structures.length,
       total_pages: meta.pagination.totalPages || 1,
       has_next: meta.pagination.hasNext || false,
       has_previous: meta.pagination.hasPrevious || false
     };
   }
-
-  if (meta.filters) responseMeta.filters = meta.filters;
 
   const convertedData = convertKeysToSnakeCase(structures);
 
@@ -178,17 +165,10 @@ export function sendConflict(res, req, message = 'Conflict', errorDetails = null
 }
 
 export function sendActiveStructureLevels(res, req, structureWithLevels) {
-  const startTime = req._startTime || Date.now();
-  const executionTime = Date.now() - startTime;
-
   if (!structureWithLevels) {
     return res.status(404).json({
       success: false,
-      error: 'No active organization structure found',
-      meta: generateBaseMetadata(req, {
-        execution_time: `${executionTime}ms`,
-        error_code: 'NOT_FOUND'
-      })
+      error: 'No active organization structure found'
     });
   }
 
@@ -196,11 +176,6 @@ export function sendActiveStructureLevels(res, req, structureWithLevels) {
 
   res.json({
     success: true,
-    meta: generateBaseMetadata(req, {
-      execution_time: `${executionTime}ms`,
-      structure_id: convertedStructure.structure_id,
-      levels_count: convertedStructure.levels ? convertedStructure.levels.length : 0
-    }),
     data: convertedStructure
   });
 }

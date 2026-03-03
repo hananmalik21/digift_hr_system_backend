@@ -1,5 +1,6 @@
 // feature/hr_org_structures/controller/hrOrgStructureController.js
 import express from 'express';
+import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import HrOrgStructureModel from '../model/hrOrgStructureModel.js';
 import {
   sendStructureList,
@@ -14,21 +15,50 @@ import {
 
 const router = express.Router();
 
-// Middleware to track request start time for execution time calculation
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-/**
- * STRUCTURE_ID is SYS_GUID (RAW(16)) exposed as 32-char hex string
- */
 function isHex32(v) {
   return typeof v === 'string' && /^[0-9a-fA-F]{32}$/.test(v);
 }
 
 function normalizeHex32(v) {
   return typeof v === 'string' ? v.trim().toUpperCase() : v;
+}
+
+/**
+ * Parse and validate enterprise_id from query. Use for GET list and GET active/levels.
+ * @returns {{ ok: true, enterpriseId: number } | { ok: false, error: string }}
+ */
+function parseEnterpriseIdFromQuery(req) {
+  const raw = req.query.enterprise_id;
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: false, error: 'enterprise_id is required' };
+  }
+  const enterpriseId = parseInt(raw, 10);
+  if (isNaN(enterpriseId) || enterpriseId <= 0) {
+    return { ok: false, error: 'enterprise_id must be a valid positive number' };
+  }
+  return { ok: true, enterpriseId };
+}
+
+function handleStructureMutationError(res, req, error, defaultMessage = 'Operation failed') {
+  if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
+    return sendConflict(res, req, error.userMessage || error.message, {
+      constraint: error.constraint,
+      columns: error.columns,
+      existingValues: error.existingValues
+    });
+  }
+  if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
+    return sendBadRequest(res, req, error.userMessage || error.message);
+  }
+  if (error.code === 'NOT_NULL_CONSTRAINT' && error.statusCode === 400) {
+    return sendBadRequest(res, req, error.userMessage || error.message);
+  }
+  return sendServerError(res, req, error.message || defaultMessage, error);
 }
 
 /**
@@ -175,198 +205,126 @@ function getUserId(req) {
 
 /**
  * GET /api/hr-org-structures
- * query: structure_id (hex32), enterprise_id (number), isActive, structure_type, page, page_size
+ * query: enterprise_id (required), structure_id (hex32), isActive, structure_type, page, page_size
  */
-router.get('/', async (req, res) => {
-  try {
-    const filters = {};
-    const appliedFilters = {};
+router.get('/', asyncHandler(async (req, res) => {
+  const parsed = parseEnterpriseIdFromQuery(req);
+  if (!parsed.ok) return sendBadRequest(res, req, parsed.error);
 
-    if (req.query.structure_id) {
-      const hex = normalizeHex32(req.query.structure_id);
-      if (!isHex32(hex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
-      filters.structureIdHex = hex;
-      appliedFilters.structure_id = hex;
-    }
+  const filters = {};
+  const appliedFilters = {};
+  filters.enterpriseId = parsed.enterpriseId;
+  appliedFilters.enterprise_id = parsed.enterpriseId;
 
-    if (req.query.enterprise_id) {
-      filters.enterpriseId = parseInt(req.query.enterprise_id);
-      if (isNaN(filters.enterpriseId)) return sendBadRequest(res, req, 'Invalid ENTERPRISE_ID format');
-      appliedFilters.enterprise_id = filters.enterpriseId;
-    }
-
-    if (req.query.isActive !== undefined) {
-      filters.isActive = req.query.isActive === 'true' || req.query.isActive === '1';
-      appliedFilters.is_active = filters.isActive;
-    }
-
-    if (req.query.structure_type) {
-      filters.structureType = req.query.structure_type;
-      appliedFilters.structure_type = filters.structureType;
-    }
-
-    let page = 1;
-    let pageSize = 10;
-
-    if (req.query.page !== undefined) {
-      const parsedPage = parseInt(req.query.page);
-      if (isNaN(parsedPage) || parsedPage < 1) return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
-      page = parsedPage;
-    }
-
-    if (req.query.page_size !== undefined || req.query.limit !== undefined) {
-      const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
-      if (isNaN(parsedPageSize) || parsedPageSize < 1) return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
-      pageSize = Math.min(100, parsedPageSize);
-    }
-
-    filters.pagination = { page, pageSize };
-
-    const result = await HrOrgStructureModel.findAll(filters);
-
-    const totalCount = result.total || result.structures.length;
-    const totalPages = Math.ceil(totalCount / pageSize);
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-
-    sendStructureList(res, req, result.structures || result, {
-      filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
-      total: totalCount,
-      pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
-    });
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch organization structures', error);
+  if (req.query.structure_id) {
+    const hex = normalizeHex32(req.query.structure_id);
+    if (!isHex32(hex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
+    filters.structureIdHex = hex;
+    appliedFilters.structure_id = hex;
   }
-});
+  if (req.query.isActive !== undefined) {
+    filters.isActive = req.query.isActive === 'true' || req.query.isActive === '1';
+    appliedFilters.is_active = filters.isActive;
+  }
+  if (req.query.structure_type) {
+    filters.structureType = req.query.structure_type;
+    appliedFilters.structure_type = filters.structureType;
+  }
+
+  let page = 1;
+  let pageSize = 10;
+  if (req.query.page !== undefined) {
+    const parsedPage = parseInt(req.query.page);
+    if (isNaN(parsedPage) || parsedPage < 1) return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
+    page = parsedPage;
+  }
+  if (req.query.page_size !== undefined || req.query.limit !== undefined) {
+    const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
+    if (isNaN(parsedPageSize) || parsedPageSize < 1) return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
+    pageSize = Math.min(100, parsedPageSize);
+  }
+  filters.pagination = { page, pageSize };
+
+  const result = await HrOrgStructureModel.findAll(filters);
+  const totalCount = result.total || result.structures.length;
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const hasNext = page < totalPages;
+  const hasPrevious = page > 1;
+
+  sendStructureList(res, req, result.structures || result, {
+    filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
+    total: totalCount,
+    pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
+  });
+}));
 
 /**
  * GET /api/hr-org-structures/active/levels
+ * query: enterprise_id (required) - one active structure per enterprise
  */
-router.get('/active/levels', async (req, res) => {
-  try {
-    const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels();
-    sendActiveStructureLevels(res, req, structureWithLevels);
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch active structure levels', error);
-  }
-});
+router.get('/active/levels', asyncHandler(async (req, res) => {
+  const parsed = parseEnterpriseIdFromQuery(req);
+  if (!parsed.ok) return sendBadRequest(res, req, parsed.error);
+  const structureWithLevels = await HrOrgStructureModel.getActiveStructureLevels(parsed.enterpriseId);
+  sendActiveStructureLevels(res, req, structureWithLevels);
+}));
 
 /**
  * GET /api/hr-org-structures/:id  (id = hex32)
  */
-router.get('/:id', async (req, res) => {
-  try {
-    const structureIdHex = normalizeHex32(req.params.id);
-    if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
-
-    const structure = await HrOrgStructureModel.findById(structureIdHex);
-    sendStructure(res, req, structure);
-  } catch (error) {
-    sendServerError(res, req, 'Failed to fetch organization structure', error);
-  }
-});
+router.get('/:id', asyncHandler(async (req, res) => {
+  const structureIdHex = normalizeHex32(req.params.id);
+  if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
+  const structure = await HrOrgStructureModel.findById(structureIdHex);
+  sendStructure(res, req, structure);
+}));
 
 /**
  * POST /api/hr-org-structures
  */
-router.post('/', async (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
+  const data = req.body;
+  const errors = validateStructureData(data, false);
+  if (errors.length > 0) return sendBadRequest(res, req, errors);
+  const userId = getUserId(req);
   try {
-    const data = req.body;
-    const errors = validateStructureData(data, false);
-    if (errors.length > 0) return sendBadRequest(res, req, errors);
-
-    const userId = getUserId(req);
     const newStructure = await HrOrgStructureModel.create(data, userId);
     sendCreated(res, req, newStructure);
   } catch (error) {
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns,
-        existingValues: error.existingValues
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    if (error.code === 'NOT_NULL_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to create organization structure', error);
+    handleStructureMutationError(res, req, error, 'Failed to create organization structure');
   }
-});
+}));
 
-/**
- * PUT /api/hr-org-structures/:id  (id = hex32)
- */
-router.put('/:id', async (req, res) => {
+/** Shared handler for PUT/PATCH (update by id). Passes enterpriseId to model to avoid extra SELECT when activating. */
+async function updateStructureById(req, res) {
+  const structureIdHex = normalizeHex32(req.params.id);
+  if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
+
+  const data = req.body;
+  const errors = validateStructureData(data, true);
+  if (errors.length > 0) return sendBadRequest(res, req, errors);
+
+  const existingStructure = await HrOrgStructureModel.findById(structureIdHex);
+  if (!existingStructure) return sendStructure(res, req, null);
+
+  const userId = getUserId(req);
+  const options = existingStructure.enterprise_id != null ? { enterpriseId: existingStructure.enterprise_id } : {};
   try {
-    const structureIdHex = normalizeHex32(req.params.id);
-    if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
-
-    const data = req.body;
-    const errors = validateStructureData(data, true);
-    if (errors.length > 0) return sendBadRequest(res, req, errors);
-
-    const existingStructure = await HrOrgStructureModel.findById(structureIdHex);
-    if (!existingStructure) return sendStructure(res, req, null);
-
-    const userId = getUserId(req);
-    const updatedStructure = await HrOrgStructureModel.update(structureIdHex, data, userId);
+    const updatedStructure = await HrOrgStructureModel.update(structureIdHex, data, userId, options);
     sendUpdated(res, req, updatedStructure);
   } catch (error) {
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns,
-        existingValues: error.existingValues
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update organization structure', error);
+    handleStructureMutationError(res, req, error, 'Failed to update organization structure');
   }
-});
+}
 
-/**
- * PATCH /api/hr-org-structures/:id (same as PUT)
- */
-router.patch('/:id', async (req, res) => {
-  try {
-    const structureIdHex = normalizeHex32(req.params.id);
-    if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
-
-    const data = req.body;
-    const errors = validateStructureData(data, true);
-    if (errors.length > 0) return sendBadRequest(res, req, errors);
-
-    const existingStructure = await HrOrgStructureModel.findById(structureIdHex);
-    if (!existingStructure) return sendStructure(res, req, null);
-
-    const userId = getUserId(req);
-    const updatedStructure = await HrOrgStructureModel.update(structureIdHex, data, userId);
-    sendUpdated(res, req, updatedStructure);
-  } catch (error) {
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns,
-        existingValues: error.existingValues
-      });
-    }
-    if (error.code === 'FOREIGN_KEY_CONSTRAINT' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.userMessage || error.message);
-    }
-    sendServerError(res, req, 'Failed to update organization structure', error);
-  }
-});
+router.put('/:id', asyncHandler(updateStructureById));
+router.patch('/:id', asyncHandler(updateStructureById));
 
 /**
  * DELETE /api/hr-org-structures/:id
  * query: hard=true OR autofallback=true
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', asyncHandler(async (req, res) => {
   try {
     const structureIdHex = normalizeHex32(req.params.id);
     if (!isHex32(structureIdHex)) return sendBadRequest(res, req, 'Invalid STRUCTURE_ID format (expected 32-char hex)');
@@ -477,6 +435,6 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     sendServerError(res, req, 'Failed to delete organization structure', error);
   }
-});
+}));
 
 export default router;
