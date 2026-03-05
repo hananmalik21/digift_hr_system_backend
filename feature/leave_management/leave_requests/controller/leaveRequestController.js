@@ -23,7 +23,6 @@ import { ValidationError } from '../../../../utils/errors/index.js';
 // -----------------------------------------------------------------------------
 // Constants
 // -----------------------------------------------------------------------------
-const VALID_PORTIONS = ['FULL_DAY', 'HALF_AM', 'HALF_PM', 'HOURS'];
 const VALID_REQUEST_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 10;
@@ -572,14 +571,6 @@ router.post('/', uploadDocuments, async (req, res) => {
     }
     if (startDate > endDate) {
       return sendBadRequest(res, req, 'end_date must be after or equal to start_date');
-    }
-
-    // Validate portions if provided
-    if (requestData.start_portion && !VALID_PORTIONS.includes(requestData.start_portion.toUpperCase())) {
-      return sendBadRequest(res, req, `start_portion must be one of: ${VALID_PORTIONS.join(', ')}`);
-    }
-    if (requestData.end_portion && !VALID_PORTIONS.includes(requestData.end_portion.toUpperCase())) {
-      return sendBadRequest(res, req, `end_portion must be one of: ${VALID_PORTIONS.join(', ')}`);
     }
 
     // Normalize portions to uppercase

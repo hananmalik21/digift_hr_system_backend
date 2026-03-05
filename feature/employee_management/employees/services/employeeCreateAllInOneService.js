@@ -99,6 +99,7 @@ BEGIN
     p_actor                    => :p_actor,
     p_employee_status          => :p_employee_status,
     p_employee_is_active       => :p_employee_is_active,
+    p_password_hash            => :p_password_hash,
     o_employee_id              => :o_employee_id
   );
 END;
@@ -311,6 +312,7 @@ export function buildBinds(body) {
     p_actor: strOrNull(body.actor, body.ACTOR, body.p_actor),
     p_employee_status: normalizeEmployeeStatus(body),
     p_employee_is_active: normalizeEmployeeIsActive(body),
+    p_password_hash: strOrNull(body.password_hash, body.passwordHash, body.PASSWORD_HASH),
     o_employee_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
   };
 }

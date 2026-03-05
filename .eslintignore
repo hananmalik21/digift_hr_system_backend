@@ -1,0 +1,6 @@
+node_modules
+Wallet
+uploads
+*.min.js
+.env
+.env.*

@@ -12,6 +12,7 @@ import {
   fromBody,
   fromBodyKeyContains
 } from '../services/employeeCreateAllInOneService.js';
+import { generatePasswordWithHash } from '../services/passwordService.js';
 import {
   sendEmployeeList,
   sendEmployee,
@@ -1071,6 +1072,9 @@ async function createEmployeeAllInOneHandler(req, res) {
   }
 
   const enterpriseId = Number(body.enterprise_id ?? body.ENTERPRISE_ID ?? getEnterprise(req));
+  const { plainPassword, passwordHash } = await generatePasswordWithHash();
+  body.password_hash = passwordHash;
+
   let connection;
   try {
     connection = await getConnection();
@@ -1093,6 +1097,7 @@ async function createEmployeeAllInOneHandler(req, res) {
     res.status(201).json({
       success: true,
       employee_id: employeeId,
+      generated_password: plainPassword,
       ...(data != null && { data })
     });
   } catch (err) {
