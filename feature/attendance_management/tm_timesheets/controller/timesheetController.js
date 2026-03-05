@@ -11,6 +11,7 @@ import {
   getTimesheetByIdFromView,
   getTimesheetIdAndStatusByGuid,
   listTimesheetsFromView,
+  getTimesheetStats,
   STATUS_CODES_LIST,
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE
@@ -398,6 +399,38 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * GET /api/tm/timesheets/stats — timesheet statistics for an enterprise.
+ * Returns: total, draft, submitted, approved, rejected counts and reg_hours, ot_hours.
+ * Query: enterprise_id (required), optional week_start_from, week_start_to, employee_id.
+ */
+router.get('/stats', asyncHandler(async (req, res) => {
+  const enterpriseId = req.query.enterprise_id ?? req.query.enterpriseId;
+  if (enterpriseId == null || String(enterpriseId).trim() === '') {
+    throw new ValidationError('enterprise_id is required');
+  }
+  const filters = {
+    enterpriseId,
+    enterprise_id: enterpriseId,
+    weekStartFrom: req.query.week_start_from ?? req.query.weekStartFrom,
+    weekStartTo: req.query.week_start_to ?? req.query.weekStartTo,
+    employeeId: req.query.employee_id ?? req.query.employeeId
+  };
+  const stats = await getTimesheetStats(filters);
+  sendSuccess(res, {
+    message: 'Timesheet stats fetched successfully',
+    data: {
+      total: stats.total,
+      draft: stats.draft,
+      submitted: stats.submitted,
+      approved: stats.approved,
+      rejected: stats.rejected,
+      reg_hours: stats.reg_hours,
+      ot_hours: stats.ot_hours
+    }
+  });
+}));
+
+/**
  * GET /api/tm/timesheets/:timesheetGuid — single timesheet (full view shape, one connection).
  */
 router.get('/:timesheetGuid', asyncHandler(async (req, res) => {
@@ -405,8 +438,7 @@ router.get('/:timesheetGuid', asyncHandler(async (req, res) => {
   if (!data) throw new NotFoundError('Timesheet not found');
   sendSuccess(res, {
     message: 'Fetched successfully',
-    data,
-    meta: { success: true }
+    data
   });
 }));
 

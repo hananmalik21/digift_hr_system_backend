@@ -1092,6 +1092,87 @@ export async function listTimesheets(filters) {
   }
 }
 
+/**
+ * Get timesheet statistics for an enterprise: counts by status (total, draft, submitted, approved, rejected)
+ * and summed regular/overtime hours from lines.
+ * @param {Object} filters - { enterpriseId, weekStartFrom?, weekStartTo?, employeeId? }
+ * @returns {Promise<{ total: number, draft: number, submitted: number, approved: number, rejected: number, reg_hours: number, ot_hours: number }>}
+ */
+export async function getTimesheetStats(filters) {
+  const enterpriseId = optNum(filters.enterpriseId ?? filters.enterprise_id);
+  if (enterpriseId == null) throw new ValidationError('enterprise_id is required for timesheet stats');
+  const weekStartFrom = filters.weekStartFrom ?? filters.week_start_from;
+  const weekStartTo = filters.weekStartTo ?? filters.week_start_to;
+  const employeeId = optNum(filters.employeeId ?? filters.employee_id);
+
+  const hasWeekFrom = weekStartFrom && String(weekStartFrom).trim() !== '';
+  const hasWeekTo = weekStartTo && String(weekStartTo).trim() !== '';
+  const hasEmployee = employeeId != null;
+
+  const baseWhere = 't.ENTERPRISE_ID = :enterpriseId';
+  const dateFromClause = hasWeekFrom ? " AND t.WEEK_START_DATE >= TO_DATE(:weekStartFrom, 'YYYY-MM-DD')" : '';
+  const dateToClause = hasWeekTo ? " AND t.WEEK_START_DATE <= TO_DATE(:weekStartTo, 'YYYY-MM-DD')" : '';
+  const employeeClause = hasEmployee ? ' AND t.EMPLOYEE_ID = :employeeId' : '';
+  const whereSuffix = dateFromClause + dateToClause + employeeClause;
+
+  // Only pass binds that appear in the SQL (Oracle errors on unused bind keys)
+  const binds = { enterpriseId };
+  if (hasWeekFrom) binds.weekStartFrom = String(weekStartFrom).slice(0, 10);
+  if (hasWeekTo) binds.weekStartTo = String(weekStartTo).slice(0, 10);
+  if (hasEmployee) binds.employeeId = employeeId;
+
+  const statsSql = `
+    SELECT
+      (SELECT COUNT(*) FROM TM.TM_TIMESHEETS t WHERE ${baseWhere}${whereSuffix}) AS total,
+      (SELECT COUNT(*) FROM TM.TM_TIMESHEETS t WHERE ${baseWhere} AND t.STATUS_CODE = 'DRAFT'${whereSuffix}) AS draft,
+      (SELECT COUNT(*) FROM TM.TM_TIMESHEETS t WHERE ${baseWhere} AND t.STATUS_CODE = 'SUBMITTED'${whereSuffix}) AS submitted,
+      (SELECT COUNT(*) FROM TM.TM_TIMESHEETS t WHERE ${baseWhere} AND t.STATUS_CODE = 'APPROVED'${whereSuffix}) AS approved,
+      (SELECT COUNT(*) FROM TM.TM_TIMESHEETS t WHERE ${baseWhere} AND t.STATUS_CODE = 'REJECTED'${whereSuffix}) AS rejected,
+      (SELECT NVL(SUM(l.REGULAR_HOURS), 0)
+       FROM TM.TM_TIMESHEET_LINES l
+       INNER JOIN TM.TM_TIMESHEETS t ON l.TIMESHEET_ID = t.TIMESHEET_ID
+       WHERE ${baseWhere}${whereSuffix}) AS reg_hours,
+      (SELECT NVL(SUM(l.OT_HOURS), 0)
+       FROM TM.TM_TIMESHEET_LINES l
+       INNER JOIN TM.TM_TIMESHEETS t ON l.TIMESHEET_ID = t.TIMESHEET_ID
+       WHERE ${baseWhere}${whereSuffix}) AS ot_hours
+    FROM DUAL
+  `;
+
+  try {
+    return await runReadOnly(async (connection) => {
+      const result = await connection.execute(statsSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const row = result.rows?.[0];
+      if (!row) {
+        return {
+          total: 0,
+          draft: 0,
+          submitted: 0,
+          approved: 0,
+          rejected: 0,
+          reg_hours: 0,
+          ot_hours: 0
+        };
+      }
+      const getNum = (v) => (v != null ? Number(v) : 0) || 0;
+      return {
+        total: getNum(row.TOTAL),
+        draft: getNum(row.DRAFT),
+        submitted: getNum(row.SUBMITTED),
+        approved: getNum(row.APPROVED),
+        rejected: getNum(row.REJECTED),
+        reg_hours: getNum(row.REG_HOURS),
+        ot_hours: getNum(row.OT_HOURS)
+      };
+    });
+  } catch (err) {
+    const userMsg = mapTimesheetOracleError(err);
+    if (userMsg) throw new DatabaseError(userMsg, err, userMsg);
+    if (err instanceof DatabaseError) throw err;
+    throw new DatabaseError('Failed to fetch timesheet statistics.', err);
+  }
+}
+
 export const STATUS_CODES_LIST = STATUS_CODES;
 export const DEFAULT_PAGE_SIZE = DEFAULT_LIMIT;
 export const MAX_PAGE_SIZE = MAX_LIMIT;
