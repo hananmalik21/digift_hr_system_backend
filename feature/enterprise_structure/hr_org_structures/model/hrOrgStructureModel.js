@@ -21,22 +21,61 @@ class HrOrgStructureModel {
   // Helpers
   // -----------------------------
 
-  /** Shared SELECT list for structure queries (main table + enterprise name + org unit count) */
-  static get STRUCTURE_SELECT() {
-    return `RAWTOHEX(${this.TABLE_NAME}.STRUCTURE_ID) AS STRUCTURE_ID,
-        ${this.TABLE_NAME}.ENTERPRISE_ID,
+  /** Base structure columns (no counts). Used to build STRUCTURE_SELECT and STRUCTURE_SELECT_FOR_ID. */
+  static get BASE_STRUCTURE_COLUMNS() {
+    const t = this.TABLE_NAME;
+    return `RAWTOHEX(${t}.STRUCTURE_ID) AS STRUCTURE_ID,
+        ${t}.ENTERPRISE_ID,
         E.ENTERPRISE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_CODE,
-        ${this.TABLE_NAME}.STRUCTURE_NAME,
-        ${this.TABLE_NAME}.STRUCTURE_TYPE,
-        ${this.TABLE_NAME}.DESCRIPTION,
-        ${this.TABLE_NAME}.IS_ACTIVE,
-        ${this.TABLE_NAME}.CREATED_BY,
-        ${this.TABLE_NAME}.CREATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATED_BY,
-        ${this.TABLE_NAME}.LAST_UPDATED_DATE,
-        ${this.TABLE_NAME}.LAST_UPDATE_LOGIN,
-        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT`;
+        ${t}.STRUCTURE_CODE,
+        ${t}.STRUCTURE_NAME,
+        ${t}.STRUCTURE_TYPE,
+        ${t}.DESCRIPTION,
+        ${t}.IS_ACTIVE,
+        ${t}.CREATED_BY,
+        ${t}.CREATED_DATE,
+        ${t}.LAST_UPDATED_BY,
+        ${t}.LAST_UPDATED_DATE,
+        ${t}.LAST_UPDATE_LOGIN`;
+  }
+
+  /** SELECT for list/active: uses JOINs to pre-aggregated OU_COUNTS and EMP_COUNTS (efficient for many rows). */
+  static get STRUCTURE_SELECT() {
+    return `${this.BASE_STRUCTURE_COLUMNS},
+        NVL(OU_COUNTS.ORG_UNIT_COUNT, 0) AS ORG_UNIT_COUNT,
+        NVL(EMP_COUNTS.EMPLOYEE_COUNT, 0) AS EMPLOYEE_COUNT`;
+  }
+
+  /** SELECT for single structure: scalar subqueries for counts (no JOINs, faster for one row). */
+  static get STRUCTURE_SELECT_FOR_ID() {
+    const t = this.TABLE_NAME;
+    return `${this.BASE_STRUCTURE_COLUMNS},
+        NVL((SELECT COUNT(*) FROM ENT.ORG_UNITS WHERE ORG_STRUCTURE_ID = ${t}.STRUCTURE_ID), 0) AS ORG_UNIT_COUNT,
+        NVL((SELECT COUNT(DISTINCT a.EMPLOYEE_ID)
+             FROM EMPL.ASSIGNMENTS a
+             INNER JOIN ENT.ORG_UNITS ou ON ou.ORG_UNIT_ID = a.ORG_UNIT_ID
+             WHERE ou.ORG_STRUCTURE_ID = ${t}.STRUCTURE_ID), 0) AS EMPLOYEE_COUNT`;
+  }
+
+  /** Reusable LEFT JOIN for org unit count (list/active). Index on ENT.ORG_UNITS(ORG_STRUCTURE_ID) helps. */
+  static get OU_COUNTS_JOIN() {
+    const t = this.TABLE_NAME;
+    return `LEFT JOIN (
+        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
+        FROM ENT.ORG_UNITS
+        GROUP BY ORG_STRUCTURE_ID
+      ) OU_COUNTS ON ${t}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID`;
+  }
+
+  /** Reusable LEFT JOIN for employee count by assignment org_unit → structure (list/active). Index on EMPL.ASSIGNMENTS(ORG_UNIT_ID) helps. */
+  static get EMP_COUNTS_JOIN() {
+    const t = this.TABLE_NAME;
+    return `LEFT JOIN (
+        SELECT ou.ORG_STRUCTURE_ID, COUNT(DISTINCT a.EMPLOYEE_ID) AS EMPLOYEE_COUNT
+        FROM EMPL.ASSIGNMENTS a
+        INNER JOIN ENT.ORG_UNITS ou ON ou.ORG_UNIT_ID = a.ORG_UNIT_ID
+        GROUP BY ou.ORG_STRUCTURE_ID
+      ) EMP_COUNTS ON ${t}.STRUCTURE_ID = EMP_COUNTS.ORG_STRUCTURE_ID`;
   }
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
@@ -127,14 +166,12 @@ class HrOrgStructureModel {
   static async findAll(filters = {}) {
     try {
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
+      const t = this.TABLE_NAME;
       let dataQuery = `SELECT ${this.STRUCTURE_SELECT}
-      FROM ${this.TABLE_NAME}
-      LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
-      LEFT JOIN (
-        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
-        FROM ENT.ORG_UNITS
-        GROUP BY ORG_STRUCTURE_ID
-      ) OU_COUNTS ON ${this.TABLE_NAME}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID`;
+      FROM ${t}
+      LEFT JOIN ENT.ENTERPRISES E ON ${t}.ENTERPRISE_ID = E.ENTERPRISE_ID
+      ${this.OU_COUNTS_JOIN}
+      ${this.EMP_COUNTS_JOIN}`;
 
       const conditions = [];
       const bindParams = [];
@@ -222,19 +259,14 @@ class HrOrgStructureModel {
 
   static async findById(structureIdHex) {
     try {
-      const query = `SELECT ${this.STRUCTURE_SELECT}
-      FROM ${this.TABLE_NAME}
-      LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
-      LEFT JOIN (
-        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
-        FROM ENT.ORG_UNITS
-        WHERE ORG_STRUCTURE_ID = HEXTORAW(:1)
-        GROUP BY ORG_STRUCTURE_ID
-      ) OU_COUNTS ON ${this.TABLE_NAME}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID
-      WHERE ${this.TABLE_NAME}.STRUCTURE_ID = HEXTORAW(:2)`;
+      const t = this.TABLE_NAME;
+      const query = `SELECT ${this.STRUCTURE_SELECT_FOR_ID}
+      FROM ${t}
+      LEFT JOIN ENT.ENTERPRISES E ON ${t}.ENTERPRISE_ID = E.ENTERPRISE_ID
+      WHERE ${t}.STRUCTURE_ID = HEXTORAW(:1)`;
 
       const [result, levels] = await Promise.all([
-        this.executeQuery(query, [structureIdHex, structureIdHex]),
+        this.executeQuery(query, [structureIdHex]),
         HrOrgHierarchyLevelModel.fetchLevelsForStructure(null, structureIdHex)
       ]);
 
@@ -259,17 +291,15 @@ class HrOrgStructureModel {
         throw new Error('enterprise_id is required and must be a positive number');
       }
       const eid = Number(enterpriseId);
+      const t = this.TABLE_NAME;
       const query = `SELECT ${this.STRUCTURE_SELECT}
-      FROM ${this.TABLE_NAME}
-      LEFT JOIN ENT.ENTERPRISES E ON ${this.TABLE_NAME}.ENTERPRISE_ID = E.ENTERPRISE_ID
-      LEFT JOIN (
-        SELECT ORG_STRUCTURE_ID, COUNT(*) AS ORG_UNIT_COUNT
-        FROM ENT.ORG_UNITS
-        GROUP BY ORG_STRUCTURE_ID
-      ) OU_COUNTS ON ${this.TABLE_NAME}.STRUCTURE_ID = OU_COUNTS.ORG_STRUCTURE_ID
-      WHERE ${this.TABLE_NAME}.IS_ACTIVE = 'Y'
-        AND ${this.TABLE_NAME}.ENTERPRISE_ID = :1
-      ORDER BY ${this.TABLE_NAME}.CREATED_DATE DESC
+      FROM ${t}
+      LEFT JOIN ENT.ENTERPRISES E ON ${t}.ENTERPRISE_ID = E.ENTERPRISE_ID
+      ${this.OU_COUNTS_JOIN}
+      ${this.EMP_COUNTS_JOIN}
+      WHERE ${t}.IS_ACTIVE = 'Y'
+        AND ${t}.ENTERPRISE_ID = :1
+      ORDER BY ${t}.CREATED_DATE DESC
       FETCH FIRST 1 ROWS ONLY`;
 
       const result = await this.executeQuery(query, [eid]);
