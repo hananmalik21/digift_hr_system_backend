@@ -57,6 +57,8 @@ import timeZoneController from './feature/time_management/time_zones/controller/
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
+import enterpriseStatsController from './feature/enterprise_structure/enterprise_stats/controller/enterpriseStatsController.js';
+import activeStructureStatsController from './feature/enterprise_structure/active_structure_stats/controller/activeStructureStatsController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
@@ -120,6 +122,12 @@ app.use('/api/holidays', holidayController);
 
 // Workforce Stats routes (must be BEFORE catch-all /api route)
 app.use('/api/workforce-stats', workforceStatsController);
+
+// Enterprise Stats routes (per enterprise/tenant)
+app.use('/api/enterprise-stats', enterpriseStatsController);
+
+// Active structure stats (active structure + levels with component counts per enterprise)
+app.use('/api/active-structure-stats', activeStructureStatsController);
 
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
