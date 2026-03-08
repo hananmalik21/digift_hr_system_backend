@@ -4,6 +4,7 @@ import { validateMinMaxGradeRange } from '../../../../utils/gradeUtils.js';
 
 class JobLevelsModel {
   static TABLE_NAME = 'ENT.JOB_LEVELS';
+  static POSITIONS_TABLE = 'ENT.POSITIONS';
 
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
@@ -143,6 +144,40 @@ class JobLevelsModel {
     LEFT JOIN ENT.GRADES gmax ON jl.MAX_GRADE_ID = gmax.GRADE_ID`;
   }
 
+  /** Normalized job_level_id from a row (handles snake_case or UPPER from DB). */
+  static _jobLevelIdFrom(row) {
+    const id = row?.job_level_id ?? row?.JOB_LEVEL_ID;
+    return id != null ? Number(id) : null;
+  }
+
+  /**
+   * Returns position counts keyed by job_level_id for the given job level IDs (tenant-scoped).
+   * Used to show how many positions use each job level. Deduplicates IDs before querying.
+   */
+  static async getPositionCountsByJobLevelIds(tenantId, jobLevelIds) {
+    const uniqueIds = jobLevelIds?.length ? [...new Set(jobLevelIds.map((id) => Number(id)).filter(Number.isFinite))] : [];
+    if (!uniqueIds.length) return new Map();
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) return new Map();
+
+    const placeholders = uniqueIds.map((_, i) => `:${i + 2}`).join(', ');
+    const q = `
+      SELECT JOB_LEVEL_ID AS JOB_LEVEL_ID, COUNT(*) AS POSITION_COUNT
+      FROM ${this.POSITIONS_TABLE}
+      WHERE TENANT_ID = :1 AND JOB_LEVEL_ID IN (${placeholders})
+      GROUP BY JOB_LEVEL_ID
+    `;
+    const bind = [tenantIdNum, ...uniqueIds];
+    const r = await this.executeQuery(q, bind);
+    const map = new Map();
+    for (const row of r.rows || []) {
+      const id = this._jobLevelIdFrom(row);
+      const count = row.POSITION_COUNT ?? row.position_count ?? 0;
+      if (id != null) map.set(id, Number(count));
+    }
+    return map;
+  }
+
   /**
    * Builds a validation error with consistent code and status for grade-range failures.
    */
@@ -191,6 +226,9 @@ class JobLevelsModel {
     }
   }
 
+  /**
+   * List job levels with filters and pagination. Each item includes position_count (positions using that job level).
+   */
   static async findAll(filters = {}) {
     const tenantId = filters.tenant_id ?? filters.tenantId;
     if (tenantId === undefined || tenantId === null) {
@@ -271,12 +309,22 @@ class JobLevelsModel {
     const rows = result.rows || [];
     const normalized = rows.map(r => this.nestGradeObjects(r));
 
+    const jobLevelIds = normalized.map((jl) => this._jobLevelIdFrom(jl)).filter((id) => id != null);
+    const positionCountMap = await this.getPositionCountsByJobLevelIds(tenantIdNum, jobLevelIds);
+    const withCount = normalized.map((jl) => ({
+      ...jl,
+      position_count: positionCountMap.get(this._jobLevelIdFrom(jl)) ?? 0
+    }));
+
     if (pagination?.page && pagination?.pageSize) {
-      return { job_levels: normalized, total: totalCount };
+      return { job_levels: withCount, total: totalCount };
     }
-    return normalized;
+    return withCount;
   }
 
+  /**
+   * Get one job level by id. Includes position_count (number of positions using this job level).
+   */
   static async findById(jobLevelId, tenantId) {
     if (tenantId === undefined || tenantId === null) {
       throw new Error('tenant_id is required');
@@ -288,7 +336,11 @@ class JobLevelsModel {
     const q = `${this.baseSelect()} WHERE jl.JOB_LEVEL_ID = :1 AND jl.TENANT_ID = :2`;
     const r = await this.executeQuery(q, [jobLevelId, tenantIdNum]);
     const row = r.rows?.[0] || null;
-    return row ? this.nestGradeObjects(row) : null;
+    if (!row) return null;
+    const jobLevel = this.nestGradeObjects(row);
+    const positionCountMap = await this.getPositionCountsByJobLevelIds(tenantIdNum, [jobLevelId]);
+    jobLevel.position_count = positionCountMap.get(Number(jobLevelId)) ?? 0;
+    return jobLevel;
   }
 
   static async create(data, userId) {

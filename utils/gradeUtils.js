@@ -1,6 +1,8 @@
 /**
  * Grade number format: prefix (family) + numeric rank, e.g. P1, P2, SM2, EX1.
  * Utilities for parsing, comparing, and validating grade numbers against GRADE_CATEGORY.
+ * Used by: grades controller (category vs number validation), job_levels model (min/max range),
+ * and ENT.TRG_JOB_LEVEL_GRADE_RANGE trigger (same logic in PL/SQL).
  */
 
 /** GRADE_CATEGORY → prefix used in GRADE_NUMBER. Format is always prefix + numeric suffix. */

@@ -20,6 +20,7 @@
 --   -20002: Max grade must be greater than or equal to min grade.
 --   -20003: Invalid min or max grade ID (not found in ENT.GRADES).
 --
+-- See also: utils/gradeUtils.js (validateMinMaxGradeRange), job_levels_model (validateGradeRange).
 -- Run as ENT or a user with privilege to create triggers on ENT.JOB_LEVELS.
 -------------------------------------------------------------------------------
 
