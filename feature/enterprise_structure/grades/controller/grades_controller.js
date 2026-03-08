@@ -29,6 +29,9 @@ const gradeNumberLookupCache = new Map();
 /** In-memory cache for grade category → prefix map: { [enterpriseId]: { data, expiresAt } } */
 const gradeCategoryLookupCache = new Map();
 
+/** In-memory cache for grade category code → { meaning_en, meaning_ar }: { [enterpriseId]: { data, expiresAt } } */
+const gradeCategoryNameLookupCache = new Map();
+
 function toLookupKey(code) {
   return (code ?? '').toString().trim().toUpperCase();
 }
@@ -121,6 +124,44 @@ async function getGradeCategoryMap(enterpriseId) {
 }
 
 /**
+ * Fetches GRADE_CATEGORY lookup values for the tenant and returns a map from
+ * category code (uppercase) to { meaning_en, meaning_ar } for display in API responses.
+ */
+async function getGradeCategoryNameMap(enterpriseId) {
+  if (!isValidEnterpriseId(enterpriseId)) return {};
+  const id = Number(enterpriseId);
+  const now = Date.now();
+  const cached = gradeCategoryNameLookupCache.get(id);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  try {
+    const result = await EntLookupValueModel.findAll({
+      enterpriseId: id,
+      lookupType: GRADE_CATEGORY_LOOKUP_TYPE,
+      pagination: { page: 1, pageSize: 500 }
+    });
+    const list = result?.lookupValues || [];
+    const data = Object.create(null);
+    for (const row of list) {
+      const code = toLookupKey(row.lookup_code ?? row.LOOKUP_CODE);
+      if (code) {
+        data[code] = {
+          meaning_en: row.meaning_en ?? row.MEANING_EN ?? null,
+          meaning_ar: row.meaning_ar ?? row.MEANING_AR ?? null
+        };
+      }
+    }
+    gradeCategoryNameLookupCache.set(id, { data, expiresAt: now + LOOKUP_CACHE_TTL_MS });
+    return data;
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('Grade category name lookup fetch failed:', err?.message ?? err);
+    }
+    return {};
+  }
+}
+
+/**
  * Enriches one grade or an array of grades with grade_number_obj { meaning_en, meaning_ar }.
  * Lookup is case-insensitive (normalized to uppercase).
  */
@@ -132,6 +173,25 @@ function enrichWithGradeNumberNames(items, lookupMap) {
     return {
       ...g,
       grade_number_obj: names
+        ? { meaning_en: names.meaning_en ?? null, meaning_ar: names.meaning_ar ?? null }
+        : null
+    };
+  };
+  return Array.isArray(items) ? items.map(one) : (items ? one(items) : items);
+}
+
+/**
+ * Enriches one grade or an array of grades with grade_category_obj { meaning_en, meaning_ar }.
+ * Lookup is case-insensitive (normalized to uppercase).
+ */
+function enrichWithGradeCategoryNames(items, categoryNameMap) {
+  if (!categoryNameMap || Object.keys(categoryNameMap).length === 0) return items;
+  const one = (g) => {
+    const code = toLookupKey(g?.grade_category ?? g?.GRADE_CATEGORY);
+    const names = code ? categoryNameMap[code] : null;
+    return {
+      ...g,
+      grade_category_obj: names
         ? { meaning_en: names.meaning_en ?? null, meaning_ar: names.meaning_ar ?? null }
         : null
     };
@@ -302,12 +362,14 @@ router.get('/', async (req, res) => {
 
     filters.pagination = { page, pageSize };
 
-    const [result, lookupMap] = await Promise.all([
+    const [result, lookupMap, categoryNameMap] = await Promise.all([
       GradeModel.findAll(filters),
-      getGradeNumberLookupMap(tenantId)
+      getGradeNumberLookupMap(tenantId),
+      getGradeCategoryNameMap(tenantId)
     ]);
     const gradesRaw = result.grades || result;
-    const grades = enrichWithGradeNumberNames(gradesRaw, lookupMap);
+    const gradesWithNumber = enrichWithGradeNumberNames(gradesRaw, lookupMap);
+    const grades = enrichWithGradeCategoryNames(gradesWithNumber, categoryNameMap);
 
     const totalCount = result.total || result.length;
     const totalPages = Math.ceil(totalCount / pageSize);
@@ -337,8 +399,12 @@ router.get('/:id', async (req, res) => {
 
     const grade = await GradeModel.findById(gradeId, tenantId);
     if (!grade) return sendGrade(res, req, null);
-    const lookupMap = await getGradeNumberLookupMap(tenantId);
-    sendGrade(res, req, enrichWithGradeNumberNames(grade, lookupMap));
+    const [lookupMap, categoryNameMap] = await Promise.all([
+      getGradeNumberLookupMap(tenantId),
+      getGradeCategoryNameMap(tenantId)
+    ]);
+    const withNumber = enrichWithGradeNumberNames(grade, lookupMap);
+    sendGrade(res, req, enrichWithGradeCategoryNames(withNumber, categoryNameMap));
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch grade', error);
