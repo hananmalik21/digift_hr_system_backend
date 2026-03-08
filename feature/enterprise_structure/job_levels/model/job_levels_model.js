@@ -1,5 +1,6 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
+import { validateMinMaxGradeRange } from '../../../../utils/gradeUtils.js';
 
 class JobLevelsModel {
   static TABLE_NAME = 'ENT.JOB_LEVELS';
@@ -142,38 +143,51 @@ class JobLevelsModel {
     LEFT JOIN ENT.GRADES gmax ON jl.MAX_GRADE_ID = gmax.GRADE_ID`;
   }
 
+  /**
+   * Builds a validation error with consistent code and status for grade-range failures.
+   */
+  static _gradeRangeError(message, code = 'GRADE_RANGE_INVALID') {
+    const e = new Error(message);
+    e.code = code;
+    e.statusCode = 400;
+    e.userMessage = e.message;
+    return e;
+  }
+
+  /**
+   * Validates that min and max grade IDs exist and form a valid range (same family, max >= min).
+   * Single round-trip query; supports min_grade_id = max_grade_id (one row).
+   */
   static async validateGradeRange(connection, minGradeId, maxGradeId) {
+    const ids = minGradeId === maxGradeId ? [minGradeId] : [minGradeId, maxGradeId];
     const q = `
       SELECT grade_id, grade_number
       FROM ent.grades
-      WHERE grade_id IN (:1, :2)
+      WHERE grade_id IN (${ids.map((_, i) => `:${i + 1}`).join(', ')})
     `;
-    const r = await connection.execute(q, [minGradeId, maxGradeId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    if (!r.rows || r.rows.length < 2) {
-      const e = new Error('min_grade_id or max_grade_id does not exist in grades');
-      e.code = 'FOREIGN_KEY_CONSTRAINT';
-      e.statusCode = 400;
-      e.userMessage = e.message;
-      throw e;
+    const r = await connection.execute(q, ids, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    if (!r.rows || r.rows.length < ids.length) {
+      throw this._gradeRangeError(
+        'min_grade_id or max_grade_id does not exist in grades',
+        'FOREIGN_KEY_CONSTRAINT'
+      );
     }
 
-    const minRow = r.rows.find(x => x.GRADE_ID === Number(minGradeId));
-    const maxRow = r.rows.find(x => x.GRADE_ID === Number(maxGradeId));
+    const minRow = r.rows.find((x) => Number(x.GRADE_ID) === Number(minGradeId));
+    const maxRow = minGradeId === maxGradeId ? minRow : r.rows.find((x) => Number(x.GRADE_ID) === Number(maxGradeId));
 
     if (!minRow || !maxRow) {
-      const e = new Error('min_grade_id or max_grade_id does not exist in grades');
-      e.code = 'FOREIGN_KEY_CONSTRAINT';
-      e.statusCode = 400;
-      e.userMessage = e.message;
-      throw e;
+      throw this._gradeRangeError(
+        'min_grade_id or max_grade_id does not exist in grades',
+        'FOREIGN_KEY_CONSTRAINT'
+      );
     }
 
-    if (minRow.GRADE_NUMBER > maxRow.GRADE_NUMBER) {
-      const e = new Error('min_grade_id cannot be higher than max_grade_id');
-      e.code = 'GRADE_RANGE_INVALID';
-      e.statusCode = 400;
-      e.userMessage = e.message;
-      throw e;
+    const minGradeNumber = minRow.GRADE_NUMBER ?? minRow.grade_number ?? '';
+    const maxGradeNumber = maxRow.GRADE_NUMBER ?? maxRow.grade_number ?? '';
+    const rangeCheck = validateMinMaxGradeRange(minGradeNumber, maxGradeNumber);
+    if (!rangeCheck.valid) {
+      throw this._gradeRangeError(rangeCheck.error);
     }
   }
 
@@ -289,7 +303,15 @@ class JobLevelsModel {
 
     try {
       return await this.executeWithTransaction(async (connection) => {
-        await this.validateGradeRange(connection, Number(data.MIN_GRADE_ID), Number(data.MAX_GRADE_ID));
+        const minGradeId = parseInt(data.MIN_GRADE_ID, 10);
+        const maxGradeId = parseInt(data.MAX_GRADE_ID, 10);
+        if (!Number.isFinite(minGradeId) || !Number.isFinite(maxGradeId)) {
+          const e = new Error('min_grade_id and max_grade_id must be valid integers');
+          e.code = 'VALIDATION_ERROR';
+          e.statusCode = 400;
+          throw e;
+        }
+        await this.validateGradeRange(connection, minGradeId, maxGradeId);
 
         let id;
         try {
@@ -324,8 +346,8 @@ class JobLevelsModel {
           data.LEVEL_NAME_EN,
           data.LEVEL_CODE,
           data.DESCRIPTION || null,
-          Number(data.MIN_GRADE_ID),
-          Number(data.MAX_GRADE_ID),
+          minGradeId,
+          maxGradeId,
           (data.STATUS || 'ACTIVE').toUpperCase(),
           userId || 'SYSTEM',
           now,

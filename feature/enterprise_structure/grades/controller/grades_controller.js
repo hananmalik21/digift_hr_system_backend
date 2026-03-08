@@ -1,6 +1,7 @@
 import express from 'express';
 import GradeModel from '../model/grades_model.js';
 import EntLookupValueModel from '../../../look_ups/ent/ent_lookup_values/model/entLookupValueModel.js';
+import { validateGradeNumberForCategory } from '../../../../utils/gradeUtils.js';
 import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
@@ -104,6 +105,14 @@ function validateGradeData(data, isUpdate = false) {
 
   if (requiredOnCreate('GRADE_NUMBER')) errors.push('GRADE_NUMBER is required');
   if (requiredOnCreate('GRADE_CATEGORY')) errors.push('GRADE_CATEGORY is required');
+
+  // Grade number must belong to selected category (prefix + format)
+  const gradeNumber = data.GRADE_NUMBER ?? data.grade_number;
+  const gradeCategory = data.GRADE_CATEGORY ?? data.grade_category;
+  if (gradeNumber != null && gradeCategory != null && String(gradeNumber).trim() && String(gradeCategory).trim()) {
+    const check = validateGradeNumberForCategory(gradeNumber, gradeCategory);
+    if (!check.valid) errors.push(check.error);
+  }
 
   // Steps are ALWAYS required on create
   const stepFields = ['STEP_1_SALARY','STEP_2_SALARY','STEP_3_SALARY','STEP_4_SALARY','STEP_5_SALARY'];
