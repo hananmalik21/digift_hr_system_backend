@@ -3,22 +3,11 @@
  * Utilities for parsing, comparing, and validating grade numbers against GRADE_CATEGORY.
  * Used by: grades controller (category vs number validation), job_levels model (min/max range),
  * and ENT.TRG_JOB_LEVEL_GRADE_RANGE trigger (same logic in PL/SQL).
+ * GRADE_CATEGORY validation uses a dynamic map (e.g. from ENT_LOOKUP_VALUES) when provided.
  */
-
-/** GRADE_CATEGORY → prefix used in GRADE_NUMBER. Format is always prefix + numeric suffix. */
-export const CATEGORY_TO_PREFIX = Object.freeze({
-  EXECUTIVE: 'EX',
-  SENIOR_MANAGEMENT: 'SM',
-  MANAGEMENT: 'M',
-  PROFESSIONAL: 'P',
-  TECHNICAL: 'T',
-  ADMINISTRATIVE: 'A',
-  OPERATIONAL: 'O'
-});
 
 /**
  * Build format regex for a prefix: ^P[0-9]+$, ^EX[0-9]+$, etc.
- * Derived from CATEGORY_TO_PREFIX so no per-category hardcoding.
  */
 function getFormatRegexForPrefix(prefix) {
   if (!prefix || typeof prefix !== 'string') return null;
@@ -50,13 +39,23 @@ export function extractRank(gradeNumber) {
 
 /**
  * Map GRADE_CATEGORY to expected prefix.
- * @param {string} gradeCategory - e.g. "PROFESSIONAL", "MANAGEMENT"
+ * Uses dynamic categoryToPrefixMap when provided (e.g. from ENT_LOOKUP_VALUES); otherwise
+ * treats a short (1–3 char) uppercase category as the prefix so codes like "P", "EX" work.
+ * @param {string} gradeCategory - e.g. "PROFESSIONAL", "P", "MANAGEMENT"
+ * @param {Object.<string, string>|null|undefined} [categoryToPrefixMap] - optional map from category/code to prefix (from lookup). When omitted, short uppercase category is used as prefix.
  * @returns {string} Expected prefix e.g. "P", "M", or empty if unknown
  */
-export function mapCategoryToPrefix(gradeCategory) {
+export function mapCategoryToPrefix(gradeCategory, categoryToPrefixMap = null) {
   if (gradeCategory == null || typeof gradeCategory !== 'string') return '';
   const key = String(gradeCategory).trim().toUpperCase();
-  return CATEGORY_TO_PREFIX[key] ?? '';
+  if (key === '') return '';
+  if (categoryToPrefixMap && typeof categoryToPrefixMap === 'object') {
+    const prefix = categoryToPrefixMap[key];
+    if (prefix != null && String(prefix).trim() !== '') return String(prefix).trim().toUpperCase();
+    return '';
+  }
+  if (key.length <= 3 && /^[A-Z]+$/.test(key)) return key;
+  return '';
 }
 
 /**
@@ -79,18 +78,21 @@ export function compareGrades(g1, g2) {
 
 /**
  * Validate that grade_number belongs to the given grade_category (prefix match + format).
+ * Uses dynamic categoryToPrefixMap when provided (e.g. from ENT_LOOKUP_VALUES); when omitted,
+ * accepts any short (1–3 char) uppercase category as the prefix.
  * @param {string} gradeNumber - e.g. "P3"
- * @param {string} gradeCategory - e.g. "PROFESSIONAL"
+ * @param {string} gradeCategory - e.g. "PROFESSIONAL", "P"
+ * @param {Object.<string, string>|null|undefined} [categoryToPrefixMap] - optional map from category/code to prefix (from lookup). When omitted, short uppercase category is used as prefix.
  * @returns {{ valid: boolean, error?: string }}
  */
-export function validateGradeNumberForCategory(gradeNumber, gradeCategory) {
+export function validateGradeNumberForCategory(gradeNumber, gradeCategory, categoryToPrefixMap = null) {
   const num = (gradeNumber ?? '').toString().trim();
   const cat = (gradeCategory ?? '').toString().trim().toUpperCase();
 
   if (!num) return { valid: false, error: 'GRADE_NUMBER is required' };
   if (!cat) return { valid: false, error: 'GRADE_CATEGORY is required' };
 
-  const expectedPrefix = mapCategoryToPrefix(cat);
+  const expectedPrefix = mapCategoryToPrefix(cat, categoryToPrefixMap);
   if (!expectedPrefix) {
     return { valid: false, error: `Unknown GRADE_CATEGORY: ${gradeCategory}` };
   }

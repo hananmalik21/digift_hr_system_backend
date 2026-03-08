@@ -20,10 +20,14 @@ import {
 const router = express.Router();
 
 const GRADE_NUMBER_LOOKUP_TYPE = 'GRADE_NUMBER';
+const GRADE_CATEGORY_LOOKUP_TYPE = 'GRADE_CATEGORY';
 const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** In-memory cache for grade number lookup map: { [enterpriseId]: { data, expiresAt } } */
 const gradeNumberLookupCache = new Map();
+
+/** In-memory cache for grade category → prefix map: { [enterpriseId]: { data, expiresAt } } */
+const gradeCategoryLookupCache = new Map();
 
 function toLookupKey(code) {
   return (code ?? '').toString().trim().toUpperCase();
@@ -74,6 +78,49 @@ async function getGradeNumberLookupMap(enterpriseId) {
 }
 
 /**
+ * Fetches GRADE_CATEGORY lookup values for the tenant and returns a map from
+ * category code/name (uppercase) to prefix. LOOKUP_CODE = prefix; MEANING_EN is also mapped to that prefix.
+ * Used for dynamic validation of GRADE_CATEGORY in create/update grade.
+ * Returns null when no lookup data exists (validation then uses fallback: short uppercase category = prefix).
+ */
+async function getGradeCategoryMap(enterpriseId) {
+  if (!isValidEnterpriseId(enterpriseId)) return null;
+  const id = Number(enterpriseId);
+  const now = Date.now();
+  const cached = gradeCategoryLookupCache.get(id);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  try {
+    const result = await EntLookupValueModel.findAll({
+      enterpriseId: id,
+      lookupType: GRADE_CATEGORY_LOOKUP_TYPE,
+      pagination: { page: 1, pageSize: 500 }
+    });
+    const list = result?.lookupValues || [];
+    if (list.length === 0) {
+      gradeCategoryLookupCache.set(id, { data: null, expiresAt: now + LOOKUP_CACHE_TTL_MS });
+      return null;
+    }
+    const data = Object.create(null);
+    for (const row of list) {
+      const code = toLookupKey(row.lookup_code ?? row.LOOKUP_CODE);
+      const meaning = toLookupKey(row.meaning_en ?? row.MEANING_EN);
+      if (code) {
+        data[code] = code;
+        if (meaning && meaning !== code) data[meaning] = code;
+      }
+    }
+    gradeCategoryLookupCache.set(id, { data, expiresAt: now + LOOKUP_CACHE_TTL_MS });
+    return data;
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('Grade category lookup fetch failed:', err?.message ?? err);
+    }
+    return null;
+  }
+}
+
+/**
  * Enriches one grade or an array of grades with grade_number_obj { meaning_en, meaning_ar }.
  * Lookup is case-insensitive (normalized to uppercase).
  */
@@ -97,7 +144,12 @@ router.use((req, res, next) => {
   next();
 });
 
-function validateGradeData(data, isUpdate = false) {
+/**
+ * @param {Object} data - Grade payload
+ * @param {boolean} isUpdate - Whether this is an update
+ * @param {Object.<string, string>|null|undefined} [categoryToPrefixMap] - Optional map from category/code to prefix (from GRADE_CATEGORY lookup). When null/undefined, validation uses fallback (short uppercase category = prefix).
+ */
+function validateGradeData(data, isUpdate = false, categoryToPrefixMap = null) {
   const errors = [];
 
   const requiredOnCreate = (field) => !isUpdate && (!data[field] && data[field] !== 0);
@@ -106,11 +158,11 @@ function validateGradeData(data, isUpdate = false) {
   if (requiredOnCreate('GRADE_NUMBER')) errors.push('GRADE_NUMBER is required');
   if (requiredOnCreate('GRADE_CATEGORY')) errors.push('GRADE_CATEGORY is required');
 
-  // Grade number must belong to selected category (prefix + format)
+  // Grade number must belong to selected category (prefix + format); categories from lookup when provided
   const gradeNumber = data.GRADE_NUMBER ?? data.grade_number;
   const gradeCategory = data.GRADE_CATEGORY ?? data.grade_category;
   if (gradeNumber != null && gradeCategory != null && String(gradeNumber).trim() && String(gradeCategory).trim()) {
-    const check = validateGradeNumberForCategory(gradeNumber, gradeCategory);
+    const check = validateGradeNumberForCategory(gradeNumber, gradeCategory, categoryToPrefixMap);
     if (!check.valid) errors.push(check.error);
   }
 
@@ -301,7 +353,8 @@ router.post('/', async (req, res) => {
     const data = toUpperCaseKeys(req.body);
     data.tenant_id = requireTenantIdInBody(data);
 
-    const errors = validateGradeData(data, false);
+    const categoryMap = await getGradeCategoryMap(data.tenant_id);
+    const errors = validateGradeData(data, false, categoryMap);
     if (errors.length) return sendBadRequest(res, req, errors);
 
     const userId = getUserId(req);
@@ -330,7 +383,8 @@ router.put('/:id', async (req, res) => {
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
     const data = toUpperCaseKeys(req.body);
-    const errors = validateGradeData(data, true);
+    const categoryMap = await getGradeCategoryMap(tenantId);
+    const errors = validateGradeData(data, true, categoryMap);
     if (errors.length) return sendBadRequest(res, req, errors);
 
     const existing = await GradeModel.findById(gradeId, tenantId);
@@ -361,7 +415,8 @@ router.patch('/:id', async (req, res) => {
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
     const data = toUpperCaseKeys(req.body);
-    const errors = validateGradeData(data, true);
+    const categoryMap = await getGradeCategoryMap(tenantId);
+    const errors = validateGradeData(data, true, categoryMap);
     if (errors.length) return sendBadRequest(res, req, errors);
 
     const existing = await GradeModel.findById(gradeId, tenantId);
