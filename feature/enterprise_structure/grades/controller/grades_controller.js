@@ -1,5 +1,6 @@
 import express from 'express';
 import GradeModel from '../model/grades_model.js';
+import EntLookupValueModel from '../../../look_ups/ent/ent_lookup_values/model/entLookupValueModel.js';
 import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
@@ -16,6 +17,79 @@ import {
 } from '../view/grade_view.js';
 
 const router = express.Router();
+
+const GRADE_NUMBER_LOOKUP_TYPE = 'GRADE_NUMBER';
+const LOOKUP_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** In-memory cache for grade number lookup map: { [enterpriseId]: { data, expiresAt } } */
+const gradeNumberLookupCache = new Map();
+
+function toLookupKey(code) {
+  return (code ?? '').toString().trim().toUpperCase();
+}
+
+function isValidEnterpriseId(enterpriseId) {
+  const id = Number(enterpriseId);
+  return enterpriseId != null && enterpriseId !== '' && Number.isFinite(id) && id >= 1;
+}
+
+/**
+ * Fetches GRADE_NUMBER lookup values for the tenant (enterprise_id) and returns
+ * a map from normalized lookup_code (uppercase, e.g. "P1") to { meaning_en, meaning_ar }.
+ * Results are cached for LOOKUP_CACHE_TTL_MS to improve response time.
+ */
+async function getGradeNumberLookupMap(enterpriseId) {
+  if (!isValidEnterpriseId(enterpriseId)) return {};
+  const id = Number(enterpriseId);
+  const now = Date.now();
+  const cached = gradeNumberLookupCache.get(id);
+  if (cached && cached.expiresAt > now) return cached.data;
+
+  try {
+    const result = await EntLookupValueModel.findAll({
+      enterpriseId: id,
+      lookupType: GRADE_NUMBER_LOOKUP_TYPE,
+      pagination: { page: 1, pageSize: 500 }
+    });
+    const list = result?.lookupValues || [];
+    const data = Object.create(null);
+    for (const row of list) {
+      const code = toLookupKey(row.lookup_code ?? row.LOOKUP_CODE);
+      if (code) {
+        data[code] = {
+          meaning_en: row.meaning_en ?? row.MEANING_EN ?? null,
+          meaning_ar: row.meaning_ar ?? row.MEANING_AR ?? null
+        };
+      }
+    }
+    gradeNumberLookupCache.set(id, { data, expiresAt: now + LOOKUP_CACHE_TTL_MS });
+    return data;
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('Grade number lookup fetch failed:', err?.message ?? err);
+    }
+    return {};
+  }
+}
+
+/**
+ * Enriches one grade or an array of grades with grade_number_obj { meaning_en, meaning_ar }.
+ * Lookup is case-insensitive (normalized to uppercase).
+ */
+function enrichWithGradeNumberNames(items, lookupMap) {
+  if (!lookupMap || Object.keys(lookupMap).length === 0) return items;
+  const one = (g) => {
+    const code = toLookupKey(g?.grade_number ?? g?.GRADE_NUMBER);
+    const names = code ? lookupMap[code] : null;
+    return {
+      ...g,
+      grade_number_obj: names
+        ? { meaning_en: names.meaning_en ?? null, meaning_ar: names.meaning_ar ?? null }
+        : null
+    };
+  };
+  return Array.isArray(items) ? items.map(one) : (items ? one(items) : items);
+}
 
 router.use((req, res, next) => {
   req._startTime = Date.now();
@@ -167,14 +241,19 @@ router.get('/', async (req, res) => {
 
     filters.pagination = { page, pageSize };
 
-    const result = await GradeModel.findAll(filters);
+    const [result, lookupMap] = await Promise.all([
+      GradeModel.findAll(filters),
+      getGradeNumberLookupMap(tenantId)
+    ]);
+    const gradesRaw = result.grades || result;
+    const grades = enrichWithGradeNumberNames(gradesRaw, lookupMap);
 
     const totalCount = result.total || result.length;
     const totalPages = Math.ceil(totalCount / pageSize);
     const hasNext = page < totalPages;
     const hasPrevious = page > 1;
 
-    sendGradeList(res, req, result.grades || result, {
+    sendGradeList(res, req, grades, {
       filters: Object.keys(appliedFilters).length ? appliedFilters : undefined,
       total: totalCount,
       pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
@@ -196,7 +275,9 @@ router.get('/:id', async (req, res) => {
     if (isNaN(gradeId)) return sendBadRequest(res, req, 'Invalid GRADE_ID format');
 
     const grade = await GradeModel.findById(gradeId, tenantId);
-    sendGrade(res, req, grade);
+    if (!grade) return sendGrade(res, req, null);
+    const lookupMap = await getGradeNumberLookupMap(tenantId);
+    sendGrade(res, req, enrichWithGradeNumberNames(grade, lookupMap));
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch grade', error);
