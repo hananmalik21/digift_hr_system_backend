@@ -236,7 +236,10 @@ router.post('/', asyncHandler(async (req, res) => {
 
 /**
  * @route   GET /api/tm/work-schedules
- * @desc    Get list of work schedules
+ * @desc    Get list of work schedules (paginated, optional weekly lines)
+ * @query   tenant_id (required), status?, search?, effective_on?, include_lines? (default true), sort_by?, order?, page?, page_size?
+ * @query   sort_by   schedule_code | schedule_name_en | effective_start_date | status | created_at
+ * @query   order     asc | desc (default asc)
  */
 router.get('/', asyncHandler(async (req, res) => {
   const filters = {};
@@ -273,16 +276,34 @@ router.get('/', asyncHandler(async (req, res) => {
     filters.includeLines = v !== 'false' && v !== '0';
   }
 
+  // sort_by: schedule_code | schedule_name_en | effective_start_date | status | created_at
+  const validSortColumns = ['schedule_code', 'schedule_name_en', 'effective_start_date', 'status', 'created_at'];
+  if (req.query.sort_by) {
+    const sortBy = String(req.query.sort_by).toLowerCase();
+    if (validSortColumns.includes(sortBy)) {
+      filters.sortBy = sortBy;
+      appliedFilters.sort_by = sortBy;
+    }
+  }
+  if (req.query.order) {
+    const order = String(req.query.order).toUpperCase();
+    if (order === 'ASC' || order === 'DESC') {
+      filters.sortOrder = order;
+      appliedFilters.order = order;
+    }
+  }
+
   let page = 1;
-  let pageSize = 10;
+  let pageSize = 25;
   if (req.query.page !== undefined) {
     page = parseInt(req.query.page, 10);
     if (isNaN(page) || page < 1) throw new ValidationError('page must be a positive integer');
   }
   if (req.query.page_size !== undefined) {
     pageSize = parseInt(req.query.page_size, 10);
-    if (isNaN(pageSize) || pageSize < 1 || pageSize > 100) {
-      throw new ValidationError('page_size must be between 1 and 100');
+    const maxPageSize = filters.includeLines ? 100 : 200;
+    if (isNaN(pageSize) || pageSize < 1 || pageSize > maxPageSize) {
+      throw new ValidationError(`page_size must be between 1 and ${maxPageSize}`);
     }
   }
 
@@ -295,22 +316,28 @@ router.get('/', asyncHandler(async (req, res) => {
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
 
+  const executionTimeMs = req._startTime != null ? Date.now() - req._startTime : null;
+
   // Convert keys to lowercase snake_case
   const convertedSchedules = toLowerCaseKeys(result.workSchedules);
-  
+
+  const meta = {
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasNext,
+      hasPrevious
+    },
+    applied_filters: appliedFilters
+  };
+  if (executionTimeMs != null) meta.execution_time_ms = executionTimeMs;
+
   sendList(res, {
     message: 'Work schedules fetched successfully',
     data: convertedSchedules,
-    meta: {
-      pagination: {
-        page,
-        pageSize,
-        total: total,
-        totalPages,
-        hasNext,
-        hasPrevious
-      }
-    }
+    meta
   });
 }));
 

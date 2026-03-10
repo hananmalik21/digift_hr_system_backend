@@ -301,7 +301,17 @@ class WorkScheduleModel {
 
       const where = ` WHERE ${conditions.join(' AND ')}`;
       dataSql += where;
-      dataSql += ` ORDER BY ws.SCHEDULE_CODE`;
+
+      const sortColumnMap = {
+        schedule_code: 'ws.SCHEDULE_CODE',
+        schedule_name_en: 'ws.SCHEDULE_NAME_EN',
+        effective_start_date: 'ws.EFFECTIVE_START_DATE',
+        status: 'ws.STATUS',
+        created_at: 'ws.CREATION_DATE'
+      };
+      const sortCol = sortColumnMap[filters.sortBy] || 'ws.SCHEDULE_CODE';
+      const sortOrder = (filters.sortOrder && String(filters.sortOrder).toUpperCase() === 'DESC') ? 'DESC' : 'ASC';
+      dataSql += ` ORDER BY ${sortCol} ${sortOrder}`;
 
       let total = 0;
       const dataBinds = [...binds];
@@ -309,6 +319,89 @@ class WorkScheduleModel {
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataSql += ` OFFSET :${p} ROWS FETCH NEXT :${p + 1} ROWS ONLY`;
         dataBinds.push(offset, pagination.pageSize);
+      }
+
+      if (includeLines && pagination?.page && pagination?.pageSize) {
+        // Single-query path: fetch schedules + lines in one round-trip (faster)
+        const offset = (pagination.page - 1) * pagination.pageSize;
+        const sortCol = sortColumnMap[filters.sortBy] || 'ws.SCHEDULE_CODE';
+        const sortOrder = (filters.sortOrder && String(filters.sortOrder).toUpperCase() === 'DESC') ? 'DESC' : 'ASC';
+        const combinedBinds = [...binds, offset, pagination.pageSize];
+        const combinedSql = `
+          WITH PAGED AS (
+            SELECT
+              ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
+              ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
+              ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
+              ws.TIME_ZONE, ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY,
+              COUNT(*) OVER() AS total
+            FROM ${this.TABLE_NAME} ws
+            LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
+            ${where}
+            ORDER BY ${sortCol} ${sortOrder}
+            OFFSET :${binds.length + 1} ROWS FETCH NEXT :${binds.length + 2} ROWS ONLY
+          )
+          SELECT
+            p.*,
+            wsl.DAY_OF_WEEK AS WSL_DAY_OF_WEEK, wsl.DAY_TYPE AS WSL_DAY_TYPE, wsl.SHIFT_ID AS WSL_SHIFT_ID,
+            s.SHIFT_CODE AS S_SHIFT_CODE, s.SHIFT_NAME_EN AS S_SHIFT_NAME_EN, s.SHIFT_NAME_AR AS S_SHIFT_NAME_AR,
+            s.START_MINUTES AS S_START_MINUTES, s.END_MINUTES AS S_END_MINUTES,
+            s.DURATION_HOURS AS S_DURATION_HOURS, s.BREAK_HOURS AS S_BREAK_HOURS,
+            (s.DURATION_HOURS - NVL(s.BREAK_HOURS, 0)) AS S_PAID_HOURS,
+            s.SHIFT_TYPE AS S_SHIFT_TYPE, s.COLOR_HEX AS S_COLOR_HEX, s.STATUS AS S_SHIFT_STATUS
+          FROM PAGED p
+          LEFT JOIN ${this.LINES_TABLE_NAME} wsl ON wsl.WORK_SCHEDULE_ID = p.WORK_SCHEDULE_ID
+          LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
+          ORDER BY p.WORK_SCHEDULE_ID, wsl.DAY_OF_WEEK`;
+        const combinedRes = await db.executeQuery(combinedSql, combinedBinds);
+        const rows = combinedRes.rows || [];
+        const scheduleMap = {};
+        for (const r of rows) {
+          const sid = r.WORK_SCHEDULE_ID;
+          if (!scheduleMap[sid]) {
+            const h = {
+              WORK_SCHEDULE_ID: r.WORK_SCHEDULE_ID, TENANT_ID: r.TENANT_ID, SCHEDULE_CODE: r.SCHEDULE_CODE,
+              SCHEDULE_NAME_EN: r.SCHEDULE_NAME_EN, SCHEDULE_NAME_AR: r.SCHEDULE_NAME_AR,
+              WORK_PATTERN_ID: r.WORK_PATTERN_ID, PATTERN_NAME_EN: r.PATTERN_NAME_EN, PATTERN_NAME_AR: r.PATTERN_NAME_AR,
+              EFFECTIVE_START_DATE: r.EFFECTIVE_START_DATE, EFFECTIVE_END_DATE: r.EFFECTIVE_END_DATE,
+              ASSIGNMENT_MODE: r.ASSIGNMENT_MODE, STATUS: r.STATUS, TIME_ZONE: r.TIME_ZONE,
+              CREATION_DATE: r.CREATION_DATE, CREATED_BY: r.CREATED_BY, LAST_UPDATE_DATE: r.LAST_UPDATE_DATE, LAST_UPDATED_BY: r.LAST_UPDATED_BY,
+              total: r.total
+            };
+            scheduleMap[sid] = { ...h, weekly_lines: [] };
+          }
+          if (r.WSL_DAY_OF_WEEK != null) {
+            const dayType = this.normalizeDayType(r.WSL_DAY_TYPE);
+            scheduleMap[sid].weekly_lines.push({
+              work_schedule_id: sid,
+              day_of_week: r.WSL_DAY_OF_WEEK,
+              day_type: dayType,
+              shift: dayType === 'REST' ? null : {
+                shift_id: r.WSL_SHIFT_ID ?? null,
+                shift_code: r.S_SHIFT_CODE ?? null,
+                shift_name_en: r.S_SHIFT_NAME_EN ?? null,
+                shift_name_ar: r.S_SHIFT_NAME_AR ?? null,
+                start_minutes: r.S_START_MINUTES ?? null,
+                end_minutes: r.S_END_MINUTES ?? null,
+                duration_hours: r.S_DURATION_HOURS ?? null,
+                break_hours: r.S_BREAK_HOURS ?? null,
+                paid_hours: r.S_PAID_HOURS ?? null,
+                shift_type: r.S_SHIFT_TYPE ?? null,
+                color_hex: r.S_COLOR_HEX ?? null,
+                status: r.S_SHIFT_STATUS ?? null
+              }
+            });
+          }
+        }
+        const schedulesRaw = Object.values(scheduleMap);
+        total = schedulesRaw.length > 0 ? Number(schedulesRaw[0].total) || 0 : 0;
+        if (schedulesRaw.length === 0) {
+          const countRes = await db.executeQuery(`SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} ws${where}`, binds);
+          total = countRes.rows?.[0]?.TOTAL ?? countRes.rows?.[0]?.total ?? 0;
+        }
+        const schedules = this.convertKeysToSnakeCase(schedulesRaw);
+        schedules.forEach(s => { delete s.total; });
+        return { workSchedules: schedules, total };
       }
 
       const res = await db.executeQuery(dataSql, dataBinds);
