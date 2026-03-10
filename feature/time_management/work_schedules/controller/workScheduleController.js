@@ -10,7 +10,7 @@ import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
 import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
-import { normalizeDayType, VALID_DAY_TYPE_INPUTS, VALID_DAY_OF_WEEKS } from '../../constants.js';
+import { normalizeDayType, VALID_DAY_TYPE_INPUTS, VALID_DAY_OF_WEEKS } from '../constants.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';

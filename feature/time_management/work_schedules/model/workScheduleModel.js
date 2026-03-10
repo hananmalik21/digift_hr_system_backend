@@ -8,7 +8,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { normalizeDayType } from '../../constants.js';
+import { normalizeDayType } from '../constants.js';
 
 class WorkScheduleModel {
   static TABLE_NAME = 'ENT.TM_WORK_SCHEDULES';
