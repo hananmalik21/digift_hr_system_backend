@@ -102,8 +102,8 @@ class WorkScheduleModel {
       const dayType = this.normalizeDayType(line.DAY_TYPE ?? line.day_type);
       const shiftIdRaw = line.SHIFT_ID ?? line.shift_id;
 
-      // REST -> shift_id must be null
-      const shiftId = dayType === 'REST' ? null : shiftIdRaw;
+      // REST / OFF -> shift_id must be null
+      const shiftId = (dayType === 'REST' || dayType === 'OFF') ? null : shiftIdRaw;
 
       return [
         workScheduleId,
@@ -376,7 +376,7 @@ class WorkScheduleModel {
               work_schedule_id: sid,
               day_of_week: r.WSL_DAY_OF_WEEK,
               day_type: dayType,
-              shift: dayType === 'REST' ? null : {
+              shift: (dayType === 'REST' || dayType === 'OFF') ? null : {
                 shift_id: r.WSL_SHIFT_ID ?? null,
                 shift_code: r.S_SHIFT_CODE ?? null,
                 shift_name_en: r.S_SHIFT_NAME_EN ?? null,
@@ -479,7 +479,7 @@ class WorkScheduleModel {
         work_schedule_id: converted.work_schedule_id,
         day_of_week: converted.day_of_week,
         day_type: dayType,
-        shift: dayType === 'REST'
+        shift: (dayType === 'REST' || dayType === 'OFF')
           ? null
           : {
               shift_id: converted.shift_id ?? null,
@@ -551,7 +551,7 @@ class WorkScheduleModel {
         work_schedule_id: workScheduleId,
         day_of_week: converted.day_of_week,
         day_type: dayType,
-        shift: dayType === 'REST'
+        shift: (dayType === 'REST' || dayType === 'OFF')
           ? null
           : {
               shift_id: converted.shift_id ?? null,

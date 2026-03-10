@@ -66,7 +66,7 @@ function validateWeeklyLines(weeklyLines) {
         }
       }
     } else if (line.shift_id !== undefined && line.shift_id !== null) {
-      errors.push(`weekly_lines[${i}].shift_id must be null for REST day`);
+      errors.push(`weekly_lines[${i}].shift_id must be null for REST or OFF day`);
     }
   }
   return errors;
