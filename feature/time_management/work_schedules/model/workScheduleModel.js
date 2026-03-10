@@ -1,5 +1,5 @@
 // workScheduleModel.js (UPDATED: Rest Day support)
-// - Adds DAY_TYPE (WORK|REST) support in TM_WORK_SCHEDULE_LINES
+// - Adds DAY_TYPE (WORK|REST|OFF) support in TM_WORK_SCHEDULE_LINES; OFF normalized to REST
 // - For REST day: SHIFT_ID must be NULL
 // - Still prevents ORA-12860 by disabling Parallel DML per transaction
 // - Still serializes concurrent updates with SELECT ... FOR UPDATE
@@ -8,6 +8,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
+import { normalizeDayType } from '../../constants.js';
 
 class WorkScheduleModel {
   static TABLE_NAME = 'ENT.TM_WORK_SCHEDULES';
@@ -46,9 +47,7 @@ class WorkScheduleModel {
   }
 
   static normalizeDayType(v) {
-    const x = String(v ?? 'WORK').trim().toUpperCase();
-    if (x === 'REST' || x === 'RESTDAY' || x === 'REST_DAY') return 'REST';
-    return 'WORK';
+    return normalizeDayType(v);
   }
 
   static async disableParallelDml(connection) {
@@ -716,11 +715,14 @@ class WorkScheduleModel {
    * Soft Delete
    * ========================= */
 
+  /**
+   * Soft delete (set STATUS = INACTIVE). Returns the updated schedule in one round-trip.
+   */
   static async softDelete(workScheduleId, tenantId, userId) {
     try {
       if (!tenantId) throw new ValidationError('tenant_id is required');
 
-      await this.executeWithTransaction(async (connection) => {
+      return await this.executeWithTransaction(async (connection) => {
         await this.disableParallelDml(connection);
 
         const r = await connection.execute(
@@ -737,9 +739,9 @@ class WorkScheduleModel {
         if (rows === 0) {
           throw new NotFoundError(`No work schedule found with ID: ${workScheduleId} for tenant: ${tenantId}`);
         }
-      });
 
-      return true;
+        return await this.findByIdWithConnection(connection, workScheduleId, tenantId);
+      });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError) throw error;
       throw new DatabaseError(`Failed to delete work schedule: ${error.message}`, error);

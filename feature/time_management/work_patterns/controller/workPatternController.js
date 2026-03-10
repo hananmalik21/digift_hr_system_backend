@@ -1,6 +1,7 @@
 import express from 'express';
 import WorkPatternModel from '../model/workPatternModel.js';
 import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
+import { VALID_DAY_TYPES, VALID_DAY_OF_WEEKS } from '../../constants.js';
 import {
   sendWorkPatternList,
   sendWorkPattern,
@@ -20,96 +21,73 @@ router.use((req, res, next) => {
 });
 
 /**
+ * Validate days array (7 entries, day_of_week 1-7, day_type WORK/REST/OFF). Returns array of error strings.
+ */
+function validateDaysArray(days) {
+  const errors = [];
+  if (!days || !Array.isArray(days)) {
+    errors.push('days is required and must be an array');
+    return errors;
+  }
+  if (days.length !== 7) {
+    errors.push('days array must contain exactly 7 days');
+    return errors;
+  }
+  const dayOfWeeks = [];
+  for (let i = 0; i < days.length; i++) {
+    const day = days[i];
+    if (day.day_of_week === undefined || day.day_of_week === null) {
+      errors.push(`days[${i}].day_of_week is required`);
+    } else {
+      const dayOfWeek = parseInt(day.day_of_week, 10);
+      if (isNaN(dayOfWeek) || !VALID_DAY_OF_WEEKS.includes(dayOfWeek)) {
+        errors.push(`days[${i}].day_of_week must be a number between 1 and 7`);
+      } else if (dayOfWeeks.includes(dayOfWeek)) {
+        errors.push(`days[${i}].day_of_week (${dayOfWeek}) is duplicated`);
+      } else {
+        dayOfWeeks.push(dayOfWeek);
+      }
+    }
+    if (!day.day_type || String(day.day_type).trim() === '') {
+      errors.push(`days[${i}].day_type is required`);
+    } else if (!VALID_DAY_TYPES.includes(String(day.day_type).toUpperCase())) {
+      errors.push(`days[${i}].day_type must be one of: ${VALID_DAY_TYPES.join(', ')}`);
+    }
+  }
+  const missingDays = VALID_DAY_OF_WEEKS.filter(d => !dayOfWeeks.includes(d));
+  if (missingDays.length > 0) {
+    errors.push(`days array must include all days 1-7. Missing: ${missingDays.join(', ')}`);
+  }
+  return errors;
+}
+
+/**
  * Validation helper for work pattern data
  */
 function validateWorkPatternData(data) {
   const errors = [];
 
-  // Required fields
-  if (!data.tenant_id && data.tenant_id !== 0) {
-    errors.push('tenant_id is required');
-  }
-  if (!data.pattern_code || data.pattern_code.trim() === '') {
-    errors.push('pattern_code is required');
-  }
-  if (!data.pattern_name_en || data.pattern_name_en.trim() === '') {
-    errors.push('pattern_name_en is required');
-  }
-  if (!data.pattern_type || data.pattern_type.trim() === '') {
-    errors.push('pattern_type is required');
-  }
+  if (!data.tenant_id && data.tenant_id !== 0) errors.push('tenant_id is required');
+  if (!data.pattern_code || data.pattern_code.trim() === '') errors.push('pattern_code is required');
+  if (!data.pattern_name_en || data.pattern_name_en.trim() === '') errors.push('pattern_name_en is required');
+  if (!data.pattern_type || data.pattern_type.trim() === '') errors.push('pattern_type is required');
   if (data.total_hours_per_week === undefined || data.total_hours_per_week === null) {
     errors.push('total_hours_per_week is required');
   }
 
-  // Validate total_hours_per_week >= 0
   if (data.total_hours_per_week !== undefined && data.total_hours_per_week !== null) {
     const hours = parseFloat(data.total_hours_per_week);
-    if (isNaN(hours) || hours < 0) {
-      errors.push('total_hours_per_week must be a non-negative number');
-    }
+    if (isNaN(hours) || hours < 0) errors.push('total_hours_per_week must be a non-negative number');
   }
 
-  // Validate status if provided
   if (data.status !== undefined && data.status !== null) {
     const validStatuses = ['ACTIVE', 'INACTIVE'];
-    if (!validStatuses.includes(data.status.toUpperCase())) {
+    if (!validStatuses.includes(String(data.status).toUpperCase())) {
       errors.push(`status must be one of: ${validStatuses.join(', ')}`);
     }
   }
 
-  // Validate days array
-  if (!data.days || !Array.isArray(data.days)) {
-    errors.push('days is required and must be an array');
-  } else {
-    // days length must be exactly 7
-    if (data.days.length !== 7) {
-      errors.push('days array must contain exactly 7 days');
-    } else {
-      const dayOfWeeks = [];
-      const validDayTypes = ['WORK', 'REST'];
-      const validDayOfWeeks = [1, 2, 3, 4, 5, 6, 7];
-
-      for (let i = 0; i < data.days.length; i++) {
-        const day = data.days[i];
-        
-        // Validate day_of_week
-        if (day.day_of_week === undefined || day.day_of_week === null) {
-          errors.push(`days[${i}].day_of_week is required`);
-        } else {
-          const dayOfWeek = parseInt(day.day_of_week);
-          if (isNaN(dayOfWeek) || !validDayOfWeeks.includes(dayOfWeek)) {
-            errors.push(`days[${i}].day_of_week must be a number between 1 and 7`);
-          } else {
-            // Check for duplicates
-            if (dayOfWeeks.includes(dayOfWeek)) {
-              errors.push(`days[${i}].day_of_week (${dayOfWeek}) is duplicated`);
-            } else {
-              dayOfWeeks.push(dayOfWeek);
-            }
-          }
-        }
-
-        // Validate day_type
-        if (!day.day_type || day.day_type.trim() === '') {
-          errors.push(`days[${i}].day_type is required`);
-        } else {
-          if (!validDayTypes.includes(day.day_type.toUpperCase())) {
-            errors.push(`days[${i}].day_type must be one of: ${validDayTypes.join(', ')}`);
-          }
-        }
-      }
-
-      // Check that all days 1-7 are present
-      if (dayOfWeeks.length === 7) {
-        const missingDays = validDayOfWeeks.filter(d => !dayOfWeeks.includes(d));
-        if (missingDays.length > 0) {
-          errors.push(`days array must include all days 1-7. Missing: ${missingDays.join(', ')}`);
-        }
-      }
-    }
-  }
-
+  errors.push(...validateDaysArray(data.days));
   return errors;
 }
 
@@ -160,7 +138,7 @@ async function validateEnterpriseExists(tenantId) {
  * @route   POST /api/tm/work-patterns
  * @desc    Create a new work pattern with 7 days in a single transaction
  * @body    { tenant_id, pattern_code, pattern_name_en, pattern_name_ar?, pattern_type,
- *            total_hours_per_week, status?, days: [{ day_of_week:1..7, day_type:'WORK'|'REST' }] }
+ *            total_hours_per_week, status?, days: [{ day_of_week:1..7, day_type:'WORK'|'REST'|'OFF' }] }
  * @access  Public
  */
 router.post('/', asyncHandler(async (req, res) => {
@@ -180,20 +158,12 @@ router.post('/', asyncHandler(async (req, res) => {
 
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
-  
-  try {
-    const createResult = await WorkPatternModel.create(upperCaseData, userId);
-    // Fetch the full work pattern object after creation
-    const workPatternId = createResult.WORK_PATTERN_ID || createResult.work_pattern_id;
-    const fullWorkPattern = await WorkPatternModel.findById(workPatternId, tenantId);
-    if (!fullWorkPattern) {
-      throw new NotFoundError('Work pattern was created but could not be retrieved');
-    }
-    sendCreated(res, req, fullWorkPattern);
-  } catch (error) {
-    // Re-throw to let error middleware handle it
-    throw error;
+
+  const fullWorkPattern = await WorkPatternModel.create(upperCaseData, userId);
+  if (!fullWorkPattern?.work_pattern_id && !fullWorkPattern?.WORK_PATTERN_ID) {
+    throw new NotFoundError('Work pattern was created but could not be retrieved');
   }
+  sendCreated(res, req, fullWorkPattern);
 }));
 
 /**
@@ -359,58 +329,8 @@ router.put('/:work_pattern_id', asyncHandler(async (req, res) => {
     }
   }
 
-  // Validate days array if provided
   if (data.days !== undefined) {
-    if (!Array.isArray(data.days)) {
-      errors.push('days must be an array');
-    } else {
-      // days length must be exactly 7
-      if (data.days.length !== 7) {
-        errors.push('days array must contain exactly 7 days');
-      } else {
-        const dayOfWeeks = [];
-        const validDayTypes = ['WORK', 'REST'];
-        const validDayOfWeeks = [1, 2, 3, 4, 5, 6, 7];
-
-        for (let i = 0; i < data.days.length; i++) {
-          const day = data.days[i];
-          
-          // Validate day_of_week
-          if (day.day_of_week === undefined || day.day_of_week === null) {
-            errors.push(`days[${i}].day_of_week is required`);
-          } else {
-            const dayOfWeek = parseInt(day.day_of_week);
-            if (isNaN(dayOfWeek) || !validDayOfWeeks.includes(dayOfWeek)) {
-              errors.push(`days[${i}].day_of_week must be a number between 1 and 7`);
-            } else {
-              // Check for duplicates
-              if (dayOfWeeks.includes(dayOfWeek)) {
-                errors.push(`days[${i}].day_of_week (${dayOfWeek}) is duplicated`);
-              } else {
-                dayOfWeeks.push(dayOfWeek);
-              }
-            }
-          }
-
-          // Validate day_type
-          if (!day.day_type || day.day_type.trim() === '') {
-            errors.push(`days[${i}].day_type is required`);
-          } else {
-            if (!validDayTypes.includes(day.day_type.toUpperCase())) {
-              errors.push(`days[${i}].day_type must be one of: ${validDayTypes.join(', ')}`);
-            }
-          }
-        }
-
-        // Check that all days 1-7 are present
-        if (dayOfWeeks.length === 7) {
-          const missingDays = validDayOfWeeks.filter(d => !dayOfWeeks.includes(d));
-          if (missingDays.length > 0) {
-            errors.push(`days array must include all days 1-7. Missing: ${missingDays.join(', ')}`);
-          }
-        }
-      }
-    }
+    errors.push(...validateDaysArray(data.days));
   }
 
   if (errors.length > 0) {
@@ -419,13 +339,9 @@ router.put('/:work_pattern_id', asyncHandler(async (req, res) => {
 
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
-  
-  try {
-    const updatedWorkPattern = await WorkPatternModel.update(workPatternId, tenantId, upperCaseData, userId);
-    sendUpdated(res, req, updatedWorkPattern);
-  } catch (error) {
-    throw error;
-  }
+
+  const updatedWorkPattern = await WorkPatternModel.update(workPatternId, tenantId, upperCaseData, userId);
+  sendUpdated(res, req, updatedWorkPattern);
 }));
 
 /**

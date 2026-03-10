@@ -260,6 +260,32 @@ class ShiftModel {
   }
 
   /**
+   * Find multiple shifts by IDs for the tenant (batch validation).
+   * @param {number[]} shiftIds - Array of shift IDs
+   * @param {number} tenantId - Tenant ID
+   * @returns {Promise<Set<number>>} Set of found shift IDs
+   * @throws {NotFoundError} If any requested ID is missing (lists missing IDs)
+   */
+  static async findByIds(shiftIds, tenantId) {
+    if (!tenantId) throw new ValidationError('tenant_id is required');
+    const unique = [...new Set(shiftIds.filter(id => id != null && !isNaN(Number(id)) && Number(id) > 0))];
+    if (unique.length === 0) return new Set();
+
+    const placeholders = unique.map((_, i) => `:${i + 2}`).join(',');
+    const query = `SELECT SHIFT_ID FROM ${this.TABLE_NAME}
+                   WHERE TENANT_ID = :1 AND SHIFT_ID IN (${placeholders})`;
+    const binds = [tenantId, ...unique];
+    const result = await db.executeQuery(query, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    const rows = result.rows || [];
+    const found = new Set(rows.map(r => Number(r.SHIFT_ID ?? r.shift_id)).filter(Boolean));
+    const missing = unique.filter(id => !found.has(Number(id)));
+    if (missing.length > 0) {
+      throw new NotFoundError(`Shift(s) not found for tenant: ${missing.join(', ')}`);
+    }
+    return found;
+  }
+
+  /**
    * Create a new shift using RETURNING INTO with binds
    * @param {Object} data - Shift data
    * @param {string} userId - User ID for audit fields

@@ -1,6 +1,6 @@
 // workScheduleController.js (UPDATED - COMPLETE FILE)
-// ✅ Supports Rest Day via weekly_lines.day_type = WORK|REST
-// ✅ REST day => shift_id must be NULL/undefined (no validation for shift)
+// ✅ Supports Rest/Off Day via weekly_lines.day_type = WORK|REST|OFF
+// ✅ REST/OFF day => shift_id must be NULL/undefined (no validation for shift)
 // ✅ WORK day => shift_id required and validated in TM_SHIFTS
 // ✅ Keeps your existing behavior: create/update header + replace lines, update lines only
 // ✅ Works with your updated model that inserts DAY_TYPE and allows SHIFT_ID null
@@ -10,6 +10,7 @@ import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
 import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
+import { normalizeDayType, VALID_DAY_TYPE_INPUTS, VALID_DAY_OF_WEEKS } from '../constants.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
@@ -27,17 +28,55 @@ router.use((req, res, next) => {
  * Helpers
  * ========================= */
 
-function normalizeDayType(v) {
-  const x = String(v ?? 'WORK').trim().toUpperCase();
-  if (x === 'REST' || x === 'RESTDAY' || x === 'REST_DAY') return 'REST';
-  return 'WORK';
+/**
+ * Validate weekly_lines array only. Returns array of error strings.
+ */
+function validateWeeklyLines(weeklyLines) {
+  const errors = [];
+  if (!Array.isArray(weeklyLines)) {
+    errors.push('weekly_lines must be an array');
+    return errors;
+  }
+  const dayOfWeeks = [];
+  for (let i = 0; i < weeklyLines.length; i++) {
+    const line = weeklyLines[i];
+    if (line.day_of_week === undefined || line.day_of_week === null) {
+      errors.push(`weekly_lines[${i}].day_of_week is required`);
+    } else {
+      const day = parseInt(line.day_of_week, 10);
+      if (isNaN(day) || !VALID_DAY_OF_WEEKS.includes(day)) {
+        errors.push(`weekly_lines[${i}].day_of_week must be a number between 1 and 7`);
+      } else if (dayOfWeeks.includes(day)) {
+        errors.push(`weekly_lines[${i}].day_of_week (${day}) is duplicated`);
+      } else {
+        dayOfWeeks.push(day);
+      }
+    }
+    const dayType = normalizeDayType(line.day_type);
+    if (line.day_type !== undefined && !VALID_DAY_TYPE_INPUTS.includes(String(line.day_type).toUpperCase())) {
+      errors.push(`weekly_lines[${i}].day_type must be WORK, REST, or OFF`);
+    }
+    if (dayType === 'WORK') {
+      if (line.shift_id === undefined || line.shift_id === null) {
+        errors.push(`weekly_lines[${i}].shift_id is required for WORK day`);
+      } else {
+        const shiftId = parseInt(line.shift_id, 10);
+        if (isNaN(shiftId) || shiftId <= 0) {
+          errors.push(`weekly_lines[${i}].shift_id must be a positive number`);
+        }
+      }
+    } else if (line.shift_id !== undefined && line.shift_id !== null) {
+      errors.push(`weekly_lines[${i}].shift_id must be null for REST day`);
+    }
+  }
+  return errors;
 }
 
 /**
  * Validation helper for work schedule data
  * Supports weekly_lines with REST day:
  * - day_type=WORK => shift_id required
- * - day_type=REST => shift_id must be null/undefined
+ * - day_type=REST or OFF => shift_id must be null/undefined
  */
 function validateWorkScheduleData(data, isUpdate = false) {
   const errors = [];
@@ -88,58 +127,8 @@ function validateWorkScheduleData(data, isUpdate = false) {
     }
   }
 
-  // weekly_lines (UPDATED)
   if (data.weekly_lines !== undefined) {
-    if (!Array.isArray(data.weekly_lines)) {
-      errors.push('weekly_lines must be an array');
-    } else {
-      const dayOfWeeks = [];
-      const validDayOfWeeks = [1, 2, 3, 4, 5, 6, 7];
-
-      for (let i = 0; i < data.weekly_lines.length; i++) {
-        const line = data.weekly_lines[i];
-
-        // day_of_week
-        if (line.day_of_week === undefined || line.day_of_week === null) {
-          errors.push(`weekly_lines[${i}].day_of_week is required`);
-        } else {
-          const day = parseInt(line.day_of_week, 10);
-          if (isNaN(day) || !validDayOfWeeks.includes(day)) {
-            errors.push(`weekly_lines[${i}].day_of_week must be a number between 1 and 7`);
-          } else {
-            if (dayOfWeeks.includes(day)) {
-              errors.push(`weekly_lines[${i}].day_of_week (${day}) is duplicated`);
-            } else {
-              dayOfWeeks.push(day);
-            }
-          }
-        }
-
-        // day_type
-        const dayType = normalizeDayType(line.day_type);
-
-        if (line.day_type !== undefined && !['WORK', 'REST', 'RESTDAY', 'REST_DAY'].includes(String(line.day_type).toUpperCase())) {
-          errors.push(`weekly_lines[${i}].day_type must be WORK or REST`);
-        }
-
-        // shift_id rules
-        if (dayType === 'WORK') {
-          if (line.shift_id === undefined || line.shift_id === null) {
-            errors.push(`weekly_lines[${i}].shift_id is required for WORK day`);
-          } else {
-            const shiftId = parseInt(line.shift_id, 10);
-            if (isNaN(shiftId) || shiftId <= 0) {
-              errors.push(`weekly_lines[${i}].shift_id must be a positive number`);
-            }
-          }
-        } else {
-          // REST
-          if (line.shift_id !== undefined && line.shift_id !== null) {
-            errors.push(`weekly_lines[${i}].shift_id must be null for REST day`);
-          }
-        }
-      }
-    }
+    errors.push(...validateWeeklyLines(data.weekly_lines));
   }
 
   return errors;
@@ -194,12 +183,16 @@ async function validateWorkPatternExists(workPatternId, tenantId) {
 }
 
 /**
- * Validate that shift_id exists for tenant_id
+ * Validate that all shift IDs used in weekly_lines (WORK days) exist for tenant. Single DB round-trip.
  */
-async function validateShiftExists(shiftId, tenantId) {
-  const shift = await ShiftModel.findById(shiftId, tenantId);
-  if (!shift) throw new NotFoundError(`Shift with ID ${shiftId} does not exist for tenant ${tenantId}`);
-  return true;
+async function validateShiftsForWeeklyLines(weeklyLines, tenantId) {
+  if (!weeklyLines?.length) return;
+  const shiftIds = weeklyLines
+    .filter(line => normalizeDayType(line.day_type) === 'WORK' && line.shift_id != null)
+    .map(line => parseInt(line.shift_id, 10))
+    .filter(id => !isNaN(id) && id > 0);
+  const unique = [...new Set(shiftIds)];
+  if (unique.length > 0) await ShiftModel.findByIds(unique, tenantId);
 }
 
 /* =========================
@@ -225,16 +218,7 @@ router.post('/', asyncHandler(async (req, res) => {
   if (isNaN(workPatternId)) throw new ValidationError('Invalid work_pattern_id format');
   await validateWorkPatternExists(workPatternId, tenantId);
 
-  // validate shifts ONLY for WORK days
-  if (data.weekly_lines && Array.isArray(data.weekly_lines)) {
-    for (const line of data.weekly_lines) {
-      const dayType = normalizeDayType(line.day_type);
-      if (dayType === 'WORK') {
-        const shiftId = parseInt(line.shift_id, 10);
-        if (!isNaN(shiftId)) await validateShiftExists(shiftId, tenantId);
-      }
-    }
-  }
+  await validateShiftsForWeeklyLines(data.weekly_lines, tenantId);
 
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
@@ -386,19 +370,7 @@ router.put('/:work_schedule_id', asyncHandler(async (req, res) => {
     throw new ValidationError('Validation failed', ['schedule_code cannot be updated']);
   }
 
-  // Validate shifts ONLY for WORK days if weekly_lines provided
-  if (data.weekly_lines !== undefined) {
-    if (!Array.isArray(data.weekly_lines)) {
-      throw new ValidationError('Validation failed', ['weekly_lines must be an array']);
-    }
-    for (const line of data.weekly_lines) {
-      const dayType = normalizeDayType(line.day_type);
-      if (dayType === 'WORK') {
-        const shiftId = parseInt(line.shift_id, 10);
-        if (!isNaN(shiftId)) await validateShiftExists(shiftId, tenantId);
-      }
-    }
-  }
+  await validateShiftsForWeeklyLines(data.weekly_lines, tenantId);
 
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
@@ -429,54 +401,10 @@ router.put('/:work_schedule_id/lines', asyncHandler(async (req, res) => {
   await validateEnterpriseExists(tenantId);
 
   const data = req.body;
-  const errors = [];
-
-  if (!data.weekly_lines || !Array.isArray(data.weekly_lines)) {
-    errors.push('weekly_lines is required and must be an array');
-  } else {
-    const dayOfWeeks = [];
-    const validDayOfWeeks = [1, 2, 3, 4, 5, 6, 7];
-
-    for (let i = 0; i < data.weekly_lines.length; i++) {
-      const line = data.weekly_lines[i];
-
-      // day_of_week
-      if (line.day_of_week === undefined || line.day_of_week === null) {
-        errors.push(`weekly_lines[${i}].day_of_week is required`);
-        continue;
-      }
-      const day = parseInt(line.day_of_week, 10);
-      if (isNaN(day) || !validDayOfWeeks.includes(day)) {
-        errors.push(`weekly_lines[${i}].day_of_week must be a number between 1 and 7`);
-      } else {
-        if (dayOfWeeks.includes(day)) errors.push(`weekly_lines[${i}].day_of_week (${day}) is duplicated`);
-        else dayOfWeeks.push(day);
-      }
-
-      const dayType = normalizeDayType(line.day_type);
-
-      // shift rules
-      if (dayType === 'WORK') {
-        if (line.shift_id === undefined || line.shift_id === null) {
-          errors.push(`weekly_lines[${i}].shift_id is required for WORK day`);
-        } else {
-          const shiftId = parseInt(line.shift_id, 10);
-          if (isNaN(shiftId) || shiftId <= 0) {
-            errors.push(`weekly_lines[${i}].shift_id must be a positive number`);
-          } else {
-            await validateShiftExists(shiftId, tenantId);
-          }
-        }
-      } else {
-        // REST
-        if (line.shift_id !== undefined && line.shift_id !== null) {
-          errors.push(`weekly_lines[${i}].shift_id must be null for REST day`);
-        }
-      }
-    }
-  }
-
+  const errors = !data.weekly_lines ? ['weekly_lines is required and must be an array'] : validateWeeklyLines(data.weekly_lines);
   if (errors.length > 0) throw new ValidationError('Validation failed', errors);
+
+  await validateShiftsForWeeklyLines(data.weekly_lines, tenantId);
 
   const userId = getUserId(req);
   const upperCaseData = convertToUpperCase(data);
@@ -543,19 +471,10 @@ router.delete('/:work_schedule_id', asyncHandler(async (req, res) => {
       throw deleteError;
     }
   } else {
-    // Default to soft delete - fetch the updated object after soft delete
-    await WorkScheduleModel.softDelete(workScheduleId, tenantId, userId);
-    const updatedWorkSchedule = await WorkScheduleModel.findById(workScheduleId, tenantId);
-    if (!updatedWorkSchedule) {
-      throw new NotFoundError('Work schedule was deactivated but could not be retrieved');
-    }
-    
-    // Convert keys to lowercase snake_case
-    const convertedSchedule = toLowerCaseKeys(updatedWorkSchedule);
-    
+    const updatedWorkSchedule = await WorkScheduleModel.softDelete(workScheduleId, tenantId, userId);
     sendDeleted(res, {
       message: 'Work schedule deactivated (soft delete)',
-      data: convertedSchedule
+      data: toLowerCaseKeys(updatedWorkSchedule)
     });
   }
 }));

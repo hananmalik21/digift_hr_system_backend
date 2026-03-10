@@ -200,10 +200,23 @@ class WorkPatternModel {
           }
         }
 
-        return {
-          WORK_PATTERN_ID: returnedId,
-          TENANT_ID: data.TENANT_ID
-        };
+        // Return full pattern in same transaction (avoids extra findById round-trip)
+        const headerSel = await connection.execute(
+          `SELECT WORK_PATTERN_ID, TENANT_ID, PATTERN_CODE, PATTERN_NAME_EN, PATTERN_NAME_AR,
+                  PATTERN_TYPE, TOTAL_HOURS_PER_WEEK, STATUS,
+                  CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+           FROM ${this.TABLE_NAME}
+           WHERE WORK_PATTERN_ID = :1 AND TENANT_ID = :2`,
+          [returnedId, data.TENANT_ID],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (!headerSel.rows?.length) {
+          return { WORK_PATTERN_ID: returnedId, TENANT_ID: data.TENANT_ID };
+        }
+        const wp = this.convertKeysToSnakeCase(headerSel.rows[0]);
+        const daysMap = await this.getDaysForPatternsWithConnection(connection, [returnedId], data.TENANT_ID);
+        wp.days = daysMap[returnedId] || [];
+        return wp;
       });
     } catch (error) {
       if (error instanceof ValidationError || error instanceof NotFoundError || error instanceof DatabaseError) {
@@ -217,9 +230,9 @@ class WorkPatternModel {
   }
 
   /**
-   * Fetch days for patterns
+   * Fetch days for patterns (uses connection when provided, for use inside transaction)
    */
-  static async getDaysForPatterns(workPatternIds, tenantId) {
+  static async getDaysForPatterns(workPatternIds, tenantId, connection = null) {
     if (!workPatternIds?.length) return {};
 
     const placeholders = workPatternIds.map((_, i) => `:${i + 1}`).join(',');
@@ -230,7 +243,9 @@ class WorkPatternModel {
                  ORDER BY WORK_PATTERN_ID, DAY_OF_WEEK`;
 
     const binds = [...workPatternIds, tenantId];
-    const result = await db.executeQuery(sql, binds);
+    const result = connection
+      ? await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+      : await db.executeQuery(sql, binds);
 
     const map = {};
     (result.rows || []).forEach(r => {
@@ -246,18 +261,16 @@ class WorkPatternModel {
     return map;
   }
 
+  /** Alias for use inside transaction (pass connection as 3rd arg) */
+  static async getDaysForPatternsWithConnection(connection, workPatternIds, tenantId) {
+    return this.getDaysForPatterns(workPatternIds, tenantId, connection);
+  }
+
   /**
-   * Find all patterns (pagination/search)
+   * Find all patterns (pagination/search). Uses COUNT(*) OVER() for single-query pagination when possible.
    */
   static async findAll(filters = {}) {
     try {
-      let countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME}`;
-      let dataSql = `SELECT
-        WORK_PATTERN_ID, TENANT_ID, PATTERN_CODE, PATTERN_NAME_EN, PATTERN_NAME_AR,
-        PATTERN_TYPE, TOTAL_HOURS_PER_WEEK, STATUS,
-        CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
-      FROM ${this.TABLE_NAME}`;
-
       if (!filters.tenantId) throw new ValidationError('tenant_id is required');
 
       const conditions = [];
@@ -285,18 +298,22 @@ class WorkPatternModel {
       }
 
       const where = ` WHERE ${conditions.join(' AND ')}`;
-      countSql += where;
-      dataSql += where;
-      dataSql += ` ORDER BY PATTERN_CODE`;
-
       const pagination = filters.pagination;
       let total = 0;
+      let dataSql = `SELECT
+        WORK_PATTERN_ID, TENANT_ID, PATTERN_CODE, PATTERN_NAME_EN, PATTERN_NAME_AR,
+        PATTERN_TYPE, TOTAL_HOURS_PER_WEEK, STATUS,
+        CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY`;
 
       const dataBinds = [...binds];
       if (pagination?.page && pagination?.pageSize) {
-        const c = await db.executeQuery(countSql, [...binds]);
-        total = c.rows?.[0]?.TOTAL || 0;
+        dataSql += `, COUNT(*) OVER() AS total`;
+      }
+      dataSql += ` FROM ${this.TABLE_NAME}`;
+      dataSql += where;
+      dataSql += ` ORDER BY PATTERN_CODE`;
 
+      if (pagination?.page && pagination?.pageSize) {
         const offset = (pagination.page - 1) * pagination.pageSize;
         dataSql += ` OFFSET :${p} ROWS FETCH NEXT :${p + 1} ROWS ONLY`;
         dataBinds.push(offset, pagination.pageSize);
@@ -305,13 +322,20 @@ class WorkPatternModel {
       const res = await db.executeQuery(dataSql, dataBinds);
       const patterns = this.convertKeysToSnakeCase(res.rows || []);
 
-      if (patterns.length) {
+      if (pagination?.page && pagination?.pageSize && patterns.length > 0) {
+        total = Number(patterns[0].total) || 0;
+        patterns.forEach(row => delete row.total);
+      }
+
+      if (patterns.length > 0) {
         const ids = patterns.map(x => x.work_pattern_id);
         const daysMap = await this.getDaysForPatterns(ids, filters.tenantId);
         patterns.forEach(x => { x.days = daysMap[x.work_pattern_id] || []; });
       }
 
-      return pagination?.page ? { workPatterns: patterns, total } : { workPatterns: patterns, total: patterns.length };
+      return pagination?.page && pagination?.pageSize
+        ? { workPatterns: patterns, total }
+        : { workPatterns: patterns, total: patterns.length };
     } catch (error) {
       if (error instanceof ValidationError) throw error;
       throw new DatabaseError(`Failed to fetch work patterns: ${error.message}`, error);
