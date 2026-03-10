@@ -7,4 +7,4 @@ export {
   VALID_DAY_TYPES,
   VALID_DAY_TYPE_INPUTS,
   VALID_DAY_OF_WEEKS
-} from '../../constants.js';
+} from '../constants.js';
