@@ -238,6 +238,13 @@ router.get('/', asyncHandler(async (req, res) => {
     filters.includeEnrichment = v !== 'false' && v !== '0';
   }
 
+  // include_org_path: set to false/0 to skip CONNECT BY org path batch (faster; org_unit + work_schedule + employee still included)
+  if (req.query.include_org_path !== undefined) {
+    const v = String(req.query.include_org_path).toLowerCase();
+    filters.includeOrgPath = v !== 'false' && v !== '0';
+    appliedFilters.include_org_path = filters.includeOrgPath;
+  }
+
   let page = 1;
   let pageSize = 10;
 

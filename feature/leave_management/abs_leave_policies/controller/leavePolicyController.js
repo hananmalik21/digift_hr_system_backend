@@ -3,6 +3,7 @@ import LeavePolicyModel from '../model/leavePolicyModel.js';
 import { sendSuccess, sendPolicy, sendValidationError, sendDatabaseError, sendError, sendPolicyList } from '../view/leavePolicyView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { sendSuccess as sendStandardSuccess } from '../../../../utils/response.js';
 import { ALLOWED_ACCRUAL_METHOD_CODES } from '../config.js';
 
 const router = express.Router();
@@ -386,6 +387,50 @@ router.post('/create-policy', asyncHandler(async (req, res) => {
  * @route   PUT /api/abs/update-policy/:policyGuid
  * @desc    Update an ABS leave policy with grade rows by calling Oracle PL/SQL package
  */
+/**
+ * @route   POST /api/abs/assign-leave-policies-to-qualified-emps
+ * @desc    Run assign_all_leave_policies_to_qualified_emps for a tenant (bulk assign/upsert)
+ * @body    tenant_id (required), as_of_date (optional ISO/date), actor (optional, default ADMIN), mode (optional, default UPSERT)
+ */
+router.post('/assign-leave-policies-to-qualified-emps', asyncHandler(async (req, res) => {
+  const tenantId = req.body.tenant_id ?? req.body.TENANT_ID;
+  if (tenantId === undefined || tenantId === null) {
+    return sendValidationError(res, req, new ValidationError('tenant_id is required'));
+  }
+  const tenantIdNum = parseInt(tenantId, 10);
+  if (isNaN(tenantIdNum) || tenantIdNum <= 0) {
+    return sendValidationError(res, req, new ValidationError('tenant_id must be a valid positive number'));
+  }
+
+  const payload = {
+    tenant_id: tenantIdNum,
+    as_of_date: req.body.as_of_date ?? req.body.AS_OF_DATE,
+    actor: req.body.actor ?? req.body.ACTOR,
+    mode: req.body.mode ?? req.body.MODE
+  };
+
+  try {
+    await LeavePolicyModel.assignAllLeavePoliciesToQualifiedEmps(payload);
+    sendStandardSuccess(res, {
+      message: 'Leave policies assigned to qualified employees successfully',
+      data: {
+        tenant_id: tenantIdNum,
+        as_of_date: payload.as_of_date || new Date().toISOString(),
+        actor: payload.actor || 'ADMIN',
+        mode: (payload.mode || 'UPSERT').toString().toUpperCase(),
+        completed_at: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
+    if (error.errorNum || error.message?.includes('ORA-')) {
+      return sendDatabaseError(res, req, new DatabaseError('Failed to assign leave policies', error));
+    }
+    sendError(res, req, error);
+  }
+}));
+
 router.put('/update-policy/:policyGuid', asyncHandler(async (req, res) => {
   const policyGuid = req.params.policyGuid?.trim();
   

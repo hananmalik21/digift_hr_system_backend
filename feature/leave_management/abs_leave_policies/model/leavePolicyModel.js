@@ -1292,6 +1292,84 @@ class LeavePolicyModel {
       }
     }
   }
+
+  /**
+   * Run assign_all_leave_policies_to_qualified_emps (ABS) to assign leave policies
+   * to all qualified employees for a tenant. Wraps the same call as:
+   *   assign_all_leave_policies_to_qualified_emps(p_tenant_id, p_as_of_date, p_actor, p_mode)
+   *
+   * @param {Object} options
+   * @param {number} options.tenant_id - Tenant ID (required)
+   * @param {Date|string} [options.as_of_date] - As-of date; defaults to current date/time if omitted
+   * @param {string} [options.actor='ADMIN'] - Actor user id/code
+   * @param {string} [options.mode='UPSERT'] - Mode (e.g. UPSERT)
+   */
+  static async assignAllLeavePoliciesToQualifiedEmps(options = {}) {
+    const tenantId = parseInt(options.tenant_id, 10);
+    if (!Number.isFinite(tenantId) || tenantId <= 0) {
+      throw new DatabaseError('Invalid tenant_id', null, 'tenant_id must be a positive number');
+    }
+
+    const asOfDate =
+      options.as_of_date != null && options.as_of_date !== ''
+        ? this.parseDateForOracle(options.as_of_date)
+        : new Date();
+    if (!asOfDate) {
+      throw new DatabaseError('Invalid as_of_date', null, 'as_of_date must be a valid date');
+    }
+
+    const actor =
+      options.actor != null && String(options.actor).trim() !== ''
+        ? String(options.actor).trim()
+        : 'ADMIN';
+    const mode =
+      options.mode != null && String(options.mode).trim() !== ''
+        ? String(options.mode).trim().toUpperCase()
+        : 'UPSERT';
+
+    const binds = {
+      tenant_id: tenantId,
+      as_of_date: asOfDate,
+      actor,
+      mode
+    };
+
+    // Procedure is resolved in ABS schema (session set below), matching other ABS policy PKG usage
+    const plsqlBlock = `
+      BEGIN
+        assign_all_leave_policies_to_qualified_emps(
+          p_tenant_id  => :tenant_id,
+          p_as_of_date => :as_of_date,
+          p_actor      => :actor,
+          p_mode       => :mode
+        );
+      END;
+    `;
+
+    let connection;
+    try {
+      connection = await db.getConnection();
+      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
+      await connection.execute(plsqlBlock, binds, { autoCommit: false });
+      await connection.commit();
+    } catch (error) {
+      if (connection) {
+        try {
+          await connection.rollback();
+        } catch (_) {}
+      }
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to assign leave policies to qualified employees', error);
+    } finally {
+      if (connection) {
+        try {
+          await connection.close();
+        } catch (err) {
+          console.error('Error closing connection:', err);
+        }
+      }
+    }
+  }
 }
 
 export default LeavePolicyModel;

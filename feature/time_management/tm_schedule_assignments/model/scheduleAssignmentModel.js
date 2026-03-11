@@ -503,6 +503,78 @@ class ScheduleAssignmentModel {
     }
   }
 
+  /**
+   * Build display name from EMPL.EMPLOYEES name parts (EN).
+   */
+  static buildEmployeeDisplayName(row) {
+    if (!row) return null;
+    const parts = [
+      row.first_name_en,
+      row.middle_name_en,
+      row.last_name_en
+    ].filter((p) => p != null && String(p).trim() !== '');
+    const name = parts.map((p) => String(p).trim()).join(' ').trim();
+    return name || null;
+  }
+
+  /**
+   * Batch-load minimal employee info for schedule assignments (EMPLOYEE level).
+   * Single round-trip; avoids N+1. Name from EN fields; code from EMPLOYEE_NUMBER on assignment if present else employee_id string.
+   */
+  static async batchGetEmployeeMiniDetails(employeeIds, tenantId) {
+    if (!employeeIds?.length || tenantId == null) return {};
+    const uniqueIds = [...new Set(employeeIds.filter((id) => id != null && !isNaN(Number(id))).map((id) => Number(id)))];
+    if (!uniqueIds.length) return {};
+
+    const empPlaceholders = uniqueIds.map((_, i) => `:${i + 2}`).join(',');
+    const empSql = `
+      SELECT e.EMPLOYEE_ID, e.FIRST_NAME_EN, e.MIDDLE_NAME_EN, e.LAST_NAME_EN
+      FROM EMPL.EMPLOYEES e
+      WHERE e.ENTERPRISE_ID = :1 AND e.EMPLOYEE_ID IN (${empPlaceholders})
+    `;
+    const empBinds = [tenantId, ...uniqueIds];
+
+    try {
+      // Two batched calls in parallel: names from EMPL.EMPLOYEES; code from latest EMPL.ASSIGNMENTS row per employee
+      // ENTERPRISE_ID on ASSIGNMENTS may not exist in all schemas; filter by EMPLOYEE_ID only (ids already scoped by tenant via EMPL.EMPLOYEES)
+      const numPlaceholders = uniqueIds.map((_, i) => `:${i + 1}`).join(',');
+      const numSql = `
+        SELECT EMPLOYEE_ID, EMPLOYEE_NUMBER FROM (
+          SELECT a.EMPLOYEE_ID, a.EMPLOYEE_NUMBER,
+                 ROW_NUMBER() OVER (PARTITION BY a.EMPLOYEE_ID ORDER BY a.ASSIGNMENT_ID DESC NULLS LAST) AS rn
+          FROM EMPL.ASSIGNMENTS a
+          WHERE a.EMPLOYEE_ID IN (${numPlaceholders})
+        ) WHERE rn = 1
+      `;
+
+      const numBinds = [...uniqueIds];
+      const [empResult, numResult] = await Promise.all([
+        db.executeQuery(empSql, empBinds),
+        db.executeQuery(numSql, numBinds).catch(() => ({ rows: [] }))
+      ]);
+
+      const numberById = {};
+      for (const row of numResult.rows || []) {
+        const r = this.toSnake(row);
+        if (r.employee_id != null) numberById[r.employee_id] = r.employee_number;
+      }
+
+      const map = {};
+      for (const row of empResult.rows || []) {
+        const r = this.toSnake(row);
+        const id = r.employee_id;
+        if (id == null) continue;
+        const num = numberById[id];
+        const code = num != null && String(num).trim() !== '' ? String(num).trim() : String(id);
+        map[id] = { name: this.buildEmployeeDisplayName(r), code };
+      }
+      return map;
+    } catch (error) {
+      console.error('Error batch fetching employee mini details:', error);
+      return {};
+    }
+  }
+
   static async batchGetOrgStructureDetails(structureIdHexArray) {
     if (!structureIdHexArray || structureIdHexArray.length === 0) return {};
     try {
@@ -544,16 +616,20 @@ class ScheduleAssignmentModel {
   static async getActiveOrgStructureForEnterprise(enterpriseId) {
     try {
       if (!enterpriseId) return null;
-      const result = await HrOrgStructureModel.findAll({ enterpriseId, isActive: true });
-
-      const activeStructure = Array.isArray(result) ? result[0] : (result?.structures?.[0] || null);
-      if (!activeStructure) return null;
-
-      return {
-        id: activeStructure.structure_id,
-        name: activeStructure.structure_name,
-        code: activeStructure.structure_code
-      };
+      // Thin query — avoid HrOrgStructureModel.findAll (JOINs + counts) for list enrichment latency
+      const sql = `
+        SELECT RAWTOHEX(s.STRUCTURE_ID) AS STRUCTURE_ID, s.STRUCTURE_CODE, s.STRUCTURE_NAME
+        FROM ENT.HR_ORG_STRUCTURES s
+        WHERE s.ENTERPRISE_ID = :1 AND UPPER(NVL(s.IS_ACTIVE,'Y')) = 'Y'
+        ORDER BY s.LAST_UPDATED_DATE DESC NULLS LAST
+        FETCH FIRST 1 ROWS ONLY
+      `;
+      const result = await db.executeQuery(sql, [enterpriseId]);
+      const row = result.rows?.[0];
+      if (!row) return null;
+      const r = this.toSnake(row);
+      if (!r.structure_id) return null;
+      return { id: r.structure_id, name: r.structure_name ?? null, code: r.structure_code ?? null };
     } catch (error) {
       console.error('Error fetching active org structure for enterprise:', error);
       return null;
@@ -618,8 +694,17 @@ class ScheduleAssignmentModel {
       if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
     }
 
-    // fallback active org structure
-    if (!a.org_structure && tenantId) {
+    // EMPLOYEE-level: attach minimal employee { name, code } from batch cache (no N+1)
+    a.employee = null;
+    if (String(a.assignment_level || '').toUpperCase() === 'EMPLOYEE' && a.employee_id != null) {
+      const eid = Number(a.employee_id);
+      if (!isNaN(eid) && cache?.employees) {
+        a.employee = cache.employees[eid] ?? null;
+      }
+    }
+
+    // fallback active org structure (only when enrichment expects org context)
+    if (!a.org_structure && tenantId && cache?.loadActiveOrgStructure !== false) {
       if (cache.activeOrgStructure !== undefined) {
         a.org_structure = cache.activeOrgStructure;
       } else {
@@ -631,43 +716,109 @@ class ScheduleAssignmentModel {
     return a;
   }
 
-  static async enrichAssignmentsBatch(assignments, tenantId) {
+  /**
+   * Sync merge only — no DB. Eliminates N+1 from Promise.all(enrichAssignment) on list.
+   */
+  static assignEnrichmentFromCache(a, cache) {
+    a.org_path = [];
+    a.work_schedule = null;
+    if (a.work_schedule_id && cache.workSchedules) {
+      a.work_schedule = cache.workSchedules[a.work_schedule_id] ?? null;
+    }
+
+    const level = String(a.assignment_level || '').toUpperCase();
+    if (level === 'DEPARTMENT' && a.department_id) {
+      const depHex = this.normalizeHex32(a.department_id);
+      a.department_id = depHex;
+      a.org_unit_id = depHex;
+      a.org_unit = cache.orgUnits?.[depHex] ?? null;
+      if (a.org_unit?.org_structure_id && cache.orgStructures) {
+        a.org_structure = cache.orgStructures[a.org_unit.org_structure_id] ?? null;
+      } else {
+        a.org_structure = null;
+      }
+      const fromBatch = cache.orgPaths?.[depHex];
+      a.org_path = Array.isArray(fromBatch) ? fromBatch : [];
+    } else {
+      if (a.department_id) a.department_id = this.normalizeHex32(a.department_id);
+      a.org_unit = null;
+      a.org_structure = null;
+    }
+
+    a.employee = null;
+    if (level === 'EMPLOYEE' && a.employee_id != null && cache.employees) {
+      const eid = Number(a.employee_id);
+      if (!isNaN(eid)) a.employee = cache.employees[eid] ?? null;
+    }
+
+    if (!a.org_structure && cache.loadActiveOrgStructure && cache.activeOrgStructure != null) {
+      a.org_structure = cache.activeOrgStructure;
+    }
+    return a;
+  }
+
+  /**
+   * Batch enrichment for list/detail. Options:
+   * - includeOrgPath: false skips CONNECT BY org path batch (large win for list UI that doesn't need path)
+   */
+  static async enrichAssignmentsBatch(assignments, tenantId, options = {}) {
     if (!assignments || assignments.length === 0) return assignments;
+
+    const includeOrgPath = options.includeOrgPath !== false;
 
     const workScheduleIds = [];
     const orgUnitIds = [];
+    const employeeIds = [];
     const structureIds = new Set();
 
-    assignments.forEach(a => {
+    for (const a of assignments) {
       if (a.work_schedule_id) workScheduleIds.push(a.work_schedule_id);
 
-      if (String(a.assignment_level || '').toUpperCase() === 'DEPARTMENT' && a.department_id) {
+      const level = String(a.assignment_level || '').toUpperCase();
+      if (level === 'DEPARTMENT' && a.department_id) {
         orgUnitIds.push(this.normalizeHex32(a.department_id));
       }
-    });
+      if (level === 'EMPLOYEE' && a.employee_id != null) {
+        employeeIds.push(a.employee_id);
+      }
+    }
 
-    const [workSchedules, orgUnits, activeOrgStructure, orgPaths] = await Promise.all([
+    const hasDepartment = orgUnitIds.length > 0;
+
+    // Parallel batch loads; org path is the heaviest — optional skip
+    const [workSchedules, orgUnits, orgPaths, employees, activeOrgStructure] = await Promise.all([
       this.batchGetWorkScheduleDetails(workScheduleIds, tenantId),
-      this.batchGetOrgUnitDetails(orgUnitIds, tenantId),
-      this.getActiveOrgStructureForEnterprise(tenantId),
-      this.batchFetchOrgPaths(orgUnitIds)
+      hasDepartment ? this.batchGetOrgUnitDetails(orgUnitIds, tenantId) : Promise.resolve({}),
+      hasDepartment && includeOrgPath ? this.batchFetchOrgPaths(orgUnitIds) : Promise.resolve({}),
+      employeeIds.length ? this.batchGetEmployeeMiniDetails(employeeIds, tenantId) : Promise.resolve({}),
+      hasDepartment ? this.getActiveOrgStructureForEnterprise(tenantId) : Promise.resolve(null)
     ]);
 
-    Object.values(orgUnits).forEach(ou => {
-      if (ou && ou.org_structure_id) structureIds.add(ou.org_structure_id);
-    });
+    if (hasDepartment) {
+      Object.values(orgUnits).forEach((ou) => {
+        if (ou?.org_structure_id) structureIds.add(ou.org_structure_id);
+      });
+    }
 
-    const orgStructures = await this.batchGetOrgStructureDetails([...structureIds]);
+    const orgStructures = hasDepartment && structureIds.size
+      ? await this.batchGetOrgStructureDetails([...structureIds])
+      : {};
 
     const cache = {
       workSchedules,
       orgUnits,
       orgStructures,
       activeOrgStructure,
-      orgPaths
+      orgPaths,
+      employees,
+      loadActiveOrgStructure: hasDepartment
     };
 
-    return Promise.all(assignments.map(a => this.enrichAssignment(a, tenantId, cache)));
+    // Sync merge — no per-row await (fixes list response time)
+    for (const a of assignments) {
+      this.assignEnrichmentFromCache(a, cache);
+    }
+    return assignments;
   }
 
   /* =========================
@@ -945,14 +1096,18 @@ class ScheduleAssignmentModel {
 
       let output = assignments;
       if (includeEnrichment && assignments.length > 0) {
-        output = await this.enrichAssignmentsBatch(assignments, filters.tenantId);
+        // includeOrgPath false skips CONNECT BY batch — much faster for list endpoints
+        output = await this.enrichAssignmentsBatch(assignments, filters.tenantId, {
+          includeOrgPath: filters.includeOrgPath !== false
+        });
       } else if (!includeEnrichment) {
-        output = assignments.map(a => ({
+        output = assignments.map((a) => ({
           ...a,
           work_schedule: null,
           org_unit: null,
           org_structure: null,
-          org_path: []
+          org_path: [],
+          employee: null
         }));
       }
 
