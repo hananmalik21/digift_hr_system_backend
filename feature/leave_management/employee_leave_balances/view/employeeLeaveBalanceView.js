@@ -143,7 +143,7 @@ export function sendLeaveBalanceTransactionsList(res, req, data, total, page, pa
 }
 
 /**
- * Send list of leave balance summary (from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view)
+ * Send list of leave balance summary (paginated list from ABS.VW_EMPLOYEE_LEAVE_BALANCES)
  * @param {Object} res - Express response object
  * @param {Object} req - Express request object
  * @param {Array} items - Summary rows (already snake_case from model)

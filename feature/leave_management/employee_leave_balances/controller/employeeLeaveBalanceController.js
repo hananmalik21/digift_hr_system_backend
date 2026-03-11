@@ -365,7 +365,7 @@ router.get('/leave-balances/list', async (req, res) => {
 
 /**
  * @route   GET /api/abs/leave-balances
- * @desc    Get paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY view
+ * @desc    Get paginated leave balances from ABS.VW_EMPLOYEE_LEAVE_BALANCES (ENTERPRISE_ID + SEARCH_* / EMPLOYEE_* filters)
  * @query   tenant_id - Required tenant ID
  * @query   page - Page number (default 1)
  * @query   pageSize - Page size (default 10)

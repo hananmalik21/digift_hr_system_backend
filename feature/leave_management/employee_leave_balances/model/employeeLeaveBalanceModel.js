@@ -19,6 +19,8 @@ class EmployeeLeaveBalanceModel {
   static EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW = 'ABS.EMPLOYEE_LEAVE_BAL_SUMMARY';
   /** Read-only view: leave balance transactions (employee-scoped, for list API) */
   static V_LEAVE_BALANCE_TXNS_EMP = 'ABS.V_LEAVE_BALANCE_TXNS_EMP';
+  /** Read-only view: employee leave balances (GET /api/abs/leave-balances paginated list) */
+  static VW_EMPLOYEE_LEAVE_BALANCES = 'ABS.VW_EMPLOYEE_LEAVE_BALANCES';
 
   /* ------------------------------------------------------------------ */
   /* Helpers                                                            */
@@ -3091,9 +3093,10 @@ END;`;
   }
 
   /**
-   * Paginated leave balance summary from ABS.EMPLOYEE_LEAVE_BAL_SUMMARY.
-   * Enforces ENTERPRISE_ID filter in SQL. Uses parameter binding for all filters.
-   * Runs COUNT and data queries in parallel for better response time.
+   * Paginated leave balances from ABS.VW_EMPLOYEE_LEAVE_BALANCES (SELECT v.*).
+   * Schema-aligned with ABS.ABS_EMP_LEAVE_BALANCES-style row: ENTERPRISE_ID, EMPLOYEE_ID,
+   * EMPLOYEE_NUMBER, EMPLOYEE_NAME, SEARCH_NAME, SEARCH_EMP_NUMBER, ANNUAL_LEAVE, SICK_LEAVE,
+   * TOTAL_AVAILABLE, etc. No TENANT_ID/LEAVE_CODE on this view—use ENTERPRISE_ID for tenant.
    * @param {Object} options - { enterpriseId/tenantId, page, pageSize, search?, name?, employeeNumber? }
    * @returns {Promise<{ rows: Array, total: number, page: number, pageSize: number }>}
    */
@@ -3110,31 +3113,38 @@ END;`;
     const search = this._trimOpt(options.search);
     const name = this._trimOpt(options.name);
     const employeeNumber = this._trimOpt(options.employeeNumber);
-
     const namePattern = name ? `%${name.toUpperCase()}%` : null;
     const empNumPattern = employeeNumber ? `%${employeeNumber}%` : null;
 
-    const viewAlias = 'v';
-    const baseWhere = `WHERE v.ENTERPRISE_ID = :1
+    const viewName = this.VW_EMPLOYEE_LEAVE_BALANCES;
+    const v = 'v';
+
+    // View uses ENTERPRISE_ID (not TENANT_ID). API tenant_id maps to enterprise.
+    const baseWhere = `WHERE v.ENTERPRISE_ID = :enterprise_id
         AND (
-          :2 IS NULL
-          OR v.SEARCH_NAME LIKE '%' || LOWER(:3) || '%'
-          OR v.SEARCH_EMP_NUMBER LIKE '%' || LOWER(:4) || '%'
+          :search IS NULL
+          OR v.SEARCH_NAME LIKE '%' || LOWER(:search) || '%'
+          OR v.SEARCH_EMP_NUMBER LIKE '%' || LOWER(:search) || '%'
         )
-        AND (:5 IS NULL OR UPPER(v.EMPLOYEE_NAME) LIKE :6)
-        AND (:7 IS NULL OR v.EMPLOYEE_NUMBER LIKE :8)`;
+        AND (:name_pat IS NULL OR UPPER(v.EMPLOYEE_NAME) LIKE :name_pat)
+        AND (:emp_num_pat IS NULL OR v.EMPLOYEE_NUMBER LIKE :emp_num_pat)`;
+
+    const binds = {
+      enterprise_id: parsed,
+      search: search || null,
+      name_pat: namePattern,
+      emp_num_pat: empNumPattern
+    };
 
     const countSql = `SELECT COUNT(1) AS total
-      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} ${viewAlias}
+      FROM ${viewName} ${v}
       ${baseWhere}`;
 
     const dataSql = `SELECT v.*
-      FROM ${this.EMPLOYEE_LEAVE_BAL_SUMMARY_VIEW} ${viewAlias}
+      FROM ${viewName} ${v}
       ${baseWhere}
-      ORDER BY v.EMPLOYEE_NAME ASC
+      ORDER BY v.EMPLOYEE_NAME ASC NULLS LAST, v.EMPLOYEE_ID ASC NULLS LAST
       OFFSET ${offset} ROWS FETCH NEXT ${pageSize} ROWS ONLY`;
-
-    const binds = [parsed, search, search, search, namePattern, namePattern, empNumPattern, empNumPattern];
 
     const connOpts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
     let conn1;
