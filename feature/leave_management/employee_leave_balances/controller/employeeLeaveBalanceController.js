@@ -1154,7 +1154,7 @@ function validateAccrualRunData(data) {
  * - Validates accrual_method is MONTHLY (returns 422 if unsupported)
  * - Validates accrual_rate_days > 0 (returns 422 if zero)
  * - Prevents duplicate accrual (skips if LAST_ACCRUAL_DATE >= period_end, unless force_recalculate=true)
- * - Updates balances: accrued_days += accrual_rate_days, available_days = opening + accrued + adjusted - taken
+ * - Updates balances: accrued_days += accrual_rate_days; available_days = opening + accrued + adjusted - taken (recalc, capped if max_balance_days > 0)
  * - Inserts audit transactions into ABS.ABS_LEAVE_BALANCE_TXNS (unless dry_run=true)
  * - Logs accrual run to ABS.ABS_LEAVE_ACCRUAL_RUNS (unless dry_run=true)
  * - Returns 200 with processed_count, skipped_count, balances_sample, recent_txns, skipped_balances_sample

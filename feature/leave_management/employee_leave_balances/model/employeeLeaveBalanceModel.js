@@ -31,6 +31,65 @@ class EmployeeLeaveBalanceModel {
     return d instanceof Date ? d : new Date(d);
   }
 
+  /** Coerce Oracle/JSON balance numeric fields to finite number (avoids NaN in dry_run math). */
+  static _toNum(v) {
+    if (v === null || v === undefined) return 0;
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+    const p = parseFloat(v);
+    return Number.isFinite(p) ? p : 0;
+  }
+
+  /** Accrual run txn constants — single place to avoid typos in SQL and payloads. */
+  static ACCRUAL_TXN_TYPE = 'ACCRUAL';
+  static ACCRUAL_REF_TYPE = 'ACCRUAL_RUN';
+  static ACCRUAL_NOTES_DRY_RUN = 'Monthly accrual (DRY RUN)';
+  static ACCRUAL_NOTES_MONTHLY = 'Monthly accrual';
+  /** Prefix for accrual run message when dry_run (view avoids duplicating if already present). */
+  static ACCRUAL_DRY_RUN_MSG_PREFIX = '[DRY RUN — no DB changes]';
+
+  /**
+   * Parse accrual delta for UPDATE binds. Returns finite number (0 if invalid).
+   * @param {unknown} accrualDays
+   * @returns {number}
+   */
+  static _parseAccrualDelta(accrualDays) {
+    if (typeof accrualDays === 'number' && Number.isFinite(accrualDays)) return accrualDays;
+    const p = parseFloat(accrualDays);
+    return p != null && !Number.isNaN(p) ? p : 0;
+  }
+
+  /**
+   * Resolve max balance cap for LEAST(). Only positive caps apply; 0/null/NaN => no cap.
+   * @param {unknown} maxBalanceDays
+   * @returns {number|null}
+   */
+  static _resolvePositiveCap(maxBalanceDays) {
+    if (maxBalanceDays === null || maxBalanceDays === undefined) return null;
+    const cap = Number(maxBalanceDays);
+    return cap != null && Number.isFinite(cap) && cap > 0 ? cap : null;
+  }
+
+  /**
+   * Compute available_days after accrual using same formula as updateBalanceWithAccrual SQL
+   * (opening + accrued_after + adjusted - taken, then GREATEST 0, optional LEAST cap).
+   * @param {Object} balance - row with opening_balance_days, accrued_days, adjusted_days, taken_days
+   * @param {number} accrualDays - rate to add to accrued
+   * @param {unknown} maxBalanceDays - plan cap
+   * @returns {{ accruedAfter: number, availableAfter: number }}
+   */
+  static _simulateAccrualAvailable(balance, accrualDays, maxBalanceDays) {
+    const opening = this._toNum(balance.opening_balance_days);
+    const accruedAfter = this._toNum(balance.accrued_days) + accrualDays;
+    const adjusted = this._toNum(balance.adjusted_days);
+    const taken = this._toNum(balance.taken_days);
+    let availableAfter = Math.max(0, opening + accruedAfter + adjusted - taken);
+    const cap = this._resolvePositiveCap(maxBalanceDays);
+    if (cap !== null) availableAfter = Math.min(availableAfter, cap);
+    return { accruedAfter, availableAfter };
+  }
+
   static _isOracleLike(err) {
     if (!err) return false;
     if (err.errorNum !== undefined) return true;
@@ -1021,18 +1080,26 @@ class EmployeeLeaveBalanceModel {
       const pStart = this._toDate(periodStart);
       const pEnd = this._toDate(periodEnd);
 
-      const addDays = Number(accrualDays) || 0;
-      const cap = (maxBalanceDays === null || maxBalanceDays === undefined) ? null : (Number(maxBalanceDays) || 0);
+      const add = this._parseAccrualDelta(accrualDays);
+      const cap = this._resolvePositiveCap(maxBalanceDays);
 
+      /*
+       * Perfect / single source of truth: after accrual, AVAILABLE_DAYS is always derived
+       * from components so it cannot drift (e.g. 20 available vs 32.5 from opening+accrued).
+       *   available = opening + accrued_after_add + adjusted - taken  (then GREATEST 0, LEAST cap)
+       * Oracle evaluates RHS with pre-update row values; (ACCRUED_DAYS + :accrual_days) is new accrued.
+       */
       const sql = cap !== null ? `
         UPDATE ${this.TABLE_NAME}
         SET
           ACCRUED_DAYS = NVL(ACCRUED_DAYS, 0) + :accrual_days,
           AVAILABLE_DAYS = LEAST(
-            NVL(OPENING_BALANCE_DAYS, 0)
-            + (NVL(ACCRUED_DAYS, 0) + :accrual_days)
-            + NVL(ADJUSTED_DAYS, 0)
-            - NVL(TAKEN_DAYS, 0),
+            GREATEST(0,
+              NVL(OPENING_BALANCE_DAYS, 0)
+              + (NVL(ACCRUED_DAYS, 0) + :accrual_days)
+              + NVL(ADJUSTED_DAYS, 0)
+              - NVL(TAKEN_DAYS, 0)
+            ),
             :max_balance_days
           ),
           LAST_ACCRUAL_DATE = :period_end,
@@ -1047,11 +1114,12 @@ class EmployeeLeaveBalanceModel {
         UPDATE ${this.TABLE_NAME}
         SET
           ACCRUED_DAYS = NVL(ACCRUED_DAYS, 0) + :accrual_days,
-          AVAILABLE_DAYS =
+          AVAILABLE_DAYS = GREATEST(0,
             NVL(OPENING_BALANCE_DAYS, 0)
             + (NVL(ACCRUED_DAYS, 0) + :accrual_days)
             + NVL(ADJUSTED_DAYS, 0)
-            - NVL(TAKEN_DAYS, 0),
+            - NVL(TAKEN_DAYS, 0)
+          ),
           LAST_ACCRUAL_DATE = :period_end,
           PERIOD_START_DATE = :period_start,
           PERIOD_END_DATE = :period_end,
@@ -1063,7 +1131,7 @@ class EmployeeLeaveBalanceModel {
       `;
 
       const binds = {
-        accrual_days: addDays,
+        accrual_days: add,
         ...(cap !== null ? { max_balance_days: cap } : {}),
         period_start: pStart,
         period_end: pEnd,
@@ -1200,12 +1268,12 @@ class EmployeeLeaveBalanceModel {
           tenantId,
           employeeId,
           leaveTypeId,
-          txnType: 'ACCRUAL',
+          txnType: this.ACCRUAL_TXN_TYPE,
           txnDate: this._toDate(txnDate),
-          amountDays: Number(accrualDays) || 0,
-          referenceType: 'ACCRUAL_RUN',
+          amountDays: this._parseAccrualDelta(accrualDays),
+          referenceType: this.ACCRUAL_REF_TYPE,
           referenceId: null,
-          comments: 'Monthly accrual',
+          comments: this.ACCRUAL_NOTES_MONTHLY,
           userId
         });
       } catch (insertError) {
@@ -1347,9 +1415,9 @@ class EmployeeLeaveBalanceModel {
               WHERE TENANT_ID = :1
                 AND EMPLOYEE_ID = :2
                 AND LEAVE_TYPE_ID = :3
-                AND TXN_TYPE = 'ACCRUAL'
+                AND TXN_TYPE = '${this.ACCRUAL_TXN_TYPE}'
                 AND TRUNC(TXN_DATE) = TRUNC(:4)
-                AND REFERENCE_TYPE = 'ACCRUAL_RUN'
+                AND REFERENCE_TYPE = '${this.ACCRUAL_REF_TYPE}'
             `;
             const txnCheck = await connection.execute(
               checkTxnSql,
@@ -1364,32 +1432,29 @@ class EmployeeLeaveBalanceModel {
             }
 
             if (dryRun) {
-              const simulatedAvailable =
-                (balance.opening_balance_days || 0) +
-                ((balance.accrued_days || 0) + accrualDays) +
-                (balance.adjusted_days || 0) -
-                (balance.taken_days || 0);
-
+              const { accruedAfter, availableAfter } = this._simulateAccrualAvailable(
+                balance,
+                accrualDays,
+                maxBalanceDays
+              );
               processedBalances.push({
                 ...balance,
-                accrued_days: (balance.accrued_days || 0) + accrualDays,
-                available_days:
-                  maxBalanceDays != null
-                    ? Math.min(simulatedAvailable, Number(maxBalanceDays))
-                    : simulatedAvailable,
+                accrued_days: accruedAfter,
+                available_days: availableAfter,
                 last_accrual_date: pEnd,
                 period_start_date: pStart,
-                period_end_date: pEnd
+                period_end_date: pEnd,
+                dry_run_simulated: true
               });
 
               insertedTransactions.push({
                 employee_id: balance.employee_id,
                 leave_type_id: leaveTypeId,
-                txn_type: 'ACCRUAL',
+                txn_type: this.ACCRUAL_TXN_TYPE,
                 txn_date: pEnd,
                 days: accrualDays,
-                reference_type: 'ACCRUAL_RUN',
-                notes: 'Monthly accrual (DRY RUN)'
+                reference_type: this.ACCRUAL_REF_TYPE,
+                notes: this.ACCRUAL_NOTES_DRY_RUN
               });
 
               newlyProcessedCount++;
@@ -1526,6 +1591,9 @@ class EmployeeLeaveBalanceModel {
         } else {
           message = 'No eligible balances found for accrual processing.';
         }
+        if (dryRun && newlyProcessedCount > 0) {
+          message = `${this.ACCRUAL_DRY_RUN_MSG_PREFIX} ${message}`;
+        }
 
         const errorBalances = skippedBalances.filter(b => b.skip_reason !== 'Already accrued for period');
         const alreadyProcessedInSample = skippedBalances.filter(b => b.skip_reason === 'Already accrued for period');
@@ -1557,8 +1625,8 @@ class EmployeeLeaveBalanceModel {
             FROM ${this.TXN_TABLE}
             WHERE TENANT_ID = :1
               AND LEAVE_TYPE_ID = :2
-              AND TXN_TYPE = 'ACCRUAL'
-              AND REFERENCE_TYPE = 'ACCRUAL_RUN'
+              AND TXN_TYPE = '${this.ACCRUAL_TXN_TYPE}'
+              AND REFERENCE_TYPE = '${this.ACCRUAL_REF_TYPE}'
               AND TRUNC(TXN_DATE) = TRUNC(:3)
             ORDER BY TXN_ID DESC
             FETCH FIRST 2 ROWS ONLY

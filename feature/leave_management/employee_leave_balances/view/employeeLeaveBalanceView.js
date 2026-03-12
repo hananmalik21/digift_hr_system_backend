@@ -72,6 +72,21 @@ function convertKeysToSnakeCase(obj) {
 
 const EMPLOYEE_INFO_KEYS = ['first_name_en', 'middle_name_en', 'last_name_en', 'first_name_ar', 'middle_name_ar', 'last_name_ar', 'family_name_ar', 'email'];
 
+/** Single prefix for accrual dry_run responses (model may already apply — avoid duplicating). */
+const ACCRUAL_DRY_RUN_PREFIX = '[DRY RUN — no DB changes]';
+
+/**
+ * Shallow-clone balance row then enrich with employee_info (avoids mutating model objects).
+ * @param {Object} b - balance row
+ * @returns {Object}
+ */
+function cloneAndEnrichBalance(b) {
+  if (b && typeof b === 'object' && !Array.isArray(b)) {
+    return enrichBalanceWithEmployeeInfo({ ...b });
+  }
+  return enrichBalanceWithEmployeeInfo(b);
+}
+
 /**
  * Build employee_info object from a balance row (has employee_id, employee_guid, first_name_en, etc.)
  * @param {Object} b - Balance object (snake_case)
@@ -525,14 +540,23 @@ export function sendAccrualRunSuccess(res, req, data) {
     accrual_rate_days: data.accrual_rate_days
   };
 
-  // Build data object (balances_sample, recent_txns, skipped_balances_sample); add employee_info to balance samples
-  const balancesSample = (convertedData.balances_sample || []).map((b) => enrichBalanceWithEmployeeInfo(b));
-  const skippedSample = (convertedData.skipped_balances_sample || []).map((b) => enrichBalanceWithEmployeeInfo(b));
+  // Use raw balances_sample when present — convertKeysToSnakeCase can recurse into objects and
+  // must not replace simulated dry_run fields (accrued_days/available_days after accrual).
+  const rawBalancesSample = Array.isArray(data.balances_sample) ? data.balances_sample : [];
+  const rawSkippedSample = Array.isArray(data.skipped_balances_sample)
+    ? data.skipped_balances_sample
+    : [];
+  const balancesSample = rawBalancesSample.map(cloneAndEnrichBalance);
+  const skippedSample = rawSkippedSample.map(cloneAndEnrichBalance);
   const responseData = {
     balances_sample: balancesSample,
     recent_txns: convertedData.recent_txns || [],
     skipped_balances_sample: skippedSample
   };
+
+  if (data.debug && data.debug.dry_run === true) {
+    responseData.dry_run = true;
+  }
 
   // Add debug info if present
   if (data.debug) {
@@ -545,11 +569,22 @@ export function sendAccrualRunSuccess(res, req, data) {
   }
 
   // Use message from data (from model) or fallback to default
-  const message = data.message || (meta.processed_count > 0 
-    ? `Accrual processed successfully for ${meta.processed_count} employee(s)` 
-    : meta.skipped_count > 0 
-      ? `No new accruals processed. ${meta.skipped_count} balance(s) already processed for this period (idempotent).`
-      : 'No eligible balances found for accrual processing.');
+  let message =
+    data.message ||
+    (meta.processed_count > 0
+      ? `Accrual processed successfully for ${meta.processed_count} employee(s).`
+      : meta.skipped_count > 0
+        ? `No new accruals processed. ${meta.skipped_count} balance(s) already processed for this period (idempotent).`
+        : 'No eligible balances found for accrual processing.');
+  // Model may already prefix dry_run message; avoid double prefix
+  if (
+    data.debug &&
+    data.debug.dry_run === true &&
+    meta.processed_count > 0 &&
+    !String(message).includes(ACCRUAL_DRY_RUN_PREFIX)
+  ) {
+    message = `${ACCRUAL_DRY_RUN_PREFIX} ${message}`;
+  }
 
   res.json({
     success: true,
