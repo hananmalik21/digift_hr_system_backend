@@ -4,8 +4,8 @@ All errors are raised with `RAISE_APPLICATION_ERROR(code, message)`. Node maps t
 
 | Code   | When |
 |--------|------|
-| -20401 | Tenant missing/invalid — send `x-tenant-id`. |
-| -20402 | User missing — send `x-user-id`. |
+| -20401 | Tenant missing/invalid — send `x-tenant-id` header. |
+| -20402 | User missing — send `x-user-id` header. |
 | -20403 | `employee_guid` required. |
 | -20404 | `employee_guid` / `delegated_employee_guid` must be 32 hex chars. |
 | -20405 | `leave_type_id` required and positive. |

@@ -47,7 +47,7 @@ router.use((req, res, next) => {
 });
 
 /**
- * Extract tenant ID from request
+ * Extract tenant ID from request (header only)
  */
 function getTenantId(req) {
   const tenantId = req.headers['x-tenant-id'];
@@ -62,7 +62,7 @@ function getTenantId(req) {
 }
 
 /**
- * Extract user ID from request
+ * Extract user ID from request (header only)
  */
 function getUserId(req) {
   const userId = req.headers['x-user-id'];
