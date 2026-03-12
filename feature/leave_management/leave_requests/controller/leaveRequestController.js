@@ -406,7 +406,7 @@ router.get('/:guid/documents', async (req, res) => {
   try {
     const parsed = parseGuidParam(req, res, 'guid');
     if (!parsed) return;
-    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
+    const leaveRequest = await LeaveRequestModel.findByGuidForPut(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
@@ -426,7 +426,7 @@ router.get('/:guid/contact', async (req, res) => {
   try {
     const parsed = parseGuidParam(req, res, 'guid');
     if (!parsed) return;
-    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
+    const leaveRequest = await LeaveRequestModel.findByGuidForPut(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
@@ -546,34 +546,8 @@ router.post('/', uploadDocuments, async (req, res) => {
       };
     }
 
-    // Validate required fields
-    if (!requestData.employee_guid) {
-      return sendBadRequest(res, req, 'employee_guid is required');
-    }
-    if (!requestData.leave_type_id) {
-      return sendBadRequest(res, req, 'leave_type_id is required');
-    }
-    if (!requestData.start_date) {
-      return sendBadRequest(res, req, 'start_date is required');
-    }
-    if (!requestData.end_date) {
-      return sendBadRequest(res, req, 'end_date is required');
-    }
-
-    // Validate dates
-    const startDate = new Date(requestData.start_date);
-    const endDate = new Date(requestData.end_date);
-    if (isNaN(startDate.getTime())) {
-      return sendBadRequest(res, req, 'Invalid start_date format');
-    }
-    if (isNaN(endDate.getTime())) {
-      return sendBadRequest(res, req, 'Invalid end_date format');
-    }
-    if (startDate > endDate) {
-      return sendBadRequest(res, req, 'end_date must be after or equal to start_date');
-    }
-
-    // Normalize portions to uppercase
+    // Create uses ABS_LEAVE_REQUESTS_PKG only — validation and errors come from the package (HTTP 400).
+    // Normalize portions before call (package TRIM/UPPER as well).
     if (requestData.start_portion) {
       requestData.start_portion = requestData.start_portion.toUpperCase();
     }
@@ -634,6 +608,8 @@ router.post('/', uploadDocuments, async (req, res) => {
  *          - Status changes automatically set approved_at/rejected_at timestamps
  *          - Contact fields update the associated leave contact record
  *          - Documents can be added/updated via multipart file uploads
+ *          - Header row update: ABS_LEAVE_REQUESTS_UPDATE_PKG.UPDATE_BY_GUID in ABS (CURRENT_SCHEMA or synonym)
+ * @query   lean=1 | include=none — omit post-update contact/doc fetch (faster; use GET if you need them)
  */
 router.put('/:guid', uploadDocuments, async (req, res) => {
   try {
@@ -641,7 +617,8 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-    const existingLeaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
+    // Fast path: header-only SELECT — updateByGuid calls ABS_LEAVE_REQUESTS_UPDATE_PKG then direct SELECT (no double refcursor)
+    const existingLeaveRequest = await LeaveRequestModel.findByGuidForPut(parsed.guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
@@ -651,9 +628,10 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     
     // If multipart/form-data, extract from req.body and req.files
     if (req.files && Array.isArray(req.files) && req.files.length > 0) {
-      // Multipart request - extract form fields
+      // Multipart request - extract form fields (trim strings — Postman form-data can include whitespace)
+      const trim = (v) => (typeof v === 'string' ? v.trim() : v);
       requestBody = {
-        employee_guid: req.body.employee_guid,
+        employee_guid: trim(req.body.employee_guid),
         leave_type_id: req.body.leave_type_id ? parseInt(req.body.leave_type_id) : undefined,
         start_date: req.body.start_date,
         end_date: req.body.end_date,
@@ -666,7 +644,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
         emergency_contact_name: req.body.emergency_contact_name,
         emergency_contact_phone: req.body.emergency_contact_phone,
         additional_notes: req.body.additional_notes,
-        delegated_employee_guid: req.body.delegated_employee_guid,
+        delegated_employee_guid: trim(req.body.delegated_employee_guid),
         submit: req.body.submit !== undefined ? req.body.submit : undefined
       };
 
@@ -796,41 +774,30 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
       normalizedData.REJECTED_AT = normalizedBody.REJECTED_AT ? new Date(normalizedBody.REJECTED_AT) : null;
     }
 
-    // Check for date overlap if dates are being updated
-    if ((normalizedData.START_DATE || normalizedData.END_DATE || startTs || endTs) && (normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id)) {
-      const checkStartDate = startTs || normalizedData.START_DATE || existingLeaveRequest.start_date;
-      const checkEndDate = endTs || normalizedData.END_DATE || existingLeaveRequest.end_date;
-      const checkEmployeeId = normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id;
-      
-      let connection;
-      try {
-        connection = await db.getConnection();
-        const overlappingRequest = await LeaveRequestModel.checkOverlappingLeaveRequest(
-          connection,
+    // Overlap check runs inside updateByGuid transaction (same connection — saves one pool round-trip)
+    const needsOverlapCheck =
+      (normalizedData.START_DATE || normalizedData.END_DATE || startTs || endTs) &&
+      (normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id);
+    const overlapCheck = needsOverlapCheck
+      ? {
           tenantId,
-          checkEmployeeId,
-          checkStartDate,
-          checkEndDate,
-          existingLeaveRequest.leave_request_id // Exclude current request
-        );
-        
-        if (overlappingRequest) {
-          const existingStartDate = new Date(overlappingRequest.start_date).toISOString().split('T')[0];
-          const existingEndDate = new Date(overlappingRequest.end_date).toISOString().split('T')[0];
-          return sendBadRequest(res, req, 
-            `You already applied for leaves on these dates. Existing leave request (${overlappingRequest.request_status}) from ${existingStartDate} to ${existingEndDate}`
-          );
+          employeeId: normalizedData.EMPLOYEE_ID || existingLeaveRequest.employee_id,
+          startDate: startTs || normalizedData.START_DATE || existingLeaveRequest.start_date,
+          endDate: endTs || normalizedData.END_DATE || existingLeaveRequest.end_date,
+          excludeLeaveRequestId: existingLeaveRequest.leave_request_id
         }
-      } finally {
-        if (connection) {
-          try {
-            await connection.close();
-          } catch {}
-        }
-      }
-    }
+      : null;
 
-    const updatedLeaveRequest = await LeaveRequestModel.updateByGuid(parsed.guidHex32, normalizedData, userId);
+    const updatedLeaveRequest = await LeaveRequestModel.updateByGuid(
+      parsed.guidHex32,
+      normalizedData,
+      userId,
+      tenantId,
+      {
+        preloadedOracleHeaderRow: existingLeaveRequest._oracleHeaderRow,
+        overlapCheck
+      }
+    );
     
     // Update contact information if provided
     if (normalizedBody.REASON_FOR_LEAVE !== undefined || normalizedBody.ADDRESS_DURING_LEAVE !== undefined ||
@@ -886,7 +853,22 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
       }
     }
     
-    // Fetch contact and document information in parallel for optimal performance
+    // ?lean=1 or include=none — skip contact/doc fetch (saves 2+ DB round-trips; GET by guid if needed)
+    const leanPut =
+      String(req.query.lean || '').toLowerCase() === '1' ||
+      String(req.query.lean || '').toLowerCase() === 'true' ||
+      String(req.query.include || '').toLowerCase() === 'none';
+
+    if (leanPut) {
+      sendLeaveRequest(res, req, {
+        ...updatedLeaveRequest,
+        leave_contact_info: null,
+        leave_document_info: null
+      });
+      return;
+    }
+
+    // Fetch contact and document information in parallel
     const [leaveContact, documents] = await Promise.all([
       LeaveContactModel.findByLeaveRequestId(updatedLeaveRequest.leave_request_id).catch(err => {
         console.error(`Error fetching leave contact for request ${updatedLeaveRequest.leave_request_id}:`, err);
@@ -901,7 +883,6 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     const documentsWithUrls = (documents || []).map(doc => attachDocumentUrls(doc, req));
     const leaveDocument = documentsWithUrls.length > 0 ? documentsWithUrls[0] : null;
 
-    // Return all 3 objects: leave_details, leave_contact_info, leave_document_info
     const leaveRequestWithContactAndDoc = {
       ...updatedLeaveRequest,
       leave_contact_info: leaveContact || null,
@@ -913,7 +894,10 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     if (error.message?.includes('Tenant ID is required') || error.message?.includes('User ID is required')) {
       return sendBadRequest(res, req, error.message);
     }
-    if (error.message?.includes('Employee not found') || error.message?.includes('already applied for leaves')) {
+    if (error instanceof ValidationError || error.message?.includes('already applied for leaves')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('Employee not found')) {
       return sendBadRequest(res, req, error.message);
     }
     if (error.code === 'FOREIGN_KEY_CONSTRAINT') {
@@ -959,11 +943,12 @@ router.post('/:guid/submit', async (req, res) => {
     if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
-    if (error.message?.includes('not found')) {
-      return sendNotFound(res, req, error.message);
-    }
+    // Package -20502 / tenant mismatch is ValidationError — must be 400, not 404
     if (error instanceof ValidationError || error.message?.includes('Cannot submit')) {
       return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to submit leave request', error);
   }
@@ -996,6 +981,9 @@ router.post('/:guid/approve', async (req, res) => {
     if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
+    if (error instanceof ValidationError || error.message?.includes('Cannot approve') || error.message?.includes('Insufficient leave balance')) {
+      return sendBadRequest(res, req, error.message);
+    }
     if (error.message?.includes('not found')) {
       return sendNotFound(res, req, error.message);
     }
@@ -1005,16 +993,13 @@ router.post('/:guid/approve', async (req, res) => {
     if (error.code === 'INVALID_COLUMN') {
       return sendBadRequest(res, req, error.message || 'Invalid column identifier in database query');
     }
-    if (error instanceof ValidationError || error.message?.includes('Cannot approve') || error.message?.includes('Insufficient leave balance')) {
-      return sendBadRequest(res, req, error.message);
-    }
     sendServerError(res, req, 'Failed to approve leave request', error);
   }
 });
 
 /**
  * @route   POST /api/abs/leave-requests/:guid/reject
- * @desc    Reject a SUBMITTED leave request
+ * @desc    Reject a SUBMITTED leave request (same as submit: ABS_LEAVE_REQUESTS_LIFECYCLE_PKG in ABS — REJECT_BY_GUID)
  * @header  x-tenant-id (required)
  * @header  x-user-id (required)
  * @body    { reason?: string, comments?: string } (optional)
@@ -1041,11 +1026,11 @@ router.post('/:guid/reject', async (req, res) => {
     if (isInvalidGuidError(error)) {
       return sendBadRequest(res, req, error.message);
     }
-    if (error.message?.includes('not found')) {
-      return sendNotFound(res, req, error.message);
-    }
     if (error instanceof ValidationError || error.message?.includes('Cannot reject')) {
       return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('not found')) {
+      return sendNotFound(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to reject leave request', error);
   }
@@ -1068,7 +1053,8 @@ router.delete('/:guid', async (req, res) => {
     if (!parsed) return;
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
-    const existingLeaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
+    // Package-only path: header via QUERY_PKG; delete/withdraw via LIFECYCLE_PKG
+    const existingLeaveRequest = await LeaveRequestModel.findByGuidForPut(parsed.guidHex32);
     if (!existingLeaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }
@@ -1127,7 +1113,7 @@ router.get('/:guid/documents', async (req, res) => {
   try {
     const parsed = parseGuidParam(req, res, 'guid');
     if (!parsed) return;
-    const leaveRequest = await LeaveRequestModel.findByGuid(parsed.guidHex32);
+    const leaveRequest = await LeaveRequestModel.findByGuidForPut(parsed.guidHex32);
     if (!leaveRequest) {
       return sendNotFound(res, req, 'Leave request not found');
     }

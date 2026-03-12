@@ -9,9 +9,17 @@ import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../utils/
 const REQUEST_STATUS_SUBMITTED = 'SUBMITTED';
 
 /**
- * Leave Request Model
- * Handles all database operations for ABS.ABS_LEAVE_REQUESTS table
- * (START_PORTION_CODE / END_PORTION_CODE removed)
+ * Leave Request Model — ABS.ABS_LEAVE_REQUESTS
+ *
+ * Mutations and header reads go through Oracle packages where deployed:
+ *   CREATE → ABS_LEAVE_REQUESTS_PKG
+ *   Submit / reject / delete-withdraw → ABS_LEAVE_REQUESTS_LIFECYCLE_PKG
+ *   Approve → ABS_LEAVE_REQUESTS_APPROVE_PKG
+ *   PUT header → ABS_LEAVE_REQUESTS_UPDATE_PKG
+ *   Header by GUID → ABS_LEAVE_REQUESTS_QUERY_PKG.OPEN_LEAVE_REQUEST_BY_GUID (or SELECT fallback)
+ *
+ * List/findAll and overlap check still use parameterized SQL on ABS.ABS_LEAVE_REQUESTS until a list package exists.
+ * Contact/documents remain in LeaveContactModel / LeaveDocumentModel (separate tables).
  */
 class LeaveRequestModel {
   static TABLE_NAME = 'ABS.ABS_LEAVE_REQUESTS';
@@ -412,80 +420,19 @@ class LeaveRequestModel {
   }
 
   /**
-   * Get single leave request by GUID (HEX32)
+   * Get single leave request by GUID (HEX32).
+   * Header row only via ABS_LEAVE_REQUESTS_QUERY_PKG.OPEN_LEAVE_REQUEST_BY_GUID (or same projection SELECT fallback).
+   * No heavy Node JOINs — employee_info / leave_type_info are null unless enriched elsewhere.
    */
   static async findByGuid(guidHex32) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
-      const guidBuffer = hexToRawBuffer(hexGuid);
-
-      const query = `SELECT 
-        a.LEAVE_REQUEST_ID,
-        RAWTOHEX(a.LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-        a.TENANT_ID,
-        a.EMPLOYEE_ID,
-        a.LEAVE_TYPE_ID,
-        a.START_DATE,
-        a.END_DATE,
-        a.START_TS,
-        a.END_TS,
-        a.TOTAL_DAYS,
-        a.REQUEST_STATUS,
-        a.SUBMITTED_AT,
-        a.APPROVED_AT,
-        a.REJECTED_AT,
-        a.CREATION_DATE,
-        a.CREATED_BY,
-        a.LAST_UPDATE_DATE,
-        a.LAST_UPDATED_BY,
-        c.REASON_FOR_LEAVE,
-        -- Employee information (limited fields)
-        e.EMPLOYEE_ID AS EMP_EMPLOYEE_ID,
-        RAWTOHEX(e.EMPLOYEE_GUID) AS EMP_EMPLOYEE_GUID,
-        e.FIRST_NAME_EN AS EMP_FIRST_NAME_EN,
-        e.MIDDLE_NAME_EN AS EMP_MIDDLE_NAME_EN,
-        e.LAST_NAME_EN AS EMP_LAST_NAME_EN,
-        e.FIRST_NAME_AR AS EMP_FIRST_NAME_AR,
-        e.MIDDLE_NAME_AR AS EMP_MIDDLE_NAME_AR,
-        e.LAST_NAME_AR AS EMP_LAST_NAME_AR,
-        e.FAMILY_NAME_AR AS EMP_FAMILY_NAME_AR,
-        e.EMAIL AS EMP_EMAIL,
-        asg.POSITION_TITLE_EN AS EMP_POSITION_NAME_EN,
-        asg.POSITION_TITLE_AR AS EMP_POSITION_NAME_AR,
-        asg.ORG_STRUCTURE_LIST AS EMP_ORG_STRUCTURE_LIST,
-        -- Leave type information (limited fields)
-        lt.LEAVE_TYPE_ID AS LT_LEAVE_TYPE_ID,
-        RAWTOHEX(lt.LEAVE_TYPE_GUID) AS LT_LEAVE_TYPE_GUID,
-        lt.LEAVE_NAME_EN AS LT_LEAVE_NAME_EN,
-        lt.LEAVE_NAME_AR AS LT_LEAVE_NAME_AR,
-        lt.LEAVE_CODE AS LT_LEAVE_CODE
-      FROM ${this.TABLE_NAME} a
-      LEFT JOIN EMPL.EMPLOYEES e
-        ON a.EMPLOYEE_ID = e.EMPLOYEE_ID
-       AND a.TENANT_ID = e.ENTERPRISE_ID
-      LEFT JOIN (
-        SELECT t.EMPLOYEE_ID, t.ENTERPRISE_ID, p.POSITION_TITLE_EN, p.POSITION_TITLE_AR, asn.ORG_STRUCTURE_LIST
-        FROM (
-          SELECT v.EMPLOYEE_ID, v.ENTERPRISE_ID, v.POSITION_ID, v.ASSIGNMENT_ID,
-                 ROW_NUMBER() OVER (PARTITION BY v.EMPLOYEE_ID, v.ENTERPRISE_ID ORDER BY v.ASSIGNMENT_ID DESC NULLS LAST) AS rn
-          FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
-        ) t
-        LEFT JOIN ENT.POSITIONS p ON p.POSITION_ID = t.POSITION_ID
-        LEFT JOIN EMPL.ASSIGNMENTS asn ON asn.ASSIGNMENT_ID = t.ASSIGNMENT_ID
-        WHERE t.rn = 1
-      ) asg ON e.EMPLOYEE_ID = asg.EMPLOYEE_ID AND e.ENTERPRISE_ID = asg.ENTERPRISE_ID
-      LEFT JOIN ABS.ABS_LEAVE_TYPES lt
-        ON a.LEAVE_TYPE_ID = lt.LEAVE_TYPE_ID
-       AND a.TENANT_ID = lt.TENANT_ID
-      LEFT JOIN ABS.ABS_LEAVE_CONTACTS c
-        ON a.LEAVE_REQUEST_ID = c.LEAVE_REQUEST_ID
-      WHERE a.LEAVE_REQUEST_GUID = :1`;
-
-      const result = await this.executeQuery(query, [guidBuffer]);
-      if (result.rows?.[0]) {
-        return this.mapRowToLeaveRequest(result.rows[0]);
-      }
-      return null;
+      return await this.executeWithTransaction(async (connection) => {
+        const row = await this._fetchLeaveRequestRowViaPackage(connection, hexGuid);
+        if (!row) return null;
+        const snake = this.convertKeysToSnakeCase(row);
+        return this.mapRowToLeaveRequest(snake);
+      });
     } catch (error) {
       if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
       if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
@@ -706,12 +653,14 @@ class LeaveRequestModel {
       if (!employeeGuid) {
         return null;
       }
-      const employeeGuidHex = ensureHex32(employeeGuid, 'employeeGuid');
+      const employeeGuidHex = ensureHex32(String(employeeGuid).trim(), 'employeeGuid');
+      const guidBuffer = hexToRawBuffer(employeeGuidHex);
+      // Bind RAW to EMPLOYEE_GUID — avoids RAWTOHEX string compare / case issues
       const query = `SELECT EMPLOYEE_ID
         FROM EMPL.EMPLOYEES
         WHERE ENTERPRISE_ID = :1
-          AND RAWTOHEX(EMPLOYEE_GUID) = :2`;
-      const result = await connection.execute(query, [tenantId, employeeGuidHex], {
+          AND EMPLOYEE_GUID = :2`;
+      const result = await connection.execute(query, [tenantId, guidBuffer], {
         outFormat: oracledb.OUT_FORMAT_OBJECT
       });
       if (!result.rows || result.rows.length === 0 || !result.rows[0]) {
@@ -734,6 +683,13 @@ class LeaveRequestModel {
    * @param {number} excludeLeaveRequestId - Optional: exclude this leave request ID (for updates)
    * @returns {Object|null} Existing leave request with overlapping dates, or null
    */
+  /** User-facing overlap message (controller also builds same string — single source if needed). */
+  static _overlapMessage(overlapping) {
+    const a = new Date(overlapping.start_date).toISOString().split('T')[0];
+    const b = new Date(overlapping.end_date).toISOString().split('T')[0];
+    return `You already applied for leaves on these dates. Existing leave request (${overlapping.request_status}) from ${a} to ${b}`;
+  }
+
   static async checkOverlappingLeaveRequest(connection, tenantId, employeeId, startDate, endDate, excludeLeaveRequestId = null) {
     let bindParams;
     try {
@@ -889,331 +845,421 @@ class LeaveRequestModel {
   }
 
   /**
-   * Create leave request with contact and documents in one transaction
+   * Create via ABS_LEAVE_REQUESTS_PKG.CREATE_LEAVE_REQUEST (synonym or CURRENT_SCHEMA; same POST body/URL).
+   * Documents still inserted in Node on the same connection; no COMMIT inside package.
+   */
+  static async _createWithContactAndDocumentsViaPackage(connection, data, tenantId, userId, now) {
+    // Validation is in ABS_LEAVE_REQUESTS_PKG — pass raw values; package returns user-friendly errors.
+    const guidHex = data.employee_guid != null ? String(data.employee_guid).trim() : null;
+    const submitVal = data.submit === false || data.submit === 'false' ? 'false' : 'true';
+    let delegatedGuid = null;
+    if (data.delegated_employee_guid != null && String(data.delegated_employee_guid).trim() !== '') {
+      delegatedGuid = String(data.delegated_employee_guid).trim();
+    }
+    const leaveTypeId =
+      data.leave_type_id != null && data.leave_type_id !== ''
+        ? parseInt(data.leave_type_id, 10)
+        : null;
+    const binds = {
+      tenantId,
+      userId: userId || 'SYSTEM',
+      employeeGuid: guidHex,
+      leaveTypeId,
+      startDate: (() => {
+        if (data.start_date == null || String(data.start_date).trim() === '') return null;
+        const d = new Date(data.start_date);
+        return isNaN(d.getTime()) ? null : d;
+      })(),
+      endDate: (() => {
+        if (data.end_date == null || String(data.end_date).trim() === '') return null;
+        const d = new Date(data.end_date);
+        return isNaN(d.getTime()) ? null : d;
+      })(),
+      startPortion: data.start_portion || null,
+      endPortion: data.end_portion || null,
+      submit: submitVal,
+      reason: data.reason_for_leave || null,
+      address: data.address_during_leave || null,
+      contactPhone: data.contact_phone || null,
+      emergencyName: data.emergency_contact_name || null,
+      emergencyPhone: data.emergency_contact_phone || null,
+      additionalNotes: data.additional_notes || null,
+      delegatedGuid,
+      leaveRequestId: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT },
+      guidHexOut: { type: oracledb.STRING, dir: oracledb.BIND_OUT, maxSize: 64 },
+      requestStatus: { type: oracledb.STRING, dir: oracledb.BIND_OUT, maxSize: 32 }
+    };
+    // Must NOT use ABS.ABS_LEAVE_REQUESTS_PKG in anonymous block — PLS-00225 (ABS parsed as cursor).
+    // Use unqualified name: connect as ABS, or CREATE SYNONYM ABS_LEAVE_REQUESTS_PKG FOR ABS.ABS_LEAVE_REQUESTS_PKG;
+    // CURRENT_SCHEMA defaults to ABS so unqualified package names resolve in ABS (override with ABS_LEAVE_REQUESTS_PKG_SCHEMA; OFF to skip).
+    await this._ensureLeaveRequestPackageSchema(connection);
+    const createPkg = this._pkgNameFromEnv('ABS_LEAVE_REQUESTS_PKG_NAME', 'ABS_LEAVE_REQUESTS_PKG');
+    const plsql = `
+      BEGIN
+        ${createPkg}.CREATE_LEAVE_REQUEST(
+          :tenantId, :userId, :employeeGuid, :leaveTypeId, :startDate, :endDate,
+          :startPortion, :endPortion, :submit,
+          :reason, :address, :contactPhone, :emergencyName, :emergencyPhone, :additionalNotes,
+          :delegatedGuid,
+          :leaveRequestId, :guidHexOut, :requestStatus
+        );
+      END;`;
+    let result;
+    try {
+      result = await connection.execute(plsql, binds, { autoCommit: false });
+    } catch (e) {
+      const num = e.errorNum;
+      const msg = (e.message || '').split('ORA-06512')[0].replace(/^ORA-\d+:?\s*/i, '').trim();
+      // Package validation -20401..-20499 and business -20001..-20004 → ValidationError for API 400
+      if (
+        (num >= 20001 && num <= 20004) ||
+        (num >= 20401 && num <= 20499) ||
+        num === 20480 ||
+        num === 20481 ||
+        num === 20482
+      ) {
+        throw new ValidationError(msg || e.message || 'Invalid leave request.');
+      }
+      if (num === 20998 || num === 20999) {
+        throw new ValidationError(msg || 'Leave request package not fully deployed.');
+      }
+      throw e;
+    }
+    const ob = result.outBinds || {};
+    const leaveRequestId = Array.isArray(ob.leaveRequestId) ? ob.leaveRequestId[0] : ob.leaveRequestId;
+    const leaveRequestGuidHex = (Array.isArray(ob.guidHexOut) ? ob.guidHexOut[0] : ob.guidHexOut) || '';
+    const requestStatus = (Array.isArray(ob.requestStatus) ? ob.requestStatus[0] : ob.requestStatus) || 'SUBMITTED';
+
+    // Contact row (package inserted; fetch for response shape)
+    let contact = null;
+    const contactResult = await connection.execute(
+      `SELECT * FROM ABS.ABS_LEAVE_CONTACTS WHERE LEAVE_REQUEST_ID = :1`,
+      [leaveRequestId],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (contactResult.rows?.[0]) {
+      contact = this.convertKeysToSnakeCase(contactResult.rows[0]);
+      if (contact.leave_contact_guid && Buffer.isBuffer(contact.leave_contact_guid)) {
+        contact.leave_contact_guid = contact.leave_contact_guid.toString('hex').toUpperCase();
+      }
+    }
+
+    // Documents: same loop as createWithContactAndDocuments (BLOB + hash in Node)
+    const documents = [];
+    if (data.documents && Array.isArray(data.documents) && data.documents.length > 0) {
+      const documentPromises = data.documents
+        .filter(doc => doc.file_name)
+        .map(async (doc) => {
+          const { buffer: docGuidBuffer } = await generateSysGuid(connection);
+          let documentId;
+          try {
+            const seqResult = await connection.execute(
+              `SELECT ABS.ABS_LEAVE_DOCUMENTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
+              [],
+              { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+            documentId = seqResult.rows[0].NEXT_ID;
+          } catch {
+            const maxResult = await connection.execute(
+              `SELECT NVL(MAX(DOCUMENT_ID), 0) + 1 AS NEXT_ID FROM ABS.ABS_LEAVE_DOCUMENTS`,
+              [],
+              { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+            documentId = maxResult.rows[0].NEXT_ID;
+          }
+          let fileBuffer = null;
+          let fileHash = null;
+          let fileUrl = null;
+          if (doc.file_buffer && Buffer.isBuffer(doc.file_buffer)) {
+            fileBuffer = doc.file_buffer;
+            fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
+          } else if (doc.file_base64) {
+            fileBuffer = Buffer.from(doc.file_base64, 'base64');
+            fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
+          } else if (doc.file_url) {
+            fileUrl = doc.file_url;
+          }
+          const fileSizeBytes = fileBuffer ? fileBuffer.length : (doc.file_size_mb ? doc.file_size_mb * 1024 * 1024 : 0);
+          const fileSizeMb = Math.round((fileSizeBytes / (1024 * 1024)) * 100) / 100;
+          const insertDocSql = `INSERT INTO ABS.ABS_LEAVE_DOCUMENTS (
+            DOCUMENT_ID, DOCUMENT_GUID, LEAVE_REQUEST_ID, FILE_NAME, FILE_TYPE, FILE_SIZE_MB,
+            FILE_URL, FILE_BLOB, FILE_HASH, CREATION_DATE, CREATED_BY, LAST_UPDATE_DATE, LAST_UPDATED_BY
+          ) VALUES (
+            :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
+          )`;
+          await connection.execute(insertDocSql, [
+            documentId, docGuidBuffer, leaveRequestId, doc.file_name,
+            doc.file_type || 'application/octet-stream', fileSizeMb, fileUrl, fileBuffer, fileHash,
+            now, userId || 'SYSTEM', now, userId || 'SYSTEM'
+          ], { autoCommit: false });
+          const docGuidHex = docGuidBuffer.toString('hex').toUpperCase();
+          return this.convertKeysToSnakeCase({
+            DOCUMENT_ID: documentId,
+            DOCUMENT_GUID: docGuidHex,
+            LEAVE_REQUEST_ID: leaveRequestId,
+            FILE_NAME: doc.file_name,
+            FILE_TYPE: doc.file_type || 'application/octet-stream',
+            FILE_SIZE_MB: fileSizeMb,
+            FILE_URL: fileUrl,
+            FILE_HASH: fileHash,
+            CREATION_DATE: now,
+            CREATED_BY: userId || 'SYSTEM',
+            LAST_UPDATE_DATE: now,
+            LAST_UPDATED_BY: userId || 'SYSTEM'
+          });
+        });
+      documents.push(...(await Promise.all(documentPromises)));
+    }
+
+    const leaveRequest = this.convertKeysToSnakeCase({
+      LEAVE_REQUEST_ID: leaveRequestId,
+      LEAVE_REQUEST_GUID: leaveRequestGuidHex,
+      TENANT_ID: tenantId,
+      EMPLOYEE_ID: null,
+      LEAVE_TYPE_ID: leaveTypeId,
+      START_DATE: new Date(data.start_date),
+      END_DATE: new Date(data.end_date),
+      REQUEST_STATUS: requestStatus,
+      SUBMITTED_AT: requestStatus === 'SUBMITTED' ? now : null,
+      APPROVED_AT: null,
+      REJECTED_AT: null,
+      CREATION_DATE: now,
+      CREATED_BY: userId || 'SYSTEM',
+      LAST_UPDATE_DATE: now,
+      LAST_UPDATED_BY: userId || 'SYSTEM'
+    });
+    // Resolve employee_id for response (optional)
+    try {
+      const empId = await this.resolveEmployeeIdByGuid(connection, tenantId, data.employee_guid);
+      if (empId) leaveRequest.employee_id = empId;
+    } catch (_) {}
+
+    return { leave_request: leaveRequest, contact, documents };
+  }
+
+  /**
+   * Set CURRENT_SCHEMA so unqualified ABS_LEAVE_REQUESTS_*_PKG resolves in ABS.
+   * Packages live in ABS — default is ABS. Override with ABS_LEAVE_REQUESTS_PKG_SCHEMA
+   * (e.g. ADMIN). Set to OFF to skip ALTER (e.g. connect as ABS or synonyms only).
+   */
+  static async _ensureLeaveRequestPackageSchema(connection) {
+    let pkgSchema = (process.env.ABS_LEAVE_REQUESTS_PKG_SCHEMA || '').trim();
+    if (!pkgSchema || pkgSchema.toUpperCase() === 'ABS') {
+      pkgSchema = 'ABS';
+    }
+    if (pkgSchema.toUpperCase() === 'OFF' || pkgSchema === '0') {
+      return;
+    }
+    await connection.execute(
+      `ALTER SESSION SET CURRENT_SCHEMA = ${pkgSchema.replace(/[^A-Za-z0-9_]/g, '')}`
+    );
+  }
+
+  /** Oracle application error message without stack line */
+  static _pkgErrorMessage(e) {
+    return (e?.message || '').split('ORA-06512')[0].replace(/^ORA-\d+:?\s*/i, '').trim() || e?.message;
+  }
+
+  /**
+   * Single entry for package RAISE_APPLICATION_ERROR ranges — keeps Node thin; all mutations delegate to DB.
+   * -205xx lifecycle | -206xx approve | -207xx update | -20801 query GUID
+   */
+  static _rethrowLeaveRequestPackageError(e) {
+    const num = e?.errorNum;
+    const msg = this._pkgErrorMessage(e);
+    if (num >= 20501 && num <= 20503) {
+      if (num === 20501) throw new DatabaseError(msg || 'Leave request not found.', e);
+      throw new ValidationError(msg || 'Invalid operation.');
+    }
+    if (num >= 20601 && num <= 20605) {
+      if (num === 20601) throw new DatabaseError(msg || 'Leave request not found.', e);
+      throw new ValidationError(msg || 'Cannot approve leave request.');
+    }
+    if (num >= 20701 && num <= 20703) {
+      if (num === 20701) throw new DatabaseError(msg || 'Leave request not found.', e);
+      if (num === 20702) throw new ValidationError(msg || 'Leave request not found for this tenant.', e);
+      throw new ValidationError(msg || 'No fields to update.');
+    }
+    if (num === 20801) throw new ValidationError(msg || 'Invalid leave request GUID.');
+    throw e;
+  }
+
+  static _lifecyclePkgName() {
+    return this._pkgNameFromEnv('ABS_LEAVE_REQUESTS_LIFECYCLE_PKG_NAME', 'ABS_LEAVE_REQUESTS_LIFECYCLE_PKG');
+  }
+
+  /** Sanitized package name from env (PLS-00225-safe identifier only). */
+  static _pkgNameFromEnv(envKey, fallback) {
+    const n = (process.env[envKey] || '').trim().replace(/[^A-Za-z0-9_]/g, '');
+    return n || fallback;
+  }
+
+  /**
+   * Shared catch for mutation methods — avoids repeating the same 5-line block on submit/reject/delete.
+   */
+  static _rethrowMutationFailure(error, operationLabel) {
+    if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
+    if (error?.message?.includes('not found')) throw error;
+    if (error instanceof ValidationError) throw error;
+    if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+      throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+    }
+    if (error instanceof DatabaseError) throw error;
+    throw new DatabaseError(operationLabel, error);
+  }
+
+  /** Load balance txn row after approve (schema variants AMOUNT_DAYS vs DAYS). */
+  static async _fetchBalanceTxnRow(connection, txnIdNum) {
+    const binds = { txn_id: txnIdNum };
+    const opts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+    const sqlPrimary = `
+      SELECT RAWTOHEX(TXN_GUID) AS TXN_GUID, TXN_ID, TENANT_ID, EMPLOYEE_ID, LEAVE_TYPE_ID,
+        TXN_TYPE, TXN_DATE, AMOUNT_DAYS, REFERENCE_TYPE, REFERENCE_ID, COMMENTS, CREATION_DATE, CREATED_BY
+      FROM ABS.ABS_LEAVE_BALANCE_TXNS WHERE TXN_ID = :txn_id`;
+    try {
+      const r = await connection.execute(sqlPrimary, binds, opts);
+      if (r.rows?.[0]) return this.convertKeysToSnakeCase(r.rows[0]);
+    } catch (selectError) {
+      if (selectError.errorNum !== 904 && !selectError.message?.includes('ORA-00904')) throw selectError;
+    }
+    const sqlFallback = `
+      SELECT RAWTOHEX(TXN_GUID) AS TXN_GUID, TXN_ID, TENANT_ID, EMPLOYEE_ID, LEAVE_TYPE_ID,
+        TXN_TYPE, TXN_DATE, DAYS AS AMOUNT_DAYS, REFERENCE_TYPE, REFERENCE_ID,
+        NVL(NOTES, COMMENTS) AS COMMENTS, CREATION_DATE, CREATED_BY
+      FROM ABS.ABS_LEAVE_BALANCE_TXNS WHERE TXN_ID = :txn_id`;
+    const r2 = await connection.execute(sqlFallback, binds, opts);
+    return r2.rows?.[0] ? this.convertKeysToSnakeCase(r2.rows[0]) : null;
+  }
+
+  /** Run lifecycle proc with 3 binds (submit/reject). */
+  static async _lifecycleExecute3(connection, procedure, binds) {
+    await this._ensureLeaveRequestPackageSchema(connection);
+    const pkg = this._lifecyclePkgName();
+    await connection.execute(
+      `BEGIN ${pkg}.${procedure}(:hex, :tenantId, :userId); END;`,
+      binds,
+      { autoCommit: false }
+    );
+  }
+
+  /** Header row after mutation — always via QUERY_PKG or SELECT fallback (same projection). */
+  static async _rowSnakeAfterMutation(connection, hexGuid) {
+    const row = await this._fetchLeaveRequestRowViaPackage(connection, hexGuid);
+    return row ? this.convertKeysToSnakeCase(row) : null;
+  }
+
+  /**
+   * Fetch leave request header row. Prefers ABS_LEAVE_REQUESTS_QUERY_PKG.OPEN_LEAVE_REQUEST_BY_GUID;
+   * falls back to direct SELECT if package missing/stub (PLS-00302) or env FORCE_LEAVE_REQUEST_ROW_SELECT=1.
+   */
+  static async _fetchLeaveRequestRowViaPackage(connection, hexGuid) {
+    const guidBuffer = hexToRawBuffer(ensureHex32(hexGuid, 'guid'));
+    const forceSelect = String(process.env.FORCE_LEAVE_REQUEST_ROW_SELECT || '').toLowerCase() === '1' ||
+      String(process.env.FORCE_LEAVE_REQUEST_ROW_SELECT || '').toLowerCase() === 'true';
+
+    if (!forceSelect) {
+      await this._ensureLeaveRequestPackageSchema(connection);
+      const curBind = { type: oracledb.CURSOR, dir: oracledb.BIND_OUT };
+      try {
+        const pkg = this._pkgNameFromEnv('ABS_LEAVE_REQUESTS_QUERY_PKG_NAME', 'ABS_LEAVE_REQUESTS_QUERY_PKG');
+        const result = await connection.execute(
+          `BEGIN ${pkg}.OPEN_LEAVE_REQUEST_BY_GUID(:hex, :cur); END;`,
+          { hex: hexGuid, cur: curBind },
+          { autoCommit: false }
+        );
+        const cursor = result.outBinds && (Array.isArray(result.outBinds.cur) ? result.outBinds.cur[0] : result.outBinds.cur);
+        if (cursor) {
+          try {
+            const rows = await cursor.getRows(2);
+            if (rows && rows.length > 1) {
+              await cursor.close();
+              throw new DatabaseError('Multiple rows for leave request GUID.');
+            }
+            if (rows && rows.length) return rows[0];
+          } finally {
+            try {
+              await cursor.close();
+            } catch (_) {}
+          }
+        }
+      } catch (e) {
+        const msg = (e.message || '').toUpperCase();
+        const isPls302 = e?.errorNum === 6550 && msg.includes('PLS-00302') && msg.includes('OPEN_LEAVE_REQUEST_BY_GUID');
+        if (!isPls302) this._rethrowLeaveRequestPackageError(e);
+        // else fall through to SELECT below
+      }
+    }
+
+    // Fallback / fast path: single SELECT (no refcursor) — same projection as QUERY_PKG body
+    return this._selectLeaveRequestRowByGuidBuffer(connection, guidBuffer);
+  }
+
+  /**
+   * Single round-trip header row from ABS_LEAVE_REQUESTS (no joins). Use for PUT prefetch + after UPDATE_PKG.
+   */
+  static async _selectLeaveRequestRowByGuidBuffer(connection, guidBuffer) {
+    const selectSql = `SELECT LEAVE_REQUEST_ID, RAWTOHEX(LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID, TENANT_ID,
+      EMPLOYEE_ID, LEAVE_TYPE_ID, START_DATE, END_DATE, START_TS, END_TS, TOTAL_DAYS,
+      REQUEST_STATUS, SUBMITTED_AT, APPROVED_AT, REJECTED_AT, CREATION_DATE, CREATED_BY,
+      LAST_UPDATE_DATE, LAST_UPDATED_BY FROM ${this.TABLE_NAME} WHERE LEAVE_REQUEST_GUID = :1`;
+    const selectResult = await connection.execute(selectSql, [guidBuffer], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    return selectResult.rows?.[0] || null;
+  }
+
+  /**
+   * Lightweight existence + fields for PUT preload. Same as findByGuid path: QUERY_PKG / SELECT on ABS_LEAVE_REQUESTS only.
+   */
+  static async findByGuidForPut(guidHex32) {
+    try {
+      const hexGuid = ensureHex32(guidHex32, 'guid');
+      return await this.executeWithTransaction(async (connection) => {
+        const row = await this._fetchLeaveRequestRowViaPackage(connection, hexGuid);
+        if (!row) return null;
+        return {
+          leave_request_id: row.LEAVE_REQUEST_ID,
+          tenant_id: row.TENANT_ID,
+          employee_id: row.EMPLOYEE_ID,
+          start_date: row.START_DATE,
+          end_date: row.END_DATE,
+          request_status: row.REQUEST_STATUS,
+          submitted_at: row.SUBMITTED_AT,
+          _oracleHeaderRow: row
+        };
+      });
+    } catch (error) {
+      if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
+      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
+        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+      }
+      throw error;
+    }
+  }
+
+  /** Bitmask for ABS_LEAVE_REQUESTS_UPDATE_PKG.UPDATE_BY_GUID (must match package). */
+  static _UPDATE_MASK = {
+    TENANT_ID: 1,
+    EMPLOYEE_ID: 2,
+    LEAVE_TYPE_ID: 4,
+    START_DATE: 8,
+    END_DATE: 16,
+    START_TS: 32,
+    END_TS: 64,
+    TOTAL_DAYS: 128,
+    REQUEST_STATUS: 256,
+    SUBMITTED_AT: 512,
+    APPROVED_AT: 1024,
+    REJECTED_AT: 2048
+  };
+
+  /**
+   * Create leave request with contact and documents in one transaction.
+   * Create path is only via ABS_LEAVE_REQUESTS_PKG (header + contact in DB); documents inserted in Node after.
    */
   static async createWithContactAndDocuments(data, tenantId, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
         const now = new Date();
-
-        // 1. Resolve employee_guid to employee_id
-        const employeeId = await this.resolveEmployeeIdByGuid(connection, tenantId, data.employee_guid);
-        if (!employeeId) {
-          throw new ValidationError(`Employee not found for GUID: ${data.employee_guid}`);
-        }
-
-        // 2. Resolve delegated_employee_guid if provided
-        let delegatedEmployeeId = null;
-        if (data.delegated_employee_guid) {
-          delegatedEmployeeId = await this.resolveEmployeeIdByGuid(connection, tenantId, data.delegated_employee_guid);
-          if (!delegatedEmployeeId) {
-            throw new ValidationError(`Delegated employee not found for GUID: ${data.delegated_employee_guid}`);
-          }
-        }
-
-        // 3. Validate leave_type_id
-        const leaveTypeId = parseInt(data.leave_type_id);
-        if (isNaN(leaveTypeId) || leaveTypeId < 1) {
-          throw new ValidationError('leave_type_id must be a positive number');
-        }
-        const isValidLeaveType = await this.validateLeaveType(connection, tenantId, leaveTypeId);
-        if (!isValidLeaveType) {
-          throw new ValidationError(`Leave type ${leaveTypeId} not found or inactive for tenant ${tenantId}`);
-        }
-
-        // 4. Compute timestamps and total days
-        const { startTs, endTs, totalDays } = this._computeTimestamps(
-          data.start_date,
-          data.end_date,
-          data.start_portion,
-          data.end_portion
-        );
-
-        // 4.5. Check for overlapping leave requests
-        const startDateObj = startTs instanceof Date ? startTs : new Date(startTs);
-        const endDateObj = endTs instanceof Date ? endTs : new Date(endTs);
-        const existingRequest = await this.checkOverlappingLeaveRequest(
-          connection,
-          tenantId,
-          employeeId,
-          startDateObj,
-          endDateObj
-        );
-        if (existingRequest) {
-          const existingStartDate = new Date(existingRequest.start_date).toISOString().split('T')[0];
-          const existingEndDate = new Date(existingRequest.end_date).toISOString().split('T')[0];
-          throw new ValidationError(
-            `You already applied for leaves on these dates. Existing leave request (${existingRequest.request_status}) from ${existingStartDate} to ${existingEndDate}`
-          );
-        }
-
-        // 5. Generate leave request GUID
-        const { buffer: leaveRequestGuidBuffer } = await generateSysGuid(connection);
-
-        // 6. Get next LEAVE_REQUEST_ID
-        let leaveRequestId;
-        try {
-          const seqQuery = `SELECT ABS.ABS_LEAVE_REQUESTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-          const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          leaveRequestId = seqResult.rows[0].NEXT_ID;
-        } catch {
-          const maxQuery = `SELECT NVL(MAX(LEAVE_REQUEST_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
-          const maxResult = await connection.execute(maxQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          leaveRequestId = maxResult.rows[0].NEXT_ID;
-        }
-
-        // 7. Determine request status
-        // Handle submit field: if explicitly false (boolean or string 'false'), set to DRAFT, otherwise SUBMITTED
-        const isSubmitFalse = data.submit === false || data.submit === 'false';
-        const requestStatus = isSubmitFalse ? 'DRAFT' : 'SUBMITTED';
-        const submittedAt = requestStatus === 'SUBMITTED' ? now : null;
-
-        // 8. Insert leave request
-        const insertRequestSql = `INSERT INTO ${this.TABLE_NAME} (
-          LEAVE_REQUEST_ID,
-          LEAVE_REQUEST_GUID,
-          TENANT_ID,
-          EMPLOYEE_ID,
-          LEAVE_TYPE_ID,
-          START_DATE,
-          END_DATE,
-          START_TS,
-          END_TS,
-          TOTAL_DAYS,
-          REQUEST_STATUS,
-          SUBMITTED_AT,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16
-        )`;
-
-        await connection.execute(insertRequestSql, [
-          leaveRequestId,
-          leaveRequestGuidBuffer,
-          tenantId,
-          employeeId,
-          leaveTypeId,
-          new Date(data.start_date),
-          new Date(data.end_date),
-          startTs,
-          endTs,
-          totalDays,
-          requestStatus,
-          submittedAt,
-          now,
-          userId || 'SYSTEM',
-          now,
-          userId || 'SYSTEM'
-        ], { autoCommit: false });
-
-        // 9. Insert contact if at least one contact field is provided
-        let contact = null;
-        const hasContactData = data.reason_for_leave || data.address_during_leave || 
-                               data.contact_phone || data.emergency_contact_name || 
-                               data.emergency_contact_phone || data.additional_notes || 
-                               delegatedEmployeeId;
-
-        if (hasContactData) {
-          const { buffer: contactGuidBuffer } = await generateSysGuid(connection);
-          let contactId;
-          try {
-            const seqQuery = `SELECT ABS.ABS_LEAVE_CONTACTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-            const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            contactId = seqResult.rows[0].NEXT_ID;
-          } catch {
-            const maxQuery = `SELECT NVL(MAX(LEAVE_CONTACT_ID), 0) + 1 AS NEXT_ID FROM ABS.ABS_LEAVE_CONTACTS`;
-            const maxResult = await connection.execute(maxQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-            contactId = maxResult.rows[0].NEXT_ID;
-          }
-
-          const insertContactSql = `INSERT INTO ABS.ABS_LEAVE_CONTACTS (
-            LEAVE_CONTACT_ID,
-            LEAVE_CONTACT_GUID,
-            LEAVE_REQUEST_ID,
-            REASON_FOR_LEAVE,
-            DELEGATED_EMPLOYEE_ID,
-            ADDRESS_DURING_LEAVE,
-            CONTACT_PHONE,
-            EMERGENCY_CONTACT_NAME,
-            EMERGENCY_CONTACT_PHONE,
-            ADDITIONAL_NOTES,
-            CREATION_DATE,
-            CREATED_BY,
-            LAST_UPDATE_DATE,
-            LAST_UPDATED_BY
-          ) VALUES (
-            :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14
-          )`;
-
-          await connection.execute(insertContactSql, [
-            contactId,
-            contactGuidBuffer,
-            leaveRequestId,
-            data.reason_for_leave || null,
-            delegatedEmployeeId,
-            data.address_during_leave || null,
-            data.contact_phone || null,
-            data.emergency_contact_name || null,
-            data.emergency_contact_phone || null,
-            data.additional_notes || null,
-            now,
-            userId || 'SYSTEM',
-            now,
-            userId || 'SYSTEM'
-          ], { autoCommit: false });
-
-          // Construct contact response from inserted data instead of SELECT (performance optimization)
-          // Convert GUID buffer to hex string
-          const contactGuidHex = contactGuidBuffer.toString('hex').toUpperCase();
-          contact = {
-            LEAVE_CONTACT_ID: contactId,
-            LEAVE_CONTACT_GUID: contactGuidHex,
-            LEAVE_REQUEST_ID: leaveRequestId,
-            REASON_FOR_LEAVE: data.reason_for_leave || null,
-            DELEGATED_EMPLOYEE_ID: delegatedEmployeeId,
-            ADDRESS_DURING_LEAVE: data.address_during_leave || null,
-            CONTACT_PHONE: data.contact_phone || null,
-            EMERGENCY_CONTACT_NAME: data.emergency_contact_name || null,
-            EMERGENCY_CONTACT_PHONE: data.emergency_contact_phone || null,
-            ADDITIONAL_NOTES: data.additional_notes || null,
-            CREATION_DATE: now,
-            CREATED_BY: userId || 'SYSTEM',
-            LAST_UPDATE_DATE: now,
-            LAST_UPDATED_BY: userId || 'SYSTEM'
-          };
-          contact = this.convertKeysToSnakeCase(contact);
-        }
-
-        // 10. Insert documents (optimized: batch GUID generation, skip unnecessary SELECTs)
-        const documents = [];
-        if (data.documents && Array.isArray(data.documents) && data.documents.length > 0) {
-          // Process documents in parallel for better performance
-          const documentPromises = data.documents
-            .filter(doc => doc.file_name) // Filter out invalid documents first
-            .map(async (doc) => {
-              const { buffer: docGuidBuffer } = await generateSysGuid(connection);
-              let documentId;
-              try {
-                const seqQuery = `SELECT ABS.ABS_LEAVE_DOCUMENTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-                const seqResult = await connection.execute(seqQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-                documentId = seqResult.rows[0].NEXT_ID;
-              } catch {
-                const maxQuery = `SELECT NVL(MAX(DOCUMENT_ID), 0) + 1 AS NEXT_ID FROM ABS.ABS_LEAVE_DOCUMENTS`;
-                const maxResult = await connection.execute(maxQuery, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-                documentId = maxResult.rows[0].NEXT_ID;
-              }
-
-              let fileBuffer = null;
-              let fileHash = null;
-              let fileUrl = null;
-
-              // Support both file_buffer (from multipart) and file_base64 (from JSON)
-              if (doc.file_buffer && Buffer.isBuffer(doc.file_buffer)) {
-                fileBuffer = doc.file_buffer;
-                fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
-              } else if (doc.file_base64) {
-                fileBuffer = Buffer.from(doc.file_base64, 'base64');
-                fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex').toUpperCase();
-              } else if (doc.file_url) {
-                fileUrl = doc.file_url;
-              }
-
-              const fileSizeBytes = fileBuffer ? fileBuffer.length : (doc.file_size_mb ? doc.file_size_mb * 1024 * 1024 : 0);
-              const fileSizeMb = Math.round((fileSizeBytes / (1024 * 1024)) * 100) / 100;
-
-              const insertDocSql = `INSERT INTO ABS.ABS_LEAVE_DOCUMENTS (
-                DOCUMENT_ID,
-                DOCUMENT_GUID,
-                LEAVE_REQUEST_ID,
-                FILE_NAME,
-                FILE_TYPE,
-                FILE_SIZE_MB,
-                FILE_URL,
-                FILE_BLOB,
-                FILE_HASH,
-                CREATION_DATE,
-                CREATED_BY,
-                LAST_UPDATE_DATE,
-                LAST_UPDATED_BY
-              ) VALUES (
-                :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13
-              )`;
-
-              await connection.execute(insertDocSql, [
-                documentId,
-                docGuidBuffer,
-                leaveRequestId,
-                doc.file_name,
-                doc.file_type || 'application/octet-stream',
-                fileSizeMb,
-                fileUrl,
-                fileBuffer,
-                fileHash,
-                now,
-                userId || 'SYSTEM',
-                now,
-                userId || 'SYSTEM'
-              ], { autoCommit: false });
-
-              // Construct response from inserted data instead of SELECT (performance optimization)
-              // We know the GUID from docGuidBuffer, convert it to hex string
-              const docGuidHex = docGuidBuffer.toString('hex').toUpperCase();
-              
-              return {
-                DOCUMENT_ID: documentId,
-                DOCUMENT_GUID: docGuidHex,
-                LEAVE_REQUEST_ID: leaveRequestId,
-                FILE_NAME: doc.file_name,
-                FILE_TYPE: doc.file_type || 'application/octet-stream',
-                FILE_SIZE_MB: fileSizeMb,
-                FILE_URL: fileUrl,
-                FILE_HASH: fileHash,
-                CREATION_DATE: now,
-                CREATED_BY: userId || 'SYSTEM',
-                LAST_UPDATE_DATE: now,
-                LAST_UPDATED_BY: userId || 'SYSTEM'
-              };
-            });
-
-          // Wait for all documents to be inserted
-          const insertedDocs = await Promise.all(documentPromises);
-          documents.push(...insertedDocs.map(doc => this.convertKeysToSnakeCase(doc)));
-        }
-
-        // 11. Construct leave request response from inserted data instead of SELECT (performance optimization)
-        // Convert GUID buffer to hex string
-        const leaveRequestGuidHex = leaveRequestGuidBuffer.toString('hex').toUpperCase();
-        const leaveRequest = {
-          LEAVE_REQUEST_ID: leaveRequestId,
-          LEAVE_REQUEST_GUID: leaveRequestGuidHex,
-          TENANT_ID: tenantId,
-          EMPLOYEE_ID: employeeId,
-          LEAVE_TYPE_ID: leaveTypeId,
-          START_DATE: new Date(data.start_date),
-          END_DATE: new Date(data.end_date),
-          START_TS: startTs,
-          END_TS: endTs,
-          TOTAL_DAYS: totalDays,
-          REQUEST_STATUS: requestStatus,
-          SUBMITTED_AT: submittedAt,
-          APPROVED_AT: null,
-          REJECTED_AT: null,
-          CREATION_DATE: now,
-          CREATED_BY: userId || 'SYSTEM',
-          LAST_UPDATE_DATE: now,
-          LAST_UPDATED_BY: userId || 'SYSTEM'
-        };
-        
-        const leaveRequestConverted = this.convertKeysToSnakeCase(leaveRequest);
-
-        return {
-          leave_request: leaveRequestConverted,
-          contact: contact,
-          documents: documents
-        };
+        return await this._createWithContactAndDocumentsViaPackage(connection, data, tenantId, userId, now);
       });
     } catch (error) {
       if (error instanceof ValidationError) throw error;
@@ -1234,24 +1280,39 @@ class LeaveRequestModel {
   }
 
   /**
-   * Update a leave request by GUID (HEX32)
+   * Update a leave request by GUID (HEX32).
+   * @param {object} [options] — options.preloadedOracleHeaderRow: row from findByGuidForPut._oracleHeaderRow to skip first fetch
    */
-  static async updateByGuid(guidHex32, data, userId) {
+  static async updateByGuid(guidHex32, data, userId, tenantId = null, options = {}) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
       const guidBuffer = hexToRawBuffer(hexGuid);
+      const preloaded = options.preloadedOracleHeaderRow || null;
 
       return await this.executeWithTransaction(async (connection) => {
-        // Current status (for transition timestamps)
-        const currentSelect = `SELECT REQUEST_STATUS, APPROVED_AT, REJECTED_AT
-          FROM ${this.TABLE_NAME}
-          WHERE LEAVE_REQUEST_GUID = :1`;
+        // Overlap check on same connection (avoids extra getConnection/close before update)
+        const oc = options.overlapCheck;
+        if (oc && oc.tenantId != null && oc.employeeId != null && oc.startDate && oc.endDate) {
+          const overlapping = await this.checkOverlappingLeaveRequest(
+            connection,
+            oc.tenantId,
+            oc.employeeId,
+            oc.startDate,
+            oc.endDate,
+            oc.excludeLeaveRequestId
+          );
+          if (overlapping) throw new ValidationError(this._overlapMessage(overlapping));
+        }
 
-        const currentResult = await connection.execute(currentSelect, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        const currentStatus = currentResult.rows?.[0]?.REQUEST_STATUS || null;
+        // First fetch: use preloaded header from PUT fast path, else package/refcursor (slower)
+        let currentRow = preloaded;
+        if (!currentRow) {
+          currentRow = await this._fetchLeaveRequestRowViaPackage(connection, hexGuid);
+        }
+        if (!currentRow && (data.REQUEST_STATUS !== undefined || data.submit !== undefined)) {
+          throw new DatabaseError('Leave request not found');
+        }
+        const currentStatus = currentRow?.REQUEST_STATUS || null;
 
         // Auto timestamps on status transitions
         const now = new Date();
@@ -1304,168 +1365,128 @@ class LeaveRequestModel {
           }
         }
 
-        // Build UPDATE dynamically
-        const updateFields = [];
-        const bindParams = [];
-        let i = 1;
+        // Build bitmask + binds for ABS_LEAVE_REQUESTS_UPDATE_PKG (same columns as before)
+        const M = this._UPDATE_MASK;
+        let mask = 0;
+        let bTenant = null,
+          bEmp = null,
+          bLt = null,
+          bStartDate = null,
+          bEndDate = null,
+          bStartTs = null,
+          bEndTs = null,
+          bTotal = null,
+          bStatus = null,
+          bSubmitted = null,
+          bApproved = null,
+          bRejected = null;
 
         if (data.TENANT_ID !== undefined) {
-          updateFields.push(`TENANT_ID = :${i}`);
-          bindParams.push(data.TENANT_ID !== null ? parseInt(data.TENANT_ID) : null);
-          i++;
+          mask |= M.TENANT_ID;
+          bTenant = data.TENANT_ID !== null ? parseInt(data.TENANT_ID, 10) : null;
         }
         if (data.EMPLOYEE_ID !== undefined) {
-          updateFields.push(`EMPLOYEE_ID = :${i}`);
-          bindParams.push(data.EMPLOYEE_ID !== null ? parseInt(data.EMPLOYEE_ID) : null);
-          i++;
+          mask |= M.EMPLOYEE_ID;
+          bEmp = data.EMPLOYEE_ID !== null ? parseInt(data.EMPLOYEE_ID, 10) : null;
         }
         if (data.LEAVE_TYPE_ID !== undefined) {
-          updateFields.push(`LEAVE_TYPE_ID = :${i}`);
-          bindParams.push(data.LEAVE_TYPE_ID !== null ? parseInt(data.LEAVE_TYPE_ID) : null);
-          i++;
+          mask |= M.LEAVE_TYPE_ID;
+          bLt = data.LEAVE_TYPE_ID !== null ? parseInt(data.LEAVE_TYPE_ID, 10) : null;
         }
         if (data.START_DATE !== undefined) {
-          updateFields.push(`START_DATE = :${i}`);
-          bindParams.push(data.START_DATE || null);
-          i++;
+          mask |= M.START_DATE;
+          bStartDate = data.START_DATE || null;
         }
         if (data.END_DATE !== undefined) {
-          updateFields.push(`END_DATE = :${i}`);
-          bindParams.push(data.END_DATE || null);
-          i++;
+          mask |= M.END_DATE;
+          bEndDate = data.END_DATE || null;
         }
         if (data.START_TS !== undefined) {
-          updateFields.push(`START_TS = :${i}`);
-          bindParams.push(data.START_TS || null);
-          i++;
+          mask |= M.START_TS;
+          bStartTs = data.START_TS || null;
         }
         if (data.END_TS !== undefined) {
-          updateFields.push(`END_TS = :${i}`);
-          bindParams.push(data.END_TS || null);
-          i++;
+          mask |= M.END_TS;
+          bEndTs = data.END_TS || null;
         }
         if (data.TOTAL_DAYS !== undefined) {
-          updateFields.push(`TOTAL_DAYS = :${i}`);
-          bindParams.push(data.TOTAL_DAYS !== null ? parseFloat(data.TOTAL_DAYS) : null);
-          i++;
+          mask |= M.TOTAL_DAYS;
+          bTotal = data.TOTAL_DAYS !== null ? parseFloat(data.TOTAL_DAYS) : null;
         }
         if (data.REQUEST_STATUS !== undefined) {
           let statusValue = data.REQUEST_STATUS ? String(data.REQUEST_STATUS).toUpperCase() : null;
-          // Convert PENDING to SUBMITTED
-          if (statusValue === 'PENDING') {
-            statusValue = 'SUBMITTED';
-          }
-          updateFields.push(`REQUEST_STATUS = :${i}`);
-          bindParams.push(statusValue);
-          i++;
-          
-          // If status is being set to SUBMITTED, also set submitted_at if not provided
+          if (statusValue === 'PENDING') statusValue = 'SUBMITTED';
+          mask |= M.REQUEST_STATUS;
+          bStatus = statusValue;
           if (statusValue === 'SUBMITTED' && data.SUBMITTED_AT === undefined) {
-            const currentSubmittedAt = currentResult.rows?.[0]?.SUBMITTED_AT;
+            const currentSubmittedAt = currentRow?.SUBMITTED_AT;
             if (!currentSubmittedAt) {
-              updateFields.push(`SUBMITTED_AT = :${i}`);
-              bindParams.push(now);
-              i++;
+              mask |= M.SUBMITTED_AT;
+              bSubmitted = now;
             }
           }
         }
         if (data.SUBMITTED_AT !== undefined) {
-          updateFields.push(`SUBMITTED_AT = :${i}`);
-          bindParams.push(data.SUBMITTED_AT || null);
-          i++;
+          mask |= M.SUBMITTED_AT;
+          bSubmitted = data.SUBMITTED_AT || null;
         }
         if (data.APPROVED_AT !== undefined) {
-          updateFields.push(`APPROVED_AT = :${i}`);
-          bindParams.push(data.APPROVED_AT || null);
-          i++;
+          mask |= M.APPROVED_AT;
+          bApproved = data.APPROVED_AT || null;
         }
         if (data.REJECTED_AT !== undefined) {
-          updateFields.push(`REJECTED_AT = :${i}`);
-          bindParams.push(data.REJECTED_AT || null);
-          i++;
+          mask |= M.REJECTED_AT;
+          bRejected = data.REJECTED_AT || null;
         }
 
-        if (updateFields.length === 0) {
-          // Nothing to update => return current row
-          const selectSql = `SELECT 
-            a.LEAVE_REQUEST_ID,
-            RAWTOHEX(a.LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-            a.TENANT_ID,
-            a.EMPLOYEE_ID,
-            a.LEAVE_TYPE_ID,
-            a.START_DATE,
-            a.END_DATE,
-            a.START_TS,
-            a.END_TS,
-            a.TOTAL_DAYS,
-            a.REQUEST_STATUS,
-            a.SUBMITTED_AT,
-            a.APPROVED_AT,
-            a.REJECTED_AT,
-            a.CREATION_DATE,
-            a.CREATED_BY,
-            a.LAST_UPDATE_DATE,
-            a.LAST_UPDATED_BY
-          FROM ${this.TABLE_NAME} a
-          WHERE a.LEAVE_REQUEST_GUID = :1`;
-
-          const selectResult = await connection.execute(selectSql, [guidBuffer], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-
-          if (selectResult.rows?.length) return this.convertKeysToSnakeCase(selectResult.rows[0]);
+        if (mask === 0) {
+          // No UPDATE_PKG call — need full row for response; preloaded may be header-only
+          const row =
+            currentRow && currentRow.LEAVE_REQUEST_GUID !== undefined
+              ? currentRow
+              : await this._selectLeaveRequestRowByGuidBuffer(connection, guidBuffer);
+          if (row) return this.convertKeysToSnakeCase(row);
           throw new DatabaseError('Leave request not found');
         }
 
-        // Audit
-        updateFields.push(`LAST_UPDATED_BY = :${i}`);
-        bindParams.push(userId || 'SYSTEM');
-        i++;
+        await this._ensureLeaveRequestPackageSchema(connection);
+        // Unqualified only (PLS-00225 if ABS.ABS_LEAVE_REQUESTS_UPDATE_PKG). Resolves to ABS via CURRENT_SCHEMA or synonym.
+        const updatePkg = this._pkgNameFromEnv('ABS_LEAVE_REQUESTS_UPDATE_PKG_NAME', 'ABS_LEAVE_REQUESTS_UPDATE_PKG');
+        const updateBinds = {
+          hex: hexGuid,
+          tenantId: tenantId != null ? tenantId : null,
+          userId: userId || 'SYSTEM',
+          mask,
+          b_tenant_id: bTenant,
+          b_employee_id: bEmp,
+          b_leave_type_id: bLt,
+          b_start_date: bStartDate,
+          b_end_date: bEndDate,
+          b_start_ts: bStartTs,
+          b_end_ts: bEndTs,
+          b_total_days: bTotal,
+          b_request_status: bStatus,
+          b_submitted_at: bSubmitted,
+          b_approved_at: bApproved,
+          b_rejected_at: bRejected
+        };
+        try {
+          await connection.execute(
+            `BEGIN ${updatePkg}.UPDATE_BY_GUID(
+              :hex, :tenantId, :userId, :mask,
+              :b_tenant_id, :b_employee_id, :b_leave_type_id, :b_start_date, :b_end_date,
+              :b_start_ts, :b_end_ts, :b_total_days, :b_request_status, :b_submitted_at, :b_approved_at, :b_rejected_at
+            ); END;`,
+            updateBinds,
+            { autoCommit: false }
+          );
+        } catch (e) {
+          this._rethrowLeaveRequestPackageError(e);
+        }
 
-        updateFields.push(`LAST_UPDATE_DATE = :${i}`);
-        bindParams.push(new Date());
-        i++;
-
-        // WHERE
-        bindParams.push(guidBuffer);
-        const updateSql = `UPDATE ${this.TABLE_NAME}
-          SET ${updateFields.join(', ')}
-          WHERE LEAVE_REQUEST_GUID = :${i}`;
-
-        const updateResult = await connection.execute(updateSql, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (updateResult.rowsAffected === 0) throw new DatabaseError('Leave request not found');
-
-        // Return updated row
-        const selectSql = `SELECT 
-          a.LEAVE_REQUEST_ID,
-          RAWTOHEX(a.LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-          a.TENANT_ID,
-          a.EMPLOYEE_ID,
-          a.LEAVE_TYPE_ID,
-          a.START_DATE,
-          a.END_DATE,
-          a.START_TS,
-          a.END_TS,
-          a.TOTAL_DAYS,
-          a.REQUEST_STATUS,
-          a.SUBMITTED_AT,
-          a.APPROVED_AT,
-          a.REJECTED_AT,
-          a.CREATION_DATE,
-          a.CREATED_BY,
-          a.LAST_UPDATE_DATE,
-          a.LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME} a
-        WHERE a.LEAVE_REQUEST_GUID = :1`;
-
-        const selectResult = await connection.execute(selectSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (selectResult.rows?.length) return this.convertKeysToSnakeCase(selectResult.rows[0]);
+        // After UPDATE_PKG: direct SELECT (one round trip, no refcursor) — faster than QUERY_PKG for single row
+        const row = await this._selectLeaveRequestRowByGuidBuffer(connection, guidBuffer);
+        if (row) return this.convertKeysToSnakeCase(row);
         throw new DatabaseError('Failed to retrieve updated leave request');
       });
     } catch (error) {
@@ -1519,107 +1540,38 @@ class LeaveRequestModel {
   static async deleteByGuid(guidHex32, userId) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
-      const guidBuffer = hexToRawBuffer(hexGuid);
-
       return await this.executeWithTransaction(async (connection) => {
-        // First, get the leave request details including status
-        const selectSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          REQUEST_STATUS
-        FROM ${this.TABLE_NAME} 
-        WHERE LEAVE_REQUEST_GUID = :1`;
-        const selectResult = await connection.execute(selectSql, [guidBuffer], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        if (!selectResult.rows || selectResult.rows.length === 0) {
-          throw new DatabaseError('Leave request not found');
-        }
-
-        const leaveRequestId = selectResult.rows[0].LEAVE_REQUEST_ID;
-        const currentStatus = String(selectResult.rows[0].REQUEST_STATUS || '').toUpperCase();
-
-        // Handle based on status
-        if (currentStatus === 'DRAFT') {
-          // DRAFT: Delete completely
-        // Delete all related leave documents first (they have BLOBs)
-        const deleteDocumentsSql = `DELETE FROM ABS.ABS_LEAVE_DOCUMENTS WHERE LEAVE_REQUEST_ID = :1`;
-        await connection.execute(deleteDocumentsSql, [leaveRequestId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        // Delete all related leave contacts
-        const deleteContactsSql = `DELETE FROM ABS.ABS_LEAVE_CONTACTS WHERE LEAVE_REQUEST_ID = :1`;
-        await connection.execute(deleteContactsSql, [leaveRequestId], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        // Finally, delete the leave request
-        const deleteRequestSql = `DELETE FROM ${this.TABLE_NAME} WHERE LEAVE_REQUEST_GUID = :1`;
-        const deleteResult = await connection.execute(deleteRequestSql, [guidBuffer], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-        if (deleteResult.rowsAffected === 0) {
-          throw new DatabaseError('Leave request not found');
-        }
-
-          return { action: 'deleted', leaveRequest: null };
-        } else if (currentStatus === 'SUBMITTED') {
-          // SUBMITTED: Withdraw (change status to WITHDRAWN, don't delete)
-          const now = new Date();
-          const updateSql = `UPDATE ${this.TABLE_NAME}
-            SET REQUEST_STATUS = 'WITHDRAWN',
-                APPROVED_AT = NULL,
-                REJECTED_AT = NULL,
-                LAST_UPDATE_DATE = :1,
-                LAST_UPDATED_BY = :2
-            WHERE LEAVE_REQUEST_GUID = :3`;
-
-          await connection.execute(updateSql, [now, userId || 'SYSTEM', guidBuffer], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-
-          // Fetch the updated leave request
-          const fetchSql = `SELECT 
-            LEAVE_REQUEST_ID,
-            RAWTOHEX(LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-            TENANT_ID,
-            EMPLOYEE_ID,
-            LEAVE_TYPE_ID,
-            START_DATE,
-            END_DATE,
-            START_TS,
-            END_TS,
-            TOTAL_DAYS,
-            REQUEST_STATUS,
-            SUBMITTED_AT,
-            APPROVED_AT,
-            REJECTED_AT,
-            CREATION_DATE,
-            CREATED_BY,
-            LAST_UPDATE_DATE,
-            LAST_UPDATED_BY
-          FROM ${this.TABLE_NAME}
-          WHERE LEAVE_REQUEST_GUID = :1`;
-
-          const fetchResult = await connection.execute(fetchSql, [guidBuffer], { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          
-          if (fetchResult.rows?.length) {
-            return { 
-              action: 'withdrawn', 
-              leaveRequest: this.convertKeysToSnakeCase(fetchResult.rows[0])
-            };
-          }
-          
-          throw new DatabaseError('Failed to retrieve withdrawn leave request');
-        } else {
-          // Other statuses (APPROVED, REJECTED, CANCELLED, WITHDRAWN): Cannot be deleted or withdrawn
-          const statusName = currentStatus || 'UNKNOWN';
-          throw new ValidationError(
-            `Cannot delete or withdraw leave request with status '${statusName}'. Only DRAFT requests can be deleted, and only SUBMITTED requests can be withdrawn.`
+        await this._ensureLeaveRequestPackageSchema(connection);
+        const pkg = this._lifecyclePkgName();
+        const binds = {
+          hex: hexGuid,
+          userId: userId || 'SYSTEM',
+          actionOut: { type: oracledb.STRING, dir: oracledb.BIND_OUT, maxSize: 32 }
+        };
+        let result;
+        try {
+          result = await connection.execute(
+            `BEGIN ${pkg}.DELETE_OR_WITHDRAW_BY_GUID(:hex, :userId, :actionOut); END;`,
+            binds,
+            { autoCommit: false }
           );
+        } catch (e) {
+          this._rethrowLeaveRequestPackageError(e);
         }
+        const out = result.outBinds || {};
+        const act = String((Array.isArray(out.actionOut) ? out.actionOut[0] : out.actionOut) || '').toUpperCase();
+        if (act === 'DELETED') {
+          return { action: 'deleted', leaveRequest: null };
+        }
+        if (act === 'WITHDRAWN') {
+          const rowSnake = await this._rowSnakeAfterMutation(connection, hexGuid);
+          if (rowSnake) return { action: 'withdrawn', leaveRequest: rowSnake };
+          throw new DatabaseError('Failed to retrieve withdrawn leave request');
+        }
+        throw new DatabaseError('Delete/withdraw package returned unexpected action: ' + act);
       });
     } catch (error) {
-      if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
-      if (error?.message?.includes('not found')) throw error;
-      if (error instanceof ValidationError) throw error;
-      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
-        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to delete or withdraw leave request', error);
+      this._rethrowMutationFailure(error, 'Failed to delete or withdraw leave request');
     }
   }
 
@@ -1633,93 +1585,22 @@ class LeaveRequestModel {
   static async submitByGuid(guidHex32, tenantId, userId) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
-      const guidBuffer = hexToRawBuffer(hexGuid);
-
       return await this.executeWithTransaction(async (connection) => {
-        // Check current status
-        const checkSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          REQUEST_STATUS,
-          TENANT_ID
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const checkResult = await connection.execute(checkSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (!checkResult.rows || checkResult.rows.length === 0) {
-          throw new DatabaseError('Leave request not found');
+        try {
+          await this._lifecycleExecute3(connection, 'SUBMIT_BY_GUID', {
+            hex: hexGuid,
+            tenantId,
+            userId: userId || 'SYSTEM'
+          });
+        } catch (e) {
+          this._rethrowLeaveRequestPackageError(e);
         }
-
-        const currentStatus = String(checkResult.rows[0].REQUEST_STATUS || '').toUpperCase();
-        const requestTenantId = checkResult.rows[0].TENANT_ID;
-
-        // Validate tenant
-        if (requestTenantId !== tenantId) {
-          throw new ValidationError('Leave request not found for this tenant');
-        }
-
-        // Validate status
-        if (currentStatus !== 'DRAFT') {
-          throw new ValidationError(
-            `Cannot submit leave request with status '${currentStatus}'. Only DRAFT requests can be submitted.`
-          );
-        }
-
-        // Update status to SUBMITTED
-        const now = new Date();
-        const updateSql = `UPDATE ${this.TABLE_NAME}
-          SET REQUEST_STATUS = 'SUBMITTED',
-              SUBMITTED_AT = :1,
-              LAST_UPDATE_DATE = :2,
-              LAST_UPDATED_BY = :3
-          WHERE LEAVE_REQUEST_GUID = :4`;
-
-        await connection.execute(updateSql, [now, now, userId || 'SYSTEM', guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        // Fetch updated leave request
-        const selectSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          RAWTOHEX(LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-          TENANT_ID,
-          EMPLOYEE_ID,
-          LEAVE_TYPE_ID,
-          START_DATE,
-          END_DATE,
-          START_TS,
-          END_TS,
-          TOTAL_DAYS,
-          REQUEST_STATUS,
-          SUBMITTED_AT,
-          APPROVED_AT,
-          REJECTED_AT,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const selectResult = await connection.execute(selectSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (selectResult.rows?.length) {
-          return this.convertKeysToSnakeCase(selectResult.rows[0]);
-        }
+        const rowSnake = await this._rowSnakeAfterMutation(connection, hexGuid);
+        if (rowSnake) return rowSnake;
         throw new DatabaseError('Failed to retrieve submitted leave request');
       });
     } catch (error) {
-      if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
-      if (error instanceof ValidationError) throw error;
-      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
-        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to submit leave request', error);
+      this._rethrowMutationFailure(error, 'Failed to submit leave request');
     }
   }
 
@@ -1733,405 +1614,31 @@ class LeaveRequestModel {
   static async approveByGuid(guidHex32, tenantId, userId) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
-      const guidBuffer = hexToRawBuffer(hexGuid);
-
       return await this.executeWithTransaction(async (connection) => {
-        // Get leave request details
-        const selectSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          REQUEST_STATUS,
-          TENANT_ID,
-          EMPLOYEE_ID,
-          LEAVE_TYPE_ID,
-          TOTAL_DAYS
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const selectResult = await connection.execute(selectSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (!selectResult.rows || selectResult.rows.length === 0) {
-          throw new DatabaseError('Leave request not found');
-        }
-
-        const leaveRequest = selectResult.rows[0];
-        const currentStatus = String(leaveRequest.REQUEST_STATUS || '').toUpperCase();
-        const requestTenantId = leaveRequest.TENANT_ID;
-        const employeeId = leaveRequest.EMPLOYEE_ID;
-        const leaveTypeId = leaveRequest.LEAVE_TYPE_ID;
-        const totalDays = parseFloat(leaveRequest.TOTAL_DAYS) || 0;
-
-        // Validate tenant
-        if (requestTenantId !== tenantId) {
-          throw new ValidationError('Leave request not found for this tenant');
-        }
-
-        // Validate status
-        if (currentStatus !== 'SUBMITTED') {
-          throw new ValidationError(
-            `Cannot approve leave request with status '${currentStatus}'. Only SUBMITTED requests can be approved.`
+        await this._ensureLeaveRequestPackageSchema(connection);
+        const txnIdOut = { type: oracledb.NUMBER, dir: oracledb.BIND_OUT };
+        let approveResult;
+        try {
+          // Unqualified name only (PLS-00225 if ABS.ABS_LEAVE_REQUESTS_APPROVE_PKG). Resolve via CURRENT_SCHEMA or synonym → ABS.ABS_LEAVE_REQUESTS_APPROVE_PKG
+          const approvePkg = this._pkgNameFromEnv('ABS_LEAVE_REQUESTS_APPROVE_PKG_NAME', 'ABS_LEAVE_REQUESTS_APPROVE_PKG');
+          approveResult = await connection.execute(
+            `BEGIN ${approvePkg}.APPROVE_BY_GUID(:hex, :tenantId, :userId, :txnIdOut); END;`,
+            { hex: hexGuid, tenantId, userId: userId || 'SYSTEM', txnIdOut },
+            { autoCommit: false }
           );
+        } catch (e) {
+          this._rethrowLeaveRequestPackageError(e);
         }
+        const ob = approveResult.outBinds || {};
+        const txnIdRaw = Array.isArray(ob.txnIdOut) ? ob.txnIdOut[0] : ob.txnIdOut;
+        const txnIdNum = txnIdRaw != null && txnIdRaw !== undefined ? Number(txnIdRaw) : null;
+        const transaction =
+          txnIdNum != null && !isNaN(txnIdNum)
+            ? await this._fetchBalanceTxnRow(connection, txnIdNum)
+            : null;
 
-        // Get current balance (active balance only)
-        const balanceSql = `SELECT 
-          RAWTOHEX(EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
-          AVAILABLE_DAYS,
-          TAKEN_DAYS,
-          STATUS
-        FROM ABS.ABS_EMPLOYEE_LEAVE_BALANCES
-        WHERE TENANT_ID = :tenant_id
-          AND EMPLOYEE_ID = :employee_id
-          AND LEAVE_TYPE_ID = :leave_type_id
-          AND NVL(STATUS, 'ACTIVE') = 'ACTIVE'`;
-
-        const balanceResult = await connection.execute(balanceSql, {
-          tenant_id: tenantId,
-          employee_id: employeeId,
-          leave_type_id: leaveTypeId
-        }, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (!balanceResult.rows || balanceResult.rows.length === 0) {
-          throw new ValidationError('Leave balance not found for this employee and leave type');
-        }
-
-        const balance = balanceResult.rows[0];
-        const availableDays = parseFloat(balance.AVAILABLE_DAYS) || 0;
-
-        // Validate available balance
-        if (availableDays < totalDays) {
-          throw new ValidationError(
-            `Insufficient leave balance. Available: ${availableDays} days, Required: ${totalDays} days`
-          );
-        }
-
-        // Insert transaction
-        const { buffer: txnGuidBuffer } = await generateSysGuid(connection);
-        const now = new Date();
-
-        // Insert transaction using same pattern as EmployeeLeaveBalanceModel (named binds)
-        const insertTxnSql = `
-          INSERT INTO ABS.ABS_LEAVE_BALANCE_TXNS (
-            TXN_GUID,
-            TENANT_ID,
-            EMPLOYEE_ID,
-            LEAVE_TYPE_ID,
-            TXN_TYPE,
-            TXN_DATE,
-            AMOUNT_DAYS,
-            REFERENCE_TYPE,
-            REFERENCE_ID,
-            COMMENTS,
-            CREATION_DATE,
-            CREATED_BY,
-            LAST_UPDATE_DATE,
-            LAST_UPDATED_BY
-          ) VALUES (
-            :txn_guid,
-            :tenant_id,
-            :employee_id,
-            :leave_type_id,
-            :txn_type,
-            :txn_date,
-            :amount_days,
-            :reference_type,
-            :reference_id,
-            :comments,
-            :creation_date,
-            :created_by,
-            :last_update_date,
-            :last_updated_by
-          )
-        `;
-
-        let insertResult;
-        try {
-          insertResult = await connection.execute(insertTxnSql, {
-            txn_guid: txnGuidBuffer,
-            tenant_id: tenantId,
-            employee_id: employeeId,
-            leave_type_id: leaveTypeId,
-            txn_type: 'TAKEN', // Must match CHECK constraint: ACCRUAL, TAKEN, ADJUSTMENT, CARRY_FORWARD, FORFEIT, REVERSAL
-            txn_date: now,
-            amount_days: -Math.abs(totalDays), // Negative for leave usage
-            reference_type: 'LEAVE_REQUEST',
-            reference_id: leaveRequest.LEAVE_REQUEST_ID,
-            comments: `Leave request approval - ${totalDays} days`,
-            creation_date: now,
-            created_by: userId || 'SYSTEM',
-            last_update_date: now,
-            last_updated_by: userId || 'SYSTEM'
-          }, { autoCommit: false });
-        } catch (insertError) {
-          // Handle check constraint violation for TXN_TYPE
-          if (insertError.errorNum === 2290 || (insertError.message && insertError.message.includes('ORA-02290'))) {
-            const constraintError = new ValidationError(
-              'Invalid TXN_TYPE. Must be one of ACCRUAL/TAKEN/ADJUSTMENT/CARRY_FORWARD/FORFEIT/REVERSAL'
-            );
-            constraintError.code = 'CHECK_CONSTRAINT_VIOLATION';
-            throw constraintError;
-          }
-          
-          // Handle invalid column identifier - try fallback with DAYS and NOTES columns
-          if (insertError.errorNum === 904 || (insertError.message && insertError.message.includes('ORA-00904'))) {
-            const columnMatch = insertError.message?.match(/ORA-00904:.*"(\w+)"/i);
-            const columnName = columnMatch ? columnMatch[1] : 'unknown';
-            
-            // Try fallback with DAYS and NOTES columns
-            const fallbackSql = `
-              INSERT INTO ABS.ABS_LEAVE_BALANCE_TXNS (
-                TXN_GUID,
-                TENANT_ID,
-                EMPLOYEE_ID,
-                LEAVE_TYPE_ID,
-                TXN_TYPE,
-                TXN_DATE,
-                DAYS,
-                REFERENCE_TYPE,
-                REFERENCE_ID,
-                NOTES,
-                CREATION_DATE,
-                CREATED_BY,
-                LAST_UPDATE_DATE,
-                LAST_UPDATED_BY
-              ) VALUES (
-                :txn_guid,
-                :tenant_id,
-                :employee_id,
-                :leave_type_id,
-                :txn_type,
-                :txn_date,
-                :days,
-                :reference_type,
-                :reference_id,
-                :notes,
-                :creation_date,
-                :created_by,
-                :last_update_date,
-                :last_updated_by
-              )
-            `;
-            try {
-              insertResult = await connection.execute(fallbackSql, {
-                txn_guid: txnGuidBuffer,
-                tenant_id: tenantId,
-                employee_id: employeeId,
-                leave_type_id: leaveTypeId,
-                txn_type: 'TAKEN',
-                txn_date: now,
-                days: -Math.abs(totalDays),
-                reference_type: 'LEAVE_REQUEST',
-                reference_id: leaveRequest.LEAVE_REQUEST_ID,
-                notes: `Leave request approval - ${totalDays} days`,
-                creation_date: now,
-                created_by: userId || 'SYSTEM',
-                last_update_date: now,
-                last_updated_by: userId || 'SYSTEM'
-              }, { autoCommit: false });
-            } catch (fallbackError) {
-              // If fallback also fails, throw error with better message
-              if (fallbackError.errorNum === 2290) {
-                const constraintError = new ValidationError(
-                  'Invalid TXN_TYPE. Must be one of ACCRUAL/TAKEN/ADJUSTMENT/CARRY_FORWARD/FORFEIT/REVERSAL'
-                );
-                constraintError.code = 'CHECK_CONSTRAINT_VIOLATION';
-                throw constraintError;
-              }
-              // If fallback also has column error, throw with column name
-              const fallbackColumnMatch = fallbackError.message?.match(/ORA-00904:.*"(\w+)"/i);
-              const fallbackColumnName = fallbackColumnMatch ? fallbackColumnMatch[1] : columnName;
-              const columnError = new DatabaseError(
-                `Invalid column identifier '${fallbackColumnName}' in transaction INSERT query. Please verify the table schema.`,
-                fallbackError
-              );
-              columnError.code = 'INVALID_COLUMN';
-              throw columnError;
-            }
-          } else {
-            throw insertError;
-          }
-        }
-
-        if (!insertResult.rowsAffected || insertResult.rowsAffected < 1) {
-          throw new DatabaseError('Transaction INSERT affected 0 rows');
-        }
-
-        // Fetch the inserted transaction using TXN_GUID (most reliable method)
-        // This avoids issues with date/time precision and column name variations
-        let fetchTxnSql = `
-          SELECT TXN_ID
-          FROM ABS.ABS_LEAVE_BALANCE_TXNS
-          WHERE TXN_GUID = :txn_guid
-        `;
-
-        let fetchResult;
-        try {
-          fetchResult = await connection.execute(fetchTxnSql, {
-            txn_guid: txnGuidBuffer
-          }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        } catch (fetchError) {
-          // Fallback: Use simpler query with fewer conditions
-          const creationDateMinus2s = new Date(now.getTime() - 2000);
-          const creationDatePlus2s = new Date(now.getTime() + 2000);
-          
-          fetchTxnSql = `
-            SELECT TXN_ID
-            FROM ABS.ABS_LEAVE_BALANCE_TXNS
-            WHERE TENANT_ID = :tenant_id
-              AND EMPLOYEE_ID = :employee_id
-              AND LEAVE_TYPE_ID = :leave_type_id
-              AND TXN_TYPE = :txn_type
-              AND REFERENCE_TYPE = :reference_type
-              AND REFERENCE_ID = :reference_id
-              AND CREATION_DATE >= :creation_date_minus_2s
-              AND CREATION_DATE <= :creation_date_plus_2s
-            ORDER BY TXN_ID DESC
-            FETCH FIRST 1 ROW ONLY
-          `;
-          
-          fetchResult = await connection.execute(fetchTxnSql, {
-            tenant_id: tenantId,
-            employee_id: employeeId,
-            leave_type_id: leaveTypeId,
-            txn_type: 'TAKEN',
-            reference_type: 'LEAVE_REQUEST',
-            reference_id: leaveRequest.LEAVE_REQUEST_ID,
-            creation_date_minus_2s: creationDateMinus2s,
-            creation_date_plus_2s: creationDatePlus2s
-          }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        }
-
-        if (!fetchResult.rows || fetchResult.rows.length === 0) {
-          throw new DatabaseError('Transaction INSERT succeeded but could not fetch TXN_ID. The transaction may have been inserted but the fetch query failed.');
-        }
-
-        const txnId = fetchResult.rows[0].TXN_ID;
-
-        // Fetch full transaction details (handle both AMOUNT_DAYS/DAYS and COMMENTS/NOTES)
-        let selectTxnSql = `
-          SELECT
-            RAWTOHEX(TXN_GUID) AS TXN_GUID,
-            TXN_ID,
-            TENANT_ID,
-            EMPLOYEE_ID,
-            LEAVE_TYPE_ID,
-            TXN_TYPE,
-            TXN_DATE,
-            AMOUNT_DAYS,
-            REFERENCE_TYPE,
-            REFERENCE_ID,
-            COMMENTS,
-            CREATION_DATE,
-            CREATED_BY
-          FROM ABS.ABS_LEAVE_BALANCE_TXNS
-          WHERE TXN_ID = :txn_id
-        `;
-
-        let txnResult;
-        try {
-          txnResult = await connection.execute(selectTxnSql, {
-            txn_id: txnId
-          }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        } catch (selectError) {
-          // If AMOUNT_DAYS or COMMENTS don't exist, try with DAYS and NOTES
-          if (selectError.errorNum === 904 || (selectError.message && selectError.message.includes('ORA-00904'))) {
-            selectTxnSql = `
-              SELECT
-                RAWTOHEX(TXN_GUID) AS TXN_GUID,
-                TXN_ID,
-                TENANT_ID,
-                EMPLOYEE_ID,
-                LEAVE_TYPE_ID,
-                TXN_TYPE,
-                TXN_DATE,
-                DAYS AS AMOUNT_DAYS,
-                REFERENCE_TYPE,
-                REFERENCE_ID,
-                NVL(NOTES, COMMENTS) AS COMMENTS,
-                CREATION_DATE,
-                CREATED_BY
-              FROM ABS.ABS_LEAVE_BALANCE_TXNS
-              WHERE TXN_ID = :txn_id
-            `;
-            txnResult = await connection.execute(selectTxnSql, {
-              txn_id: txnId
-            }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-          } else {
-            throw selectError;
-          }
-        }
-
-        const transaction = txnResult.rows?.[0] ? this.convertKeysToSnakeCase(txnResult.rows[0]) : null;
-
-        // Update balance (using named binds for consistency)
-        const updateBalanceSql = `UPDATE ABS.ABS_EMPLOYEE_LEAVE_BALANCES
-          SET TAKEN_DAYS = NVL(TAKEN_DAYS, 0) + :total_days,
-              AVAILABLE_DAYS = NVL(AVAILABLE_DAYS, 0) - :total_days,
-              LAST_UPDATE_DATE = :last_update_date,
-              LAST_UPDATED_BY = :last_updated_by
-          WHERE TENANT_ID = :tenant_id
-            AND EMPLOYEE_ID = :employee_id
-            AND LEAVE_TYPE_ID = :leave_type_id
-            AND NVL(STATUS, 'ACTIVE') = 'ACTIVE'`;
-
-        await connection.execute(updateBalanceSql, {
-          total_days: totalDays,
-          last_update_date: now,
-          last_updated_by: userId || 'SYSTEM',
-          tenant_id: tenantId,
-          employee_id: employeeId,
-          leave_type_id: leaveTypeId
-        }, { autoCommit: false });
-
-        // Update leave request status
-        const updateRequestSql = `UPDATE ${this.TABLE_NAME}
-          SET REQUEST_STATUS = 'APPROVED',
-              APPROVED_AT = :1,
-              REJECTED_AT = NULL,
-              LAST_UPDATE_DATE = :2,
-              LAST_UPDATED_BY = :3
-          WHERE LEAVE_REQUEST_GUID = :4`;
-
-        await connection.execute(updateRequestSql, [now, now, userId || 'SYSTEM', guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        // Fetch updated leave request
-        const fetchRequestSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          RAWTOHEX(LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-          TENANT_ID,
-          EMPLOYEE_ID,
-          LEAVE_TYPE_ID,
-          START_DATE,
-          END_DATE,
-          START_TS,
-          END_TS,
-          TOTAL_DAYS,
-          REQUEST_STATUS,
-          SUBMITTED_AT,
-          APPROVED_AT,
-          REJECTED_AT,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const fetchRequestResult = await connection.execute(fetchRequestSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (fetchRequestResult.rows?.length) {
-          return {
-            leaveRequest: this.convertKeysToSnakeCase(fetchRequestResult.rows[0]),
-            transaction: transaction
-          };
-        }
+        const rowSnake = await this._rowSnakeAfterMutation(connection, hexGuid);
+        if (rowSnake) return { leaveRequest: rowSnake, transaction };
         throw new DatabaseError('Failed to retrieve approved leave request');
       });
     } catch (error) {
@@ -2182,108 +1689,22 @@ class LeaveRequestModel {
   static async rejectByGuid(guidHex32, tenantId, userId, rejectionData = {}) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
-      const guidBuffer = hexToRawBuffer(hexGuid);
-
       return await this.executeWithTransaction(async (connection) => {
-        // Check current status
-        const checkSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          REQUEST_STATUS,
-          TENANT_ID
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const checkResult = await connection.execute(checkSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (!checkResult.rows || checkResult.rows.length === 0) {
-          throw new DatabaseError('Leave request not found');
+        try {
+          await this._lifecycleExecute3(connection, 'REJECT_BY_GUID', {
+            hex: hexGuid,
+            tenantId,
+            userId: userId || 'SYSTEM'
+          });
+        } catch (e) {
+          this._rethrowLeaveRequestPackageError(e);
         }
-
-        const currentStatus = String(checkResult.rows[0].REQUEST_STATUS || '').toUpperCase();
-        const requestTenantId = checkResult.rows[0].TENANT_ID;
-
-        // Validate tenant
-        if (requestTenantId !== tenantId) {
-          throw new ValidationError('Leave request not found for this tenant');
-        }
-
-        // Validate status
-        if (currentStatus !== 'SUBMITTED') {
-          throw new ValidationError(
-            `Cannot reject leave request with status '${currentStatus}'. Only SUBMITTED requests can be rejected.`
-          );
-        }
-
-        // Update status to REJECTED
-        const now = new Date();
-        
-        // Check if REJECTION_REASON column exists (optional, handle gracefully)
-        let updateSql = `UPDATE ${this.TABLE_NAME}
-          SET REQUEST_STATUS = 'REJECTED',
-              REJECTED_AT = :1,
-              APPROVED_AT = NULL,
-              LAST_UPDATE_DATE = :2,
-              LAST_UPDATED_BY = :3`;
-
-        const updateParams = [now, now, userId || 'SYSTEM'];
-
-        // Try to add rejection reason if column exists and data provided
-        if (rejectionData.reason || rejectionData.comments) {
-          // Note: We'll try to update REJECTION_REASON if it exists, but won't fail if it doesn't
-          // This requires checking column existence or using a try-catch, but for simplicity,
-          // we'll just update the main fields and ignore rejection_reason if column doesn't exist
-          // The application can store rejection reason in comments or a separate table if needed
-        }
-
-        updateSql += ` WHERE LEAVE_REQUEST_GUID = :4`;
-        updateParams.push(guidBuffer);
-
-        await connection.execute(updateSql, updateParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        // Fetch updated leave request
-        const selectSql = `SELECT 
-          LEAVE_REQUEST_ID,
-          RAWTOHEX(LEAVE_REQUEST_GUID) AS LEAVE_REQUEST_GUID,
-          TENANT_ID,
-          EMPLOYEE_ID,
-          LEAVE_TYPE_ID,
-          START_DATE,
-          END_DATE,
-          START_TS,
-          END_TS,
-          TOTAL_DAYS,
-          REQUEST_STATUS,
-          SUBMITTED_AT,
-          APPROVED_AT,
-          REJECTED_AT,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME}
-        WHERE LEAVE_REQUEST_GUID = :1`;
-
-        const selectResult = await connection.execute(selectSql, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (selectResult.rows?.length) {
-          return this.convertKeysToSnakeCase(selectResult.rows[0]);
-        }
+        const rowSnake = await this._rowSnakeAfterMutation(connection, hexGuid);
+        if (rowSnake) return rowSnake;
         throw new DatabaseError('Failed to retrieve rejected leave request');
       });
     } catch (error) {
-      if (error?.message?.includes('must be a 32-character hex GUID')) throw error;
-      if (error instanceof ValidationError) throw error;
-      if (error?.errorNum !== undefined || error?.message?.includes('ORA-')) {
-        throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to reject leave request', error);
+      this._rethrowMutationFailure(error, 'Failed to reject leave request');
     }
   }
 }
