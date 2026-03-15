@@ -208,14 +208,15 @@ class LeaveTypeModel {
   /**
    * Get a single leave type by GUID
    * @param {string} guidHex32 - Leave Type GUID (32-hex string)
+   * @param {number} [tenantId] - Optional tenant ID to scope the lookup
    * @returns {Promise<Object|null>} Leave type object or null
    */
-  static async findByGuid(guidHex32) {
+  static async findByGuid(guidHex32, tenantId) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
       const guidBuffer = hexToRawBuffer(hexGuid);
 
-      const query = `SELECT 
+      let query = `SELECT 
         a.LEAVE_TYPE_ID,
         RAWTOHEX(a.LEAVE_TYPE_GUID) AS LEAVE_TYPE_GUID,
         a.TENANT_ID,
@@ -234,8 +235,14 @@ class LeaveTypeModel {
         a.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} a
       WHERE a.LEAVE_TYPE_GUID = :1`;
+      const bindParams = [guidBuffer];
 
-      const result = await this.executeQuery(query, [guidBuffer]);
+      if (tenantId != null) {
+        query += ` AND a.TENANT_ID = :2`;
+        bindParams.push(tenantId);
+      }
+
+      const result = await this.executeQuery(query, bindParams);
       
       if (result.rows && result.rows.length > 0) {
         return result.rows[0];

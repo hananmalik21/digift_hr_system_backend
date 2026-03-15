@@ -205,16 +205,24 @@ class LeaveTypeAccrualModel {
 
   /**
    * Get one by GUID
+   * @param {string} guidHex32 - Leave type accrual GUID (32-hex)
+   * @param {number} [tenantId] - Optional tenant ID to scope the lookup
    */
-  static async findByGuid(guidHex32) {
+  static async findByGuid(guidHex32, tenantId) {
     try {
       const hexGuid = ensureHex32(guidHex32, 'guid');
       const guidBuffer = hexToRawBuffer(hexGuid);
 
-      const sql = `${this.baseSelectSql()}
+      let sql = `${this.baseSelectSql()}
         WHERE a.LEAVE_TYPE_ACCRUAL_GUID = :1`;
+      const binds = [guidBuffer];
 
-      const res = await this.executeQuery(sql, [guidBuffer]);
+      if (tenantId != null) {
+        sql += ` AND a.TENANT_ID = :2`;
+        binds.push(this.toInt(tenantId, 'TENANT_ID'));
+      }
+
+      const res = await this.executeQuery(sql, binds);
       return res?.rows?.[0] ?? null;
     } catch (error) {
       if (error.message?.includes('must be a 32-character hex GUID')) {

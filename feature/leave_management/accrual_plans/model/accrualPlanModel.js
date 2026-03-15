@@ -144,7 +144,8 @@ class AccrualPlanModel {
 
   /**
    * Get all accrual plans with optional filters and pagination
-   * @param {Object} filters - Optional filters (status, search, pagination)
+   * @param {Object} filters - Optional filters (tenantId, status, search, pagination)
+   * @param {number} filters.tenantId - Required tenant ID to scope results
    * @param {Object} filters.pagination - Pagination options {page, pageSize}
    * @returns {Promise<Object>} Object with {accrualPlans, total} if paginated
    */
@@ -176,6 +177,13 @@ class AccrualPlanModel {
       const conditions = [];
       const bindParams = [];
       let paramIndex = 1;
+
+      // Required: filter by tenant
+      if (filters.tenantId != null) {
+        conditions.push(`a.TENANT_ID = :${paramIndex}`);
+        bindParams.push(filters.tenantId);
+        paramIndex++;
+      }
 
       // Filter by STATUS
       if (filters.status) {

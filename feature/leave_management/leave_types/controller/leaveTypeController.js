@@ -12,6 +12,10 @@ import {
   sendConflict
 } from '../view/leaveTypeView.js';
 import { parseGuid } from '../../../../utils/guidUtils.js';
+import { getTenantId } from '../../../../utils/tenantUtils.js';
+import { getUserId } from '../../../../utils/requestUtils.js';
+import { parsePagination, buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 
 const router = express.Router();
 
@@ -21,52 +25,12 @@ router.use((req, res, next) => {
   next();
 });
 
-/**
- * Extract user ID from request
- */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
-
-/**
- * Parse and validate pagination parameters
- */
-function parsePagination(query) {
-  let page = 1;
-  let pageSize = 10;
-
-  if (query.page !== undefined) {
-    const parsedPage = parseInt(query.page);
-    if (isNaN(parsedPage) || parsedPage < 1) {
-      throw new Error('Invalid page number. Must be a positive integer.');
-    }
-    page = parsedPage;
+/** Return 400 for tenant validation errors from shared utils */
+function handleTenantError(res, req, error) {
+  if (error instanceof ValidationError) {
+    return sendBadRequest(res, req, error.message);
   }
-
-  if (query.page_size !== undefined) {
-    const parsedPageSize = parseInt(query.page_size);
-    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-      throw new Error('Invalid page_size. Must be a positive integer.');
-    }
-    pageSize = Math.min(100, parsedPageSize);
-  }
-
-  return { page, pageSize };
-}
-
-/**
- * Build pagination metadata
- */
-function buildPaginationMeta(page, pageSize, totalCount) {
-  const totalPages = Math.ceil(totalCount / pageSize);
-  return {
-    page,
-    pageSize,
-    total: totalCount,
-    totalPages,
-    hasNext: page < totalPages,
-    hasPrevious: page > 1
-  };
+  throw error;
 }
 
 /**
@@ -172,7 +136,7 @@ function validateLeaveTypeData(data, isUpdate = false) {
 /**
  * @route   GET /api/abs/leave-types
  * @desc    Get all leave types with optional filtering and pagination
- * @query   tenant_id - Filter by TENANT_ID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  * @query   status - Filter by STATUS (ACTIVE, INACTIVE)
  * @query   search - Search by LEAVE_CODE, LEAVE_NAME_EN, or LEAVE_NAME_AR (case-insensitive)
  * @query   page - Page number (default: 1)
@@ -180,16 +144,14 @@ function validateLeaveTypeData(data, isUpdate = false) {
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
-
-    // Filter by TENANT_ID
-    if (req.query.tenant_id !== undefined) {
-      const tenantId = parseInt(req.query.tenant_id);
-      if (isNaN(tenantId) || tenantId < 1) {
-        return sendBadRequest(res, req, 'TENANT_ID must be a valid positive number');
-      }
-      filters.tenantId = tenantId;
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
     }
+
+    const filters = { tenantId };
 
     // Filter by STATUS
     if (req.query.status) {
@@ -230,9 +192,17 @@ router.get('/', async (req, res) => {
 /**
  * @route   GET /api/abs/leave-types/:guid
  * @desc    Get a single leave type by GUID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  */
 router.get('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     let guidHex32;
     try {
       guidHex32 = parseGuid(req.params.guid, 'guid');
@@ -240,7 +210,7 @@ router.get('/:guid', async (req, res) => {
       return sendBadRequest(res, req, parseError.message);
     }
 
-    const leaveType = await LeaveTypeModel.findByGuid(guidHex32);
+    const leaveType = await LeaveTypeModel.findByGuid(guidHex32, tenantId);
     
     if (!leaveType) {
       return sendNotFound(res, req, 'Leave type not found');
@@ -258,10 +228,18 @@ router.get('/:guid', async (req, res) => {
 /**
  * @route   POST /api/abs/leave-types
  * @desc    Create a new leave type
+ * @query   tenant_id - Optional if provided in body. Tenant (enterprise) ID.
  * @body    { LEAVE_CODE, LEAVE_NAME_EN, LEAVE_NAME_AR?, TENANT_ID?, DESCRIPTION_EN?, DESCRIPTION_AR?, IS_PAID?, REQUIRES_DOCUMENTS?, MAX_DAYS_PER_YEAR?, STATUS? }
  */
 router.post('/', async (req, res) => {
   try {
+    let tenantIdFromContext;
+    try {
+      tenantIdFromContext = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     // Normalize request body keys (lowercase to uppercase)
     const normalizedBody = normalizeRequestBody(req.body);
 
@@ -271,9 +249,9 @@ router.post('/', async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
 
-    // Normalize data values
+    // Normalize data values (tenant_id from query/body/header takes precedence; fallback to context)
     const normalizedData = {
-      TENANT_ID: normalizedBody.TENANT_ID !== undefined ? normalizedBody.TENANT_ID : null,
+      TENANT_ID: normalizedBody.TENANT_ID !== undefined ? normalizedBody.TENANT_ID : tenantIdFromContext,
       LEAVE_CODE: normalizedBody.LEAVE_CODE?.toString().trim(),
       LEAVE_NAME_EN: normalizedBody.LEAVE_NAME_EN?.toString().trim(),
       LEAVE_NAME_AR: normalizedBody.LEAVE_NAME_AR !== undefined ? (normalizedBody.LEAVE_NAME_AR ? normalizedBody.LEAVE_NAME_AR.toString().trim() : null) : null,
@@ -303,10 +281,18 @@ router.post('/', async (req, res) => {
 /**
  * @route   PUT /api/abs/leave-types/:guid
  * @desc    Update a leave type by GUID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  * @body    { LEAVE_CODE?, LEAVE_NAME_EN?, LEAVE_NAME_AR?, TENANT_ID?, DESCRIPTION_EN?, DESCRIPTION_AR?, IS_PAID?, REQUIRES_DOCUMENTS?, MAX_DAYS_PER_YEAR?, STATUS? }
  */
 router.put('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     let guidHex32;
     try {
       guidHex32 = parseGuid(req.params.guid, 'guid');
@@ -314,8 +300,8 @@ router.put('/:guid', async (req, res) => {
       return sendBadRequest(res, req, parseError.message);
     }
 
-    // Check if leave type exists
-    const existingLeaveType = await LeaveTypeModel.findByGuid(guidHex32);
+    // Check if leave type exists and belongs to tenant
+    const existingLeaveType = await LeaveTypeModel.findByGuid(guidHex32, tenantId);
     if (!existingLeaveType) {
       return sendNotFound(res, req, 'Leave type not found');
     }
@@ -386,9 +372,17 @@ router.put('/:guid', async (req, res) => {
 /**
  * @route   DELETE /api/abs/leave-types/:guid
  * @desc    Delete a leave type by GUID (hard delete)
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  */
 router.delete('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     let guidHex32;
     try {
       guidHex32 = parseGuid(req.params.guid, 'guid');
@@ -396,8 +390,8 @@ router.delete('/:guid', async (req, res) => {
       return sendBadRequest(res, req, parseError.message);
     }
 
-    // Check if leave type exists
-    const existingLeaveType = await LeaveTypeModel.findByGuid(guidHex32);
+    // Check if leave type exists and belongs to tenant
+    const existingLeaveType = await LeaveTypeModel.findByGuid(guidHex32, tenantId);
     if (!existingLeaveType) {
       return sendNotFound(res, req, 'Leave type not found');
     }

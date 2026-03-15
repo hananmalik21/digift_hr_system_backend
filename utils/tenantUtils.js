@@ -5,25 +5,30 @@
 import { ValidationError } from './errors/index.js';
 
 /**
- * Get tenant_id from request (body or query).
+ * Get tenant_id from request (query, body, header, or user context).
  * Use for GET list, GET single, PUT, PATCH, DELETE where tenant is required for filtering.
  *
  * @param {object} req - Express request
- * @param {object} [options] - Optional: { fromBodyOnly: true } to only read from body
+ * @param {object} [options] - Optional: { fromBodyOnly: true } to only read from body; { fromQueryAndBodyOnly: true } to skip header/user
  * @returns {number} Valid tenant ID (positive integer)
  * @throws {ValidationError} When tenant_id is missing or invalid
  */
 export function getTenantId(req, options = {}) {
   const fromBodyOnly = options.fromBodyOnly === true;
+  const fromQueryAndBodyOnly = options.fromQueryAndBodyOnly === true;
   let raw;
 
   if (fromBodyOnly) {
     raw = req.body?.tenant_id ?? req.body?.TENANT_ID;
   } else {
-    raw = req.body?.tenant_id ?? req.body?.TENANT_ID ?? req.query?.tenant_id;
+    raw =
+      req.query?.tenant_id ??
+      req.body?.tenant_id ??
+      req.body?.TENANT_ID ??
+      (fromQueryAndBodyOnly ? undefined : req.headers?.['x-enterprise-id'] ?? req.user?.enterprise_id);
   }
 
-  return parseTenantId(raw, 'tenant_id is required (pass in query or request body)');
+  return parseTenantId(raw, 'tenant_id is required (pass in query params or request body)');
 }
 
 /**

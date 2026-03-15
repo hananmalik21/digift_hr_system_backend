@@ -12,6 +12,9 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/leaveTypeAccrualView.js';
+import { getTenantId } from '../../../../utils/tenantUtils.js';
+import { getUserId } from '../../../../utils/requestUtils.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 
 const router = express.Router();
 
@@ -21,11 +24,12 @@ router.use((req, res, next) => {
   next();
 });
 
-/**
- * Extract user ID from request
- */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+/** Return 400 for tenant validation errors from shared utils */
+function handleTenantError(res, req, error) {
+  if (error instanceof ValidationError) {
+    return sendBadRequest(res, req, error.message);
+  }
+  throw error;
 }
 
 /**
@@ -193,25 +197,29 @@ function validateMappingData(data, isUpdate = false) {
 /**
  * @route   GET /api/abs/leave-type-accrual
  * @desc    Get all leave type accrual mappings with optional filtering and pagination
- * @query   TENANT_ID - Filter by TENANT_ID
- * @query   LEAVE_TYPE_ID - Filter by LEAVE_TYPE_ID
- * @query   ACCRUAL_PLAN_ID - Filter by ACCRUAL_PLAN_ID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
+ * @query   leave_type_id - Optional filter by LEAVE_TYPE_ID
+ * @query   accrual_plan_id - Optional filter by ACCRUAL_PLAN_ID
  * @query   limit - Page size (default: 10, max: 100)
  * @query   offset - Number of records to skip (default: 0)
  */
 router.get('/', async (req, res) => {
   try {
-    const filters = {};
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
 
-    // Parse filters
-    if (req.query.TENANT_ID !== undefined) {
-      filters.TENANT_ID = req.query.TENANT_ID;
+    const filters = { TENANT_ID: tenantId };
+
+    // Optional filters (support both snake_case and uppercase for backward compatibility)
+    if (req.query.leave_type_id !== undefined || req.query.LEAVE_TYPE_ID !== undefined) {
+      filters.LEAVE_TYPE_ID = req.query.leave_type_id ?? req.query.LEAVE_TYPE_ID;
     }
-    if (req.query.LEAVE_TYPE_ID !== undefined) {
-      filters.LEAVE_TYPE_ID = req.query.LEAVE_TYPE_ID;
-    }
-    if (req.query.ACCRUAL_PLAN_ID !== undefined) {
-      filters.ACCRUAL_PLAN_ID = req.query.ACCRUAL_PLAN_ID;
+    if (req.query.accrual_plan_id !== undefined || req.query.ACCRUAL_PLAN_ID !== undefined) {
+      filters.ACCRUAL_PLAN_ID = req.query.accrual_plan_id ?? req.query.ACCRUAL_PLAN_ID;
     }
 
     // Parse pagination (using limit/offset)
@@ -241,11 +249,19 @@ router.get('/', async (req, res) => {
 /**
  * @route   GET /api/abs/leave-type-accrual/:guid
  * @desc    Get a single leave type accrual mapping by GUID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  */
 router.get('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     const guid = parseGuid(req.params.guid, 'guid');
-    const mapping = await LeaveTypeAccrualModel.findByGuid(guid);
+    const mapping = await LeaveTypeAccrualModel.findByGuid(guid, tenantId);
     if (!mapping) {
       return sendNotFound(res, req, 'Leave type accrual mapping not found');
     }
@@ -262,12 +278,25 @@ router.get('/:guid', async (req, res) => {
 /**
  * @route   POST /api/abs/leave-type-accrual
  * @desc    Create a new leave type accrual mapping
- * @body    { TENANT_ID, LEAVE_TYPE_ID, ACCRUAL_PLAN_ID, EFFECTIVE_START_DATE, EFFECTIVE_END_DATE? }
+ * @query   tenant_id - Optional if provided in body. Tenant (enterprise) ID.
+ * @body    { TENANT_ID?, LEAVE_TYPE_ID, ACCRUAL_PLAN_ID, EFFECTIVE_START_DATE, EFFECTIVE_END_DATE? }
  */
 router.post('/', async (req, res) => {
   try {
+    let tenantIdFromContext;
+    try {
+      tenantIdFromContext = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     // Normalize request body keys (lowercase to uppercase)
     const normalizedBody = normalizeRequestBody(req.body);
+
+    // Ensure TENANT_ID is set from body or context
+    if (normalizedBody.TENANT_ID === undefined || normalizedBody.TENANT_ID === null || normalizedBody.TENANT_ID === '') {
+      normalizedBody.TENANT_ID = tenantIdFromContext;
+    }
 
     // Validate required fields
     const errors = validateMappingData(normalizedBody, false);
@@ -316,11 +345,25 @@ router.post('/', async (req, res) => {
 /**
  * @route   PUT /api/abs/leave-type-accrual/:guid
  * @desc    Update a leave type accrual mapping by GUID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  * @body    { TENANT_ID?, LEAVE_TYPE_ID?, ACCRUAL_PLAN_ID?, EFFECTIVE_START_DATE?, EFFECTIVE_END_DATE? }
  */
 router.put('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     const guid = parseGuid(req.params.guid, 'guid');
+
+    // Ensure mapping exists and belongs to tenant before update
+    const existing = await LeaveTypeAccrualModel.findByGuid(guid, tenantId);
+    if (!existing) {
+      return sendNotFound(res, req, 'Leave type accrual mapping not found');
+    }
 
     // Normalize request body keys (lowercase to uppercase)
     const normalizedBody = normalizeRequestBody(req.body);
@@ -381,10 +424,25 @@ router.put('/:guid', async (req, res) => {
 /**
  * @route   DELETE /api/abs/leave-type-accrual/:guid
  * @desc    Delete a leave type accrual mapping by GUID
+ * @query   tenant_id - Required. Tenant (enterprise) ID to scope results
  */
 router.delete('/:guid', async (req, res) => {
   try {
+    let tenantId;
+    try {
+      tenantId = getTenantId(req);
+    } catch (err) {
+      return handleTenantError(res, req, err);
+    }
+
     const guid = parseGuid(req.params.guid, 'guid');
+
+    // Ensure mapping exists and belongs to tenant before delete
+    const existing = await LeaveTypeAccrualModel.findByGuid(guid, tenantId);
+    if (!existing) {
+      return sendNotFound(res, req, 'Leave type accrual mapping not found');
+    }
+
     const deleted = await LeaveTypeAccrualModel.deleteByGuid(guid);
     
     if (!deleted) {

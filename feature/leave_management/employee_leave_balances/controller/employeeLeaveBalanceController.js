@@ -17,6 +17,8 @@ import {
 } from '../view/employeeLeaveBalanceView.js';
 import { ensureHex32 } from '../../../../utils/guidUtils.js';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
+import { getTenantId } from '../../../../utils/tenantUtils.js';
+import { getUserId } from '../../../../utils/requestUtils.js';
 
 const router = express.Router();
 
@@ -26,7 +28,7 @@ router.use((req, res, next) => {
   next();
 });
 
-// Middleware: parse enterprise ID (x-enterprise-id header, user context, or params) and optional x-user-id
+// Middleware: parse enterprise ID (query, body, x-enterprise-id, or user context) and optional x-user-id
 router.use((req, res, next) => {
   try {
     req.tenantId = getTenantId(req);
@@ -39,38 +41,6 @@ router.use((req, res, next) => {
     next(e);
   }
 });
-
-/**
- * Extract tenant_id (enterprise ID) from: params first, then header, then user context.
- * Use tenant_id in query or body for API requests.
- * @param {Object} req - Express request object
- * @returns {number} Tenant ID (enterprise ID)
- * @throws {ValidationError} If tenant_id is missing or invalid
- */
-function getTenantId(req) {
-  const raw =
-    req.query.tenant_id ??
-    req.body?.tenant_id ??
-    req.headers['x-enterprise-id'] ??
-    req.user?.enterprise_id;
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    throw new ValidationError('tenant_id is required (pass in query params or request body)');
-  }
-  const tenantId = parseInt(raw, 10);
-  if (!Number.isFinite(tenantId) || tenantId < 1) {
-    throw new ValidationError('tenant_id must be a valid positive number');
-  }
-  return tenantId;
-}
-
-/**
- * Extract user ID from request (optional)
- * Note: x-user-id represents the acting user (admin/hr/system), NOT the employee_guid.
- * employee_guid belongs only in path/body parameters and resolves to employee_id.
- */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 /**
  * Extract user ID from request (required)
