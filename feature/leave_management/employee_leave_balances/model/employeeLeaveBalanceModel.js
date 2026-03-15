@@ -21,6 +21,8 @@ class EmployeeLeaveBalanceModel {
   static V_LEAVE_BALANCE_TXNS_EMP = 'ABS.V_LEAVE_BALANCE_TXNS_EMP';
   /** Read-only view: employee leave balances (GET /api/abs/leave-balances paginated list) */
   static VW_EMPLOYEE_LEAVE_BALANCES = 'ABS.VW_EMPLOYEE_LEAVE_BALANCES';
+  /** Read-only view: employee leave balance per leave type (for ESS/MSS/mobile/HR dashboards) */
+  static ABS_EMPLOYEE_LEAVE_BAL_V = 'ABS.ABS_EMPLOYEE_LEAVE_BAL_V';
 
   /* ------------------------------------------------------------------ */
   /* Helpers                                                            */
@@ -3403,6 +3405,39 @@ END;`;
   }
 
   /**
+   * Read employee leave balances from ABS.ABS_EMPLOYEE_LEAVE_BAL_V (read-only view).
+   * Returns one row per leave type for the given tenant and employee.
+   * @param {number} tenantId - Tenant ID (required)
+   * @param {string} employeeGuid - Employee GUID, 32-char hex (required)
+   * @returns {Promise<Array>} Rows (snake_case); leave_type_obj parsed if JSON string
+   */
+  static async getEmployeeLeaveBalancesFromView(tenantId, employeeGuid) {
+    const tid = tenantId != null ? parseInt(tenantId, 10) : NaN;
+    if (!Number.isFinite(tid) || tid < 1) {
+      throw new ValidationError('tenant_id is required and must be a valid positive number');
+    }
+    let guidHex;
+    try {
+      guidHex = ensureHex32(employeeGuid, 'employee_guid');
+    } catch (e) {
+      if (e instanceof ValidationError) throw e;
+      throw new ValidationError('employee_guid must be a valid 32-character hex string');
+    }
+
+    const sql = `SELECT * FROM ${this.ABS_EMPLOYEE_LEAVE_BAL_V}
+      WHERE TENANT_ID = :1 AND RAWTOHEX(EMPLOYEE_GUID) = :2`;
+    const binds = [tid, guidHex];
+
+    try {
+      const result = await this.executeQuery(sql, binds);
+      const rows = result.rows || [];
+      return rows.map((row) => this._parseLeaveTypeObjInRow(row));
+    } catch (err) {
+      throw this._wrapDb(err, 'Failed to fetch employee leave balances from view');
+    }
+  }
+
+  /**
    * Paginated leave balances from ABS.VW_EMPLOYEE_LEAVE_BALANCES (SELECT v.*).
    * Schema-aligned with ABS.ABS_EMP_LEAVE_BALANCES-style row: ENTERPRISE_ID, EMPLOYEE_ID,
    * EMPLOYEE_NUMBER, EMPLOYEE_NAME, SEARCH_NAME, SEARCH_EMP_NUMBER, ANNUAL_LEAVE, SICK_LEAVE,
@@ -3487,6 +3522,24 @@ END;`;
     if (val == null) return null;
     const s = String(val).trim();
     return s === '' ? null : s;
+  }
+
+  /**
+   * Parse leave_type_obj from a view row if it is a JSON string (e.g. Oracle JSON column).
+   * Returns row as-is when leave_type_obj is already object/null to avoid extra allocation.
+   * @param {Object} row - Row object (may have leave_type_obj as string or object)
+   * @returns {Object} Row with leave_type_obj as object or null
+   */
+  static _parseLeaveTypeObjInRow(row) {
+    if (!row || typeof row !== 'object') return row;
+    if (typeof row.leave_type_obj !== 'string') return row;
+    const r = { ...row };
+    try {
+      r.leave_type_obj = JSON.parse(row.leave_type_obj);
+    } catch {
+      r.leave_type_obj = null;
+    }
+    return r;
   }
 
   /**

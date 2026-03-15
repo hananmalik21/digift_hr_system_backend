@@ -7,6 +7,7 @@ import {
   sendLeaveBalanceSummaryPaginated,
   sendLeaveBalance,
   sendLeaveBalanceTransactionsList,
+  sendEmployeeLeaveBalancesFromView,
   sendCreated,
   sendOk,
   sendBadRequest,
@@ -65,6 +66,57 @@ async function getBalanceTransactionsSafe(tenantId, employeeId, leaveTypeId, lim
   } catch {
     return [];
   }
+}
+
+/** Cache duration in seconds for GET /employee-leave-balances (in-memory + Cache-Control header). */
+const EMPLOYEE_LEAVE_BALANCES_CACHE_MAX_AGE_SEC = 60;
+
+/** In-memory cache: key -> { data, expires }. Lazy cleanup on get. */
+const employeeLeaveBalancesCache = new Map();
+
+/**
+ * Get cached employee leave balances or null if miss/expired.
+ * @param {string} key - Cache key (tenantId:employeeGuid)
+ * @returns {Array|null} Cached rows or null
+ */
+function getCachedEmployeeLeaveBalances(key) {
+  const entry = employeeLeaveBalancesCache.get(key);
+  if (!entry || Date.now() > entry.expires) {
+    if (entry) employeeLeaveBalancesCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+/**
+ * Set cached employee leave balances.
+ * @param {string} key - Cache key
+ * @param {Array} data - Rows to cache
+ */
+function setCachedEmployeeLeaveBalances(key, data) {
+  employeeLeaveBalancesCache.set(key, {
+    data,
+    expires: Date.now() + EMPLOYEE_LEAVE_BALANCES_CACHE_MAX_AGE_SEC * 1000
+  });
+}
+
+/**
+ * Validate and return tenant_id + employee_guid for GET /employee-leave-balances.
+ * @param {Object} req - Express request (query.tenant_id, query.employee_guid; req.tenantId from middleware)
+ * @returns {{ tenantId: string|number, employeeGuid: string }}
+ * @throws {ValidationError}
+ */
+function validateEmployeeLeaveBalancesQuery(req) {
+  const tenantId = req.query.tenant_id ?? req.tenantId;
+  const rawGuid = req.query.employee_guid;
+  if (tenantId === undefined || tenantId === null || String(tenantId).trim() === '') {
+    throw new ValidationError('tenant_id is required');
+  }
+  if (rawGuid === undefined || rawGuid === null || String(rawGuid).trim() === '') {
+    throw new ValidationError('employee_guid is required');
+  }
+  const employeeGuid = ensureHex32(rawGuid, 'employee_guid');
+  return { tenantId, employeeGuid };
 }
 
 /**
@@ -286,6 +338,43 @@ router.get('/employees/:employeeGuid/leave-balances/summary', async (req, res) =
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to fetch leave balance summary', error);
+  }
+});
+
+/**
+ * @route   GET /api/abs/employee-leave-balances
+ * @desc    Get employee leave balances from ABS.ABS_EMPLOYEE_LEAVE_BAL_V (by tenant and employee_guid).
+ *          For ESS, MSS, mobile apps, and HR dashboards.
+ * @query   tenant_id (required) - Tenant ID
+ * @query   employee_guid (required) - Employee GUID (32-char hex)
+ * @access  Public
+ * @response { success, message, data: [] } — data empty and success false when no records
+ *
+ * @example
+ * GET /api/abs/employee-leave-balances?tenant_id=3&employee_guid=7F92C6A1FBD9E6C1E0633519000A9A11
+ */
+router.get('/employee-leave-balances', async (req, res) => {
+  try {
+    const { tenantId, employeeGuid } = validateEmployeeLeaveBalancesQuery(req);
+    const cacheKey = `${tenantId}:${employeeGuid}`;
+    let rows = getCachedEmployeeLeaveBalances(cacheKey);
+    if (rows === null) {
+      rows = await EmployeeLeaveBalanceModel.getEmployeeLeaveBalancesFromView(tenantId, employeeGuid);
+      setCachedEmployeeLeaveBalances(cacheKey, rows);
+    }
+    res.set('Cache-Control', `private, max-age=${EMPLOYEE_LEAVE_BALANCES_CACHE_MAX_AGE_SEC}`);
+    sendEmployeeLeaveBalancesFromView(res, req, rows);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error instanceof NotFoundError) {
+      return sendNotFound(res, req, error.message);
+    }
+    if (error instanceof DatabaseError) {
+      return sendServerError(res, req, error.message || 'Failed to fetch employee leave balances', error);
+    }
+    sendServerError(res, req, 'Failed to fetch employee leave balances', error);
   }
 });
 

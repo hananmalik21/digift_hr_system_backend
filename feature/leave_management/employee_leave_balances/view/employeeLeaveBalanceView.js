@@ -75,6 +75,10 @@ const EMPLOYEE_INFO_KEYS = ['first_name_en', 'middle_name_en', 'last_name_en', '
 /** Single prefix for accrual dry_run responses (model may already apply — avoid duplicating). */
 const ACCRUAL_DRY_RUN_PREFIX = '[DRY RUN — no DB changes]';
 
+/** Messages for GET /employee-leave-balances (ABS_EMPLOYEE_LEAVE_BAL_V). */
+const MSG_LEAVE_BALANCES_RETRIEVED = 'Employee leave balances retrieved successfully';
+const MSG_LEAVE_BALANCES_NOT_FOUND = 'No leave balances found for the given tenant and employee';
+
 /**
  * Shallow-clone balance row then enrich with employee_info (avoids mutating model objects).
  * @param {Object} b - balance row
@@ -177,6 +181,29 @@ export function sendLeaveBalanceSummaryList(res, req, items, meta = {}) {
     success: true,
     message: 'Leave balance summary fetched',
     meta: responseMeta,
+    data: list
+  });
+}
+
+/**
+ * Send employee leave balances from ABS_EMPLOYEE_LEAVE_BAL_V (success with data or no records).
+ * @param {Object} res - Express response object
+ * @param {Object} req - Express request object
+ * @param {Array} data - Leave balance rows (snake_case, from view)
+ */
+export function sendEmployeeLeaveBalancesFromView(res, req, data) {
+  const list = Array.isArray(data) ? data : [];
+  if (list.length === 0) {
+    res.json({
+      success: false,
+      message: MSG_LEAVE_BALANCES_NOT_FOUND,
+      data: []
+    });
+    return;
+  }
+  res.json({
+    success: true,
+    message: MSG_LEAVE_BALANCES_RETRIEVED,
     data: list
   });
 }
