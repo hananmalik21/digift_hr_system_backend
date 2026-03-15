@@ -33,7 +33,7 @@ function validateJobFamilyData(data, isUpdate = false) {
     if (!data.JOB_FAMILY_NAME_EN || String(data.JOB_FAMILY_NAME_EN).trim() === '') {
       errors.push('JOB_FAMILY_NAME_EN is required');
     }
-    // JOB_FAMILY_NAME_AR (Arabic name) is optional
+    // job_family_name_ar is optional — not validated here
   } else {
     // For updates, validate only provided fields
     if (data.JOB_FAMILY_CODE !== undefined && String(data.JOB_FAMILY_CODE).trim() === '') {
@@ -42,7 +42,7 @@ function validateJobFamilyData(data, isUpdate = false) {
     if (data.JOB_FAMILY_NAME_EN !== undefined && String(data.JOB_FAMILY_NAME_EN).trim() === '') {
       errors.push('JOB_FAMILY_NAME_EN cannot be empty');
     }
-    // JOB_FAMILY_NAME_AR (Arabic name) is optional; empty string is allowed to clear
+    // job_family_name_ar is optional; empty string is allowed to clear
   }
 
   // Validate STATUS if provided
@@ -181,6 +181,7 @@ router.get('/:id', async (req, res) => {
 /**
  * @route   POST /api/job-families
  * @desc    Create a new job family
+ * @body    job_family_code (required), job_family_name_en (required), job_family_name_ar (optional), description (optional), status (optional)
  * @access  Public
  */
 router.post('/', async (req, res) => {

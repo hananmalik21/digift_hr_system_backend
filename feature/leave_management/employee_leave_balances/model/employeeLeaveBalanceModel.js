@@ -1699,6 +1699,248 @@ class EmployeeLeaveBalanceModel {
       throw this._wrapDb(error, 'Failed to process accrual');
     }
   }
+
+  /**
+   * Run accrual via ABS_LEAVE_ACCRUAL_RUN_PKG.RUN_FOR_PERIOD (DB package).
+   * After package returns, loads recent_txns / skipped_balances_sample / balances_sample via same connection (parity with JS path).
+   * Maps RAISE_APPLICATION_ERROR -20901..-20908 to ValidationError/NotFoundError.
+   *
+   * @see feature/leave_management/employee_leave_balances/docs/ABS_LEAVE_ACCRUAL_RUN_PKG_ERRORS.md
+   */
+  static _mapAccrualPackageOracleError(err) {
+    const oracleErr = this._oracleErr(err);
+    const num = oracleErr?.errorNum;
+    const msg = oracleErr?.message || err?.message || 'Accrual package error';
+    // RAISE_APPLICATION_ERROR(-20904) often surfaces as errorNum 20904
+    const code = num != null ? Math.abs(num) : null;
+    if (code >= 20901 && code <= 20903) {
+      const ve = new ValidationError(msg);
+      ve.statusCode = 400;
+      return ve;
+    }
+    if (code === 20904 || code === 20906) {
+      const ve = new ValidationError(msg);
+      ve.statusCode = 404;
+      return ve;
+    }
+    if (code >= 20905 && code <= 20908) {
+      const ve = new ValidationError(msg);
+      ve.statusCode = 422;
+      return ve;
+    }
+    return null;
+  }
+
+  /**
+   * Call ABS_LEAVE_ACCRUAL_RUN_PKG.RUN_FOR_PERIOD after CURRENT_SCHEMA=ABS.
+   * PLS-00225: cannot use schema-qualified ABS.PKG in anonymous PL/SQL — unqualified only.
+   */
+  static async processAccrualForPeriodViaPackage(tenantId, periodStart, periodEnd, leaveTypeId, userId, options = {}) {
+    const forceRecalculate = options.forceRecalculate === true ? 1 : 0;
+    const dryRun = options.dryRun === true ? 1 : 0;
+
+    return await this.executeWithTransaction(async (connection) => {
+      // Same pattern as leave-request packages: resolve package in ABS without ABS. prefix in PL/SQL block
+      try {
+        await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
+      } catch (_) {
+        // Some setups connect as ABS already
+      }
+
+      const pkgNameRaw = (process.env.ABS_LEAVE_ACCRUAL_RUN_PKG_NAME || 'ABS_LEAVE_ACCRUAL_RUN_PKG').trim();
+      let pkgName = pkgNameRaw.replace(/[^A-Za-z0-9_.]/g, '') || 'ABS_LEAVE_ACCRUAL_RUN_PKG';
+      // Strip schema prefix — qualified name causes PLS-00225 in anonymous block
+      if (pkgName.includes('.')) {
+        pkgName = pkgName.split('.').pop();
+      }
+      const sql = `
+BEGIN
+  ${pkgName}.RUN_FOR_PERIOD(
+    p_tenant_id           => :p_tenant_id,
+    p_leave_type_id       => :p_leave_type_id,
+    p_period_start        => :p_period_start,
+    p_period_end          => :p_period_end,
+    p_run_by              => :p_run_by,
+    p_force_recalculate   => :p_force_recalculate,
+    p_dry_run             => :p_dry_run,
+    p_result_json         => :p_result_json
+  );
+END;`;
+
+      const binds = {
+        p_tenant_id: tenantId,
+        p_leave_type_id: leaveTypeId,
+        p_period_start: this._toDate(periodStart),
+        p_period_end: this._toDate(periodEnd),
+        p_run_by: (userId && String(userId)) || 'SYSTEM',
+        p_force_recalculate: forceRecalculate,
+        p_dry_run: dryRun,
+        p_result_json: { type: oracledb.CLOB, dir: oracledb.BIND_OUT }
+      };
+
+      let result;
+      try {
+        result = await connection.execute(sql, binds, { autoCommit: false });
+      } catch (e) {
+        const mapped = this._mapAccrualPackageOracleError(e);
+        if (mapped) throw mapped;
+        throw this._wrapDb(e, 'Failed to run accrual package');
+      }
+
+      const rawClob = result.outBinds?.p_result_json;
+      const clobArr = Array.isArray(rawClob) ? rawClob[0] : rawClob;
+      const jsonStr = await this._readClobOut(clobArr);
+      if (!jsonStr || !jsonStr.trim()) {
+        throw new DatabaseError('Accrual package returned empty result');
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (pe) {
+        throw new DatabaseError('Accrual package returned invalid JSON', pe);
+      }
+
+      // Normalize to processAccrualForPeriod-like shape for controller/view
+      const processedCount = Number(parsed.processed_count) || 0;
+      const skippedCount = Number(parsed.skipped_count) || 0;
+      const auditRunId =
+        parsed.audit_run_id != null && parsed.audit_run_id !== 'null'
+          ? Number(parsed.audit_run_id)
+          : null;
+
+      const pEnd = this._toDate(periodEnd);
+      let recentTxns = [];
+      let skippedBalancesSample = [];
+      let balancesSample = [];
+
+      // --- recent_txns (same projection as JS path) ---
+      try {
+        const recentTxnSql = `
+            SELECT
+              RAWTOHEX(TXN_GUID) AS TXN_GUID,
+              TXN_ID,
+              TENANT_ID,
+              EMPLOYEE_ID,
+              LEAVE_TYPE_ID,
+              TXN_TYPE,
+              TXN_DATE,
+              AMOUNT_DAYS AS DAYS,
+              REFERENCE_TYPE,
+              REFERENCE_ID,
+              COMMENTS AS NOTES,
+              CREATION_DATE,
+              CREATED_BY
+            FROM ${this.TXN_TABLE}
+            WHERE TENANT_ID = :1
+              AND LEAVE_TYPE_ID = :2
+              AND TXN_TYPE = '${this.ACCRUAL_TXN_TYPE}'
+              AND REFERENCE_TYPE = '${this.ACCRUAL_REF_TYPE}'
+              AND TRUNC(TXN_DATE) = TRUNC(:3)
+            ORDER BY TXN_ID DESC
+            FETCH FIRST 2 ROWS ONLY
+          `;
+        const recentTxnResult = await connection.execute(
+          recentTxnSql,
+          [tenantId, leaveTypeId, pEnd],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        const rows = recentTxnResult.rows || [];
+        recentTxns = rows
+          .map((row) => this.convertKeysToSnakeCase(row))
+          .sort((a, b) => (b.txn_id || 0) - (a.txn_id || 0))
+          .slice(0, 2);
+      } catch (_) {
+        recentTxns = [];
+      }
+
+      // --- skipped_balances_sample: already accrued for period (idempotent skips) ---
+      if (forceRecalculate === 0) {
+        try {
+          const alreadyProcessedQuery = `SELECT
+            RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
+            b.TENANT_ID, b.EMPLOYEE_ID,
+            RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+            e.FIRST_NAME_EN, e.MIDDLE_NAME_EN, e.LAST_NAME_EN,
+            e.FIRST_NAME_AR, e.MIDDLE_NAME_AR, e.LAST_NAME_AR, e.FAMILY_NAME_AR, e.EMAIL,
+            b.LEAVE_TYPE_ID, b.OPENING_BALANCE_DAYS, b.ACCRUED_DAYS, b.TAKEN_DAYS,
+            b.ADJUSTED_DAYS, b.AVAILABLE_DAYS, b.LAST_ACCRUAL_DATE,
+            b.PERIOD_START_DATE, b.PERIOD_END_DATE, b.STATUS
+          FROM ${this.TABLE_NAME} b
+          INNER JOIN ${this.EMPLOYEE_TABLE_NAME} e
+            ON b.EMPLOYEE_ID = e.EMPLOYEE_ID AND b.TENANT_ID = e.ENTERPRISE_ID
+          WHERE b.TENANT_ID = :1 AND b.LEAVE_TYPE_ID = :2 AND b.STATUS = 'ACTIVE'
+            AND b.LAST_ACCRUAL_DATE IS NOT NULL AND b.LAST_ACCRUAL_DATE >= :3
+          FETCH FIRST 5 ROWS ONLY`;
+          const alreadyResult = await connection.execute(
+            alreadyProcessedQuery,
+            [tenantId, leaveTypeId, pEnd],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          const alreadyRows = alreadyResult.rows || [];
+          skippedBalancesSample = alreadyRows
+            .map((row) => this.convertKeysToSnakeCase(row))
+            .map((b) => ({ ...b, skip_reason: 'Already accrued for period' }));
+        } catch (_) {
+          skippedBalancesSample = [];
+        }
+      }
+
+      // --- balances_sample: rows with last_accrual_date on period end (processed this period) ---
+      try {
+        const balancesSampleSql = `SELECT
+            RAWTOHEX(b.EMPLOYEE_LEAVE_BALANCE_GUID) AS EMPLOYEE_LEAVE_BALANCE_GUID,
+            b.TENANT_ID, b.EMPLOYEE_ID,
+            RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
+            e.FIRST_NAME_EN, e.MIDDLE_NAME_EN, e.LAST_NAME_EN,
+            e.FIRST_NAME_AR, e.MIDDLE_NAME_AR, e.LAST_NAME_AR, e.FAMILY_NAME_AR, e.EMAIL,
+            b.LEAVE_TYPE_ID, b.OPENING_BALANCE_DAYS, b.ACCRUED_DAYS, b.TAKEN_DAYS,
+            b.ADJUSTED_DAYS, b.AVAILABLE_DAYS, b.LAST_ACCRUAL_DATE,
+            b.PERIOD_START_DATE, b.PERIOD_END_DATE, b.STATUS
+          FROM ${this.TABLE_NAME} b
+          INNER JOIN ${this.EMPLOYEE_TABLE_NAME} e
+            ON b.EMPLOYEE_ID = e.EMPLOYEE_ID AND b.TENANT_ID = e.ENTERPRISE_ID
+          WHERE b.TENANT_ID = :1 AND b.LEAVE_TYPE_ID = :2 AND b.STATUS = 'ACTIVE'
+            AND TRUNC(b.LAST_ACCRUAL_DATE) = TRUNC(:3)
+          FETCH FIRST 5 ROWS ONLY`;
+        const balResult = await connection.execute(
+          balancesSampleSql,
+          [tenantId, leaveTypeId, pEnd],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        balancesSample = (balResult.rows || []).map((row) => this.convertKeysToSnakeCase(row));
+      } catch (_) {
+        balancesSample = [];
+      }
+
+      return {
+        processed_count: processedCount,
+        skipped_count: skippedCount,
+        newly_processed_count: Number(parsed.newly_processed_count) || 0,
+        already_processed_count: Number(parsed.already_processed_count) || 0,
+        balances_sample: balancesSample,
+        recent_txns: recentTxns,
+        skipped_balances_sample: skippedBalancesSample,
+        message: parsed.message || null,
+        accrual_plan_id:
+          parsed.accrual_plan_id != null ? Number(parsed.accrual_plan_id) : null,
+        accrual_method: parsed.accrual_method || null,
+        accrual_rate_days:
+          parsed.accrual_rate_days != null ? Number(parsed.accrual_rate_days) : null,
+        audit_run_id: Number.isFinite(auditRunId) ? auditRunId : null,
+        ...(options.includeDebug
+          ? {
+              debug: {
+                source: 'ABS_LEAVE_ACCRUAL_RUN_PKG',
+                dry_run: dryRun === 1,
+                force_recalculate: forceRecalculate === 1
+              }
+            }
+          : {})
+      };
+    });
+  }
+
   /* ------------------------------------------------------------------ */
 /* PL/SQL opening balance                                              */
 /* ------------------------------------------------------------------ */

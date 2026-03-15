@@ -1275,19 +1275,53 @@ router.post('/accrual/run', async (req, res) => {
     // Track execution time
     const startTime = Date.now();
 
-    // Process accrual (production-grade implementation)
-    const result = await EmployeeLeaveBalanceModel.processAccrualForPeriod(
-      tenantId,
-      periodStart,
-      periodEnd,
-      leaveTypeId,
-      userId,
-      {
-        forceRecalculate,
-        dryRun,
-        includeDebug
+    // Process accrual: DB package (default) or JS implementation (USE_ABS_LEAVE_ACCRUAL_RUN_PKG=0)
+    const usePackage = process.env.USE_ABS_LEAVE_ACCRUAL_RUN_PKG !== '0' &&
+      process.env.USE_ABS_LEAVE_ACCRUAL_RUN_PKG !== 'false';
+    let result;
+    if (usePackage) {
+      try {
+        result = await EmployeeLeaveBalanceModel.processAccrualForPeriodViaPackage(
+          tenantId,
+          periodStart,
+          periodEnd,
+          leaveTypeId,
+          userId,
+          { forceRecalculate, dryRun, includeDebug }
+        );
+      } catch (pkgErr) {
+        const oracleErr = EmployeeLeaveBalanceModel._oracleErr?.(pkgErr) || pkgErr?.oracleError;
+        const errNum = oracleErr?.errorNum ?? pkgErr?.errorNum;
+        const msg = String(pkgErr?.message || '');
+        const missingObj =
+          errNum === 4043 ||
+          errNum === 6508 ||
+          msg.includes('ORA-04043') ||
+          msg.includes('ORA-06508') ||
+          msg.includes('PLS-00201');
+        if (missingObj) {
+          result = await EmployeeLeaveBalanceModel.processAccrualForPeriod(
+            tenantId,
+            periodStart,
+            periodEnd,
+            leaveTypeId,
+            userId,
+            { forceRecalculate, dryRun, includeDebug }
+          );
+        } else {
+          throw pkgErr;
+        }
       }
-    );
+    } else {
+      result = await EmployeeLeaveBalanceModel.processAccrualForPeriod(
+        tenantId,
+        periodStart,
+        periodEnd,
+        leaveTypeId,
+        userId,
+        { forceRecalculate, dryRun, includeDebug }
+      );
+    }
 
     const executionTime = Date.now() - startTime;
 

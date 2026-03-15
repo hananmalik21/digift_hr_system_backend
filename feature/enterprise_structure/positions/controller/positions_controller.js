@@ -43,7 +43,7 @@ function validatePosition(data, isUpdate = false) {
   reqIfCreate('POSITION_CODE', 'position_code is required');
   reqIfCreate('STATUS', 'status is required');
   reqIfCreate('POSITION_TITLE_EN', 'position_title_en is required');
-  // position_title_ar (Arabic name) is optional
+  // position_title_ar is optional — not validated here
 
   reqIfCreate('ORG_STRUCTURE_ID', 'org_structure_id is required');
   reqIfCreate('ORG_UNIT_ID', 'org_unit_id is required');
@@ -232,7 +232,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/positions
- * Body: tenant_id (required), position_code, status, position_title_en, position_title_ar, ...
+ * Body: tenant_id (required), position_code, status, position_title_en (required), position_title_ar (optional), ...
  */
 router.post('/', async (req, res) => {
   try {

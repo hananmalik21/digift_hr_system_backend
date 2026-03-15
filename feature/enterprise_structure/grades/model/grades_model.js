@@ -210,6 +210,21 @@ class GradeModel {
       throw new Error('tenant_id must be a valid positive number');
     }
 
+    const gradeNumber = data.GRADE_NUMBER ?? data.grade_number;
+    if (gradeNumber !== undefined && gradeNumber !== null && String(gradeNumber).trim() !== '') {
+      const exists = await this.executeQuery(
+        `SELECT 1 FROM ${this.TABLE_NAME} WHERE TENANT_ID = :1 AND UPPER(TRIM(GRADE_NUMBER)) = UPPER(TRIM(:2)) AND ROWNUM = 1`,
+        [tenantIdNum, gradeNumber]
+      );
+      if (exists?.rows?.length > 0) {
+        const e = new Error('A grade with the same GRADE_NUMBER already exists for this tenant.');
+        e.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+        e.statusCode = 409;
+        e.userMessage = e.message;
+        throw e;
+      }
+    }
+
     try {
       return await this.executeWithTransaction(async (connection) => {
         let gradeId;
@@ -288,7 +303,7 @@ class GradeModel {
 
       if (isUnique) {
         const constraint = error.message?.match(/\(([A-Z0-9_.]+)\)/)?.[1] || 'UNKNOWN';
-        const e = new Error('A grade with the same GRADE_NUMBER already exists.');
+        const e = new Error('A grade with the same GRADE_NUMBER already exists for this tenant.');
         e.code = 'UNIQUE_CONSTRAINT_VIOLATION';
         e.statusCode = 409;
         e.constraint = constraint;
@@ -312,6 +327,20 @@ class GradeModel {
     const payload = { ...data };
     delete payload.tenant_id;
     delete payload.TENANT_ID;
+
+    if (payload.GRADE_NUMBER !== undefined && payload.GRADE_NUMBER !== null && String(payload.GRADE_NUMBER).trim() !== '') {
+      const exists = await this.executeQuery(
+        `SELECT 1 FROM ${this.TABLE_NAME} WHERE TENANT_ID = :1 AND UPPER(TRIM(GRADE_NUMBER)) = UPPER(TRIM(:2)) AND GRADE_ID <> :3 AND ROWNUM = 1`,
+        [tenantIdNum, payload.GRADE_NUMBER, gradeId]
+      );
+      if (exists?.rows?.length > 0) {
+        const e = new Error('A grade with the same GRADE_NUMBER already exists for this tenant.');
+        e.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+        e.statusCode = 409;
+        e.userMessage = e.message;
+        throw e;
+      }
+    }
 
     try {
       return await this.executeWithTransaction(async (connection) => {
@@ -378,7 +407,7 @@ class GradeModel {
 
       if (isUnique) {
         const constraint = error.message?.match(/\(([A-Z0-9_.]+)\)/)?.[1] || 'UNKNOWN';
-        const e = new Error('A grade with the same GRADE_NUMBER already exists.');
+        const e = new Error('A grade with the same GRADE_NUMBER already exists for this tenant.');
         e.code = 'UNIQUE_CONSTRAINT_VIOLATION';
         e.statusCode = 409;
         e.constraint = constraint;
