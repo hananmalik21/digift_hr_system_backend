@@ -240,7 +240,7 @@ class JobFamilyModel {
           tenantIdNum,
           data.JOB_FAMILY_CODE || null,
           data.JOB_FAMILY_NAME_EN || null,
-          (data.JOB_FAMILY_NAME_AR != null && String(data.JOB_FAMILY_NAME_AR).trim() !== '') ? String(data.JOB_FAMILY_NAME_AR).trim() : null,
+          (data.JOB_FAMILY_NAME_AR != null && String(data.JOB_FAMILY_NAME_AR).trim() !== '') ? String(data.JOB_FAMILY_NAME_AR).trim() : ' ',
           data.DESCRIPTION || null,
           data.STATUS || 'ACTIVE',
           userId || 'SYSTEM',
