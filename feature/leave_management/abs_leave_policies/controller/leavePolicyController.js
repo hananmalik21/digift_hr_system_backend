@@ -6,6 +6,19 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { sendSuccess as sendStandardSuccess } from '../../../../utils/response.js';
 import { ALLOWED_ACCRUAL_METHOD_CODES } from '../config.js';
 
+/** 32-char hex policy GUID format (reused to avoid regex recompilation). */
+const POLICY_GUID_REGEX = /^[0-9A-Fa-f]{32}$/;
+
+/** Eligibility fields: singular (legacy) -> plural (array) key. Multi-select supported. */
+const ELIGIBILITY_FIELDS = [
+  { singular: 'employee_category_code', plural: 'employee_category_codes' },
+  { singular: 'employment_type_code', plural: 'employment_type_codes' },
+  { singular: 'contract_type_code', plural: 'contract_type_codes' },
+  { singular: 'gender_code', plural: 'gender_codes' },
+  { singular: 'religion_code', plural: 'religion_codes' },
+  { singular: 'marital_status_code', plural: 'marital_status_codes' }
+];
+
 const router = express.Router();
 
 router.use((req, res, next) => {
@@ -21,22 +34,45 @@ function parsePagination(query) {
   let pageSize = 10;
 
   if (query.page !== undefined) {
-    const parsedPage = parseInt(query.page);
-    if (isNaN(parsedPage) || parsedPage < 1) {
+    const parsedPage = Number.parseInt(query.page, 10);
+    if (Number.isNaN(parsedPage) || parsedPage < 1) {
       throw new Error('Invalid page number. Must be a positive integer.');
     }
     page = parsedPage;
   }
 
   if (query.page_size !== undefined) {
-    const parsedPageSize = parseInt(query.page_size);
-    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
+    const parsedPageSize = Number.parseInt(query.page_size, 10);
+    if (Number.isNaN(parsedPageSize) || parsedPageSize < 1) {
       throw new Error('Invalid page_size. Must be a positive integer.');
     }
     pageSize = Math.min(100, parsedPageSize);
   }
 
   return { page, pageSize };
+}
+
+/** Push error if value is not a positive finite number (for required id fields). */
+function requirePositiveNumber(errors, value, fieldName) {
+  if (value === undefined || value === null) {
+    errors.push(`${fieldName} is required`);
+    return;
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    errors.push(`${fieldName} must be a valid positive number`);
+  }
+}
+
+/**
+ * Send appropriate error response for policy create/update (ValidationError, DatabaseError, or generic).
+ */
+function handlePolicyRouteError(res, req, error) {
+  if (error instanceof ValidationError) return sendValidationError(res, req, error);
+  if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
+  if (error?.errorNum || error?.message?.includes?.('ORA-')) {
+    return sendDatabaseError(res, req, new DatabaseError('Operation failed', error));
+  }
+  sendError(res, req, error);
 }
 
 /**
@@ -62,18 +98,8 @@ function buildPaginationMeta(page, pageSize, totalCount) {
 function validatePolicyData(data, isUpdate = false) {
   const errors = [];
 
-  // Validate required fields
-  if (data.tenant_id === undefined || data.tenant_id === null) {
-    errors.push('tenant_id is required');
-  } else if (!Number.isFinite(data.tenant_id) || data.tenant_id <= 0) {
-    errors.push('tenant_id must be a valid positive number');
-  }
-
-  if (data.leave_type_id === undefined || data.leave_type_id === null) {
-    errors.push('leave_type_id is required');
-  } else if (!Number.isFinite(data.leave_type_id) || data.leave_type_id <= 0) {
-    errors.push('leave_type_id must be a valid positive number');
-  }
+  requirePositiveNumber(errors, data.tenant_id, 'tenant_id');
+  requirePositiveNumber(errors, data.leave_type_id, 'leave_type_id');
 
   if (data.entitlement_days === undefined || data.entitlement_days === null) {
     errors.push('entitlement_days is required');
@@ -225,7 +251,54 @@ function validatePolicyData(data, isUpdate = false) {
     }
   }
 
+  // Validate optional eligibility fields (multi-select): accept *_codes (array) or legacy *_code (string)
+  for (const { singular, plural } of ELIGIBILITY_FIELDS) {
+    const arrayVal = data[plural];
+    const singleVal = data[singular];
+    if (arrayVal !== undefined && arrayVal !== null) {
+      if (!Array.isArray(arrayVal)) {
+        errors.push(`${plural} must be an array of strings when provided`);
+      } else {
+        for (let i = 0; i < arrayVal.length; i++) {
+          if (typeof arrayVal[i] !== 'string' || !String(arrayVal[i]).trim()) {
+            errors.push(`${plural}[${i}] must be a non-empty string`);
+          }
+        }
+      }
+    }
+    if (singleVal !== undefined && singleVal !== null && (arrayVal === undefined || arrayVal === null)) {
+      if (typeof singleVal !== 'string' || !String(singleVal).trim()) {
+        errors.push(`${singular} must be a non-empty string when provided`);
+      }
+    }
+  }
+
   return errors;
+}
+
+/**
+ * Normalize request body so eligibility fields are always *_codes arrays (or null).
+ * Backward compatible: if only singular *_code is sent, wrap in array.
+ * @param {Object} body - Raw request body
+ * @returns {Object} New object with all other keys plus normalized *_codes (null or string[])
+ */
+function normalizeEligibilityPayload(body) {
+  const out = { ...body };
+  for (const { singular, plural } of ELIGIBILITY_FIELDS) {
+    const arrayVal = body[plural];
+    const singleVal = body[singular];
+    let normalized = null;
+    if (arrayVal !== undefined && arrayVal !== null && Array.isArray(arrayVal)) {
+      const filtered = arrayVal.map(v => (v != null ? String(v).trim() : '')).filter(Boolean);
+      normalized = filtered.length > 0 ? filtered : null;
+    } else if (singleVal !== undefined && singleVal !== null && String(singleVal).trim() !== '') {
+      normalized = [String(singleVal).trim()];
+    }
+    out[plural] = normalized;
+    // Remove legacy key so model only sees plural
+    delete out[singular];
+  }
+  return out;
 }
 
 /**
@@ -332,7 +405,7 @@ router.get('/policies/:id', asyncHandler(async (req, res) => {
 
   try {
     // Check if identifier is a GUID (32 hex characters) or numeric ID
-    const isGuid = /^[0-9A-Fa-f]{32}$/.test(identifier);
+    const isGuid = POLICY_GUID_REGEX.test(identifier);
     
     let policy;
     if (isGuid) {
@@ -370,16 +443,12 @@ router.post('/create-policy', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
+  const payload = normalizeEligibilityPayload(req.body);
   try {
-    const createdPolicy = await LeavePolicyModel.createPolicyWithGrades(req.body);
+    const createdPolicy = await LeavePolicyModel.createPolicyWithGrades(payload);
     sendSuccess(res, req, createdPolicy);
   } catch (error) {
-    if (error instanceof ValidationError) return sendValidationError(res, req, error);
-    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
-    if (error.errorNum || error.message?.includes('ORA-')) {
-      return sendDatabaseError(res, req, new DatabaseError('Failed to create policy', error));
-    }
-    sendError(res, req, error);
+    handlePolicyRouteError(res, req, error);
   }
 }));
 
@@ -433,9 +502,7 @@ router.post('/assign-leave-policies-to-qualified-emps', asyncHandler(async (req,
 
 router.put('/update-policy/:policyGuid', asyncHandler(async (req, res) => {
   const policyGuid = req.params.policyGuid?.trim();
-  
-  // Validate GUID format (32 hex characters)
-  if (!policyGuid || !/^[0-9A-Fa-f]{32}$/.test(policyGuid)) {
+  if (!policyGuid || !POLICY_GUID_REGEX.test(policyGuid)) {
     return sendValidationError(res, req, new ValidationError('Invalid policy_guid. Must be a valid 32-character hexadecimal GUID.'));
   }
 
@@ -454,16 +521,12 @@ router.put('/update-policy/:policyGuid', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
+  const payload = normalizeEligibilityPayload(req.body);
   try {
-    const updatedPolicy = await LeavePolicyModel.updatePolicyWithGrades(policyGuid.toUpperCase(), req.body);
+    const updatedPolicy = await LeavePolicyModel.updatePolicyWithGrades(policyGuid.toUpperCase(), payload);
     sendSuccess(res, req, updatedPolicy, true);
   } catch (error) {
-    if (error instanceof ValidationError) return sendValidationError(res, req, error);
-    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
-    if (error.errorNum || error.message?.includes('ORA-')) {
-      return sendDatabaseError(res, req, new DatabaseError('Failed to update policy', error));
-    }
-    sendError(res, req, error);
+    handlePolicyRouteError(res, req, error);
   }
 }));
 

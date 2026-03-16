@@ -77,6 +77,39 @@ class LeavePolicyModel {
   }
 
   /**
+   * Serialize eligibility codes for PL/SQL: array of strings -> JSON string; null/empty -> null.
+   * Backward compat: single string is wrapped into single-element array.
+   * @param {string[]|string|null|undefined} value - Array of codes, single code, or null
+   * @returns {string|null} JSON array string e.g. '["STAFF","MANAGEMENT"]' or null
+   */
+  static serializeEligibilityCodes(value) {
+    if (value == null) return null;
+    const arr = Array.isArray(value)
+      ? value.map(v => (v != null ? String(v).trim() : '')).filter(Boolean)
+      : [String(value).trim()].filter(Boolean);
+    return arr.length === 0 ? null : JSON.stringify(arr);
+  }
+
+  /** Bind keys for eligibility codes passed to PL/SQL (create/update). */
+  static ELIGIBILITY_BIND_KEYS = [
+    'employee_category_codes', 'employment_type_codes', 'contract_type_codes',
+    'gender_codes', 'religion_codes', 'marital_status_codes'
+  ];
+
+  /**
+   * Build all eligibility code bind values from policy data in one pass.
+   * @param {Object} policyData - Policy payload with *_codes (array or null)
+   * @returns {Object} Object with the 6 bind key -> serialized string or null
+   */
+  static buildEligibilityBinds(policyData) {
+    const out = {};
+    for (const key of this.ELIGIBILITY_BIND_KEYS) {
+      out[key] = this.serializeEligibilityCodes(policyData[key]);
+    }
+    return out;
+  }
+
+  /**
    * Parse value to Date for Oracle DATE bind (avoids ORA-01861 format string).
    * Returns Date or null; oracledb binds Date correctly to Oracle DATE.
    */
@@ -750,20 +783,10 @@ class LeavePolicyModel {
     
     try {
       connection = await db.getConnection();
-      
-      // Set current schema and optimize session settings
-      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
-      // Disable parallel query to avoid ORA-12801 and improve single-threaded performance
-      try {
-        await connection.execute(`ALTER SESSION DISABLE PARALLEL QUERY`, [], { autoCommit: false });
-      } catch (e) {
-        // Ignore if already disabled or not supported
-      }
-      
-      // Validate leave type exists before creating policy
+      await this._setSession(connection);
+
       await this.validateLeaveTypeExists(connection, policyData.tenant_id, policyData.leave_type_id);
       
-      // Build p_grade_rows_json: include accrual_method_code per row (key exactly "accrual_method_code" for Oracle JSON_TABLE)
       const policyAccrual = policyData.accrual_method_code ?? null;
       const normalizedGradeRows = (policyData.grade_rows || []).map(row => ({
         grade_from: row.grade_from,
@@ -776,6 +799,7 @@ class LeavePolicyModel {
           : policyAccrual
       }));
       const gradeRowsJson = JSON.stringify(normalizedGradeRows);
+      const eligibilityBinds = this.buildEligibilityBinds(policyData);
 
       const binds = {
         tenant_id: policyData.tenant_id,
@@ -786,12 +810,7 @@ class LeavePolicyModel {
         created_by: policyData.created_by,
         min_service_years: policyData.min_service_years ?? null,
         max_service_years: policyData.max_service_years ?? null,
-        employee_category_code: policyData.employee_category_code ?? null,
-        employment_type_code: policyData.employment_type_code ?? null,
-        contract_type_code: policyData.contract_type_code ?? null,
-        gender_code: policyData.gender_code ?? null,
-        religion_code: policyData.religion_code ?? null,
-        marital_status_code: policyData.marital_status_code ?? null,
+        ...eligibilityBinds,
         probation_allowed: policyData.probation_allowed ?? null,
         min_notice_days: policyData.min_notice_days ?? null,
         max_consecutive_days: policyData.max_consecutive_days ?? null,
@@ -822,12 +841,12 @@ class LeavePolicyModel {
             p_created_by             => :created_by,
             p_min_service_years      => :min_service_years,
             p_max_service_years      => :max_service_years,
-            p_employee_category_code => :employee_category_code,
-            p_employment_type_code   => :employment_type_code,
-            p_contract_type_code     => :contract_type_code,
-            p_gender_code            => :gender_code,
-            p_religion_code          => :religion_code,
-            p_marital_status_code    => :marital_status_code,
+            p_employee_category_codes => :employee_category_codes,
+            p_employment_type_codes   => :employment_type_codes,
+            p_contract_type_codes     => :contract_type_codes,
+            p_gender_codes            => :gender_codes,
+            p_religion_codes          => :religion_codes,
+            p_marital_status_codes    => :marital_status_codes,
             p_probation_allowed      => :probation_allowed,
             p_min_notice_days        => :min_notice_days,
             p_max_consecutive_days   => :max_consecutive_days,
@@ -853,65 +872,64 @@ class LeavePolicyModel {
 
       await connection.commit();
 
-      // Fetch the created policy to return it - optimized: use ROWNUM for faster retrieval
       const fetchQuery = `
-        SELECT /*+ FIRST_ROWS(100) */
-          POLICY_ID,
-          RAWTOHEX(POLICY_GUID) AS POLICY_GUID,
-          TENANT_ID,
-          LEAVE_TYPE_ID,
-          LEAVE_TYPE_EN,
-          LEAVE_TYPE_AR,
-          POLICY_NAME,
-          POLICY_ENTITLEMENT_DAYS,
-          POLICY_ACCRUAL_METHOD,
-          POLICY_STATUS,
-          KUWAIT_LABOR_COMPLIANT,
-          POLICY_CREATED_BY,
-          POLICY_CREATED_DATE,
-          ELIGIBILITY_ID,
-          MIN_SERVICE_YEARS,
-          MAX_SERVICE_YEARS,
-          EMPLOYEE_CATEGORY_CODE,
-          EMPLOYMENT_TYPE_CODE,
-          CONTRACT_TYPE_CODE,
-          GENDER_CODE,
-          RELIGION_CODE,
-          MARITAL_STATUS_CODE,
-          PROBATION_ALLOWED,
-          RULE_ID,
-          MIN_NOTICE_DAYS,
-          MAX_CONSECUTIVE_DAYS,
-          REQUIRES_DOCUMENT,
-          RULES_ALLOW_CARRY_FORWARD,
-          RULES_ALLOW_ENCASHMENT,
-          CF_RULE_ID,
-          CF_ALLOW_CARRY_FORWARD,
-          CARRY_FORWARD_LIMIT_DAYS,
-          GRACE_PERIOD_DAYS,
-          AUTO_FORFEIT_FLAG,
-          FORFEIT_TRIGGER_CODE,
-          NOTIFY_BEFORE_DAYS,
-          ENCASH_RULE_ID,
-          ENCASH_ALLOW_ENCASHMENT,
-          ENCASHMENT_LIMIT_DAYS,
-          ENCASHMENT_RATE_PCT,
-          EFFECTIVE_START_DATE,
-          EFFECTIVE_END_DATE,
-          ENABLE_PRO_RATA,
-          COUNT_WEEKENDS_AS_LEAVE,
-          ENTITLEMENT_ID,
-          GRADE_FROM,
-          GRADE_TO,
-          GRADE_ENTITLEMENT_DAYS,
-          GRADE_ACCRUAL_RATE,
-          GRADE_STATUS,
-          GRADE_ACCRUAL_METHOD
-        FROM ${this.VIEW_NAME}
-        WHERE TENANT_ID = :tenant_id
-          AND LEAVE_TYPE_ID = :leave_type_id
-          AND ROWNUM <= 100
-        ORDER BY POLICY_ID DESC, GRADE_FROM ASC
+        SELECT * FROM (
+          SELECT
+            POLICY_ID,
+            RAWTOHEX(POLICY_GUID) AS POLICY_GUID,
+            TENANT_ID,
+            LEAVE_TYPE_ID,
+            LEAVE_TYPE_EN,
+            LEAVE_TYPE_AR,
+            POLICY_NAME,
+            POLICY_ENTITLEMENT_DAYS,
+            POLICY_ACCRUAL_METHOD,
+            POLICY_STATUS,
+            KUWAIT_LABOR_COMPLIANT,
+            POLICY_CREATED_BY,
+            POLICY_CREATED_DATE,
+            ELIGIBILITY_ID,
+            MIN_SERVICE_YEARS,
+            MAX_SERVICE_YEARS,
+            EMPLOYEE_CATEGORY_CODE,
+            EMPLOYMENT_TYPE_CODE,
+            CONTRACT_TYPE_CODE,
+            GENDER_CODE,
+            RELIGION_CODE,
+            MARITAL_STATUS_CODE,
+            PROBATION_ALLOWED,
+            RULE_ID,
+            MIN_NOTICE_DAYS,
+            MAX_CONSECUTIVE_DAYS,
+            REQUIRES_DOCUMENT,
+            RULES_ALLOW_CARRY_FORWARD,
+            RULES_ALLOW_ENCASHMENT,
+            CF_RULE_ID,
+            CF_ALLOW_CARRY_FORWARD,
+            CARRY_FORWARD_LIMIT_DAYS,
+            GRACE_PERIOD_DAYS,
+            AUTO_FORFEIT_FLAG,
+            FORFEIT_TRIGGER_CODE,
+            NOTIFY_BEFORE_DAYS,
+            ENCASH_RULE_ID,
+            ENCASH_ALLOW_ENCASHMENT,
+            ENCASHMENT_LIMIT_DAYS,
+            ENCASHMENT_RATE_PCT,
+            EFFECTIVE_START_DATE,
+            EFFECTIVE_END_DATE,
+            ENABLE_PRO_RATA,
+            COUNT_WEEKENDS_AS_LEAVE,
+            ENTITLEMENT_ID,
+            GRADE_FROM,
+            GRADE_TO,
+            GRADE_ENTITLEMENT_DAYS,
+            GRADE_ACCRUAL_RATE,
+            GRADE_STATUS,
+            GRADE_ACCRUAL_METHOD
+          FROM ${this.VIEW_NAME}
+          WHERE TENANT_ID = :tenant_id AND LEAVE_TYPE_ID = :leave_type_id
+          ORDER BY POLICY_ID DESC, GRADE_FROM ASC
+        ) WHERE ROWNUM <= 100
       `;
 
       const fetchResult = await connection.execute(fetchQuery, {
@@ -1004,17 +1022,9 @@ class LeavePolicyModel {
     
     try {
       connection = await db.getConnection();
-      
-      // Set current schema and optimize session settings
-      await connection.execute(`ALTER SESSION SET CURRENT_SCHEMA = ABS`, [], { autoCommit: false });
-      // Disable parallel query to avoid ORA-12801 and improve single-threaded performance
-      try {
-        await connection.execute(`ALTER SESSION DISABLE PARALLEL QUERY`, [], { autoCommit: false });
-      } catch (e) {
-        // Ignore if already disabled or not supported
-      }
-      
-      // First, get policy_id, policy_name, and optional date/flag columns from GUID (for fallback when client omits them)
+      await this._setSession(connection);
+
+      // Get policy_id, policy_name, and optional date/flag columns from GUID (for fallback when client omits them)
       const guidLookupQuery = `
         SELECT /*+ FIRST_ROWS(1) */ POLICY_ID, POLICY_NAME,
                EFFECTIVE_START_DATE, EFFECTIVE_END_DATE, ENABLE_PRO_RATA
@@ -1056,9 +1066,8 @@ class LeavePolicyModel {
           : policyAccrualUpdate
       }));
       const gradeRowsJson = JSON.stringify(normalizedGradeRowsUpdate);
+      const eligibilityBinds = this.buildEligibilityBinds(policyData);
 
-      // Prepare binds - handle null max_service_years with NUMBER type
-      // If policy_name is not provided, use the current policy_name to avoid changing it
       const binds = {
         tenant_id: policyData.tenant_id,
         policy_id: policyId,
@@ -1070,12 +1079,7 @@ class LeavePolicyModel {
         updated_by: policyData.updated_by,
         min_service_years: policyData.min_service_years ?? null,
         max_service_years: policyData.max_service_years ?? null,
-        employee_category_code: policyData.employee_category_code ?? null,
-        employment_type_code: policyData.employment_type_code ?? null,
-        contract_type_code: policyData.contract_type_code ?? null,
-        gender_code: policyData.gender_code ?? null,
-        religion_code: policyData.religion_code ?? null,
-        marital_status_code: policyData.marital_status_code ?? null,
+        ...eligibilityBinds,
         probation_allowed: policyData.probation_allowed ?? null,
         min_notice_days: policyData.min_notice_days ?? null,
         max_consecutive_days: policyData.max_consecutive_days ?? null,
@@ -1121,12 +1125,12 @@ class LeavePolicyModel {
             p_updated_by              => :updated_by,
             p_min_service_years       => :min_service_years,
             p_max_service_years       => :max_service_years,
-            p_employee_category_code  => :employee_category_code,
-            p_employment_type_code    => :employment_type_code,
-            p_contract_type_code      => :contract_type_code,
-            p_gender_code             => :gender_code,
-            p_religion_code           => :religion_code,
-            p_marital_status_code     => :marital_status_code,
+            p_employee_category_codes  => :employee_category_codes,
+            p_employment_type_codes   => :employment_type_codes,
+            p_contract_type_codes      => :contract_type_codes,
+            p_gender_codes             => :gender_codes,
+            p_religion_codes          => :religion_codes,
+            p_marital_status_codes    => :marital_status_codes,
             p_probation_allowed       => :probation_allowed,
             p_min_notice_days         => :min_notice_days,
             p_max_consecutive_days    => :max_consecutive_days,
