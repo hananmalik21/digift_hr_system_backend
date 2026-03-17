@@ -18,9 +18,10 @@ function optNum(v) {
 
 /**
  * GET /api/tm/attendance-summary
- * Query params: enterprise_id (required), attendance_date | date_from & date_to, employee_id, org_unit_id, level_code, attendance_status, page, page_size
+ * Query params: enterprise_id (required), from_date, to_date (optional; from_date alone = single day), employee_id, org_unit_id, level_code, attendance_status, page, page_size
  */
 router.get('/', asyncHandler(async (req, res) => {
+  req._startTime = Date.now();
   const enterpriseId = optNum(req.query.enterprise_id);
   if (enterpriseId == null || enterpriseId <= 0) {
     return sendValidationError(res, req, new ValidationError('Validation failed', ['enterprise_id is required and must be a positive number']));
@@ -28,9 +29,9 @@ router.get('/', asyncHandler(async (req, res) => {
 
   const filters = {
     enterprise_id: enterpriseId,
+    from_date: req.query.from_date ?? req.query.date_from ?? null,
+    to_date: req.query.to_date ?? req.query.date_to ?? null,
     attendance_date: req.query.attendance_date ?? null,
-    date_from: req.query.date_from ?? null,
-    date_to: req.query.date_to ?? null,
     employee_id: req.query.employee_id ?? null,
     org_unit_id: req.query.org_unit_id ?? null,
     level_code: req.query.level_code ?? null,
@@ -40,12 +41,10 @@ router.get('/', asyncHandler(async (req, res) => {
   };
 
   try {
-    const { rows, total } = await getAttendanceSummary(filters);
-    const page = Math.max(1, optNum(req.query.page) ?? 1);
-    const pageSize = Math.min(100, Math.max(1, optNum(req.query.page_size) ?? 25));
-    const totalPages = Math.ceil(total / pageSize);
+    const { rows, total, page, pageSize } = await getAttendanceSummary(filters);
+    const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
 
-    res.status(200).json({
+    const payload = {
       success: true,
       data: rows,
       pagination: {
@@ -56,7 +55,11 @@ router.get('/', asyncHandler(async (req, res) => {
         has_next: page < totalPages,
         has_previous: page > 1
       }
-    });
+    };
+    if (req._startTime != null) {
+      payload.meta = { execution_time_ms: Date.now() - req._startTime };
+    }
+    res.status(200).json(payload);
   } catch (error) {
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
     if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);

@@ -1,12 +1,12 @@
 /**
  * Attendance Summary Model
  * Reads from TM.V_ATTENDANCE_ACTUALS_EMP only (no joins to base tables).
- * Single SELECT with optional filters: enterprise_id (required), attendance_date / date_from/date_to,
+ * Single SELECT with optional filters: enterprise_id (required), from_date, to_date (optional),
  * employee_id, org_unit_id (tree via ORG_STRUCTURE_LIST), level_code (tree via ORG_STRUCTURE_LIST), attendance_status.
  */
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
-import { DatabaseError } from '../../../../utils/errors/index.js';
+import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 
 const VIEW = 'TM.V_ATTENDANCE_ACTUALS_EMP';
 
@@ -74,25 +74,22 @@ function parseJsonFields(row, jsonFields = ['org_structure_list']) {
 /**
  * Build a single SELECT from TM.V_ATTENDANCE_ACTUALS_EMP with bind parameters.
  * - enterprise_id: required, always applied.
- * - attendance_date: single day; if provided, date_from/date_to are ignored.
- * - date_from, date_to: range; used only when attendance_date is not provided.
+ * - from_date, to_date: optional; attendance_date >= :from_date AND attendance_date < :to_date + 1.
+ *   If only from_date: single day (to_date = from_date). If both: date range. If neither: no date filter.
  * - employee_id, attendance_status: optional equality filters.
  * - org_unit_id: filter rows where org_unit_id exists in ORG_STRUCTURE_LIST (membership).
  * - level_code: filter rows where level_code exists in ORG_STRUCTURE_LIST (membership).
- * Uses ORG_STRUCTURE_LIST or ORG_STRUCTURE_LIST_JSON if present.
+ * No filter on employment_status or employee_status.
  */
 function buildSummaryQuery(filters) {
   const whereParts = ['v.ENTERPRISE_ID = :enterpriseId'];
 
-  if (filters.attendanceDate != null) {
-    whereParts.push('TRUNC(v.ATTENDANCE_DATE) = TO_DATE(:attendanceDate, \'YYYY-MM-DD\')');
-  } else {
-    if (filters.dateFrom != null) {
-      whereParts.push('TRUNC(v.ATTENDANCE_DATE) >= TO_DATE(:dateFrom, \'YYYY-MM-DD\')');
-    }
-    if (filters.dateTo != null) {
-      whereParts.push('TRUNC(v.ATTENDANCE_DATE) <= TO_DATE(:dateTo, \'YYYY-MM-DD\')');
-    }
+  // Date filter: attendance_date >= :from_date AND attendance_date < :to_date + 1
+  // Only from_date -> single day (effective to_date = from_date); both -> range; neither -> no filter
+  if (filters.fromDate != null) {
+    const toDate = filters.toDate != null ? filters.toDate : filters.fromDate;
+    whereParts.push('v.ATTENDANCE_DATE >= TO_DATE(:fromDate, \'YYYY-MM-DD\')');
+    whereParts.push('v.ATTENDANCE_DATE < TO_DATE(:toDate, \'YYYY-MM-DD\') + 1');
   }
 
   if (filters.employeeId != null) {
@@ -116,7 +113,6 @@ function buildSummaryQuery(filters) {
   }
 
   const whereClause = whereParts.join(' AND ');
-  const orderCol = 'v.ATTENDANCE_DATE';
   const orderDir = 'DESC';
 
   // Single query: total via COUNT(*) OVER (), paginate with OFFSET/FETCH (one round-trip)
@@ -132,10 +128,9 @@ function buildSummaryQuery(filters) {
   `;
 
   const binds = { enterpriseId: filters.enterpriseId, page: filters.page, pageSize: filters.pageSize };
-  if (filters.attendanceDate != null) binds.attendanceDate = filters.attendanceDate;
-  else {
-    if (filters.dateFrom != null) binds.dateFrom = filters.dateFrom;
-    if (filters.dateTo != null) binds.dateTo = filters.dateTo;
+  if (filters.fromDate != null) {
+    binds.fromDate = filters.fromDate;
+    binds.toDate = filters.toDate != null ? filters.toDate : filters.fromDate;
   }
   if (filters.employeeId != null) binds.employeeId = filters.employeeId;
   if (filters.attendanceStatus != null) binds.attendanceStatus = filters.attendanceStatus;
@@ -145,14 +140,14 @@ function buildSummaryQuery(filters) {
   return { sql, binds };
 }
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PAGE_SIZE = 25;
-const MAX_PAGE_SIZE = 100;
+export const DEFAULT_PAGE = 1;
+export const DEFAULT_PAGE_SIZE = 25;
+export const MAX_PAGE_SIZE = 100;
 
 /**
  * Fetch paginated attendance summary rows from TM.V_ATTENDANCE_ACTUALS_EMP.
- * @param {Object} filters - enterpriseId (required), attendanceDate | dateFrom+dateTo, employeeId, orgUnitId, levelCode, attendanceStatus, page, pageSize
- * @returns {Promise<{ rows: Array, total: number }>} Rows (snake_case) and total count.
+ * @param {Object} filters - enterpriseId (required), from_date, to_date (optional), employeeId, orgUnitId, levelCode, attendanceStatus, page, pageSize
+ * @returns {Promise<{ rows: Array, total: number, page: number, pageSize: number }>} Rows (snake_case), total count, and pagination used.
  */
 export async function getAttendanceSummary(filters) {
   const enterpriseId = optNum(filters.enterprise_id ?? filters.enterpriseId);
@@ -160,9 +155,18 @@ export async function getAttendanceSummary(filters) {
     throw new DatabaseError('enterprise_id is required');
   }
 
-  const attendanceDate = optStr(filters.attendance_date ?? filters.attendanceDate);
-  const dateFrom = optStr(filters.date_from ?? filters.dateFrom);
-  const dateTo = optStr(filters.date_to ?? filters.dateTo);
+  const fromDateRaw = optStr(filters.from_date ?? filters.fromDate ?? filters.date_from ?? filters.dateFrom ?? filters.attendance_date ?? filters.attendanceDate);
+  const toDateRaw = optStr(filters.to_date ?? filters.toDate ?? filters.date_to ?? filters.dateTo);
+  const fromDate = fromDateRaw ? parseDateOnly(fromDateRaw) : null;
+  const toDate = toDateRaw ? parseDateOnly(toDateRaw) : null;
+
+  if (fromDateRaw != null && fromDate == null) {
+    throw new ValidationError('Validation failed', ['Invalid date format for from_date (use YYYY-MM-DD)']);
+  }
+  if (toDateRaw != null && toDate == null) {
+    throw new ValidationError('Validation failed', ['Invalid date format for to_date (use YYYY-MM-DD)']);
+  }
+
   const employeeId = optNum(filters.employee_id ?? filters.employeeId);
   const orgUnitId = optStr(filters.org_unit_id ?? filters.orgUnitId);
   const levelCode = optStr(filters.level_code ?? filters.levelCode);
@@ -172,13 +176,12 @@ export async function getAttendanceSummary(filters) {
 
   const normalizedFilters = {
     enterpriseId,
-    attendanceDate: attendanceDate ? parseDateOnly(attendanceDate) : null,
-    dateFrom: dateFrom ? parseDateOnly(dateFrom) : null,
-    dateTo: dateTo ? parseDateOnly(dateTo) : null,
+    fromDate,
+    toDate,
     employeeId,
-    orgUnitId: orgUnitId && orgUnitId.trim() !== '' ? orgUnitId.trim() : null,
-    levelCode: levelCode && levelCode.trim() !== '' ? levelCode.trim().toUpperCase() : null,
-    attendanceStatus: attendanceStatus && attendanceStatus.trim() !== '' ? attendanceStatus.trim() : null,
+    orgUnitId: orgUnitId || null,
+    levelCode: levelCode ? levelCode.toUpperCase() : null,
+    attendanceStatus: attendanceStatus || null,
     page,
     pageSize
   };
@@ -192,21 +195,20 @@ export async function getAttendanceSummary(filters) {
 
     const result = await connection.execute(sql, binds, {
       outFormat: oracledb.OUT_FORMAT_OBJECT,
-      fetchArraySize: Math.max(pageSize, 100)
+      fetchArraySize: pageSize
     });
 
     const rawRows = result.rows || [];
     const total = rawRows.length > 0 ? Number(rawRows[0].TOTAL_COUNT) : 0;
     const rows = rawRows.map((r) => {
-      const row = { ...r };
-      delete row.TOTAL_COUNT;
-      const snake = convertRowToSnakeCase(row);
+      const snake = convertRowToSnakeCase(r);
+      delete snake.total_count;
       return parseJsonFields(snake, ['org_structure_list']);
     });
 
-    return { rows, total };
+    return { rows, total, page, pageSize };
   } catch (error) {
-    if (error instanceof DatabaseError) throw error;
+    if (error instanceof DatabaseError || error instanceof ValidationError) throw error;
     throw new DatabaseError(error.message || 'Failed to fetch attendance summary', error);
   } finally {
     if (connection) {
