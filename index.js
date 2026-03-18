@@ -53,6 +53,8 @@ import emplLookupTypeController from './feature/look_ups/empl/empl_lookup_types/
 import emplLookupValueController from './feature/look_ups/empl/empl_lookup_values/controller/emplLookupValueController.js';
 import entLookupTypeController from './feature/look_ups/ent/ent_lookup_types/controller/entLookupTypeController.js';
 import entLookupValueController from './feature/look_ups/ent/ent_lookup_values/controller/entLookupValueController.js';
+import compLookupTypeController from './feature/look_ups/comp/comp_lookup_types/controller/compLookupTypeController.js';
+import compLookupValueController from './feature/look_ups/comp/comp_lookup_values/controller/compLookupValueController.js';
 import timeZoneController from './feature/time_management/time_zones/controller/timeZoneController.js';
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
@@ -192,6 +194,8 @@ app.use('/api/empl/lookup-types', emplLookupTypeController);
 app.use('/api/empl/lookup-values', emplLookupValueController);
 app.use('/api/ent/lookup-types', entLookupTypeController);
 app.use('/api/ent/lookup-values', entLookupValueController);
+app.use('/api/comp/lookup-types', compLookupTypeController);
+app.use('/api/comp/lookup-values', compLookupValueController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
