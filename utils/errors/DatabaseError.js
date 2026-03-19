@@ -273,6 +273,18 @@ export class DatabaseError extends AppError {
       if (upperMessage.includes('PROJECT') && upperMessage.includes('NOT FOUND')) {
         return 'Project not found for update. Check project_id or project_guid and enterprise_id.';
       }
+      // ORA-20008: COMPONENT_CODE already exists for this TENANT_ID
+      if (errorNum === 20008 || message.includes('ORA-20008')) {
+        if (upperMessage.includes('COMPONENT_CODE') && upperMessage.includes('ALREADY EXISTS')) {
+          return 'This component code already exists for this tenant. Please use a different component code.';
+        }
+      }
+      // ORA-20010: Current component version not found for given GUID and TENANT_ID
+      if (errorNum === 20010 || message.includes('ORA-20010')) {
+        if (upperMessage.includes('CURRENT COMPONENT VERSION') && upperMessage.includes('NOT FOUND')) {
+          return 'No current version of this component found for the given tenant. Check that the component_guid and tenant_id are correct and that the component exists.';
+        }
+      }
       // Check for specific lookup validation errors (leave type)
       if (upperMessage.includes('LEAVE_TYPE') || upperMessage.includes('LEAVE TYPE') || upperMessage.includes('NOT FOUND')) {
         return 'The leave type does not exist. Please verify that the leave_type_id is valid and exists in the system.';
@@ -344,6 +356,7 @@ export class DatabaseError extends AppError {
     if (errorNum === 2290 || message.includes('ORA-02290')) return 400; // Bad Request
     if (errorNum === 20090 || message.includes('ORA-20090')) return 400; // Check constraint (e.g. attendance)
     if (errorNum === 1403 || message.includes('ORA-01403')) return 400; // No data found (e.g. attendance_day_id not found)
+    if (errorNum === 20010 || message.includes('ORA-20010')) return 404; // Current component version not found (GUID + tenant)
     if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
 
     return 500; // Internal Server Error
@@ -369,6 +382,7 @@ export class DatabaseError extends AppError {
     if (errorNum === 2292 || message.includes('ORA-02292')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 1400 || message.includes('ORA-01400')) return 'NOT_NULL_CONSTRAINT';
     if (errorNum === 2290 || message.includes('ORA-02290')) return 'CHECK_CONSTRAINT_VIOLATION';
+    if (errorNum === 20010 || message.includes('ORA-20010')) return 'COMPONENT_VERSION_NOT_FOUND';
 
     return 'DATABASE_ERROR';
   }
