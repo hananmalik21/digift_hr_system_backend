@@ -14,6 +14,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 import { createPool, closePool } from './config/db.js';
+import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
 import companyController from './feature/enterprise_structure/companies/controller/companyController.js';
 import divisionController from './feature/enterprise_structure/divisions/controller/divisionController.js';
 import businessUnitController from './feature/enterprise_structure/business_units/controller/businessUnitController.js';
@@ -66,6 +67,8 @@ import activeStructureStatsController from './feature/enterprise_structure/activ
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
+import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
+import { prewarmFaceModels } from './utils/facePrewarm.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -205,11 +208,15 @@ app.use('/api/abs', leavePolicyController);
 // Employee Leave Balances routes
 app.use('/api/abs', employeeLeaveBalanceController);
 
+// Face registration + attendance routes (Oracle-backed)
+app.use('/api/registerFace', faceAttendanceController);
 
 
 
 // Initialize database pool on startup
 await createPool();
+await createFaceOraclePool();
+await prewarmFaceModels();
 
 // ==========================================
 // 📌 HEALTH CHECK ENDPOINT
@@ -248,6 +255,7 @@ const server = app.listen(PORT);
 process.on('SIGINT', async () => {
   server.close(async () => {
     await closePool();
+    await closeFaceOraclePool();
     process.exit(0);
   });
 });

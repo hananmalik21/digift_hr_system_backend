@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import AttendanceModel from '../model/attendanceModel.js';
 import attendanceLogsController from './attendanceLogsController.js';
 import {
@@ -9,11 +10,50 @@ import {
   sendPunchRecomputeOracleError,
   sendError
 } from '../view/attendanceView.js';
-import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
+import { ValidationError, DatabaseError, ForbiddenError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { ALLOWED_SOURCE_TYPES, ALLOWED_LOG_TYPES } from '../config.js';
+import FaceAttendanceRepository from '../../face_attendance/repository/faceAttendanceRepository.js';
+import { getFaceDescriptor } from '../../../../utils/faceProcess.js';
 
 const router = express.Router();
+const TTL_MS_DAY = 30_000;
+const TTL_MS_USER = 60_000;
+const _ttlCache = new Map();
+
+function cacheGet(key) {
+  const hit = _ttlCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    _ttlCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSet(key, value, ttlMs) {
+  _ttlCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+async function cached(key, ttlMs, loader) {
+  const existing = cacheGet(key);
+  if (existing != null) return existing;
+  const value = await loader();
+  if (value != null) cacheSet(key, value, ttlMs);
+  return value;
+}
+
+const punchUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+      cb(new ValidationError(`${file.fieldname} must be an image upload`));
+      return;
+    }
+    cb(null, true);
+  }
+});
 
 router.use((req, res, next) => {
   req._startTime = Date.now();
@@ -52,9 +92,26 @@ function isValidISODate(value) {
   return !Number.isNaN(d.getTime());
 }
 
+function parseYnBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null || value === '') return defaultValue;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toUpperCase();
+  if (normalized === 'Y' || normalized === 'TRUE' || normalized === '1') return true;
+  if (normalized === 'N' || normalized === 'FALSE' || normalized === '0') return false;
+  return defaultValue;
+}
+
+function parsePositiveInt(value) {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 /**
- * Validate add-punch: attendance_day_id (required), punch_type (IN|OUT), punch_time (ISO 8601 with offset),
- * actor (required, non-empty). Optional: latitude, longitude, location_name. Return 400 if invalid.
+ * Validate add-punch: attendance_day_id (required), employee_id (required), punch_type (IN|OUT),
+ * punch_time (ISO 8601 with offset), actor (required, non-empty).
+ * Optional: user_id (required when face mode on), latitude, longitude, location_name.
  */
 function validateAddPunchPayload(body) {
   const errors = [];
@@ -65,6 +122,15 @@ function validateAddPunchPayload(body) {
     const n = Number(body.attendance_day_id);
     if (!Number.isInteger(n) || n <= 0) {
       errors.push('attendance_day_id must be a positive integer');
+    }
+  }
+
+  if (body.employee_id === undefined || body.employee_id === null || body.employee_id === '') {
+    errors.push('employee_id is required');
+  } else {
+    const n = Number(body.employee_id);
+    if (!Number.isInteger(n) || n <= 0) {
+      errors.push('employee_id must be a positive integer');
     }
   }
 
@@ -98,6 +164,21 @@ function validateAddPunchPayload(body) {
 
   if (body.location_name !== undefined && body.location_name !== null && typeof body.location_name !== 'string') {
     errors.push('location_name must be a string when provided');
+  }
+
+  if (body.mark_attendance_by_face !== undefined && body.mark_attendance_by_face !== null) {
+    const v = String(body.mark_attendance_by_face).trim().toUpperCase();
+    if (!['TRUE', 'FALSE', '1', '0', 'Y', 'N'].includes(v)) {
+      errors.push('mark_attendance_by_face must be a boolean or Y/N when provided');
+    }
+  }
+
+  const markByFace = parseYnBoolean(body.mark_attendance_by_face, false);
+  if (markByFace) {
+    const userId = parsePositiveInt(body.user_id);
+    if (!userId) {
+      errors.push('user_id is required and must be a positive integer when mark_attendance_by_face is true');
+    }
   }
 
   return errors;
@@ -309,32 +390,122 @@ router.put('/', asyncHandler(async (req, res) => {
 /**
  * POST /api/tm/attendance/punch
  * Create a punch (IN or OUT) for a given attendance_day_id.
- * System stores punches in UTC; DB evaluates status in schedule tz_region.
- * Timezone rule: accept punch_time with offset → parse as JS Date → bind directly to Oracle (no manual string conversion).
+ *
+ * Identity rules:
+ *   employee_id  — authoritative for attendance ownership; must match TM.TM_ATTENDANCE_DAYS.EMPLOYEE_ID.
+ *   user_id      — authoritative for face verification; resolved to SEC.USERS; EMPLOYEE_ID on that row
+ *                  must match employee_id to prevent identity mixing.
+ *
+ * Face matching (when mark_attendance_by_face=true):
+ *   Server computes face match from uploaded faceImage using user_id → SEC.USERS → email.
+ *   p_face_matched is set internally; client never decides it.
  */
-router.post('/punch', asyncHandler(async (req, res) => {
+router.post('/punch', punchUpload.fields([
+  { name: 'faceImage', maxCount: 1 }
+]), asyncHandler(async (req, res) => {
   const body = req.body || {};
   const validationErrors = validateAddPunchPayload(body);
   if (validationErrors.length > 0) {
     return sendValidationError(res, req, new ValidationError('Validation failed', validationErrors));
   }
 
+  const attendanceDayId = parsePositiveInt(body.attendance_day_id);
+  const employeeId = parsePositiveInt(body.employee_id);
+  const userId = parsePositiveInt(body.user_id);
   const punchTimeIso = String(body.punch_time).trim();
+  const markAttendanceByFace = parseYnBoolean(body.mark_attendance_by_face, false);
+  const threshold = Number.isFinite(Number(process.env.FACE_MATCH_THRESHOLD))
+    ? Number(process.env.FACE_MATCH_THRESHOLD)
+    : 0.5;
 
+  // --- 1. Attendance ownership + identity lookups ---
+  const dayAndUser = markAttendanceByFace
+    ? await Promise.all([
+      cached(
+        `day:${attendanceDayId}`,
+        TTL_MS_DAY,
+        () => AttendanceModel.getAttendanceDayEmployee(attendanceDayId)
+      ),
+      cached(
+        `secUser:${userId}`,
+        TTL_MS_USER,
+        () => FaceAttendanceRepository.findSecUserById(userId)
+      )
+    ])
+    : [await cached(
+      `day:${attendanceDayId}`,
+      TTL_MS_DAY,
+      () => AttendanceModel.getAttendanceDayEmployee(attendanceDayId)
+    ), null];
+
+  const [dayRow, secUser] = dayAndUser;
+  if (!dayRow) {
+    throw new ValidationError('attendance_day_id not found');
+  }
+  if (Number(dayRow.EMPLOYEE_ID) !== employeeId) {
+    throw new ForbiddenError('employee_id does not match the attendance day record');
+  }
+
+  // --- 2. Face verification (when enabled) ---
+  let faceMatchedForPunch = false;
+
+  if (markAttendanceByFace) {
+    const faceImageFile = req.files?.faceImage?.[0];
+
+    if (!faceImageFile) {
+      throw new ValidationError('faceImage is required when mark_attendance_by_face is true');
+    }
+    if (body.geoRadius != null && body.geoRadius !== '' && !Number.isFinite(Number(body.geoRadius))) {
+      throw new ValidationError('geoRadius must be numeric when provided');
+    }
+
+    // SEC.USERS resolved in parallel with attendance day lookup.
+    if (!secUser) {
+      throw new ForbiddenError('user_id not found in SEC.USERS');
+    }
+
+    // --- 3. Cross-check: user's linked employee must match attendance day employee ---
+    if (secUser.EMPLOYEE_ID == null || Number(secUser.EMPLOYEE_ID) !== employeeId) {
+      throw new ForbiddenError('user_id is not linked to the same employee as the attendance day record');
+    }
+
+    // Run face match using email + tenant resolved from SEC.USERS
+    const liveDescriptor = await getFaceDescriptor(faceImageFile.buffer);
+    const statusForFacePackage = String(body.punch_type).trim().toUpperCase() === 'IN' ? 'checkIn' : 'checkOut';
+    const faceResult = await FaceAttendanceRepository.markFaceAttendanceViaPackage({
+      email: secUser.EMAIL_ADDRESS,
+      tenantId: secUser.TENANT_ID ?? null,
+      userGuid: null,
+      liveFaceArrayJson: JSON.stringify(liveDescriptor),
+      threshold,
+      status: statusForFacePackage,
+      locationLat: body.latitude ?? null,
+      locationLng: body.longitude ?? null,
+      geoRadius: body.geoRadius == null || body.geoRadius === '' ? null : Number(body.geoRadius)
+    });
+    faceMatchedForPunch = Boolean(faceResult.MATCHED);
+  }
+
+  // --- 4. Call ADD_PUNCH — face gate enforced by Oracle package ---
   const payload = {
-    attendance_day_id: Number(body.attendance_day_id),
+    attendance_day_id: attendanceDayId,
     punch_type: String(body.punch_type).trim().toUpperCase(),
     punch_time: punchTimeIso,
     actor: String(body.actor).trim(),
     latitude: body.latitude ?? null,
     longitude: body.longitude ?? null,
-    location_name: body.location_name ?? null
+    location_name: body.location_name ?? null,
+    mark_attendance_by_face: markAttendanceByFace ? 'Y' : 'N',
+    face_matched: faceMatchedForPunch ? 'Y' : 'N'
   };
 
   try {
     const result = await AttendanceModel.addPunch(payload);
     return sendPunchRecomputeSuccess(res, req, result.attendance_day_id, 'PUNCH');
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ success: false, message: error.message });
+    }
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
     if (error instanceof DatabaseError) return sendPunchRecomputeOracleError(res, req, error);
     if (error.errorNum != null || (error.message && error.message.includes('ORA-'))) {

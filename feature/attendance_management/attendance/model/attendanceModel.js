@@ -1,6 +1,6 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
-import { DatabaseError } from '../../../../utils/errors/index.js';
+import { DatabaseError, ForbiddenError } from '../../../../utils/errors/index.js';
 import { ALLOWED_SOURCE_TYPES, DEFAULT_SOURCE_TYPE, ALLOWED_LOG_TYPES } from '../config.js';
 
 /**
@@ -53,6 +53,29 @@ class AttendanceModel {
       return d;
     }
     return d;
+  }
+
+  /**
+   * Load employee_id and enterprise_id from TM.TM_ATTENDANCE_DAYS for a given attendance_day_id.
+   * Returns { EMPLOYEE_ID, ENTERPRISE_ID } or null if not found.
+   */
+  static async getAttendanceDayEmployee(attendanceDayId) {
+    let connection;
+    try {
+      connection = await db.getConnection();
+      const result = await connection.execute(
+        `SELECT EMPLOYEE_ID, ENTERPRISE_ID
+           FROM TM.TM_ATTENDANCE_DAYS
+          WHERE ATTENDANCE_DAY_ID = :id`,
+        { id: Number(attendanceDayId) },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      return result.rows?.[0] || null;
+    } catch (error) {
+      throw new DatabaseError('Failed to load attendance day.', error);
+    } finally {
+      if (connection) await connection.close().catch(() => {});
+    }
   }
 
   /**
@@ -357,10 +380,14 @@ class AttendanceModel {
       const punch_type = String(payload.punch_type || '').trim().toUpperCase();
       let punch_time = typeof payload.punch_time === 'string' ? payload.punch_time.trim() : String(payload.punch_time);
       if (punch_time.endsWith('Z')) punch_time = punch_time.slice(0, -1) + '+00:00';
+      // Strip milliseconds (e.g. .000 or .123) — Oracle format mask has no FF placeholder.
+      punch_time = punch_time.replace(/\.\d+(?=[+-]\d{2}:\d{2}$)/, '');
       const actor = this.optStr(payload.actor) || 'ADMIN';
       const latitude = payload.latitude ?? null;
       const longitude = payload.longitude ?? null;
       const location_name = payload.location_name ?? null;
+      const mark_attendance_by_face = payload.mark_attendance_by_face === true || payload.mark_attendance_by_face === 'Y' ? 'Y' : 'N';
+      const face_matched = payload.face_matched === true || payload.face_matched === 'Y' ? 'Y' : 'N';
 
       const plsqlBlock = `
         DECLARE
@@ -368,13 +395,15 @@ class AttendanceModel {
         BEGIN
           v_punch_ts := TO_TIMESTAMP_TZ(:punch_time, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM');
           TM.TM_ATTENDANCE_SYSTEM_PKG.ADD_PUNCH(
-            p_attendance_day_id => :attendance_day_id,
-            p_punch_type        => :punch_type,
-            p_punch_time        => v_punch_ts,
-            p_actor             => :actor,
-            p_latitude          => :latitude,
-            p_longitude         => :longitude,
-            p_location_name     => :location_name
+            p_attendance_day_id       => :attendance_day_id,
+            p_punch_type              => :punch_type,
+            p_punch_time              => v_punch_ts,
+            p_actor                   => :actor,
+            p_latitude                => :latitude,
+            p_longitude               => :longitude,
+            p_location_name           => :location_name,
+            p_mark_attendance_by_face => :mark_attendance_by_face,
+            p_face_matched            => :face_matched
           );
         END;
       `;
@@ -386,7 +415,9 @@ class AttendanceModel {
         actor,
         latitude,
         longitude,
-        location_name
+        location_name,
+        mark_attendance_by_face,
+        face_matched
       };
 
       await connection.execute(plsqlBlock, binds, { autoCommit: false });
@@ -399,7 +430,10 @@ class AttendanceModel {
           await connection.rollback();
         } catch (_) {}
       }
-      if (error instanceof DatabaseError) throw error;
+      if (error instanceof DatabaseError || error instanceof ForbiddenError) throw error;
+      if (error.errorNum === 20023 || (error.message || '').includes('ORA-20023')) {
+        throw new ForbiddenError('Face not matched. Attendance punch blocked.');
+      }
       const userMsg = this.mapAddPunchError(error);
       const message = userMsg || (() => {
         const oraCode = (error.message || '').match(/ORA-\d{5}/)?.[0];
