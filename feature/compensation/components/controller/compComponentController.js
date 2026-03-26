@@ -10,6 +10,7 @@ import {
   createComponent,
   updateComponent,
   getComponentByGuid,
+  deleteComponent,
   COMPONENT_GUID_REGEX
 } from '../model/compComponentModel.js';
 import {
@@ -25,7 +26,8 @@ const router = express.Router();
 const ERROR_TITLE = {
   CREATE: 'Failed to create compensation component',
   UPDATE: 'Failed to update compensation component',
-  GET: 'Failed to get compensation component'
+  GET: 'Failed to get compensation component',
+  DELETE: 'Failed to delete compensation component'
 };
 
 const GENERIC_DB_MESSAGE = 'A database error occurred. Please try again later.';
@@ -54,6 +56,10 @@ function validateComponentGuid(componentGuid) {
 function toUserFriendlyMessage(rawMessage) {
   if (!rawMessage || typeof rawMessage !== 'string') return rawMessage || 'An error occurred.';
   const msg = rawMessage.trim();
+  // Keep full compiler diagnostics for PL/SQL compile-time errors (ORA-06550 usually paired with PLS-00306 details).
+  if (msg.includes('ORA-06550')) {
+    return msg;
+  }
   // ORA-20008: COMPONENT_CODE already exists for this TENANT_ID
   if (msg.includes('ORA-20008') && /COMPONENT_CODE\s+already\s+exists/i.test(msg)) {
     return 'This component code already exists for this tenant. Please use a different component code.';
@@ -134,43 +140,11 @@ function validateYnFlags(data) {
 }
 
 /**
- * Validate arrays: org_unit_ids (hex strings), job_family_ids (numbers), grade_ids (numbers), location_codes (strings)
+ * Validate arrays: location_codes (strings)
  */
 function validateArrays(data) {
   const errors = [];
   const eligibility = data.eligibility || {};
-  const hex32 = /^[0-9A-Fa-f]{32}$/;
-
-  if (eligibility.org_unit_ids != null) {
-    if (!Array.isArray(eligibility.org_unit_ids)) {
-      errors.push('eligibility.org_unit_ids must be an array of hex strings');
-    } else {
-      const bad = eligibility.org_unit_ids.some(
-        (id) => typeof id !== 'string' || !hex32.test(String(id).trim())
-      );
-      if (bad) errors.push('eligibility.org_unit_ids must be array of 32-character hex strings');
-    }
-  }
-  if (eligibility.job_family_ids != null) {
-    if (!Array.isArray(eligibility.job_family_ids)) {
-      errors.push('eligibility.job_family_ids must be an array of numbers');
-    } else {
-      const bad = eligibility.job_family_ids.some(
-        (n) => !Number.isFinite(Number(n))
-      );
-      if (bad) errors.push('eligibility.job_family_ids must be array of numbers');
-    }
-  }
-  if (eligibility.grade_ids != null) {
-    if (!Array.isArray(eligibility.grade_ids)) {
-      errors.push('eligibility.grade_ids must be an array of numbers');
-    } else {
-      const bad = eligibility.grade_ids.some(
-        (n) => !Number.isFinite(Number(n))
-      );
-      if (bad) errors.push('eligibility.grade_ids must be array of numbers');
-    }
-  }
   if (eligibility.location_codes != null) {
     if (!Array.isArray(eligibility.location_codes)) {
       errors.push('eligibility.location_codes must be an array of strings');
@@ -263,6 +237,36 @@ function validateComponentPayload(data, isUpdate) {
   return errors;
 }
 
+function parseTenantIdBody(req) {
+  const raw = req.body?.tenant_id;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+function parseDeletedByBody(req) {
+  const raw = req.body?.user;
+  if (raw === undefined || raw === null) return null;
+  const s = String(raw).trim();
+  return s || null;
+}
+
+function mapDeleteOracleError(err) {
+  const msg = String(err?.message || err?.oracleError?.message || '').toUpperCase();
+  const errorNum = Number(err?.errorNum);
+  if (errorNum === 20001 || msg.includes('ORA-20001')) {
+    return { status: 404, message: 'Component not found' };
+  }
+  if (errorNum === 20002 || msg.includes('ORA-20002')) {
+    return { status: 400, message: 'Deletion failed' };
+  }
+  if (errorNum === 20003 || msg.includes('ORA-20003')) {
+    return { status: 500, message: 'Generic deletion error' };
+  }
+  return { status: 500, message: 'Failed to delete compensation component' };
+}
+
 // ----- Routes -----
 
 /**
@@ -350,6 +354,45 @@ router.get('/:componentGuid', asyncHandler(async (req, res) => {
       return sendError(res, err.statusCode || 400, ERROR_TITLE.GET, err.message || 'Database error');
     }
     return sendError(res, 500, ERROR_TITLE.GET, err.message || ERROR_TITLE.GET);
+  }
+}));
+
+/**
+ * DELETE /comp/components/:componentGuid
+ * Hard delete component using package COMP.DELETE_COMPONENT_PKG.DELETE_COMPONENT.
+ * Required body fields:
+ * - tenant_id
+ * - user
+ */
+router.delete('/:componentGuid', asyncHandler(async (req, res) => {
+  const componentGuid = req.params.componentGuid;
+  const guidError = validateComponentGuid(componentGuid);
+  if (guidError) {
+    return res.status(400).json({ success: false, message: guidError });
+  }
+
+  const tenantId = parseTenantIdBody(req);
+  if (tenantId == null) {
+    return res.status(400).json({ success: false, message: 'tenant_id is required' });
+  }
+
+  const deletedBy = parseDeletedByBody(req);
+  if (!deletedBy) {
+    return res.status(400).json({ success: false, message: 'user is required' });
+  }
+
+  try {
+    await deleteComponent(componentGuid, tenantId, deletedBy);
+    return res.status(200).json({
+      success: true,
+      message: 'Component deleted successfully'
+    });
+  } catch (err) {
+    const mapped = mapDeleteOracleError(err);
+    return res.status(mapped.status).json({
+      success: false,
+      message: mapped.message
+    });
   }
 }));
 

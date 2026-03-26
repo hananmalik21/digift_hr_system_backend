@@ -80,20 +80,6 @@ function normalizeYn(value, defaultVal = 'N') {
   return String(value).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
 }
 
-const HEX32 = /^[0-9A-Fa-f]{32}$/;
-
-/**
- * Convert to SYS.ODCINUMBERLIST (array of numbers).
- * @param {number[]} arr
- * @returns {number[]}
- */
-function toNumberList(arr) {
-  if (!Array.isArray(arr)) return [];
-  return arr
-    .map((n) => (n != null && Number.isFinite(Number(n)) ? Number(n) : null))
-    .filter((n) => n !== null);
-}
-
 /**
  * Convert to SYS.ODCIVARCHAR2LIST (array of strings).
  * @param {string[]} arr
@@ -104,20 +90,6 @@ function toStringList(arr) {
   return arr
     .map((s) => (s != null ? String(s).trim() : ''))
     .filter(Boolean);
-}
-
-/** JSON string of hex IDs for update path (if package accepts string there). */
-function orgUnitIdsToJson(arr) {
-  if (!Array.isArray(arr)) return null;
-  const hexList = arr
-    .map((id) => (id != null ? String(id).trim() : ''))
-    .filter((s) => HEX32.test(s));
-  return hexList.length === 0 ? null : JSON.stringify(hexList);
-}
-
-function numberArrayToJson(arr) {
-  const list = toNumberList(arr);
-  return list.length === 0 ? null : JSON.stringify(list);
 }
 
 function stringArrayToJson(arr) {
@@ -167,16 +139,12 @@ async function runWithTransaction(fn, errorContext = 'operation', opts = {}) {
 }
 
 /**
- * Build binds for CREATE. Pass collection data as JSON strings; PL/SQL wrapper builds
- * SYS.ODCIRAWLIST / SYS.ODCINUMBERLIST / SYS.ODCIVARCHAR2LIST and calls the package.
+ * Build binds for CREATE. Pass location_codes as JSON string for PL/SQL wrapper.
  */
 function buildCreateBinds(payload) {
   const flags = payload.flags || {};
   const eligibility = payload.eligibility || {};
 
-  const orgJson = orgUnitIdsToJson(eligibility.org_unit_ids);
-  const jobJson = numberArrayToJson(eligibility.job_family_ids);
-  const gradeJson = numberArrayToJson(eligibility.grade_ids);
   const locJson = stringArrayToJson(eligibility.location_codes);
 
   return {
@@ -201,9 +169,6 @@ function buildCreateBinds(payload) {
     P_PRORATED_FLAG: normalizeYn(flags.prorated_flag),
     P_TAXABLE_FLAG: normalizeYn(flags.taxable_flag),
     P_ALL_EMPLOYEES_FLAG: normalizeYn(eligibility.all_employees_flag),
-    P_ORG_UNIT_IDS_JSON: orgJson ?? '[]',
-    P_JOB_FAMILY_IDS_JSON: jobJson ?? '[]',
-    P_GRADE_IDS_JSON: gradeJson ?? '[]',
     P_LOCATION_CODES_JSON: locJson ?? '[]',
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
@@ -212,15 +177,11 @@ function buildCreateBinds(payload) {
 }
 
 /**
- * Build binds for UPDATE. Same as create (P_ prefixed, collection params as JSON strings);
- * PL/SQL wrapper builds collections and calls COMP_COMPONENT_UPDATE_PKG.UPDATE_COMPONENT.
+ * Build binds for UPDATE.
  */
 function buildUpdateBinds(componentGuidBuffer, payload) {
   const flags = payload.flags || {};
   const eligibility = payload.eligibility || {};
-  const orgJson = orgUnitIdsToJson(eligibility.org_unit_ids);
-  const jobJson = numberArrayToJson(eligibility.job_family_ids);
-  const gradeJson = numberArrayToJson(eligibility.grade_ids);
   const locJson = stringArrayToJson(eligibility.location_codes);
 
   return {
@@ -246,9 +207,6 @@ function buildUpdateBinds(componentGuidBuffer, payload) {
     P_PRORATED_FLAG: normalizeYn(flags.prorated_flag),
     P_TAXABLE_FLAG: normalizeYn(flags.taxable_flag),
     P_ALL_EMPLOYEES_FLAG: normalizeYn(eligibility.all_employees_flag),
-    P_ORG_UNIT_IDS_JSON: orgJson ?? '[]',
-    P_JOB_FAMILY_IDS_JSON: jobJson ?? '[]',
-    P_GRADE_IDS_JSON: gradeJson ?? '[]',
     P_LOCATION_CODES_JSON: locJson ?? '[]',
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
@@ -258,8 +216,7 @@ function buildUpdateBinds(componentGuidBuffer, payload) {
 
 /**
  * Create compensation component via COMP.COMP_COMPONENT_CREATE_PKG.CREATE_COMPONENT.
- * Uses a PL/SQL wrapper that parses JSON for collection params and builds
- * SYS.ODCIRAWLIST, SYS.ODCINUMBERLIST, SYS.ODCIVARCHAR2LIST (node-oracledb does not bind these directly).
+ * Uses a PL/SQL wrapper that parses location_codes JSON into SYS.ODCIVARCHAR2LIST.
  */
 export async function createComponent(payload) {
   const binds = buildCreateBinds(payload);
@@ -267,34 +224,10 @@ export async function createComponent(payload) {
 
   const plsql = `
     DECLARE
-      L_ORG   SYS.ODCIRAWLIST := SYS.ODCIRAWLIST();
-      L_JOB   SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
-      L_GRADE SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
       L_LOC   SYS.ODCIVARCHAR2LIST := SYS.ODCIVARCHAR2LIST();
       J       JSON_ARRAY_T;
       I       PLS_INTEGER;
     BEGIN
-      IF :P_ORG_UNIT_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_ORG_UNIT_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_ORG.EXTEND(1);
-          L_ORG(L_ORG.COUNT) := HEXTORAW(J.GET_STRING(I));
-        END LOOP;
-      END IF;
-      IF :P_JOB_FAMILY_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_JOB_FAMILY_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_JOB.EXTEND(1);
-          L_JOB(L_JOB.COUNT) := J.GET_NUMBER(I);
-        END LOOP;
-      END IF;
-      IF :P_GRADE_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_GRADE_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_GRADE.EXTEND(1);
-          L_GRADE(L_GRADE.COUNT) := J.GET_NUMBER(I);
-        END LOOP;
-      END IF;
       IF :P_LOCATION_CODES_JSON IS NOT NULL THEN
         J := JSON_ARRAY_T.PARSE(:P_LOCATION_CODES_JSON);
         FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
@@ -317,6 +250,8 @@ export async function createComponent(payload) {
         P_STATUS                  => :P_STATUS,
         P_ACTIVE_FLAG             => :P_ACTIVE_FLAG,
         P_COMP_CATEGORY_CODE      => :P_COMP_CATEGORY_CODE,
+        P_EFFECTIVE_START_DATE    => :P_EFFECTIVE_START_DATE,
+        P_EFFECTIVE_END_DATE      => :P_EFFECTIVE_END_DATE,
         P_RECURRING_FLAG          => :P_RECURRING_FLAG,
         P_OPTIONAL_FLAG           => :P_OPTIONAL_FLAG,
         P_PENSIONABLE_FLAG        => :P_PENSIONABLE_FLAG,
@@ -325,12 +260,7 @@ export async function createComponent(payload) {
         P_PRORATED_FLAG           => :P_PRORATED_FLAG,
         P_TAXABLE_FLAG            => :P_TAXABLE_FLAG,
         P_ALL_EMPLOYEES_FLAG      => :P_ALL_EMPLOYEES_FLAG,
-        P_ORG_UNIT_IDS            => L_ORG,
-        P_JOB_FAMILY_IDS          => L_JOB,
-        P_GRADE_IDS               => L_GRADE,
         P_LOCATION_CODES          => L_LOC,
-        P_EFFECTIVE_START_DATE    => :P_EFFECTIVE_START_DATE,
-        P_EFFECTIVE_END_DATE      => :P_EFFECTIVE_END_DATE,
         P_CREATED_BY              => :P_CREATED_BY,
         P_COMPONENT_ID            => :P_COMPONENT_ID
       );
@@ -374,8 +304,7 @@ export async function createComponent(payload) {
 
 /**
  * Update compensation component via COMP.COMP_COMPONENT_UPDATE_PKG.UPDATE_COMPONENT.
- * Uses a PL/SQL wrapper that parses JSON for collection params and builds
- * SYS.ODCIRAWLIST, SYS.ODCINUMBERLIST, SYS.ODCIVARCHAR2LIST (same as create).
+ * Uses a PL/SQL wrapper that parses location_codes JSON into SYS.ODCIVARCHAR2LIST.
  */
 export async function updateComponent(componentGuid, payload) {
   const guidBuffer = guidHexToBuffer(componentGuid);
@@ -383,34 +312,10 @@ export async function updateComponent(componentGuid, payload) {
 
   const plsql = `
     DECLARE
-      L_ORG   SYS.ODCIRAWLIST := SYS.ODCIRAWLIST();
-      L_JOB   SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
-      L_GRADE SYS.ODCINUMBERLIST := SYS.ODCINUMBERLIST();
       L_LOC   SYS.ODCIVARCHAR2LIST := SYS.ODCIVARCHAR2LIST();
       J       JSON_ARRAY_T;
       I       PLS_INTEGER;
     BEGIN
-      IF :P_ORG_UNIT_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_ORG_UNIT_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_ORG.EXTEND(1);
-          L_ORG(L_ORG.COUNT) := HEXTORAW(J.GET_STRING(I));
-        END LOOP;
-      END IF;
-      IF :P_JOB_FAMILY_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_JOB_FAMILY_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_JOB.EXTEND(1);
-          L_JOB(L_JOB.COUNT) := J.GET_NUMBER(I);
-        END LOOP;
-      END IF;
-      IF :P_GRADE_IDS_JSON IS NOT NULL THEN
-        J := JSON_ARRAY_T.PARSE(:P_GRADE_IDS_JSON);
-        FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
-          L_GRADE.EXTEND(1);
-          L_GRADE(L_GRADE.COUNT) := J.GET_NUMBER(I);
-        END LOOP;
-      END IF;
       IF :P_LOCATION_CODES_JSON IS NOT NULL THEN
         J := JSON_ARRAY_T.PARSE(:P_LOCATION_CODES_JSON);
         FOR I IN 0 .. J.GET_SIZE() - 1 LOOP
@@ -434,6 +339,8 @@ export async function updateComponent(componentGuid, payload) {
         P_STATUS                 => :P_STATUS,
         P_ACTIVE_FLAG            => :P_ACTIVE_FLAG,
         P_COMP_CATEGORY_CODE     => :P_COMP_CATEGORY_CODE,
+        P_EFFECTIVE_START_DATE   => :P_EFFECTIVE_START_DATE,
+        P_EFFECTIVE_END_DATE     => :P_EFFECTIVE_END_DATE,
         P_RECURRING_FLAG         => :P_RECURRING_FLAG,
         P_OPTIONAL_FLAG          => :P_OPTIONAL_FLAG,
         P_PENSIONABLE_FLAG       => :P_PENSIONABLE_FLAG,
@@ -442,12 +349,7 @@ export async function updateComponent(componentGuid, payload) {
         P_PRORATED_FLAG          => :P_PRORATED_FLAG,
         P_TAXABLE_FLAG           => :P_TAXABLE_FLAG,
         P_ALL_EMPLOYEES_FLAG     => :P_ALL_EMPLOYEES_FLAG,
-        P_ORG_UNIT_IDS           => L_ORG,
-        P_JOB_FAMILY_IDS         => L_JOB,
-        P_GRADE_IDS              => L_GRADE,
         P_LOCATION_CODES         => L_LOC,
-        P_EFFECTIVE_START_DATE   => :P_EFFECTIVE_START_DATE,
-        P_EFFECTIVE_END_DATE     => :P_EFFECTIVE_END_DATE,
         P_UPDATED_BY             => :P_UPDATED_BY
       );
     END;
@@ -457,6 +359,34 @@ export async function updateComponent(componentGuid, payload) {
     await connection.execute(plsql, binds, { autoCommit: false });
     return { component_guid: normalizeComponentGuid(componentGuid) };
   }, 'update compensation component');
+}
+
+/**
+ * Hard delete compensation component via COMP.DELETE_COMPONENT_PKG.DELETE_COMPONENT.
+ * Package handles child cleanup internally.
+ */
+export async function deleteComponent(componentGuid, tenantId, deletedBy) {
+  const guidBuffer = guidHexToBuffer(componentGuid);
+  const binds = {
+    P_COMPONENT_GUID: guidBuffer,
+    P_TENANT_ID: optNum(tenantId),
+    P_DELETED_BY: optStr(deletedBy)
+  };
+
+  const plsql = `
+    BEGIN
+      COMP.DELETE_COMPONENT_PKG.DELETE_COMPONENT(
+        P_COMPONENT_GUID => :P_COMPONENT_GUID,
+        P_TENANT_ID      => :P_TENANT_ID,
+        P_DELETED_BY     => :P_DELETED_BY
+      );
+    END;
+  `;
+
+  return runWithTransaction(async (connection) => {
+    await connection.execute(plsql, binds, { autoCommit: false });
+    return true;
+  }, 'delete compensation component', { useOriginalErrorMessage: true });
 }
 
 /**
@@ -541,48 +471,7 @@ export async function getComponentByGuid(componentGuid) {
     }
 
     const componentId = headerRow.COMPONENT_ID;
-    let orgUnitIds = [];
-    let jobFamilyIds = [];
-    let gradeIds = [];
     let locationCodes = [];
-
-    try {
-      const orgSql = `
-        SELECT RAWTOHEX(ORG_UNIT_ID) AS ORG_UNIT_ID
-        FROM COMP.COMP_COMPONENT_ORG_UNITS
-        WHERE COMPONENT_ID = :id
-      `;
-      const orgResult = await connection.execute(
-        orgSql,
-        { id: componentId },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      orgUnitIds = (orgResult.rows || []).map((r) => r.ORG_UNIT_ID).filter(Boolean);
-    } catch (_) {}
-
-    try {
-      const jfSql = `
-        SELECT JOB_FAMILY_ID FROM COMP.COMP_COMPONENT_JOB_FAMILIES WHERE COMPONENT_ID = :id
-      `;
-      const jfResult = await connection.execute(
-        jfSql,
-        { id: componentId },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      jobFamilyIds = (jfResult.rows || []).map((r) => r.JOB_FAMILY_ID).filter((v) => v != null);
-    } catch (_) {}
-
-    try {
-      const grSql = `
-        SELECT GRADE_ID FROM COMP.COMP_COMPONENT_GRADES WHERE COMPONENT_ID = :id
-      `;
-      const grResult = await connection.execute(
-        grSql,
-        { id: componentId },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      gradeIds = (grResult.rows || []).map((r) => r.GRADE_ID).filter((v) => v != null);
-    } catch (_) {}
 
     try {
       const locSql = `
@@ -627,9 +516,6 @@ export async function getComponentByGuid(componentGuid) {
       },
       eligibility: {
         all_employees_flag: h.all_employees_flag ?? 'N',
-        org_unit_ids: orgUnitIds,
-        job_family_ids: jobFamilyIds,
-        grade_ids: gradeIds,
         location_codes: locationCodes
       }
     };
