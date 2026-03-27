@@ -58,6 +58,7 @@ import compLookupTypeController from './feature/look_ups/comp/comp_lookup_types/
 import compLookupValueController from './feature/look_ups/comp/comp_lookup_values/controller/compLookupValueController.js';
 import compComponentController from './feature/compensation/components/controller/compComponentController.js';
 import compSalaryStructureRoutes from './feature/compensation/salary_structures/routes/compSalaryStructures.routes.js';
+import compensationPlanController from './feature/compensation/plans/controller/compensationPlanController.js';
 import timeZoneController from './feature/time_management/time_zones/controller/timeZoneController.js';
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
@@ -203,6 +204,7 @@ app.use('/api/comp/lookup-types', compLookupTypeController);
 app.use('/api/comp/lookup-values', compLookupValueController);
 app.use('/api/comp/components', compComponentController);
 app.use('/api/comp', compSalaryStructureRoutes);
+app.use('/api/compensation/plans', compensationPlanController);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes

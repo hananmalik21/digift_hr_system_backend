@@ -1,0 +1,204 @@
+import express from 'express';
+import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import {
+  createCompensationPlan,
+  updateCompensationPlan,
+  deleteCompensationPlan
+} from '../service/compensationPlanService.js';
+
+const router = express.Router();
+
+const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
+
+const ORA_STACK_CODE = 'ORA-06512';
+const ORACLE_PLAN_ERROR_MAP = {
+  ORA_20002: { code: 'ORA-20002', message: 'Compensation plan not found' },
+  ORA_20001: { code: 'ORA-20001', message: 'Invalid request data' },
+  ORA_20099: { code: 'ORA-20099', message: 'Compensation plan request could not be completed' }
+};
+
+const PLAN_GUID_REGEX = /^[0-9A-F]{32}$/;
+
+function stripOracleHelpUrl(text) {
+  return (text || '').replace(/\s*Help:\s*https?:\/\/[^\s]*/gi, '').trim();
+}
+
+function primaryOracleLine(error) {
+  return stripOracleHelpUrl(String(error?.message || '')).split(/\n/)[0].trim();
+}
+
+function parseOracleCode(errorMessage) {
+  const raw = String(errorMessage || '');
+  const matches = raw.match(/ORA-\d{5}/g) || [];
+  const meaningful = matches.find((c) => c !== ORA_STACK_CODE);
+  return meaningful || null;
+}
+
+function mapPlanOracleError(error) {
+  const ora = parseOracleCode(error?.message);
+  if (!ora) {
+    return {
+      code: 'UNKNOWN',
+      message: 'Something went wrong. Please try again'
+    };
+  }
+  const key = ora.replace(/-/g, '_');
+  const mapped = ORACLE_PLAN_ERROR_MAP[key];
+  if (mapped) return { code: mapped.code, message: mapped.message };
+  return {
+    code: ora,
+    message: 'Something went wrong. Please try again'
+  };
+}
+
+function sendBadRequest(res, message) {
+  return res.status(HTTP.BAD_REQUEST).json({
+    success: false,
+    message
+  });
+}
+
+function sendPlanDbError(res, error) {
+  const mapped = mapPlanOracleError(error);
+  return res.status(HTTP.SERVER_ERROR).json({
+    success: false,
+    message: mapped.message,
+    code: mapped.code,
+    error: primaryOracleLine(error) || mapped.message
+  });
+}
+
+function validateEligibilityObject(payload) {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'eligibility')) return null;
+  const { eligibility } = payload;
+  if (
+    eligibility == null ||
+    Array.isArray(eligibility) ||
+    typeof eligibility !== 'object'
+  ) {
+    return 'eligibility must be a JSON object';
+  }
+  return null;
+}
+
+function hasKey(obj, key) {
+  return obj != null && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function normalizePlanGuidHex(value) {
+  if (value == null) return null;
+  const s = String(value).trim().toUpperCase();
+  if (!PLAN_GUID_REGEX.test(s)) return null;
+  return s;
+}
+
+/**
+ * @param {object} payload
+ * @param {{ requirePlanGuid: boolean }} options
+ * @returns {string[]}
+ */
+function collectPlanJsonValidationErrors(payload, options) {
+  const errors = [];
+  const { requirePlanGuid } = options;
+
+  if (hasKey(payload, 'budgets')) {
+    errors.push('budgets is no longer supported; use budget (a single object)');
+  }
+
+  if (requirePlanGuid) {
+    if (hasKey(payload, 'plan_id')) {
+      errors.push('plan_id is no longer supported; use plan_guid');
+    }
+    const normalizedGuid = normalizePlanGuidHex(payload.plan_guid);
+    if (payload.plan_guid === undefined || payload.plan_guid === null || String(payload.plan_guid).trim() === '') {
+      errors.push('plan_guid is required');
+    } else if (!normalizedGuid) {
+      errors.push('plan_guid must be a 32-character hexadecimal string');
+    }
+  }
+
+  if (hasKey(payload, 'budget') && payload.budget != null) {
+    if (Array.isArray(payload.budget) || typeof payload.budget !== 'object') {
+      errors.push('budget must be an object, not an array');
+    }
+  }
+
+  if (hasKey(payload, 'positions') && payload.positions != null) {
+    if (!Array.isArray(payload.positions)) {
+      errors.push('positions must be an array');
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * @param {object} payload
+ * @param {{ requirePlanGuid: boolean }} options
+ * @returns {{ ok: true } | { ok: false, message: string }}
+ */
+function validatePlanRequestPayload(payload, options) {
+  const eligibilityError = validateEligibilityObject(payload);
+  if (eligibilityError) return { ok: false, message: eligibilityError };
+
+  const planErrors = collectPlanJsonValidationErrors(payload, options);
+  if (planErrors.length > 0) return { ok: false, message: planErrors.join('; ') };
+
+  return { ok: true };
+}
+
+router.post('/create', asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const validation = validatePlanRequestPayload(payload, { requirePlanGuid: false });
+  if (!validation.ok) return sendBadRequest(res, validation.message);
+
+  try {
+    const planId = await createCompensationPlan(payload);
+    return res.status(HTTP.OK).json({
+      success: true,
+      message: 'Compensation plan created successfully',
+      plan_id: planId
+    });
+  } catch (error) {
+    return sendPlanDbError(res, error);
+  }
+}));
+
+router.put('/update', asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const validation = validatePlanRequestPayload(payload, { requirePlanGuid: true });
+  if (!validation.ok) return sendBadRequest(res, validation.message);
+
+  try {
+    await updateCompensationPlan(payload);
+    return res.status(HTTP.OK).json({
+      success: true,
+      message: 'Compensation plan updated successfully'
+    });
+  } catch (error) {
+    return sendPlanDbError(res, error);
+  }
+}));
+
+router.delete('/:planGuid', asyncHandler(async (req, res) => {
+  const { planGuid } = req.params;
+  const normalizedPlanGuid = String(planGuid || '').trim().toUpperCase();
+  if (!PLAN_GUID_REGEX.test(normalizedPlanGuid)) {
+    return sendBadRequest(res, 'planGuid must be a 32-character hexadecimal string');
+  }
+
+  const deletedBy = req.body?.deleted_by ?? 'SYSTEM';
+
+  try {
+    await deleteCompensationPlan(normalizedPlanGuid, deletedBy);
+    return res.status(HTTP.OK).json({
+      success: true,
+      message: 'Compensation plan deleted successfully',
+      plan_guid: normalizedPlanGuid
+    });
+  } catch (error) {
+    return sendPlanDbError(res, error);
+  }
+}));
+
+export default router;

@@ -1,0 +1,56 @@
+### Variables
+@baseUrl = http://localhost:3000
+
+### Create compensation plan
+POST {{baseUrl}}/api/compensation/plans/create
+Content-Type: application/json
+
+{
+  "enterprise_id": 1,
+  "country_id": 1,
+  "plan_code": "PLAN001",
+  "plan_name": "Annual Compensation Plan",
+  "plan_type_code": "MERIT",
+  "status_code": "DRAFT",
+  "currency_code": "KWD",
+  "start_date": "2026-01-01",
+  "end_date": "2026-12-31",
+  "budget_amount": 50000,
+  "description": "Test plan",
+  "plan_owner": 293,
+  "active_flag": "Y",
+  "created_by": "ADMIN",
+  "budget": {
+    "budget_amount": 50000,
+    "currency_code": "KWD",
+    "created_by": "ADMIN"
+  },
+  "positions": [
+    {
+      "position_id": "4D64578D1ECC0E6AE0633519000AF3AC",
+      "enterprise_id": 1,
+      "created_by": "ADMIN"
+    }
+  ]
+}
+
+### Update compensation plan (plan_guid required; do not send plan_id or budgets)
+PUT {{baseUrl}}/api/compensation/plans/update
+Content-Type: application/json
+
+{
+  "plan_guid": "A1B2C3D4E5F64789AABBCCDDEEFF0011",
+  "last_updated_by": "ADMIN",
+  "budget": {
+    "budget_amount": 70000,
+    "currency_code": "KWD",
+    "created_by": "ADMIN"
+  },
+  "positions": [
+    {
+      "position_id": "4D64578D1ECC0E6AE0633519000AF3AC",
+      "enterprise_id": 1,
+      "created_by": "ADMIN"
+    }
+  ]
+}
