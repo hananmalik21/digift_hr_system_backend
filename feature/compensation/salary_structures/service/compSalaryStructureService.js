@@ -35,6 +35,9 @@ BEGIN
     :p_components_json,
     :p_business_units_json,
     :p_employee_categories_json,
+    :p_job_families_json,
+    :p_positions_json,
+    :p_grade_ranges_json,
     :p_created_by,
     :o_structure_id,
     :o_structure_guid
@@ -71,6 +74,9 @@ BEGIN
     :p_components_json,
     :p_business_units_json,
     :p_employee_categories_json,
+    :p_job_families_json,
+    :p_positions_json,
+    :p_grade_ranges_json,
     :p_updated_by
   );
 END;
@@ -150,6 +156,25 @@ function stringArrayToJson(arr) {
   return JSON.stringify(arr);
 }
 
+/** undefined / null / non-array → null; any array (including []) → JSON.stringify(arr). */
+function optionalArrayToJsonString(arr) {
+  if (arr == null || !Array.isArray(arr)) return null;
+  return JSON.stringify(arr);
+}
+
+function gradeRangesToJson(gradeRanges) {
+  if (gradeRanges == null || !Array.isArray(gradeRanges)) return null;
+  if (gradeRanges.length === 0) return JSON.stringify([]);
+  const normalized = gradeRanges.map((row) => ({
+    grade_id: row.grade_id,
+    active_flag:
+      row.active_flag == null || String(row.active_flag).trim() === ''
+        ? 'Y'
+        : normalizeYn(row.active_flag, 'N')
+  }));
+  return JSON.stringify(normalized);
+}
+
 async function withConnection(fn) {
   const connection = await db.getConnection();
   try {
@@ -196,6 +221,10 @@ function buildCreateBinds(payload, createdBy) {
     p_business_units_json: org.business_units != null ? stringArrayToJson(org.business_units) : null,
     p_employee_categories_json:
       org.employee_categories != null ? stringArrayToJson(org.employee_categories) : null,
+
+    p_job_families_json: optionalArrayToJsonString(payload.job_family_ids),
+    p_positions_json: optionalArrayToJsonString(payload.position_ids),
+    p_grade_ranges_json: gradeRangesToJson(payload.grade_ranges),
 
     p_created_by: optStr(createdBy) ?? 'SYSTEM',
 
@@ -248,7 +277,11 @@ function pickUpdate(body) {
     p_country_code: hasKey(org, 'country_code') ? optStr(org.country_code) : null,
     p_components_json: has('components') ? componentsToJson(body.components) : null,
     p_business_units_json: hasKey(org, 'business_units') ? stringArrayToJson(org.business_units) : null,
-    p_employee_categories_json: hasKey(org, 'employee_categories') ? stringArrayToJson(org.employee_categories) : null
+    p_employee_categories_json: hasKey(org, 'employee_categories') ? stringArrayToJson(org.employee_categories) : null,
+
+    p_job_families_json: has('job_family_ids') ? optionalArrayToJsonString(body.job_family_ids) : null,
+    p_positions_json: has('position_ids') ? optionalArrayToJsonString(body.position_ids) : null,
+    p_grade_ranges_json: has('grade_ranges') ? gradeRangesToJson(body.grade_ranges) : null
   };
 }
 

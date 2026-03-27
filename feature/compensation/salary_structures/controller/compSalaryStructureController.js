@@ -159,8 +159,8 @@ function validateCreateBody(body) {
   if (body.effective_from == null || String(body.effective_from).trim() === '') {
     errors.push('effective_from is required');
   }
-  if (!Array.isArray(body.components) || body.components.length === 0) {
-    errors.push('components must be a non-empty array');
+  if (!Array.isArray(body.components)) {
+    errors.push('components must be an array');
   }
 
   if (body.components != null) {
