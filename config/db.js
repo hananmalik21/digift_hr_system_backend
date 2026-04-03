@@ -90,11 +90,13 @@ const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   
-  // Connection pool configuration
-  poolMin: parseInt(process.env.DB_POOL_MIN) || 2,
-  poolMax: parseInt(process.env.DB_POOL_MAX) || 10,
-  poolIncrement: parseInt(process.env.DB_POOL_INCREMENT) || 1,
-  poolTimeout: parseInt(process.env.DB_POOL_TIMEOUT) || 60,
+  // Connection pool configuration (raise poolMin under steady load to avoid cold acquire latency)
+  poolMin: parseInt(process.env.DB_POOL_MIN, 10) || 2,
+  poolMax: parseInt(process.env.DB_POOL_MAX, 10) || 10,
+  poolIncrement: parseInt(process.env.DB_POOL_INCREMENT, 10) || 1,
+  poolTimeout: parseInt(process.env.DB_POOL_TIMEOUT, 10) || 60,
+  /** ms to wait for a free connection before failing (0 = wait indefinitely) */
+  queueTimeout: parseInt(process.env.DB_QUEUE_TIMEOUT, 10) || 60000,
   
   // Additional options (stmtCacheSize reduces parse overhead for repeated statements)
   externalAuth: false,

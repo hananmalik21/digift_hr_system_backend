@@ -5,6 +5,10 @@ import {
   updateCompensationPlan,
   deleteCompensationPlan
 } from '../service/compensationPlanService.js';
+import {
+  normalizePlanGuidHex,
+  PLAN_GUID_VALIDATION_MESSAGE
+} from '../planGuid.js';
 
 const router = express.Router();
 
@@ -16,8 +20,6 @@ const ORACLE_PLAN_ERROR_MAP = {
   ORA_20001: { code: 'ORA-20001', message: 'Invalid request data' },
   ORA_20099: { code: 'ORA-20099', message: 'Compensation plan request could not be completed' }
 };
-
-const PLAN_GUID_REGEX = /^[0-9A-F]{32}$/;
 
 function stripOracleHelpUrl(text) {
   return (text || '').replace(/\s*Help:\s*https?:\/\/[^\s]*/gi, '').trim();
@@ -85,13 +87,6 @@ function hasKey(obj, key) {
   return obj != null && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function normalizePlanGuidHex(value) {
-  if (value == null) return null;
-  const s = String(value).trim().toUpperCase();
-  if (!PLAN_GUID_REGEX.test(s)) return null;
-  return s;
-}
-
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -113,7 +108,7 @@ function collectPlanJsonValidationErrors(payload, options) {
     if (payload.plan_guid === undefined || payload.plan_guid === null || String(payload.plan_guid).trim() === '') {
       errors.push('plan_guid is required');
     } else if (!normalizedGuid) {
-      errors.push('plan_guid must be a 32-character hexadecimal string');
+      errors.push(PLAN_GUID_VALIDATION_MESSAGE);
     }
   }
 
@@ -182,9 +177,9 @@ router.put('/update', asyncHandler(async (req, res) => {
 
 router.delete('/:planGuid', asyncHandler(async (req, res) => {
   const { planGuid } = req.params;
-  const normalizedPlanGuid = String(planGuid || '').trim().toUpperCase();
-  if (!PLAN_GUID_REGEX.test(normalizedPlanGuid)) {
-    return sendBadRequest(res, 'planGuid must be a 32-character hexadecimal string');
+  const normalizedPlanGuid = normalizePlanGuidHex(planGuid);
+  if (!normalizedPlanGuid) {
+    return sendBadRequest(res, PLAN_GUID_VALIDATION_MESSAGE);
   }
 
   const deletedBy = req.body?.deleted_by ?? 'SYSTEM';
