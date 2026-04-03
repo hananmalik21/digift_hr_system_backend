@@ -27,6 +27,11 @@
 -- Link INSERT uses COMP.COMP_PLAN_EMP_ASSIGNMENT_SEQ.NEXTVAL — rename if your DB differs.
 -- Cursor rule: .cursor/rules/comp-plan-employee-oracle.mdc
 --
+-- GET_ELIGIBLE_PLANS_FOR_EMPLOYEE(employee_id, enterprise_id, OUT ref cursor):
+--   Plans the employee matches (same rules as SYNC_FOR_PLAN_CORE).
+-- GET_ELIGIBLE_EMPLOYEES_FOR_PLAN(plan_id, OUT ref cursor):
+--   Employees who match that plan (reads enterprise_id from COMP.COMP_PLANS).
+--
 -- ⚠ TIMING: sync after all plan criteria child rows exist (incl. BUSINESS_UNIT).
 -- Node: compensationPlanService calls SYNC after CREATE_PLAN.
 -- Sequence for COMP_PLAN_EMP_ASSIGNMENT.ASSIGNMENT_ID (script creates if missing):
@@ -46,8 +51,21 @@ END;
 /
 
 CREATE OR REPLACE PACKAGE COMP.PKG_PLAN_EMPLOYEES AS
+  /* Package-level ref cursor: avoids PLS-00103 on SYS.REFCURSOR in some clients / parsers. */
+  TYPE t_eligible_plans_cur IS REF CURSOR;
+
   PROCEDURE SYNC_FOR_PLAN(p_plan_id IN NUMBER, p_enterprise_id IN NUMBER);
   PROCEDURE SYNC_FOR_PLAN(p_plan_id IN NUMBER);
+  -- Plans in p_enterprise_id matching employee current assignment (same rules as SYNC_FOR_PLAN_CORE).
+  PROCEDURE GET_ELIGIBLE_PLANS_FOR_EMPLOYEE(
+    p_employee_id   IN NUMBER,
+    p_enterprise_id IN NUMBER,
+    p_result_set    OUT t_eligible_plans_cur
+  );
+  PROCEDURE GET_ELIGIBLE_EMPLOYEES_FOR_PLAN(
+    p_plan_id    IN NUMBER,
+    p_result_set OUT t_eligible_plans_cur
+  );
 END PKG_PLAN_EMPLOYEES;
 /
 
@@ -172,6 +190,213 @@ CREATE OR REPLACE PACKAGE BODY COMP.PKG_PLAN_EMPLOYEES AS
     SYNC_FOR_PLAN_CORE(p_plan_id, v_enterprise_id);
   END SYNC_FOR_PLAN;
 
+  PROCEDURE GET_ELIGIBLE_PLANS_FOR_EMPLOYEE(
+    p_employee_id   IN NUMBER,
+    p_enterprise_id IN NUMBER,
+    p_result_set    OUT t_eligible_plans_cur
+  ) IS
+  BEGIN
+    IF p_employee_id IS NULL OR p_enterprise_id IS NULL THEN
+      OPEN p_result_set FOR
+        SELECT CAST(NULL AS NUMBER) AS plan_id,
+               CAST(NULL AS NUMBER) AS enterprise_id,
+               CAST(NULL AS VARCHAR2(1)) AS plan_code,
+               CAST(NULL AS VARCHAR2(1)) AS plan_name
+          FROM DUAL
+         WHERE 1 = 0;
+      RETURN;
+    END IF;
+
+    /* Eligibility predicates must stay aligned with SYNC_FOR_PLAN_CORE. */
+    OPEN p_result_set FOR
+      SELECT cp.plan_id,
+             cp.enterprise_id,
+             cp.plan_code,
+             cp.plan_name
+        FROM comp.comp_plans cp
+       WHERE cp.enterprise_id = p_enterprise_id
+         AND EXISTS (
+               SELECT 1
+                 FROM (
+                        SELECT a_inner.*,
+                               ROW_NUMBER() OVER (
+                                 PARTITION BY a_inner.employee_id, a_inner.enterprise_id
+                                 ORDER BY a_inner.effective_start_date DESC NULLS LAST,
+                                          a_inner.assignment_id DESC NULLS LAST
+                               ) AS rn
+                          FROM empl.assignments a_inner
+                         WHERE a_inner.enterprise_id = p_enterprise_id
+                           AND a_inner.employee_id = p_employee_id
+                      ) a
+                WHERE a.rn = 1
+                  AND TRUNC(SYSDATE) BETWEEN TRUNC(NVL(a.effective_start_date, DATE '1900-01-01'))
+                                         AND TRUNC(NVL(a.effective_end_date,   DATE '9999-12-31'))
+                  AND EXISTS (
+                        SELECT 1
+                          FROM comp.comp_plan_job_family j
+                         WHERE j.plan_id = cp.plan_id
+                           AND j.job_family_id = a.job_family_id
+                      )
+                  AND EXISTS (
+                        SELECT 1
+                          FROM comp.comp_plan_employment_type t
+                         WHERE t.plan_id = cp.plan_id
+                           AND t.employment_type_code = a.contract_type_code
+                      )
+                  AND EXISTS (
+                        SELECT 1
+                          FROM comp.comp_plan_grades g
+                         WHERE g.plan_id = cp.plan_id
+                           AND g.grade_id = a.grade_id
+                      )
+                  AND EXISTS (
+                        SELECT 1
+                          FROM comp.comp_plan_positions pos
+                         WHERE pos.plan_id = cp.plan_id
+                           AND pos.position_id = a.position_id
+                      )
+                  AND EXISTS (
+                        SELECT 1
+                          FROM comp.comp_plan_business_unit b
+                         WHERE b.plan_id = cp.plan_id
+                           AND (
+                                (
+                                  a.org_structure_list IS NULL
+                              AND b.org_unit_id = a.org_unit_id
+                                )
+                             OR (
+                                  a.org_structure_list IS NOT NULL
+                              AND EXISTS (
+                                    SELECT 1
+                                      FROM JSON_TABLE(
+                                             a.org_structure_list FORMAT JSON,
+                                             '$[*]'
+                                             COLUMNS (
+                                               level_code        VARCHAR2(80)  PATH '$.level_code',
+                                               org_unit_id_txt   VARCHAR2(128) PATH '$.org_unit_id'
+                                             )
+                                           ) bu_node
+                                     WHERE UPPER(TRIM(bu_node.level_code)) = 'BUSINESS_UNIT'
+                                       AND bu_node.org_unit_id_txt IS NOT NULL
+                                       AND UPPER(REPLACE(TRIM(bu_node.org_unit_id_txt), '-', ''))
+                                           = UPPER(RAWTOHEX(b.org_unit_id))
+                                  )
+                                )
+                              )
+                      )
+             )
+       ORDER BY cp.plan_id;
+  END GET_ELIGIBLE_PLANS_FOR_EMPLOYEE;
+
+  PROCEDURE GET_ELIGIBLE_EMPLOYEES_FOR_PLAN(
+    p_plan_id    IN NUMBER,
+    p_result_set OUT t_eligible_plans_cur
+  ) IS
+    v_enterprise_id NUMBER;
+  BEGIN
+    IF p_plan_id IS NULL THEN
+      OPEN p_result_set FOR
+        SELECT CAST(NULL AS NUMBER) AS employee_id,
+               CAST(NULL AS RAW(16)) AS employee_guid,
+               CAST(NULL AS NUMBER) AS enterprise_id
+          FROM DUAL
+         WHERE 1 = 0;
+      RETURN;
+    END IF;
+
+    BEGIN
+      SELECT p.enterprise_id
+        INTO v_enterprise_id
+        FROM comp.comp_plans p
+       WHERE p.plan_id = p_plan_id;
+    EXCEPTION
+      WHEN NO_DATA_FOUND THEN
+        OPEN p_result_set FOR
+          SELECT CAST(NULL AS NUMBER) AS employee_id,
+                 CAST(NULL AS RAW(16)) AS employee_guid,
+                 CAST(NULL AS NUMBER) AS enterprise_id
+            FROM DUAL
+           WHERE 1 = 0;
+        RETURN;
+    END;
+
+    /* Same FROM/WHERE as SYNC_FOR_PLAN_CORE for this plan + enterprise. */
+    OPEN p_result_set FOR
+      SELECT a.employee_id,
+             e.employee_guid,
+             a.enterprise_id
+        FROM (
+               SELECT a_inner.*,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY a_inner.employee_id, a_inner.enterprise_id
+                        ORDER BY a_inner.effective_start_date DESC NULLS LAST,
+                                 a_inner.assignment_id DESC NULLS LAST
+                      ) AS rn
+                 FROM empl.assignments a_inner
+                WHERE a_inner.enterprise_id = v_enterprise_id
+             ) a
+        JOIN empl.employees e
+          ON e.enterprise_id = a.enterprise_id
+         AND e.employee_id   = a.employee_id
+       WHERE a.rn = 1
+         AND TRUNC(SYSDATE) BETWEEN TRUNC(NVL(a.effective_start_date, DATE '1900-01-01'))
+                                AND TRUNC(NVL(a.effective_end_date,   DATE '9999-12-31'))
+         AND EXISTS (
+               SELECT 1
+                 FROM comp.comp_plan_job_family j
+                WHERE j.plan_id = p_plan_id
+                  AND j.job_family_id = a.job_family_id
+             )
+         AND EXISTS (
+               SELECT 1
+                 FROM comp.comp_plan_employment_type t
+                WHERE t.plan_id = p_plan_id
+                  AND t.employment_type_code = a.contract_type_code
+             )
+         AND EXISTS (
+               SELECT 1
+                 FROM comp.comp_plan_grades g
+                WHERE g.plan_id = p_plan_id
+                  AND g.grade_id = a.grade_id
+             )
+         AND EXISTS (
+               SELECT 1
+                 FROM comp.comp_plan_positions p
+                WHERE p.plan_id = p_plan_id
+                  AND p.position_id = a.position_id
+             )
+         AND EXISTS (
+               SELECT 1
+                 FROM comp.comp_plan_business_unit b
+                WHERE b.plan_id = p_plan_id
+                  AND (
+                       (
+                         a.org_structure_list IS NULL
+                     AND b.org_unit_id = a.org_unit_id
+                       )
+                    OR (
+                         a.org_structure_list IS NOT NULL
+                     AND EXISTS (
+                           SELECT 1
+                             FROM JSON_TABLE(
+                                    a.org_structure_list FORMAT JSON,
+                                    '$[*]'
+                                    COLUMNS (
+                                      level_code        VARCHAR2(80)  PATH '$.level_code',
+                                      org_unit_id_txt   VARCHAR2(128) PATH '$.org_unit_id'
+                                    )
+                                  ) bu_node
+                            WHERE UPPER(TRIM(bu_node.level_code)) = 'BUSINESS_UNIT'
+                              AND bu_node.org_unit_id_txt IS NOT NULL
+                              AND UPPER(REPLACE(TRIM(bu_node.org_unit_id_txt), '-', ''))
+                                  = UPPER(RAWTOHEX(b.org_unit_id))
+                         )
+                       )
+                  )
+             )
+       ORDER BY a.employee_id;
+  END GET_ELIGIBLE_EMPLOYEES_FOR_PLAN;
+
 END PKG_PLAN_EMPLOYEES;
 /
 
@@ -187,5 +412,37 @@ BEGIN
 END;
 /
 */
+
+-- Oracle Database Actions: sql/query_eligible_plans_for_employee.sql (bind :employee_guid_hex).
+-- Package GET_ELIGIBLE_PLANS_FOR_EMPLOYEE still uses numeric employee_id + enterprise_id.
+--
+-- Examples (SQL*Plus / SQLcl):
+-- Do NOT use: VAR c COMP.PKG_...t_eligible_plans_cur  → SP2-0738 (VAR only allows REFCURSOR, NUMBER, …).
+--
+-- Eligible PLANS for employee 292 / enterprise 1 (anonymous block; use SYS_REFCURSOR local var):
+--   SET SERVEROUTPUT ON SIZE UNLIMITED
+--   DECLARE
+--     c   SYS_REFCURSOR;
+--     pid NUMBER; eid NUMBER; pcode VARCHAR2(256); pname VARCHAR2(512);
+--   BEGIN
+--     COMP.PKG_PLAN_EMPLOYEES.GET_ELIGIBLE_PLANS_FOR_EMPLOYEE(292, 1, c);
+--     LOOP
+--       FETCH c INTO pid, eid, pcode, pname;
+--       EXIT WHEN c%NOTFOUND;
+--       DBMS_OUTPUT.PUT_LINE(pid || ' ' || NVL(pcode,'') || ' ' || NVL(pname,''));
+--     END LOOP;
+--     CLOSE c;
+--   END;
+--   /
+--
+-- Or bind only built-in REFCURSOR (then PRINT):
+--   VAR rc REFCURSOR
+--   EXEC COMP.PKG_PLAN_EMPLOYEES.GET_ELIGIBLE_PLANS_FOR_EMPLOYEE(292, 1, :rc);
+--   PRINT rc
+--
+-- Eligible EMPLOYEES for plan_id 100:
+--   VAR rc REFCURSOR
+--   EXEC COMP.PKG_PLAN_EMPLOYEES.GET_ELIGIBLE_EMPLOYEES_FOR_PLAN(100, :rc);
+--   PRINT rc
 
 SHOW ERRORS;

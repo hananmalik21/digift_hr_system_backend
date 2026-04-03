@@ -3,12 +3,16 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   createCompensationPlan,
   updateCompensationPlan,
-  deleteCompensationPlan
+  deleteCompensationPlan,
+  getEligiblePlansForEmployee
 } from '../service/compensationPlanService.js';
 import {
   normalizePlanGuidHex,
+  EMPLOYEE_GUID_VALIDATION_MESSAGE,
   PLAN_GUID_VALIDATION_MESSAGE
 } from '../planGuid.js';
+
+const EMPLOYEE_GUID_REQUIRED = 'employee_guid is required';
 
 const router = express.Router();
 
@@ -141,6 +145,28 @@ function validatePlanRequestPayload(payload, options) {
 
   return { ok: true };
 }
+
+router.get('/eligible-for-employee', asyncHandler(async (req, res) => {
+  const rawGuid = req.query.employee_guid;
+  if (rawGuid === undefined || rawGuid === null || String(rawGuid).trim() === '') {
+    return sendBadRequest(res, EMPLOYEE_GUID_REQUIRED);
+  }
+  const employeeGuidHex = normalizePlanGuidHex(rawGuid);
+  if (!employeeGuidHex) {
+    return sendBadRequest(res, EMPLOYEE_GUID_VALIDATION_MESSAGE);
+  }
+
+  try {
+    const plans = await getEligiblePlansForEmployee(employeeGuidHex);
+    return res.status(HTTP.OK).json({
+      success: true,
+      employee_guid: employeeGuidHex,
+      plans
+    });
+  } catch (error) {
+    return sendPlanDbError(res, error);
+  }
+}));
 
 router.post('/create', asyncHandler(async (req, res) => {
   const payload = req.body || {};

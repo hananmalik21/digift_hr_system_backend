@@ -1,6 +1,9 @@
 ### Variables
 @baseUrl = http://localhost:3000
 
+### Eligible plans for an employee (32-char hex employee_guid; requires view COMP.V_EMPLOYEE_ELIGIBLE_PLANS)
+GET {{baseUrl}}/api/compensation/plans/eligible-for-employee?employee_guid=4CBB495127471A6FE0633519000A2706
+
 ### Create compensation plan
 POST {{baseUrl}}/api/compensation/plans/create
 Content-Type: application/json

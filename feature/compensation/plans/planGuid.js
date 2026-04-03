@@ -4,12 +4,15 @@ export const PLAN_GUID_HEX_REGEX = /^[0-9A-F]{32}$/;
 export const PLAN_GUID_VALIDATION_MESSAGE =
   'plan_guid must be a 32-character hexadecimal string';
 
+export const EMPLOYEE_GUID_VALIDATION_MESSAGE =
+  'employee_guid must be a 32-character hexadecimal string';
+
 /**
  * @param {unknown} value
  * @returns {string | null} normalized 32-char hex or null if invalid / empty
  */
 export function normalizePlanGuidHex(value) {
   if (value == null) return null;
-  const s = String(value).trim().toUpperCase();
+  const s = String(value).trim().replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
   return PLAN_GUID_HEX_REGEX.test(s) ? s : null;
 }
