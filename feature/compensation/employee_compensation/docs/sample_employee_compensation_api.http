@@ -1,0 +1,51 @@
+### Create — JSON only (no documents, no adjustment_id)
+POST http://localhost:3000/api/comp/employee-compensation/create
+Content-Type: application/json
+
+{
+  "enterprise_id": 1,
+  "employee_id": 1001,
+  "plan_id": 10,
+  "created_by": "SYSTEM",
+  "components": [
+    {
+      "component_id": 101,
+      "amount": 1000,
+      "effective_start_date": "2026-04-01",
+      "effective_end_date": null,
+      "active_flag": "Y"
+    }
+  ]
+}
+
+### curl (create)
+# curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/create" \
+#   -H "Content-Type: application/json" \
+#   -d '{"enterprise_id":1,"employee_id":1001,"plan_id":10,"created_by":"SYSTEM","components":[{"component_id":101,"amount":1000,"effective_start_date":"2026-04-01","effective_end_date":null,"active_flag":"Y"}]}'
+
+### Edit — multipart/form-data (adjustment + stringified components + optional BLOB documents)
+### Uploaded files are NOT stored in this repo or on app disk — only persisted in Oracle (e.g. COMP_ADJUSTMENT_DOCS.FILE_CONTENT).
+### Field "components" must be a JSON array string. Files: "documents" or "documents[]" (repeat for multiple).
+### Optional: document_descriptions = JSON string array, same order as files, e.g. ["Memo","Contract"]
+### Use paths to files on your machine for curl @... (do not commit sample PDFs into the project).
+POST http://localhost:3000/api/comp/employee-compensation/edit
+Content-Type: multipart/form-data; boundary=----digify
+
+### curl (edit) — two files, components JSON inline
+# COMPONENTS='[{"component_id":101,"amount":1500,"effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
+# curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/edit" \
+#   -F "enterprise_id=1" \
+#   -F "employee_id=1001" \
+#   -F "plan_id=10" \
+#   -F "adjustment_type=SALARY_INCREASE" \
+#   -F "effective_date=2026-05-01" \
+#   -F "reason_code=PROMOTION" \
+#   -F "budget_code=HR-BUD-2026-01" \
+#   -F "justification_text=Employee promoted and salary revised." \
+#   -F "performance_rating=EXCEEDS_EXPECTATIONS" \
+#   -F "internal_notes=Reviewed by HR and line manager." \
+#   -F "updated_by=SYSTEM" \
+#   -F "components=${COMPONENTS}" \
+#   -F "document_descriptions=[\"Offer letter\",\"Signed addendum\"]" \
+#   -F "documents=@/path/to/file1.pdf" \
+#   -F "documents=@/path/to/file2.pdf"

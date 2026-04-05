@@ -1,7 +1,10 @@
 /**
  * Compensation Component Controller
- * REST APIs: POST /comp/components (create), PUT /comp/components/:componentGuid (update), GET /comp/components/:componentGuid (get)
- * componentGuid is 32-character hexadecimal (RAW(16) in DB).
+ * REST APIs:
+ * - GET /comp/components — list from COMP.COMPONENTS_VIEW
+ * - GET /comp/components/:componentId — single row by numeric id (view)
+ * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
+ * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
  */
 
 import express from 'express';
@@ -14,9 +17,16 @@ import {
   COMPONENT_GUID_REGEX
 } from '../model/compComponentModel.js';
 import {
+  listComponentsFromView,
+  getComponentByIdFromView,
+  COMPONENTS_VIEW_SORT_COLUMNS
+} from '../model/compComponentsViewModel.js';
+import { parsePagination, buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import {
   sendCreateSuccess,
   sendUpdateSuccess,
   sendGetSuccess,
+  sendListSuccess,
   sendError
 } from '../view/compComponentView.js';
 import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
@@ -27,8 +37,210 @@ const ERROR_TITLE = {
   CREATE: 'Failed to create compensation component',
   UPDATE: 'Failed to update compensation component',
   GET: 'Failed to get compensation component',
-  DELETE: 'Failed to delete compensation component'
+  DELETE: 'Failed to delete compensation component',
+  LIST: 'Failed to list compensation components',
+  GET_VIEW: 'Failed to get compensation component'
 };
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseOptionalQueryDate(query, key) {
+  const raw = query[key];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
+  const s = String(raw).trim();
+  if (!DATE_ONLY_REGEX.test(s)) {
+    return { error: `${key} must be YYYY-MM-DD` };
+  }
+  const d = new Date(`${s}T00:00:00.000Z`);
+  if (!Number.isFinite(d.getTime())) {
+    return { error: `${key} must be YYYY-MM-DD` };
+  }
+  return { value: d };
+}
+
+function parseOptionalPositiveInt(query, key) {
+  const raw = query[key];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
+  const n = parseInt(String(raw), 10);
+  if (Number.isNaN(n) || n < 1) {
+    return { error: `${key} must be a positive integer` };
+  }
+  return { value: n };
+}
+
+function parseRequiredPositiveInt(query, key) {
+  const raw = query[key];
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return { error: `${key} is required` };
+  }
+  const n = parseInt(String(raw), 10);
+  if (Number.isNaN(n) || n < 1) {
+    return { error: `${key} must be a positive integer` };
+  }
+  return { value: n };
+}
+
+function parseOptionalYn(query, key) {
+  const raw = query[key];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
+  const v = String(raw).trim().toUpperCase();
+  if (v !== 'Y' && v !== 'N') {
+    return { error: `${key} must be Y or N` };
+  }
+  return { value: v };
+}
+
+function parseActiveOnly(query) {
+  const raw = query.active_only;
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
+  const s = String(raw).toLowerCase();
+  if (s === 'true' || s === '1' || s === 'yes') return { value: true };
+  if (s === 'false' || s === '0' || s === 'no') return { value: false };
+  return { error: 'active_only must be true or false' };
+}
+
+function parseOptionalString(query, key) {
+  const raw = query[key];
+  if (raw === undefined || raw === null) return { value: undefined };
+  const s = String(raw).trim();
+  return { value: s === '' ? undefined : s };
+}
+
+function parseComponentsViewSort(query) {
+  const allowed = Object.keys(COMPONENTS_VIEW_SORT_COLUMNS);
+  let sortBy = 'component_id';
+  const rawBy = query.sort_by;
+  if (rawBy != null && String(rawBy).trim() !== '') {
+    sortBy = String(rawBy).trim().toLowerCase();
+    if (!COMPONENTS_VIEW_SORT_COLUMNS[sortBy]) {
+      return { error: `Invalid sort_by. Allowed: ${allowed.join(', ')}` };
+    }
+  }
+  let sortOrder = 'DESC';
+  const so = query.sort_order ?? query.sort_dir;
+  if (so != null && String(so).trim() !== '') {
+    const o = String(so).trim().toUpperCase();
+    if (o !== 'ASC' && o !== 'DESC') {
+      return { error: 'sort_order must be asc or desc' };
+    }
+    sortOrder = o;
+  }
+  return { sortBy, sortOrder };
+}
+
+/**
+ * Build filters for COMP.COMPONENTS_VIEW list; returns { error?: string, filters? }
+ */
+function buildComponentsViewListFilters(query) {
+  const filters = {};
+
+  let r = parseOptionalPositiveInt(query, 'component_id');
+  if (r.error) return r;
+  filters.component_id = r.value;
+
+  r = parseOptionalString(query, 'component_code');
+  if (r.error) return r;
+  filters.component_code = r.value;
+
+  r = parseOptionalString(query, 'component_name');
+  if (r.error) return r;
+  filters.component_name = r.value;
+
+  r = parseOptionalString(query, 'component_type_code');
+  if (r.error) return r;
+  filters.component_type_code = r.value;
+
+  r = parseOptionalString(query, 'calculation_method_code');
+  if (r.error) return r;
+  filters.calculation_method_code = r.value;
+
+  r = parseOptionalString(query, 'currency_code');
+  if (r.error) return r;
+  filters.currency_code = r.value;
+
+  r = parseOptionalString(query, 'status');
+  if (r.error) return r;
+  filters.status = r.value;
+
+  r = parseOptionalYn(query, 'active_flag');
+  if (r.error) return r;
+  filters.active_flag = r.value;
+
+  r = parseRequiredPositiveInt(query, 'tenant_id');
+  if (r.error) return r;
+  filters.tenant_id = r.value;
+
+  r = parseOptionalString(query, 'comp_category_code');
+  if (r.error) return r;
+  filters.comp_category_code = r.value;
+
+  r = parseOptionalYn(query, 'recurring_flag');
+  if (r.error) return r;
+  filters.recurring_flag = r.value;
+
+  r = parseOptionalYn(query, 'optional_flag');
+  if (r.error) return r;
+  filters.optional_flag = r.value;
+
+  r = parseOptionalYn(query, 'pensionable_flag');
+  if (r.error) return r;
+  filters.pensionable_flag = r.value;
+
+  r = parseOptionalYn(query, 'statutory_flag');
+  if (r.error) return r;
+  filters.statutory_flag = r.value;
+
+  r = parseOptionalYn(query, 'include_in_ctc_flag');
+  if (r.error) return r;
+  filters.include_in_ctc_flag = r.value;
+
+  r = parseOptionalYn(query, 'prorated_flag');
+  if (r.error) return r;
+  filters.prorated_flag = r.value;
+
+  r = parseOptionalYn(query, 'taxable_flag');
+  if (r.error) return r;
+  filters.taxable_flag = r.value;
+
+  r = parseOptionalString(query, 'search');
+  if (r.error) return r;
+  filters.search = r.value;
+
+  r = parseActiveOnly(query);
+  if (r.error) return r;
+  filters.active_only = r.value;
+
+  const d1 = parseOptionalQueryDate(query, 'effective_start_date_from');
+  if (d1.error) return d1;
+  const d2 = parseOptionalQueryDate(query, 'effective_start_date_to');
+  if (d2.error) return d2;
+  const d3 = parseOptionalQueryDate(query, 'effective_end_date_from');
+  if (d3.error) return d3;
+  const d4 = parseOptionalQueryDate(query, 'effective_end_date_to');
+  if (d4.error) return d4;
+
+  if (
+    d1.value &&
+    d2.value &&
+    d1.value.getTime() > d2.value.getTime()
+  ) {
+    return { error: 'effective_start_date_from must be on or before effective_start_date_to' };
+  }
+  if (
+    d3.value &&
+    d4.value &&
+    d3.value.getTime() > d4.value.getTime()
+  ) {
+    return { error: 'effective_end_date_from must be on or before effective_end_date_to' };
+  }
+
+  filters.effective_start_date_from = d1.value;
+  filters.effective_start_date_to = d2.value;
+  filters.effective_end_date_from = d3.value;
+  filters.effective_end_date_to = d4.value;
+
+  return { filters };
+}
 
 const GENERIC_DB_MESSAGE = 'A database error occurred. Please try again later.';
 
@@ -177,9 +389,6 @@ function validateMinMax(data) {
   return errors;
 }
 
-/** YYYY-MM-DD date string pattern. */
-const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
  * Validate effective_start_date and effective_end_date (optional).
  * If provided: must be YYYY-MM-DD; if both provided, effective_end_date >= effective_start_date.
@@ -270,6 +479,37 @@ function mapDeleteOracleError(err) {
 // ----- Routes -----
 
 /**
+ * GET /comp/components
+ * List compensation components from COMP.COMPONENTS_VIEW (tenant_id required; filters, pagination, sort, search).
+ */
+router.get('/', asyncHandler(async (req, res) => {
+  const parsed = buildComponentsViewListFilters(req.query);
+  if (parsed.error) {
+    return sendError(res, 400, ERROR_TITLE.LIST, parsed.error);
+  }
+  let pageData;
+  try {
+    pageData = parsePagination(req.query);
+  } catch (e) {
+    return sendError(res, 400, ERROR_TITLE.LIST, e.message || 'Invalid pagination');
+  }
+  const sort = parseComponentsViewSort(req.query);
+  if (sort.error) {
+    return sendError(res, 400, ERROR_TITLE.LIST, sort.error);
+  }
+  try {
+    const { rows, total } = await listComponentsFromView(parsed.filters, pageData, sort);
+    const meta = buildPaginationMeta(pageData.page, pageData.pageSize, total);
+    return sendListSuccess(res, rows, meta);
+  } catch (err) {
+    if (err instanceof DatabaseError) {
+      return sendError(res, 500, ERROR_TITLE.LIST, err.message || 'Unexpected error');
+    }
+    return sendError(res, 500, ERROR_TITLE.LIST, 'Unexpected error');
+  }
+}));
+
+/**
  * POST /comp/components
  * Create compensation component
  */
@@ -335,16 +575,38 @@ router.put('/:componentGuid', asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /comp/components/:componentGuid
- * Get component by component_guid (header + flags + eligibility)
+ * GET /comp/components/:componentIdOrGuid
+ * Numeric id → full row from COMP.COMPONENTS_VIEW (tenant_id query required).
+ * 32-char hex → legacy get by component_guid (COMP_COMPONENTS + locations).
  */
-router.get('/:componentGuid', asyncHandler(async (req, res) => {
-  const componentGuid = req.params.componentGuid;
-  const guidError = validateComponentGuid(componentGuid);
+router.get('/:componentIdOrGuid', asyncHandler(async (req, res) => {
+  const param = req.params.componentIdOrGuid;
+
+  if (/^\d+$/.test(String(param))) {
+    const tid = parseRequiredPositiveInt(req.query, 'tenant_id');
+    if (tid.error) {
+      return sendError(res, 400, ERROR_TITLE.GET_VIEW, tid.error);
+    }
+    const id = parseInt(String(param), 10);
+    try {
+      const data = await getComponentByIdFromView(id, tid.value);
+      if (!data) {
+        return sendError(res, 404, ERROR_TITLE.GET_VIEW, 'Compensation component not found');
+      }
+      return sendGetSuccess(res, data);
+    } catch (err) {
+      if (err instanceof DatabaseError) {
+        return sendError(res, 500, ERROR_TITLE.GET_VIEW, err.message || 'Unexpected error');
+      }
+      return sendError(res, 500, ERROR_TITLE.GET_VIEW, 'Unexpected error');
+    }
+  }
+
+  const guidError = validateComponentGuid(param);
   if (guidError) return sendError(res, 400, ERROR_TITLE.GET, guidError);
 
   try {
-    const data = await getComponentByGuid(componentGuid);
+    const data = await getComponentByGuid(param);
     return sendGetSuccess(res, data);
   } catch (err) {
     if (err instanceof NotFoundError) {
