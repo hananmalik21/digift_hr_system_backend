@@ -17,32 +17,22 @@ const LOG_TAG = 'compSalaryStructureFullViewModel';
 
 const VIEW_SELECT_SQL = `SELECT ${VIEW_ALIAS}.* FROM COMP.COMP_SALARY_STRUCTURE_FULL_V ${VIEW_ALIAS}`;
 
-/** API sort_by → SQL ORDER BY expression (whitelist). */
+/** API sort_by → SQL ORDER BY expression (whitelist). Audit columns are not exposed on the list response. */
 export const SALARY_STRUCTURE_FULL_V_SORT_COLUMNS = {
   structure_id: `${VIEW_ALIAS}.STRUCTURE_ID`,
   enterprise_id: `${VIEW_ALIAS}.ENTERPRISE_ID`,
   structure_code: `${VIEW_ALIAS}.STRUCTURE_CODE`,
   structure_name: `${VIEW_ALIAS}.STRUCTURE_NAME`,
-  structure_active_flag: `${VIEW_ALIAS}.STRUCTURE_ACTIVE_FLAG`,
-  created_by: `${VIEW_ALIAS}.CREATED_BY`,
-  creation_date: `${VIEW_ALIAS}.CREATION_DATE`,
-  last_updated_by: `${VIEW_ALIAS}.LAST_UPDATED_BY`,
-  last_update_date: `${VIEW_ALIAS}.LAST_UPDATE_DATE`
+  structure_active_flag: `${VIEW_ALIAS}.STRUCTURE_ACTIVE_FLAG`
 };
 
 /**
- * Map view row to API list item (snake_case).
+ * Map view row to API list item (snake_case). Omits audit/who columns.
  */
 export function mapSalaryStructureFullViewRow(row) {
   if (!row) return null;
   const r = rowKeysUpper(row);
   const g = (k) => r[k];
-
-  const toIso = (d) => {
-    if (d == null) return null;
-    if (d instanceof Date && Number.isFinite(d.getTime())) return d.toISOString();
-    return null;
-  };
 
   return {
     structure_id: g('STRUCTURE_ID') != null ? Number(g('STRUCTURE_ID')) : null,
@@ -55,11 +45,7 @@ export function mapSalaryStructureFullViewRow(row) {
     structure_code: g('STRUCTURE_CODE') != null ? String(g('STRUCTURE_CODE')) : null,
     structure_name: g('STRUCTURE_NAME') != null ? String(g('STRUCTURE_NAME')) : null,
     structure_active_flag:
-      g('STRUCTURE_ACTIVE_FLAG') != null ? String(g('STRUCTURE_ACTIVE_FLAG')) : null,
-    created_by: g('CREATED_BY') != null ? String(g('CREATED_BY')) : null,
-    creation_date: toIso(g('CREATION_DATE')),
-    last_updated_by: g('LAST_UPDATED_BY') != null ? String(g('LAST_UPDATED_BY')) : null,
-    last_update_date: toIso(g('LAST_UPDATE_DATE'))
+      g('STRUCTURE_ACTIVE_FLAG') != null ? String(g('STRUCTURE_ACTIVE_FLAG')) : null
   };
 }
 
