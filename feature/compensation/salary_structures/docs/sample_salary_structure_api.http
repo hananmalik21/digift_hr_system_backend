@@ -2,6 +2,18 @@
 @baseUrl = http://localhost:3000
 @structureGuid = REPLACE_WITH_32_CHAR_HEX_FROM_CREATE_RESPONSE
 
+### List salary structures (COMP.COMP_SALARY_STRUCTURE_FULL_V)
+GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&page=1&limit=10&search=&status=ALL&sort_by=structure_code&sort_order=asc
+
+### List — active only, no search
+GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&status=ACTIVE
+
+### Full nested JSON (COMP.COMP_SALARY_STRUCTURE_JSON_V) — list / grid
+GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&page=1&limit=10
+
+### Full JSON — single structure, search, active only
+GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&structure_id=10&search=manager&status=ACTIVE&page=2&limit=20
+
 ### Create salary structure — success
 POST {{baseUrl}}/api/comp/salary-structures
 Content-Type: application/json

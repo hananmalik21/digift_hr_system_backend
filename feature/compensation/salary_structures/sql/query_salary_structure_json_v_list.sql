@@ -1,0 +1,5 @@
+-- COMP.COMP_SALARY_STRUCTURE_JSON_V — GET /api/comp/salary-structures-details
+-- Two statements: COUNT(*) with WHERE binds only, then paginated SELECT (COUNT must not include row_offset/fetch_size binds).
+--
+-- Binds (WHERE): enterprise_id, structure_id, search_pattern, p_status
+-- Binds (SELECT + OFFSET/FETCH): same + row_offset, fetch_size
