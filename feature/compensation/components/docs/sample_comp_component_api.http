@@ -1,0 +1,116 @@
+### Variables
+@baseUrl = http://localhost:3000
+@tenantId = 1
+@componentGuid = 00000000000000000000000000000000
+
+### List components (COMP.COMPONENTS_VIEW; tenant_id required). Response rows include optional `description`.
+GET {{baseUrl}}/api/comp/components?tenant_id={{tenantId}}&page=1&page_size=20
+
+### List — keyword search matches component_code, component_name, description, formula_name, type, category
+GET {{baseUrl}}/api/comp/components?tenant_id={{tenantId}}&search=housing
+
+### Get by numeric id (tenant_id query required). Response includes `description`.
+GET {{baseUrl}}/api/comp/components/123?tenant_id={{tenantId}}
+
+### Get by component_guid (32-char hex). Response includes `description`.
+GET {{baseUrl}}/api/comp/components/{{componentGuid}}
+
+### Create component (description optional; trimmed; max length COMP_COMPONENT_DESCRIPTION_MAX, default 4000)
+POST {{baseUrl}}/api/comp/components
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "component_code": "HRA",
+  "component_name": "Housing Allowance",
+  "description": "Allowance provided for employee housing expenses",
+  "component_type_code": "EARNING",
+  "calculation_method_code": "FIXED",
+  "status": "ACTIVE",
+  "active_flag": "Y",
+  "comp_category_code": "ALLOWANCE",
+  "effective_start_date": "2026-01-01",
+  "flags": {
+    "recurring_flag": "Y",
+    "optional_flag": "N",
+    "pensionable_flag": "N",
+    "statutory_flag": "N",
+    "include_in_ctc_flag": "Y",
+    "prorated_flag": "Y",
+    "taxable_flag": "Y"
+  },
+  "eligibility": {
+    "all_employees_flag": "Y",
+    "location_codes": []
+  },
+  "created_by": "ADMIN"
+}
+
+### Create component without description (backward compatible; stored as null)
+POST {{baseUrl}}/api/comp/components
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "component_code": "BASIC2",
+  "component_name": "Basic Salary",
+  "component_type_code": "EARNING",
+  "calculation_method_code": "FIXED",
+  "status": "ACTIVE",
+  "active_flag": "Y",
+  "comp_category_code": "SALARY",
+  "flags": {
+    "recurring_flag": "Y",
+    "optional_flag": "N",
+    "pensionable_flag": "N",
+    "statutory_flag": "N",
+    "include_in_ctc_flag": "Y",
+    "prorated_flag": "Y",
+    "taxable_flag": "Y"
+  },
+  "eligibility": {
+    "all_employees_flag": "Y",
+    "location_codes": []
+  },
+  "created_by": "ADMIN"
+}
+
+### Update component (send full payload). Omit `description` to keep the existing value; send `"description": null` to clear.
+PUT {{baseUrl}}/api/comp/components/{{componentGuid}}
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "component_code": "HRA",
+  "component_name": "Housing Allowance",
+  "description": "Updated housing allowance text",
+  "component_type_code": "EARNING",
+  "calculation_method_code": "FIXED",
+  "status": "ACTIVE",
+  "active_flag": "Y",
+  "comp_category_code": "ALLOWANCE",
+  "effective_start_date": "2026-01-01",
+  "flags": {
+    "recurring_flag": "Y",
+    "optional_flag": "N",
+    "pensionable_flag": "N",
+    "statutory_flag": "N",
+    "include_in_ctc_flag": "Y",
+    "prorated_flag": "Y",
+    "taxable_flag": "Y"
+  },
+  "eligibility": {
+    "all_employees_flag": "Y",
+    "location_codes": []
+  },
+  "updated_by": "ADMIN"
+}
+
+### Delete component
+DELETE {{baseUrl}}/api/comp/components/{{componentGuid}}
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "user": "ADMIN"
+}

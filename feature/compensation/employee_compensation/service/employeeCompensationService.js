@@ -5,6 +5,9 @@ import db from '../../../../config/db.js';
 /**
  * Create: JSON only — no adjustment, no documents (package).
  * Edit: multipart — files are read into Buffer in memory and sent to Oracle as BLOB; nothing is written to the project tree or local uploads folder.
+ *
+ * Oracle: COMP.EMPLOYEE_COMPENSATION.t_component_rec must include currency_code (VARCHAR2)
+ * and create/edit package bodies must persist it on COMP_EMP_COMP_ASSIGNMENT_DTL (or equivalent).
  */
 const CREATE_COMPONENTS_VIA_JSON = `
 DECLARE
@@ -20,6 +23,7 @@ BEGIN
     BEGIN
       rec.component_id := o.get_number('component_id');
       rec.amount := o.get_number('amount');
+      rec.currency_code := TRIM(UPPER(o.get_string('currency_code')));
       v_start := TRIM(o.get_string('effective_start_date'));
       rec.effective_start_date := TO_DATE(SUBSTR(v_start, 1, 10), 'YYYY-MM-DD');
       IF NOT o.has('effective_end_date')
@@ -180,6 +184,7 @@ BEGIN
     BEGIN
       rec.component_id := o.get_number('component_id');
       rec.amount := o.get_number('amount');
+      rec.currency_code := TRIM(UPPER(o.get_string('currency_code')));
       v_start := TRIM(o.get_string('effective_start_date'));
       rec.effective_start_date := TO_DATE(SUBSTR(v_start, 1, 10), 'YYYY-MM-DD');
       IF NOT o.has('effective_end_date')

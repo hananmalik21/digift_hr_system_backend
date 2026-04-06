@@ -10,6 +10,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
+import { normalizeComponentForGetResponse } from '../normalizeComponentGetResponse.js';
 
 const SCHEMA = 'COMP';
 
@@ -151,6 +152,7 @@ function buildCreateBinds(payload) {
     P_TENANT_ID: optNum(payload.tenant_id),
     P_COMPONENT_CODE: optStr(payload.component_code),
     P_COMPONENT_NAME: optStr(payload.component_name),
+    P_DESCRIPTION: optStr(payload.description),
     P_COMPONENT_TYPE_CODE: optStr(payload.component_type_code),
     P_CALCULATION_METHOD_CODE: optStr(payload.calculation_method_code),
     P_BASE_AMOUNT_SOURCE: optStr(payload.base_amount_source),
@@ -189,6 +191,7 @@ function buildUpdateBinds(componentGuidBuffer, payload) {
     P_TENANT_ID: optNum(payload.tenant_id),
     P_COMPONENT_CODE: optStr(payload.component_code),
     P_COMPONENT_NAME: optStr(payload.component_name),
+    P_DESCRIPTION: optStr(payload.description),
     P_COMPONENT_TYPE_CODE: optStr(payload.component_type_code),
     P_CALCULATION_METHOD_CODE: optStr(payload.calculation_method_code),
     P_BASE_AMOUNT_SOURCE: optStr(payload.base_amount_source),
@@ -240,6 +243,7 @@ export async function createComponent(payload) {
         P_TENANT_ID               => :P_TENANT_ID,
         P_COMPONENT_CODE          => :P_COMPONENT_CODE,
         P_COMPONENT_NAME          => :P_COMPONENT_NAME,
+        P_DESCRIPTION             => :P_DESCRIPTION,
         P_COMPONENT_TYPE_CODE     => :P_COMPONENT_TYPE_CODE,
         P_CALCULATION_METHOD_CODE => :P_CALCULATION_METHOD_CODE,
         P_BASE_AMOUNT_SOURCE      => :P_BASE_AMOUNT_SOURCE,
@@ -280,7 +284,7 @@ export async function createComponent(payload) {
         );
       }
       const fetchGuidSql = `
-        SELECT COMPONENT_ID, RAWTOHEX(COMPONENT_GUID) AS COMPONENT_GUID
+        SELECT COMPONENT_ID, RAWTOHEX(COMPONENT_GUID) AS COMPONENT_GUID, DESCRIPTION
         FROM COMP.COMP_COMPONENTS WHERE COMPONENT_ID = :id
       `;
       const guidResult = await connection.execute(
@@ -292,9 +296,14 @@ export async function createComponent(payload) {
       const componentGuid = row?.COMPONENT_GUID
         ? String(row.COMPONENT_GUID).toUpperCase()
         : null;
+      const description =
+        row?.DESCRIPTION != null && String(row.DESCRIPTION).trim() !== ''
+          ? String(row.DESCRIPTION).trim()
+          : null;
       return {
         component_id: id,
-        component_guid: componentGuid
+        component_guid: componentGuid,
+        description
       };
     },
     'create compensation component',
@@ -308,7 +317,7 @@ export async function createComponent(payload) {
  */
 export async function updateComponent(componentGuid, payload) {
   const guidBuffer = guidHexToBuffer(componentGuid);
-  const binds = buildUpdateBinds(guidBuffer, payload);
+  const normalizedGuid = normalizeComponentGuid(componentGuid);
 
   const plsql = `
     DECLARE
@@ -325,39 +334,76 @@ export async function updateComponent(componentGuid, payload) {
       END IF;
 
       COMP.COMP_COMPONENT_UPDATE_PKG.UPDATE_COMPONENT(
-        P_COMPONENT_GUID         => :P_COMPONENT_GUID,
-        P_TENANT_ID              => :P_TENANT_ID,
-        P_COMPONENT_CODE         => :P_COMPONENT_CODE,
-        P_COMPONENT_NAME         => :P_COMPONENT_NAME,
-        P_COMPONENT_TYPE_CODE    => :P_COMPONENT_TYPE_CODE,
+        P_COMPONENT_GUID          => :P_COMPONENT_GUID,
+        P_TENANT_ID               => :P_TENANT_ID,
+        P_COMPONENT_CODE          => :P_COMPONENT_CODE,
+        P_COMPONENT_NAME          => :P_COMPONENT_NAME,
+        P_DESCRIPTION             => :P_DESCRIPTION,
+        P_COMPONENT_TYPE_CODE     => :P_COMPONENT_TYPE_CODE,
         P_CALCULATION_METHOD_CODE => :P_CALCULATION_METHOD_CODE,
-        P_BASE_AMOUNT_SOURCE     => :P_BASE_AMOUNT_SOURCE,
-        P_FORMULA_NAME           => :P_FORMULA_NAME,
-        P_MIN_VALUE              => :P_MIN_VALUE,
-        P_MAX_VALUE              => :P_MAX_VALUE,
-        P_CURRENCY_CODE          => :P_CURRENCY_CODE,
-        P_STATUS                 => :P_STATUS,
-        P_ACTIVE_FLAG            => :P_ACTIVE_FLAG,
-        P_COMP_CATEGORY_CODE     => :P_COMP_CATEGORY_CODE,
-        P_EFFECTIVE_START_DATE   => :P_EFFECTIVE_START_DATE,
-        P_EFFECTIVE_END_DATE     => :P_EFFECTIVE_END_DATE,
-        P_RECURRING_FLAG         => :P_RECURRING_FLAG,
-        P_OPTIONAL_FLAG          => :P_OPTIONAL_FLAG,
-        P_PENSIONABLE_FLAG       => :P_PENSIONABLE_FLAG,
-        P_STATUTORY_FLAG         => :P_STATUTORY_FLAG,
-        P_INCLUDE_IN_CTC_FLAG    => :P_INCLUDE_IN_CTC_FLAG,
-        P_PRORATED_FLAG          => :P_PRORATED_FLAG,
-        P_TAXABLE_FLAG           => :P_TAXABLE_FLAG,
-        P_ALL_EMPLOYEES_FLAG     => :P_ALL_EMPLOYEES_FLAG,
-        P_LOCATION_CODES         => L_LOC,
-        P_UPDATED_BY             => :P_UPDATED_BY
+        P_BASE_AMOUNT_SOURCE      => :P_BASE_AMOUNT_SOURCE,
+        P_FORMULA_NAME            => :P_FORMULA_NAME,
+        P_MIN_VALUE               => :P_MIN_VALUE,
+        P_MAX_VALUE               => :P_MAX_VALUE,
+        P_CURRENCY_CODE           => :P_CURRENCY_CODE,
+        P_STATUS                  => :P_STATUS,
+        P_ACTIVE_FLAG             => :P_ACTIVE_FLAG,
+        P_COMP_CATEGORY_CODE      => :P_COMP_CATEGORY_CODE,
+        P_EFFECTIVE_START_DATE    => :P_EFFECTIVE_START_DATE,
+        P_EFFECTIVE_END_DATE      => :P_EFFECTIVE_END_DATE,
+        P_RECURRING_FLAG          => :P_RECURRING_FLAG,
+        P_OPTIONAL_FLAG           => :P_OPTIONAL_FLAG,
+        P_PENSIONABLE_FLAG        => :P_PENSIONABLE_FLAG,
+        P_STATUTORY_FLAG          => :P_STATUTORY_FLAG,
+        P_INCLUDE_IN_CTC_FLAG     => :P_INCLUDE_IN_CTC_FLAG,
+        P_PRORATED_FLAG           => :P_PRORATED_FLAG,
+        P_TAXABLE_FLAG            => :P_TAXABLE_FLAG,
+        P_ALL_EMPLOYEES_FLAG      => :P_ALL_EMPLOYEES_FLAG,
+        P_LOCATION_CODES          => L_LOC,
+        P_UPDATED_BY              => :P_UPDATED_BY
       );
     END;
   `;
 
   return runWithTransaction(async (connection) => {
+    let payloadForUpdate = payload;
+    if (!Object.prototype.hasOwnProperty.call(payload, 'description')) {
+      const curSql = `
+        SELECT DESCRIPTION
+        FROM COMP.COMP_COMPONENTS
+        WHERE COMPONENT_GUID = HEXTORAW(:guid)
+      `;
+      const curResult = await connection.execute(
+        curSql,
+        { guid: normalizedGuid },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const curRow = curResult.rows?.[0];
+      const existingDesc =
+        curRow?.DESCRIPTION != null && String(curRow.DESCRIPTION).trim() !== ''
+          ? String(curRow.DESCRIPTION).trim()
+          : null;
+      payloadForUpdate = { ...payload, description: existingDesc };
+    }
+
+    const binds = buildUpdateBinds(guidBuffer, payloadForUpdate);
     await connection.execute(plsql, binds, { autoCommit: false });
-    return { component_guid: normalizeComponentGuid(componentGuid) };
+    const fetchSql = `
+      SELECT DESCRIPTION
+      FROM COMP.COMP_COMPONENTS
+      WHERE COMPONENT_GUID = HEXTORAW(:guid)
+    `;
+    const fetchResult = await connection.execute(
+      fetchSql,
+      { guid: normalizedGuid },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const descRow = fetchResult.rows?.[0];
+    const description =
+      descRow?.DESCRIPTION != null && String(descRow.DESCRIPTION).trim() !== ''
+        ? String(descRow.DESCRIPTION).trim()
+        : null;
+    return { component_guid: normalizedGuid, description };
   }, 'update compensation component');
 }
 
@@ -437,6 +483,7 @@ export async function getComponentByGuid(componentGuid) {
         TENANT_ID,
         COMPONENT_CODE,
         COMPONENT_NAME,
+        DESCRIPTION,
         COMPONENT_TYPE_CODE,
         CALCULATION_METHOD_CODE,
         BASE_AMOUNT_SOURCE,
@@ -488,11 +535,14 @@ export async function getComponentByGuid(componentGuid) {
     const h = rowToComponent(headerRow);
     const componentGuidHex = rawToHex(headerRow.COMPONENT_GUID) ?? normalizedGuid;
     const formatDate = (d) => (d instanceof Date && Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : (d != null ? String(d).slice(0, 10) : null));
-    return {
+    const descCell = headerRow.DESCRIPTION ?? headerRow.description;
+    return normalizeComponentForGetResponse({
       component_guid: componentGuidHex,
       tenant_id: h.tenant_id,
       component_code: h.component_code,
       component_name: h.component_name,
+      description:
+        descCell != null && String(descCell).trim() !== '' ? String(descCell).trim() : null,
       component_type_code: h.component_type_code,
       calculation_method_code: h.calculation_method_code,
       base_amount_source: h.base_amount_source ?? null,
@@ -518,7 +568,7 @@ export async function getComponentByGuid(componentGuid) {
         all_employees_flag: h.all_employees_flag ?? 'N',
         location_codes: locationCodes
       }
-    };
+    });
   } catch (err) {
     if (err instanceof NotFoundError) throw err;
     throw new DatabaseError(

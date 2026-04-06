@@ -75,6 +75,24 @@ function toNonEmptyString(value, field) {
   return { ok: true, value: String(value).trim() };
 }
 
+/** ISO-style currency codes (e.g. USD, KWD); max 15 chars for Oracle VARCHAR2. */
+function toCurrencyCode(value, fieldPath) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { ok: false, error: `${fieldPath}.currency_code is required` };
+  }
+  const s = String(value).trim().toUpperCase();
+  if (s.length > 15) {
+    return { ok: false, error: `${fieldPath}.currency_code must be at most 15 characters` };
+  }
+  if (!/^[A-Z0-9]+$/.test(s)) {
+    return {
+      ok: false,
+      error: `${fieldPath}.currency_code must contain only letters and digits`
+    };
+  }
+  return { ok: true, value: s };
+}
+
 function parseActiveFlag(value, rowNumber) {
   if (value === undefined || value === null || String(value).trim() === '') {
     return { ok: true, value: 'Y' };
@@ -107,6 +125,8 @@ function validateComponentLines(components) {
     if (!cid.ok) errors.push(cid.error);
     const amt = toNumberAmount(c?.amount, `${p}.amount`);
     if (!amt.ok) errors.push(amt.error);
+    const cur = toCurrencyCode(c?.currency_code, p);
+    if (!cur.ok) errors.push(cur.error);
     const af = parseActiveFlag(c?.active_flag, rowNumber);
     if (!af.ok) errors.push(af.error);
     if (
@@ -144,6 +164,7 @@ function validateComponentLines(components) {
   const normalized = components.map((c, idx) => ({
     component_id: Number(c.component_id),
     amount: Number(c.amount),
+    currency_code: String(c.currency_code).trim().toUpperCase(),
     effective_start_date: String(c.effective_start_date).trim().slice(0, 10),
     effective_end_date:
       c.effective_end_date === undefined ||

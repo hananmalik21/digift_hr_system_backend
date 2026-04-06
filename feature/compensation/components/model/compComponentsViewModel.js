@@ -6,6 +6,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import { normalizeComponentForGetResponse } from '../normalizeComponentGetResponse.js';
 
 const SCHEMA = 'COMP';
 
@@ -61,11 +62,14 @@ export function mapComponentsViewRow(row) {
   const componentActive =
     g('COMPONENT_ACTIVE_FLAG') != null ? g('COMPONENT_ACTIVE_FLAG') : g('ACTIVE_FLAG');
 
-  return {
+  const descRaw = g('DESCRIPTION') ?? g('COMPONENT_DESCRIPTION');
+  return normalizeComponentForGetResponse({
     component_id: g('COMPONENT_ID') != null ? Number(g('COMPONENT_ID')) : null,
     component_guid: componentGuid,
     component_code: g('COMPONENT_CODE') != null ? String(g('COMPONENT_CODE')) : null,
     component_name: g('COMPONENT_NAME') != null ? String(g('COMPONENT_NAME')) : null,
+    description:
+      descRaw != null && String(descRaw).trim() !== '' ? String(descRaw).trim() : null,
     component_type_code: g('COMPONENT_TYPE_CODE') != null ? String(g('COMPONENT_TYPE_CODE')) : null,
     calculation_method_code:
       g('CALCULATION_METHOD_CODE') != null ? String(g('CALCULATION_METHOD_CODE')) : null,
@@ -99,7 +103,7 @@ export function mapComponentsViewRow(row) {
     creation_date: toIso(g('CREATION_DATE')),
     last_updated_by: g('LAST_UPDATED_BY') != null ? String(g('LAST_UPDATED_BY')) : null,
     last_update_date: toIso(g('LAST_UPDATE_DATE'))
-  };
+  });
 }
 
 async function runCompRead(fn) {
@@ -136,6 +140,7 @@ export const COMPONENTS_VIEW_SORT_COLUMNS = {
   component_id: 'v.COMPONENT_ID',
   component_code: 'v.COMPONENT_CODE',
   component_name: 'v.COMPONENT_NAME',
+  description: 'v.DESCRIPTION',
   component_type_code: 'v.COMPONENT_TYPE_CODE',
   calculation_method_code: 'v.CALCULATION_METHOD_CODE',
   currency_code: 'v.CURRENCY_CODE',
@@ -232,6 +237,7 @@ export async function listComponentsFromView(filters, pagination, sort) {
     conditions.push(`(
       UPPER(v.COMPONENT_CODE) LIKE UPPER(${pat}) ESCAPE '\\'
       OR UPPER(v.COMPONENT_NAME) LIKE UPPER(${pat}) ESCAPE '\\'
+      OR (v.DESCRIPTION IS NOT NULL AND UPPER(v.DESCRIPTION) LIKE UPPER(${pat}) ESCAPE '\\')
       OR (v.FORMULA_NAME IS NOT NULL AND UPPER(v.FORMULA_NAME) LIKE UPPER(${pat}) ESCAPE '\\')
       OR UPPER(v.COMPONENT_TYPE_CODE) LIKE UPPER(${pat}) ESCAPE '\\'
       OR UPPER(v.COMP_CATEGORY_CODE) LIKE UPPER(${pat}) ESCAPE '\\'

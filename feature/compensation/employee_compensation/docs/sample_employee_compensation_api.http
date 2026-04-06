@@ -11,6 +11,7 @@ Content-Type: application/json
     {
       "component_id": 101,
       "amount": 1000,
+      "currency_code": "USD",
       "effective_start_date": "2026-04-01",
       "effective_end_date": null,
       "active_flag": "Y"
@@ -21,7 +22,7 @@ Content-Type: application/json
 ### curl (create)
 # curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/create" \
 #   -H "Content-Type: application/json" \
-#   -d '{"enterprise_id":1,"employee_id":1001,"plan_id":10,"created_by":"SYSTEM","components":[{"component_id":101,"amount":1000,"effective_start_date":"2026-04-01","effective_end_date":null,"active_flag":"Y"}]}'
+#   -d '{"enterprise_id":1,"employee_id":1001,"plan_id":10,"created_by":"SYSTEM","components":[{"component_id":101,"amount":1000,"currency_code":"USD","effective_start_date":"2026-04-01","effective_end_date":null,"active_flag":"Y"}]}'
 
 ### Edit — multipart/form-data (adjustment + stringified components + optional BLOB documents)
 ### Uploaded files are NOT stored in this repo or on app disk — only persisted in Oracle (e.g. COMP_ADJUSTMENT_DOCS.FILE_CONTENT).
@@ -32,7 +33,7 @@ POST http://localhost:3000/api/comp/employee-compensation/edit
 Content-Type: multipart/form-data; boundary=----digify
 
 ### curl (edit) — two files, components JSON inline
-# COMPONENTS='[{"component_id":101,"amount":1500,"effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
+# COMPONENTS='[{"component_id":101,"amount":1500,"currency_code":"USD","effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
 # curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/edit" \
 #   -F "enterprise_id=1" \
 #   -F "employee_id=1001" \

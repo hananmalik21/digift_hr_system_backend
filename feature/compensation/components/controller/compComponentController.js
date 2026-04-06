@@ -5,6 +5,8 @@
  * - GET /comp/components/:componentId — single row by numeric id (view)
  * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
  * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
+ *
+ * Optional body field: description (maps to COMP.COMP_COMPONENTS.DESCRIPTION, trimmed; max length from env COMP_COMPONENT_DESCRIPTION_MAX, default 4000).
  */
 
 import express from 'express';
@@ -43,6 +45,12 @@ const ERROR_TITLE = {
 };
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Align with Oracle VARCHAR2 length for COMP.COMP_COMPONENTS.DESCRIPTION (override via env). */
+const COMP_COMPONENT_DESCRIPTION_MAX = (() => {
+  const n = Number(process.env.COMP_COMPONENT_DESCRIPTION_MAX);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 32767) : 4000;
+})();
 
 function parseOptionalQueryDate(query, key) {
   const raw = query[key];
@@ -434,10 +442,28 @@ function validateTenantId(data) {
   return errors;
 }
 
+/**
+ * Optional description: string, trimmed length cap; omit or null for backward compatibility.
+ */
+function validateDescription(data) {
+  const errors = [];
+  if (data.description === undefined || data.description === null) return errors;
+  if (typeof data.description !== 'string') {
+    errors.push('description must be a string');
+    return errors;
+  }
+  const t = data.description.trim();
+  if (t.length > COMP_COMPONENT_DESCRIPTION_MAX) {
+    errors.push(`description must be at most ${COMP_COMPONENT_DESCRIPTION_MAX} characters`);
+  }
+  return errors;
+}
+
 function validateComponentPayload(data, isUpdate) {
   const errors = [
     ...validateRequired(data, isUpdate),
     ...validateTenantId(data),
+    ...validateDescription(data),
     ...validateYnFlags(data),
     ...validateArrays(data),
     ...validateMinMax(data),

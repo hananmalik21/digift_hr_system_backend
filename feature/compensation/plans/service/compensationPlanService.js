@@ -1,5 +1,6 @@
 import oracledb from 'oracledb';
 import db, { executeQuery } from '../../../../config/db.js';
+import { normalizeComponentForGetResponse } from '../../components/normalizeComponentGetResponse.js';
 import {
   normalizePlanGuidHex,
   PLAN_GUID_VALIDATION_MESSAGE
@@ -171,6 +172,7 @@ SELECT v.enterprise_id,
                'component_guid' VALUE UPPER(RAWTOHEX(c.component_guid)),
                'component_code' VALUE c.component_code,
                'component_name' VALUE c.component_name,
+               'description' VALUE c.description,
                'component_type_code' VALUE c.component_type_code,
                'display_sequence' VALUE pc.display_sequence,
                'mandatory_flag' VALUE pc.mandatory_flag,
@@ -222,7 +224,9 @@ export async function getEligiblePlansForEmployee(employeeGuidHex) {
     plan_guid: r.PLAN_GUID ?? r.plan_guid,
     plan_code: r.PLAN_CODE ?? r.plan_code,
     plan_name: r.PLAN_NAME ?? r.plan_name,
-    components: parsePlanComponentsJson(r.COMPONENTS_JSON ?? r.components_json)
+    components: parsePlanComponentsJson(r.COMPONENTS_JSON ?? r.components_json).map(
+      normalizeComponentForGetResponse
+    )
   }));
 }
 
