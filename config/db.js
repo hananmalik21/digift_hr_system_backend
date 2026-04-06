@@ -62,9 +62,10 @@ try {
   throw error;
 }
 
-// Fetch CLOB columns as strings (not Lob streams). Must be set before any query runs.
-// Ensures columns like ORG_STRUCTURE_LIST (JSON_SERIALIZE(...) RETURNING CLOB) are strings for JSON.parse.
-oracledb.fetchAsString = [oracledb.CLOB];
+// Fetch CLOB/JSON columns as strings (not Lob streams / native JSON wire path). Must be set before any query runs.
+// - CLOB: e.g. JSON_SERIALIZE(...) RETURNING CLOB
+// - DB_TYPE_JSON: Oracle native JSON (e.g. COMP.COMP_SALARY_STRUCTURE_JSON_V) — omitting this can contribute to ORA-03106 in thin mode.
+oracledb.fetchAsString = [oracledb.CLOB, oracledb.DB_TYPE_JSON];
 
 /**
  * Database configuration

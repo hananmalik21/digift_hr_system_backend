@@ -126,6 +126,39 @@ export function normalizeStructureGuid(guid) {
   return s.toUpperCase();
 }
 
+/**
+ * Path segment for GET …/salary-structures-details/:structureKey.
+ * @param {string|undefined} encodedSegment
+ * @returns {{ ok: true, structure_id: number|null, structure_guid_hex: string|null } | { ok: false, message: string }}
+ */
+export function parseDetailKeyFromPathSegment(encodedSegment) {
+  const invalid =
+    'Path must be a positive integer structure id or 32-character hex structure_guid';
+  const raw = decodeURIComponent(String(encodedSegment ?? '').trim());
+  if (!raw) {
+    return { ok: false, message: invalid };
+  }
+
+  const compactGuid = raw.replace(/-/g, '');
+  if (compactGuid.length === 32 && STRUCTURE_GUID_REGEX.test(compactGuid)) {
+    const structure_guid_hex = normalizeStructureGuid(compactGuid);
+    return { ok: true, structure_id: null, structure_guid_hex };
+  }
+
+  if (/^\d+$/.test(raw)) {
+    const structure_id = parseInt(raw, 10);
+    if (Number.isNaN(structure_id) || structure_id < 1) {
+      return { ok: false, message: 'structure id must be a valid positive integer' };
+    }
+    if (structure_id > Number.MAX_SAFE_INTEGER) {
+      return { ok: false, message: 'structure id is out of supported range' };
+    }
+    return { ok: true, structure_id, structure_guid_hex: null };
+  }
+
+  return { ok: false, message: invalid };
+}
+
 function invalidStructureGuidError() {
   const err = new Error('structure_guid must be a 32-character hexadecimal string');
   err.statusCode = 400;

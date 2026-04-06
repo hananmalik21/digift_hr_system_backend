@@ -1,5 +1,14 @@
--- COMP.COMP_SALARY_STRUCTURE_JSON_V — GET /api/comp/salary-structures-details
--- Two statements: COUNT(*) with WHERE binds only, then paginated SELECT (COUNT must not include row_offset/fetch_size binds).
+-- COMP.COMP_SALARY_STRUCTURE_JSON_V (single source for list + detail in Node)
 --
--- Binds (WHERE): enterprise_id, structure_id, search_pattern, p_status
--- Binds (SELECT + OFFSET/FETCH): same + row_offset, fetch_size
+-- List: GET /api/comp/salary-structures
+--   SELECT header columns only (STRUCTURE_ID, STRUCTURE_GUID, ENTERPRISE_ID, STRUCTURE_CODE,
+--   STRUCTURE_NAME, ACTIVE_FLAG, CREATED_BY, CREATION_DATE, LAST_UPDATED_BY, LAST_UPDATE_DATE)
+--   + COUNT(*) + OFFSET/FETCH (see compSalaryStructureJsonViewModel.js).
+--
+-- Detail: GET /api/comp/salary-structures-details?enterprise_id=&structure_id=|structure_guid=
+--   Full row including STRUCTURE_OBJ, *_JSON columns (see buildJsonViewDetailSelectSql).
+--
+-- Optional env:
+--   COMP_SALARY_STRUCTURE_ENTERPRISE_COL=TENANT_ID
+--   COMP_SALARY_STRUCTURE_JSON_V_ACTIVE_COL=STRUCTURE_ACTIVE_FLAG
+--   COMP_SALARY_STRUCTURE_JSON_V_GUID_FORMAT=VARCHAR  (if STRUCTURE_GUID is not RAW)

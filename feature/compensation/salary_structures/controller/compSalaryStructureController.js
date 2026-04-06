@@ -9,20 +9,19 @@ import {
   updateSalaryStructure,
   deleteSalaryStructure,
   normalizeStructureGuid,
-  STRUCTURE_GUID_REGEX
+  STRUCTURE_GUID_REGEX,
+  parseDetailKeyFromPathSegment
 } from '../service/compSalaryStructureService.js';
 import {
-  listSalaryStructuresFromFullView,
-  SALARY_STRUCTURE_FULL_V_SORT_COLUMNS
-} from '../model/compSalaryStructureFullViewModel.js';
-import {
-  parseSalaryStructureJsonFullRequest,
-  listSalaryStructuresWithNestedJson
+  parseSalaryStructureListRequest,
+  parseSalaryStructureDetailRequest,
+  listSalaryStructureHeaders,
+  listSalaryStructureDetailEndpointPaginated,
+  getSalaryStructureDetail
 } from '../service/compSalaryStructureJsonViewService.js';
+import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { parseSalaryStructurePageLimit } from '../utils/parseSalaryStructurePageLimit.js';
-import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 
 const router = express.Router();
 const HTTP = { BAD_REQUEST: 400, OK: 200, CREATED: 201, NOT_FOUND: 404, CONFLICT: 409, SERVER_ERROR: 500 };
@@ -31,8 +30,9 @@ const MSG_INVALID_STRUCTURE_GUID = 'structure_guid must be a 32-character hexade
 const MSG_SALARY_STRUCTURE_NOT_FOUND = 'Salary structure not found';
 const MSG_DELETE_SUCCESS = 'Salary structure deleted successfully';
 const MSG_LIST_SUCCESS = 'Salary structures fetched successfully';
+const MSG_DETAIL_SUCCESS = 'Salary structure fetched successfully';
 const LIST_ERROR_TITLE = 'Failed to list salary structures';
-const JSON_FULL_ERROR_TITLE = 'Failed to fetch salary structure details';
+const DETAIL_ERROR_TITLE = 'Failed to fetch salary structure details';
 
 const ORACLE_CONFLICT_MAP = [
   {
@@ -101,55 +101,6 @@ function sendFail(res, statusCode, error, errorCode) {
   res.status(statusCode).json(body);
 }
 
-function parseSalaryStructureListSort(query) {
-  const allowed = Object.keys(SALARY_STRUCTURE_FULL_V_SORT_COLUMNS);
-  let sortBy = 'structure_id';
-  const rawBy = query.sort_by;
-  if (rawBy != null && String(rawBy).trim() !== '') {
-    sortBy = String(rawBy).trim().toLowerCase();
-    if (!SALARY_STRUCTURE_FULL_V_SORT_COLUMNS[sortBy]) {
-      throw new Error(`Invalid sort_by. Allowed: ${allowed.join(', ')}`);
-    }
-  }
-  let sortOrder = 'DESC';
-  const so = query.sort_order ?? query.sort_dir;
-  if (so != null && String(so).trim() !== '') {
-    const o = String(so).trim().toUpperCase();
-    if (o !== 'ASC' && o !== 'DESC') {
-      throw new Error('sort_order must be asc or desc');
-    }
-    sortOrder = o;
-  }
-  return { sortBy, sortOrder };
-}
-
-/**
- * @returns {{ enterprise_id: number, search?: string, statusActiveFlag?: 'Y'|'N' }}
- */
-function buildSalaryStructureListFilters(query) {
-  const enterprise_id = parseRequiredEnterpriseId(query);
-  const filters = { enterprise_id };
-
-  const s = query.search;
-  if (s != null && String(s).trim() !== '') {
-    filters.search = String(s).trim();
-  }
-
-  const st = query.status;
-  if (st != null && String(st).trim() !== '') {
-    const u = String(st).trim().toUpperCase();
-    if (u === 'ACTIVE') filters.statusActiveFlag = 'Y';
-    else if (u === 'INACTIVE') filters.statusActiveFlag = 'N';
-    else if (u === 'ALL') {
-      /* no STRUCTURE_ACTIVE_FLAG filter */
-    } else {
-      throw new Error('status must be ACTIVE, INACTIVE, or ALL');
-    }
-  }
-
-  return filters;
-}
-
 /** Same pagination shape as GET /api/comp/components (compComponentView.sendListSuccess). */
 function salaryStructuresPaginationBody(page, pageSize, total) {
   const meta = buildPaginationMeta(page, pageSize, total);
@@ -170,6 +121,28 @@ function sendSalaryStructurePaginatedList(res, rows, page, pageSize, total) {
     data: rows,
     pagination: salaryStructuresPaginationBody(page, pageSize, total)
   });
+}
+
+function sendSalaryStructureDetailSuccess(res, data) {
+  res.status(HTTP.OK).json({
+    success: true,
+    message: MSG_DETAIL_SUCCESS,
+    data
+  });
+}
+
+/** Load one structure by detail key; sends 404 / JSON body or database error response. */
+async function sendSalaryStructureDetailByKey(res, key) {
+  try {
+    const data = await getSalaryStructureDetail(key);
+    if (data == null) {
+      sendFail(res, HTTP.NOT_FOUND, MSG_SALARY_STRUCTURE_NOT_FOUND, HTTP.NOT_FOUND);
+      return;
+    }
+    sendSalaryStructureDetailSuccess(res, data);
+  } catch (err) {
+    sendSalaryStructureListDatabaseError(res, err, DETAIL_ERROR_TITLE);
+  }
 }
 
 function sendSalaryStructureListDatabaseError(res, err, fallbackMessage) {
@@ -337,22 +310,100 @@ export const deleteSalaryStructureHandler = asyncHandler(async (req, res) => {
   }
 });
 
+function queryHasStructureKey(query) {
+  const q = query || {};
+  const idRaw = q.structure_id;
+  const guidRaw = q.structure_guid;
+  const hasId = idRaw !== undefined && idRaw !== null && String(idRaw).trim() !== '';
+  const hasGuid = guidRaw !== undefined && guidRaw !== null && String(guidRaw).trim() !== '';
+  return hasId || hasGuid;
+}
+
 /**
  * GET /api/comp/salary-structures-details
- * Full nested JSON per row from COMP.COMP_SALARY_STRUCTURE_JSON_V (enterprise_id required; optional filters + pagination).
+ * - With structure_id and/or structure_guid: one row from COMP.COMP_SALARY_STRUCTURE_JSON_V (nested JSON).
+ * - Without both: paginated list, full view JSON per row (same 14 keys as single-detail).
  */
-export const getSalaryStructuresJsonFull = asyncHandler(async (req, res) => {
+export const getSalaryStructureDetailHandler = asyncHandler(async (req, res) => {
+  if (!queryHasStructureKey(req.query)) {
+    let parsed;
+    try {
+      parsed = parseSalaryStructureListRequest(req.query);
+    } catch (e) {
+      return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
+    }
+
+    try {
+      const { data, total } = await listSalaryStructureDetailEndpointPaginated(
+        parsed.filterInput,
+        parsed.pagination,
+        parsed.sort
+      );
+      return sendSalaryStructurePaginatedList(
+        res,
+        data,
+        parsed.pagination.page,
+        parsed.pagination.pageSize,
+        total
+      );
+    } catch (err) {
+      return sendSalaryStructureListDatabaseError(res, err, LIST_ERROR_TITLE);
+    }
+  }
+
+  let key;
+  try {
+    key = parseSalaryStructureDetailRequest(req.query);
+  } catch (e) {
+    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
+  }
+
+  await sendSalaryStructureDetailByKey(res, key);
+});
+
+/**
+ * GET /api/comp/salary-structures-details/:structureKey?enterprise_id=
+ * Single structure: path is numeric structure_id OR 32-char hex structure_guid (hyphens optional).
+ */
+export const getSalaryStructureDetailByPathKeyHandler = asyncHandler(async (req, res) => {
+  let enterprise_id;
+  try {
+    enterprise_id = parseRequiredEnterpriseId(req.query);
+  } catch (e) {
+    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
+  }
+
+  const parsed = parseDetailKeyFromPathSegment(req.params.structureKey);
+  if (!parsed.ok) {
+    return sendFail(res, HTTP.BAD_REQUEST, parsed.message, ERROR_CODE_VALIDATION);
+  }
+
+  const key = {
+    enterprise_id,
+    structure_id: parsed.structure_id,
+    structure_guid_hex: parsed.structure_guid_hex
+  };
+
+  await sendSalaryStructureDetailByKey(res, key);
+});
+
+/**
+ * GET /api/comp/salary-structures
+ * Paginated grid list (header + audit columns) from COMP.COMP_SALARY_STRUCTURE_JSON_V.
+ */
+export const getSalaryStructuresList = asyncHandler(async (req, res) => {
   let parsed;
   try {
-    parsed = parseSalaryStructureJsonFullRequest(req.query);
+    parsed = parseSalaryStructureListRequest(req.query);
   } catch (e) {
     return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
   }
 
   try {
-    const { data, total } = await listSalaryStructuresWithNestedJson(
+    const { data, total } = await listSalaryStructureHeaders(
       parsed.filterInput,
-      parsed.pagination
+      parsed.pagination,
+      parsed.sort
     );
     return sendSalaryStructurePaginatedList(
       res,
@@ -362,45 +413,12 @@ export const getSalaryStructuresJsonFull = asyncHandler(async (req, res) => {
       total
     );
   } catch (err) {
-    return sendSalaryStructureListDatabaseError(res, err, JSON_FULL_ERROR_TITLE);
-  }
-});
-
-/**
- * GET /api/comp/salary-structures
- * List from COMP.COMP_SALARY_STRUCTURE_FULL_V (enterprise_id required; pagination, search, status, sort).
- */
-export const getSalaryStructuresList = asyncHandler(async (req, res) => {
-  let filters;
-  try {
-    filters = buildSalaryStructureListFilters(req.query);
-  } catch (e) {
-    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
-  }
-
-  let pageData;
-  try {
-    pageData = parseSalaryStructurePageLimit(req.query);
-  } catch (e) {
-    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid pagination', ERROR_CODE_VALIDATION);
-  }
-
-  let sort;
-  try {
-    sort = parseSalaryStructureListSort(req.query);
-  } catch (e) {
-    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid sort', ERROR_CODE_VALIDATION);
-  }
-
-  try {
-    const { rows, total } = await listSalaryStructuresFromFullView(filters, pageData, sort);
-    return sendSalaryStructurePaginatedList(res, rows, pageData.page, pageData.pageSize, total);
-  } catch (err) {
     return sendSalaryStructureListDatabaseError(res, err, LIST_ERROR_TITLE);
   }
 });
 
-router.get('/salary-structures-details', getSalaryStructuresJsonFull);
+router.get('/salary-structures-details/:structureKey', getSalaryStructureDetailByPathKeyHandler);
+router.get('/salary-structures-details', getSalaryStructureDetailHandler);
 router.get('/salary-structures', getSalaryStructuresList);
 router.post('/salary-structures', postSalaryStructure);
 router.put('/salary-structures/:structureGuid', putSalaryStructure);

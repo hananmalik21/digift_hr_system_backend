@@ -5,7 +5,7 @@
 import { DatabaseError } from '../../../../utils/errors/index.js';
 
 /**
- * Column used to filter by tenant on COMP salary structure views.
+ * Column used to filter by tenant on COMP.COMP_SALARY_STRUCTURE_JSON_V.
  * COMP_SALARY_STRUCTURE_JSON_V_ENTERPRISE_COL is a legacy alias for the same setting.
  */
 export function enterpriseFilterColumnFromEnv() {

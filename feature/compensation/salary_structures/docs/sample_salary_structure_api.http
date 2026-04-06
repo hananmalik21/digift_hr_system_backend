@@ -2,17 +2,26 @@
 @baseUrl = http://localhost:3000
 @structureGuid = REPLACE_WITH_32_CHAR_HEX_FROM_CREATE_RESPONSE
 
-### List salary structures (COMP.COMP_SALARY_STRUCTURE_FULL_V)
+### List salary structures (COMP.COMP_SALARY_STRUCTURE_JSON_V — header + audit columns for grids)
 GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&page=1&limit=10&search=&status=ALL&sort_by=structure_code&sort_order=asc
 
-### List — active only, no search
+### List — active only; optional structure_guid filter
 GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&status=ACTIVE
 
-### Full nested JSON (COMP.COMP_SALARY_STRUCTURE_JSON_V) — list / grid
-GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&page=1&limit=10
+### Details URL — paginated list (no structure_id / structure_guid): full nested JSON per row (same 14 keys as single-detail; use a modest limit if payloads are large)
+GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&page=1&limit=10&search=&status=ALL&sort_by=structure_code&sort_order=asc
 
-### Full JSON — single structure, search, active only
-GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&structure_id=10&search=manager&status=ACTIVE&page=2&limit=20
+### Details URL — one structure by path (numeric structure_id)
+GET {{baseUrl}}/api/comp/salary-structures-details/10?enterprise_id=1
+
+### Details URL — one structure by path (32-char hex structure_guid; hyphens optional)
+GET {{baseUrl}}/api/comp/salary-structures-details/{{structureGuid}}?enterprise_id=1
+
+### Details URL — one structure by structure_id query (nested JSON sections)
+GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&structure_id=10
+
+### Details URL — by structure_guid (preferred for external clients)
+GET {{baseUrl}}/api/comp/salary-structures-details?enterprise_id=1&structure_guid={{structureGuid}}
 
 ### Create salary structure — success
 POST {{baseUrl}}/api/comp/salary-structures
