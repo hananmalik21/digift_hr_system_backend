@@ -389,7 +389,8 @@ export const getSalaryStructureDetailByPathKeyHandler = asyncHandler(async (req,
 
 /**
  * GET /api/comp/salary-structures
- * Paginated grid list (header + audit columns) from COMP.COMP_SALARY_STRUCTURE_JSON_V.
+ * Paginated grid list from COMP.COMP_SALARY_STRUCTURE_JSON_V: identifiers, structure_code/name,
+ * structure_type_code, location_obj (lookup JSON — same as details route), active_flag, audit columns.
  */
 export const getSalaryStructuresList = asyncHandler(async (req, res) => {
   let parsed;

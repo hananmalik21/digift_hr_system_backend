@@ -2,8 +2,36 @@
 @baseUrl = http://localhost:3000
 @structureGuid = REPLACE_WITH_32_CHAR_HEX_FROM_CREATE_RESPONSE
 
-### List salary structures (COMP.COMP_SALARY_STRUCTURE_JSON_V — header + audit columns for grids)
+### List salary structures — with TYPE_LOCATION_COLS off, STRUCTURE_OBJ is selected by default so structure_type_code + location_obj match details
 GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&page=1&limit=10&search=&status=ALL&sort_by=structure_code&sort_order=asc
+
+### Sample list row (structure_type_code + location_obj match GET …/salary-structures-details shape for those keys)
+# {
+#   "structure_id": 10,
+#   "structure_guid": "…",
+#   "enterprise_id": 1,
+#   "structure_code": "SAL_STR_001",
+#   "structure_name": "Monthly Salary Structure",
+#   "structure_type_code": "MONTHLY_FIXED",
+#   "active_flag": "Y",
+#   "location_obj": {
+#     "lookup_value_id": 1052,
+#     "lookup_value_guid": "4D4ED8AA817AE30EE0633519000A6222",
+#     "lookup_type_id": 115,
+#     "tenant_id": null,
+#     "value_code": "KUWAIT",
+#     "value_name": "Kuwait",
+#     "display_sequence": 10,
+#     "active_flag": "Y",
+#     "type_code": "COMPONENT_LOCATION",
+#     "type_name": "Component Location",
+#     "type_description": "Optional description"
+#   },
+#   "created_by": "…",
+#   "creation_date": "…",
+#   "last_updated_by": "…",
+#   "last_update_date": "…"
+# }
 
 ### List — active only; optional structure_guid filter
 GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&status=ACTIVE

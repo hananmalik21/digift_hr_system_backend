@@ -15,12 +15,67 @@ import {
 const VIEW_NAME = 'COMP.COMP_SALARY_STRUCTURE_JSON_V';
 const LOG_TAG = 'compSalaryStructureJsonViewModel';
 
+/** Tuned for wide JSON rows (STRUCTURE_OBJ + list); thin default in listSalaryStructuresFromJsonViewPaged. */
+const FETCH_ARRAY_LIST_WITH_STRUCTURE_OBJ_CAP = 25;
+const FETCH_ARRAY_DETAIL_CAP = 25;
+
+function envRaw(name) {
+  return String(process.env[name] ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function envIsAffirmative(name) {
+  const v = envRaw(name);
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function envIsNegative(name) {
+  const v = envRaw(name);
+  return v === '0' || v === 'false' || v === 'no' || v === 'off';
+}
+
+/**
+ * When COMP.COMP_SALARY_STRUCTURE_JSON_V includes STRUCTURE_TYPE_CODE and LOCATION_OBJ, set
+ * COMP_SALARY_STRUCTURE_JSON_V_TYPE_LOCATION_COLS=1 (otherwise list/detail SELECT hits ORA-00904).
+ */
+function jsonViewTypeLocationColsEnabled() {
+  return envIsAffirmative('COMP_SALARY_STRUCTURE_JSON_V_TYPE_LOCATION_COLS');
+}
+
+function typeAndLocationSelectLines() {
+  return jsonViewTypeLocationColsEnabled()
+    ? `STRUCTURE_TYPE_CODE,
+  LOCATION_OBJ,
+  `
+    : '';
+}
+
+/**
+ * Append STRUCTURE_OBJ on list SELECT so Node can fill structure_type_code / location_obj from STRUCTURE_OBJ
+ * when view columns are absent or null. Default: include when TYPE_LOCATION_COLS is off; override with
+ * COMP_SALARY_STRUCTURE_JSON_V_LIST_INCLUDE_STRUCTURE_OBJ=1|0.
+ */
+export function jsonViewListSelectIncludesStructureObj() {
+  const name = 'COMP_SALARY_STRUCTURE_JSON_V_LIST_INCLUDE_STRUCTURE_OBJ';
+  if (envIsAffirmative(name)) return true;
+  if (envIsNegative(name)) return false;
+  return !jsonViewTypeLocationColsEnabled();
+}
+
+function listStructureObjSelectSuffix() {
+  return jsonViewListSelectIncludesStructureObj() ? ', STRUCTURE_OBJ' : '';
+}
+
 /** sort_by (API snake_case) → ORDER BY column on the view. */
 export const SALARY_STRUCTURE_JSON_V_LIST_SORT_COLUMNS = {
   structure_id: 'STRUCTURE_ID',
   structure_guid: 'STRUCTURE_GUID',
   structure_code: 'STRUCTURE_CODE',
   structure_name: 'STRUCTURE_NAME',
+  ...(jsonViewTypeLocationColsEnabled()
+    ? { structure_type_code: 'STRUCTURE_TYPE_CODE' }
+    : {}),
   creation_date: 'CREATION_DATE',
   last_update_date: 'LAST_UPDATE_DATE'
 };
@@ -49,11 +104,11 @@ export function buildJsonViewListSelectSql() {
   ENTERPRISE_ID,
   STRUCTURE_CODE,
   STRUCTURE_NAME,
-  ${af} AS ACTIVE_FLAG,
+  ${typeAndLocationSelectLines()}${af} AS ACTIVE_FLAG,
   CREATED_BY,
   CREATION_DATE,
   LAST_UPDATED_BY,
-  LAST_UPDATE_DATE
+  LAST_UPDATE_DATE${listStructureObjSelectSuffix()}
 `
     .replace(/\s+/g, ' ')
     .trim();
@@ -68,7 +123,7 @@ export function buildJsonViewDetailSelectSql() {
   ENTERPRISE_ID,
   STRUCTURE_CODE,
   STRUCTURE_NAME,
-  ${af} AS ACTIVE_FLAG,
+  ${typeAndLocationSelectLines()}${af} AS ACTIVE_FLAG,
   CREATED_BY,
   CREATION_DATE,
   LAST_UPDATED_BY,
@@ -259,9 +314,14 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
  * @param {{ sortBy: string, sortOrder: 'ASC'|'DESC' }} sort
  */
 export async function listSalaryStructureHeadersFromJsonView(filters, pagination, sort) {
+  const fetchSize = pagination.pageSize;
+  const heavyList = jsonViewListSelectIncludesStructureObj();
   return listSalaryStructuresFromJsonViewPaged(filters, pagination, sort, {
     selectSql: buildJsonViewListSelectSql(),
-    logLabel: 'listSalaryStructureHeadersFromJsonView'
+    logLabel: 'listSalaryStructureHeadersFromJsonView',
+    fetchArraySize: heavyList
+      ? Math.min(FETCH_ARRAY_LIST_WITH_STRUCTURE_OBJ_CAP, Math.max(1, fetchSize))
+      : undefined
   });
 }
 
@@ -276,7 +336,7 @@ export async function listSalaryStructureFullRowsFromJsonView(filters, paginatio
   return listSalaryStructuresFromJsonViewPaged(filters, pagination, sort, {
     selectSql: buildJsonViewDetailSelectSql(),
     logLabel: 'listSalaryStructureFullRowsFromJsonView',
-    fetchArraySize: Math.min(25, Math.max(1, fetchSize))
+    fetchArraySize: Math.min(FETCH_ARRAY_DETAIL_CAP, Math.max(1, fetchSize))
   });
 }
 
@@ -285,30 +345,17 @@ export async function listSalaryStructureFullRowsFromJsonView(filters, paginatio
  * @param {{ enterprise_id: number, structure_id: number|null, structure_guid_hex: string|null }} key
  */
 export async function getSalaryStructureDetailRowFromJsonView(key) {
-  const entCol = enterpriseFilterColumnFromEnv();
-  const parts = [`${entCol} = :enterprise_id`];
-  const binds = {
-    enterprise_id: { val: key.enterprise_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
-  };
-
   if (key.structure_id == null && key.structure_guid_hex == null) {
     throw new Error('structure_id or structure_guid is required');
   }
-  if (key.structure_id != null) {
-    parts.push('STRUCTURE_ID = :structure_id');
-    binds.structure_id = { val: key.structure_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN };
-  }
-  if (key.structure_guid_hex != null) {
-    parts.push(structureGuidMatchSql());
-    binds.structure_guid_hex = {
-      val: key.structure_guid_hex,
-      type: oracledb.STRING,
-      dir: oracledb.BIND_IN,
-      maxSize: 40
-    };
-  }
 
-  const whereSql = `WHERE ${parts.join(' AND ')}`;
+  const { whereSql, binds } = buildJsonViewWhereAndBinds({
+    enterprise_id: key.enterprise_id,
+    structure_id: key.structure_id,
+    structure_guid_hex: key.structure_guid_hex,
+    search_pattern: null,
+    p_status: null
+  });
   const sql = `SELECT ${buildJsonViewDetailSelectSql()} FROM ${VIEW_NAME} ${whereSql}`;
 
   try {
