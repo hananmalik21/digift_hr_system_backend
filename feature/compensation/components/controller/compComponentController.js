@@ -1,7 +1,7 @@
 /**
  * Compensation Component Controller
  * REST APIs:
- * - GET /comp/components — list from COMP.COMPONENTS_VIEW
+ * - GET /comp/components — list from COMP.COMPONENTS_VIEW (tenant_id + search, category, status, calculation; pagination/sort)
  * - GET /comp/components/:componentId — single row by numeric id (view)
  * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
  * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
@@ -52,30 +52,6 @@ const COMP_COMPONENT_DESCRIPTION_MAX = (() => {
   return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 32767) : 4000;
 })();
 
-function parseOptionalQueryDate(query, key) {
-  const raw = query[key];
-  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
-  const s = String(raw).trim();
-  if (!DATE_ONLY_REGEX.test(s)) {
-    return { error: `${key} must be YYYY-MM-DD` };
-  }
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (!Number.isFinite(d.getTime())) {
-    return { error: `${key} must be YYYY-MM-DD` };
-  }
-  return { value: d };
-}
-
-function parseOptionalPositiveInt(query, key) {
-  const raw = query[key];
-  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
-  const n = parseInt(String(raw), 10);
-  if (Number.isNaN(n) || n < 1) {
-    return { error: `${key} must be a positive integer` };
-  }
-  return { value: n };
-}
-
 function parseRequiredPositiveInt(query, key) {
   const raw = query[key];
   if (raw === undefined || raw === null || String(raw).trim() === '') {
@@ -88,30 +64,18 @@ function parseRequiredPositiveInt(query, key) {
   return { value: n };
 }
 
-function parseOptionalYn(query, key) {
-  const raw = query[key];
-  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
-  const v = String(raw).trim().toUpperCase();
-  if (v !== 'Y' && v !== 'N') {
-    return { error: `${key} must be Y or N` };
-  }
-  return { value: v };
-}
-
-function parseActiveOnly(query) {
-  const raw = query.active_only;
-  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: undefined };
-  const s = String(raw).toLowerCase();
-  if (s === 'true' || s === '1' || s === 'yes') return { value: true };
-  if (s === 'false' || s === '0' || s === 'no') return { value: false };
-  return { error: 'active_only must be true or false' };
-}
-
 function parseOptionalString(query, key) {
   const raw = query[key];
   if (raw === undefined || raw === null) return { value: undefined };
   const s = String(raw).trim();
   return { value: s === '' ? undefined : s };
+}
+
+/** First non-empty query value among keys (for canonical + alias params). */
+function firstOptionalString(query, primaryKey, aliasKey) {
+  const primary = parseOptionalString(query, primaryKey).value;
+  if (primary !== undefined) return primary;
+  return parseOptionalString(query, aliasKey).value;
 }
 
 function parseComponentsViewSort(query) {
@@ -138,116 +102,22 @@ function parseComponentsViewSort(query) {
 
 /**
  * Build filters for COMP.COMPONENTS_VIEW list; returns { error?: string, filters? }
+ * Supported query filters: tenant_id (required), search, category|comp_category_code, status, calculation|calculation_method_code.
+ * @returns {{ error: string } | { filters: { tenant_id: number, search?: string, comp_category_code?: string, status?: string, calculation_method_code?: string } }}
  */
 function buildComponentsViewListFilters(query) {
-  const filters = {};
+  const tenant = parseRequiredPositiveInt(query, 'tenant_id');
+  if (tenant.error) return tenant;
 
-  let r = parseOptionalPositiveInt(query, 'component_id');
-  if (r.error) return r;
-  filters.component_id = r.value;
-
-  r = parseOptionalString(query, 'component_code');
-  if (r.error) return r;
-  filters.component_code = r.value;
-
-  r = parseOptionalString(query, 'component_name');
-  if (r.error) return r;
-  filters.component_name = r.value;
-
-  r = parseOptionalString(query, 'component_type_code');
-  if (r.error) return r;
-  filters.component_type_code = r.value;
-
-  r = parseOptionalString(query, 'calculation_method_code');
-  if (r.error) return r;
-  filters.calculation_method_code = r.value;
-
-  r = parseOptionalString(query, 'currency_code');
-  if (r.error) return r;
-  filters.currency_code = r.value;
-
-  r = parseOptionalString(query, 'status');
-  if (r.error) return r;
-  filters.status = r.value;
-
-  r = parseOptionalYn(query, 'active_flag');
-  if (r.error) return r;
-  filters.active_flag = r.value;
-
-  r = parseRequiredPositiveInt(query, 'tenant_id');
-  if (r.error) return r;
-  filters.tenant_id = r.value;
-
-  r = parseOptionalString(query, 'comp_category_code');
-  if (r.error) return r;
-  filters.comp_category_code = r.value;
-
-  r = parseOptionalYn(query, 'recurring_flag');
-  if (r.error) return r;
-  filters.recurring_flag = r.value;
-
-  r = parseOptionalYn(query, 'optional_flag');
-  if (r.error) return r;
-  filters.optional_flag = r.value;
-
-  r = parseOptionalYn(query, 'pensionable_flag');
-  if (r.error) return r;
-  filters.pensionable_flag = r.value;
-
-  r = parseOptionalYn(query, 'statutory_flag');
-  if (r.error) return r;
-  filters.statutory_flag = r.value;
-
-  r = parseOptionalYn(query, 'include_in_ctc_flag');
-  if (r.error) return r;
-  filters.include_in_ctc_flag = r.value;
-
-  r = parseOptionalYn(query, 'prorated_flag');
-  if (r.error) return r;
-  filters.prorated_flag = r.value;
-
-  r = parseOptionalYn(query, 'taxable_flag');
-  if (r.error) return r;
-  filters.taxable_flag = r.value;
-
-  r = parseOptionalString(query, 'search');
-  if (r.error) return r;
-  filters.search = r.value;
-
-  r = parseActiveOnly(query);
-  if (r.error) return r;
-  filters.active_only = r.value;
-
-  const d1 = parseOptionalQueryDate(query, 'effective_start_date_from');
-  if (d1.error) return d1;
-  const d2 = parseOptionalQueryDate(query, 'effective_start_date_to');
-  if (d2.error) return d2;
-  const d3 = parseOptionalQueryDate(query, 'effective_end_date_from');
-  if (d3.error) return d3;
-  const d4 = parseOptionalQueryDate(query, 'effective_end_date_to');
-  if (d4.error) return d4;
-
-  if (
-    d1.value &&
-    d2.value &&
-    d1.value.getTime() > d2.value.getTime()
-  ) {
-    return { error: 'effective_start_date_from must be on or before effective_start_date_to' };
-  }
-  if (
-    d3.value &&
-    d4.value &&
-    d3.value.getTime() > d4.value.getTime()
-  ) {
-    return { error: 'effective_end_date_from must be on or before effective_end_date_to' };
-  }
-
-  filters.effective_start_date_from = d1.value;
-  filters.effective_start_date_to = d2.value;
-  filters.effective_end_date_from = d3.value;
-  filters.effective_end_date_to = d4.value;
-
-  return { filters };
+  return {
+    filters: {
+      tenant_id: tenant.value,
+      search: parseOptionalString(query, 'search').value,
+      comp_category_code: firstOptionalString(query, 'comp_category_code', 'category'),
+      status: parseOptionalString(query, 'status').value,
+      calculation_method_code: firstOptionalString(query, 'calculation_method_code', 'calculation')
+    }
+  };
 }
 
 const GENERIC_DB_MESSAGE = 'A database error occurred. Please try again later.';
@@ -506,7 +376,8 @@ function mapDeleteOracleError(err) {
 
 /**
  * GET /comp/components
- * List compensation components from COMP.COMPONENTS_VIEW (tenant_id required; filters, pagination, sort, search).
+ * List compensation components from COMP.COMPONENTS_VIEW (tenant_id required; pagination, sort).
+ * Query: search (name|code|category partial), category or comp_category_code, status, calculation or calculation_method_code; page, page_size, sort_by, sort_order.
  */
 router.get('/', asyncHandler(async (req, res) => {
   const parsed = buildComponentsViewListFilters(req.query);

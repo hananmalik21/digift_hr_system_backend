@@ -15,6 +15,55 @@ import { parseGuid } from '../../../../../utils/guidUtils.js';
 
 const router = express.Router();
 
+const LOOKUP_GRAPH_PLAN_TYPE = 'PLAN_TYPE';
+
+/** @throws {Error} with message suitable for sendBadRequest */
+function parseGraphQueryTenantId(q) {
+  const raw = q?.tenant_id;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    throw new Error('tenant_id is required');
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) {
+    throw new Error('tenant_id must be a valid positive number');
+  }
+  return n;
+}
+
+/** @throws {Error} with message suitable for sendBadRequest */
+function parseGraphQueryLookupTypeCode(q) {
+  const raw = q?.lookup_type_code;
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    throw new Error('lookup_type_code is required');
+  }
+  return String(raw).trim();
+}
+
+function parseGraphQueryActiveFlag(q) {
+  if (q?.active_flag === undefined) return undefined;
+  const v = q.active_flag;
+  return v === 'true' || v === '1' || v === 'Y' || v === 'y';
+}
+
+function isGraphCountsClientError(error) {
+  const m = error?.message ?? '';
+  return (
+    m.includes('tenant_id') ||
+    m.includes('lookup_type_code') ||
+    m.includes(CompLookupValueModel.UNSUPPORTED_COMPONENT_CHART_MSG_SUBSTR)
+  );
+}
+
+function mapGraphCountRow(row, countKey) {
+  return {
+    lookup_value_id: row.lookup_value_id != null ? Number(row.lookup_value_id) : null,
+    value_code: row.value_code != null ? String(row.value_code) : null,
+    value_name: row.value_name != null ? String(row.value_name) : null,
+    display_sequence: row.display_sequence != null ? Number(row.display_sequence) : null,
+    count: Number(row[countKey] ?? 0) || 0
+  };
+}
+
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
@@ -166,55 +215,39 @@ router.get('/', async (req, res) => {
 
 router.get('/graph-counts', async (req, res) => {
   try {
-    const parseRequiredTenantId = (q) => {
-      const raw = q?.tenant_id;
-      if (raw === undefined || raw === null || String(raw).trim() === '') {
-        throw new Error('tenant_id is required');
-      }
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 1) {
-        throw new Error('tenant_id must be a valid positive number');
-      }
-      return n;
-    };
-
-    const parseRequiredLookupTypeCode = (q) => {
-      const raw = q?.lookup_type_code;
-      if (raw === undefined || raw === null || String(raw).trim() === '') {
-        throw new Error('lookup_type_code is required');
-      }
-      return String(raw).trim();
-    };
-
-    const parseOptionalActiveFlag = (q) => {
-      if (q?.active_flag === undefined) return undefined;
-      const v = q.active_flag;
-      return v === 'true' || v === '1' || v === 'Y' || v === 'y';
-    };
-
-    const tenantIdNum = parseRequiredTenantId(req.query);
-    const lookupTypeCodeTrim = parseRequiredLookupTypeCode(req.query);
+    const tenantIdNum = parseGraphQueryTenantId(req.query);
+    const lookupTypeCodeTrim = parseGraphQueryLookupTypeCode(req.query);
     const filters = {
       tenantId: tenantIdNum,
       lookupTypeCode: lookupTypeCodeTrim
     };
-    const af = parseOptionalActiveFlag(req.query);
+    const af = parseGraphQueryActiveFlag(req.query);
     if (af !== undefined) filters.activeFlag = af;
 
     const type = lookupTypeCodeTrim.toUpperCase();
-    const graphQuery =
-      type === 'PLAN_TYPE'
-        ? { measure: 'plans_by_plan_type_code', fn: 'findGraphCountsPlansByPlanType', countKey: 'plan_type_count' }
-        : { measure: 'components_by_comp_category_code', fn: 'findGraphCountsByLookupTypeCode', countKey: 'component_category_count' };
+    const isPlanType = type === LOOKUP_GRAPH_PLAN_TYPE;
+    const componentCol = isPlanType
+      ? null
+      : CompLookupValueModel.getComponentViewColumnForLookupTypeCode(type);
+    if (!isPlanType && !componentCol) {
+      return sendBadRequest(
+        res,
+        req,
+        CompLookupValueModel.unsupportedComponentChartTypeMessage(lookupTypeCodeTrim)
+      );
+    }
+
+    const graphQuery = isPlanType
+      ? { measure: 'plans_by_plan_type_code', fn: 'findGraphCountsPlansByPlanType', countKey: 'plan_type_count' }
+      : {
+          measure: 'components_view_usage',
+          fn: 'findGraphCountsByLookupTypeCode',
+          countKey: 'usage_count',
+          components_view_column: componentCol
+        };
 
     const rows = await CompLookupValueModel[graphQuery.fn](filters);
-    const data = rows.map((r) => ({
-      lookup_value_id: r.lookup_value_id != null ? Number(r.lookup_value_id) : null,
-      value_code: r.value_code != null ? String(r.value_code) : null,
-      value_name: r.value_name != null ? String(r.value_name) : null,
-      display_sequence: r.display_sequence != null ? Number(r.display_sequence) : null,
-      count: Number(r[graphQuery.countKey] ?? 0) || 0
-    }));
+    const data = rows.map((r) => mapGraphCountRow(r, graphQuery.countKey));
 
     res.json({
       success: true,
@@ -223,15 +256,15 @@ router.get('/graph-counts', async (req, res) => {
         tenant_id: tenantIdNum,
         lookup_type_code: lookupTypeCodeTrim,
         measure: graphQuery.measure,
+        ...(graphQuery.components_view_column != null
+          ? { components_view_column: graphQuery.components_view_column }
+          : {}),
         points: data.length
       },
       data
     });
   } catch (error) {
-    if (error.message?.includes('tenant_id')) {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.message?.includes('lookup_type_code')) {
+    if (isGraphCountsClientError(error)) {
       return sendBadRequest(res, req, error.message);
     }
     sendServerError(res, req, 'Failed to fetch lookup value graph counts', error);

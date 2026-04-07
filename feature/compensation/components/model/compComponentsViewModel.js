@@ -10,6 +10,13 @@ import { normalizeComponentForGetResponse } from '../normalizeComponentGetRespon
 
 const SCHEMA = 'COMP';
 
+const ROW_OBJECT = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+
+/** Upper bound on list `search` input length (LIKE pattern safety). */
+export const COMPONENTS_LIST_SEARCH_MAX_LEN = 200;
+
+const LIKE_ESCAPE_SUFFIX = ` ESCAPE '\\'`;
+
 /**
  * Select all columns from the view so we do not ORA-00904 when DB column names differ slightly.
  * mapComponentsViewRow normalizes known aliases (e.g. ACTIVE_FLAG vs COMPONENT_ACTIVE_FLAG).
@@ -17,7 +24,7 @@ const SCHEMA = 'COMP';
 const VIEW_SELECT_SQL = `SELECT v.* FROM COMP.COMPONENTS_VIEW v`;
 
 /**
- * SQL expression for the component row active Y/N column (filters + sort).
+ * SQL expression for the component row active Y/N column (ORDER BY component_active_flag).
  * Default matches COMP.COMP_COMPONENTS.ACTIVE_FLAG. Set env COMP_COMPONENTS_VIEW_ACTIVE_COL if the view uses COMPONENT_ACTIVE_FLAG only.
  */
 function activeFlagExpr() {
@@ -158,12 +165,33 @@ export const COMPONENTS_VIEW_SORT_COLUMNS = {
  * Escape LIKE wildcards for Oracle LIKE ... ESCAPE '\\'
  */
 export function escapeLikePattern(raw) {
-  const s = String(raw ?? '').slice(0, 200);
+  const s = String(raw ?? '').slice(0, COMPONENTS_LIST_SEARCH_MAX_LEN);
   return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
 }
 
 /**
- * @param {object} filters - normalized filters from controller
+ * Case-insensitive substring match on a column (Oracle UPPER + LIKE).
+ * @param {string} colExpr - e.g. v.COMPONENT_CODE
+ * @param {string} patBindToken - bound placeholder e.g. :b0
+ */
+function upperLikeContains(colExpr, patBindToken) {
+  return `UPPER(${colExpr}) LIKE UPPER(${patBindToken})${LIKE_ESCAPE_SUFFIX}`;
+}
+
+function appendListSearchCondition(conditions, bindFn, rawSearch) {
+  const term = String(rawSearch ?? '').trim();
+  if (term === '') return;
+  const esc = escapeLikePattern(term);
+  const pat = bindFn(`%${esc}%`);
+  conditions.push(`(
+    ${upperLikeContains('v.COMPONENT_CODE', pat)}
+    OR ${upperLikeContains('v.COMPONENT_NAME', pat)}
+    OR (v.COMP_CATEGORY_CODE IS NOT NULL AND ${upperLikeContains('v.COMP_CATEGORY_CODE', pat)})
+  )`);
+}
+
+/**
+ * @param {object} filters - tenant_id (required), optional search, comp_category_code, status, calculation_method_code
  * @param {{ page: number, pageSize: number }} pagination
  * @param {{ sortBy: string, sortOrder: 'ASC'|'DESC' }} sort
  */
@@ -186,63 +214,12 @@ export async function listComponentsFromView(filters, pagination, sort) {
     conditions.push(`${colExpr} = ${bind(val)}`);
   };
 
-  if (filters.component_id != null) {
-    addEq('v.COMPONENT_ID', filters.component_id);
-  }
-  if (filters.component_code != null) {
-    const esc = escapeLikePattern(filters.component_code);
-    const b = bind(`%${esc}%`);
-    conditions.push(`(UPPER(v.COMPONENT_CODE) LIKE UPPER(${b}) ESCAPE '\\')`);
-  }
-  if (filters.component_name != null) {
-    const esc = escapeLikePattern(filters.component_name);
-    const b = bind(`%${esc}%`);
-    conditions.push(`(UPPER(v.COMPONENT_NAME) LIKE UPPER(${b}) ESCAPE '\\')`);
-  }
-  addEq('v.COMPONENT_TYPE_CODE', filters.component_type_code, { nullMatch: true });
-  addEq('v.CALCULATION_METHOD_CODE', filters.calculation_method_code, { nullMatch: true });
-  addEq('v.CURRENCY_CODE', filters.currency_code, { nullMatch: true });
-  addEq('v.STATUS', filters.status, { nullMatch: true });
-  addEq(activeFlagExpr(), filters.active_flag, { nullMatch: true });
   addEq('v.TENANT_ID', filters.tenant_id);
   addEq('v.COMP_CATEGORY_CODE', filters.comp_category_code, { nullMatch: true });
-  addEq('v.RECURRING_FLAG', filters.recurring_flag, { nullMatch: true });
-  addEq('v.OPTIONAL_FLAG', filters.optional_flag, { nullMatch: true });
-  addEq('v.PENSIONABLE_FLAG', filters.pensionable_flag, { nullMatch: true });
-  addEq('v.STATUTORY_FLAG', filters.statutory_flag, { nullMatch: true });
-  addEq('v.INCLUDE_IN_CTC_FLAG', filters.include_in_ctc_flag, { nullMatch: true });
-  addEq('v.PRORATED_FLAG', filters.prorated_flag, { nullMatch: true });
-  addEq('v.TAXABLE_FLAG', filters.taxable_flag, { nullMatch: true });
+  addEq('v.STATUS', filters.status, { nullMatch: true });
+  addEq('v.CALCULATION_METHOD_CODE', filters.calculation_method_code, { nullMatch: true });
 
-  if (filters.effective_start_date_from != null) {
-    conditions.push(`v.EFFECTIVE_START_DATE >= ${bind(filters.effective_start_date_from)}`);
-  }
-  if (filters.effective_start_date_to != null) {
-    conditions.push(`v.EFFECTIVE_START_DATE <= ${bind(filters.effective_start_date_to)}`);
-  }
-  if (filters.effective_end_date_from != null) {
-    conditions.push(`v.EFFECTIVE_END_DATE >= ${bind(filters.effective_end_date_from)}`);
-  }
-  if (filters.effective_end_date_to != null) {
-    conditions.push(`v.EFFECTIVE_END_DATE <= ${bind(filters.effective_end_date_to)}`);
-  }
-
-  if (filters.active_only === true) {
-    conditions.push(`${activeFlagExpr()} = 'Y'`);
-  }
-
-  if (filters.search != null && String(filters.search).trim() !== '') {
-    const esc = escapeLikePattern(filters.search.trim());
-    const pat = bind(`%${esc}%`);
-    conditions.push(`(
-      UPPER(v.COMPONENT_CODE) LIKE UPPER(${pat}) ESCAPE '\\'
-      OR UPPER(v.COMPONENT_NAME) LIKE UPPER(${pat}) ESCAPE '\\'
-      OR (v.DESCRIPTION IS NOT NULL AND UPPER(v.DESCRIPTION) LIKE UPPER(${pat}) ESCAPE '\\')
-      OR (v.FORMULA_NAME IS NOT NULL AND UPPER(v.FORMULA_NAME) LIKE UPPER(${pat}) ESCAPE '\\')
-      OR UPPER(v.COMPONENT_TYPE_CODE) LIKE UPPER(${pat}) ESCAPE '\\'
-      OR UPPER(v.COMP_CATEGORY_CODE) LIKE UPPER(${pat}) ESCAPE '\\'
-    )`);
-  }
+  appendListSearchCondition(conditions, bind, filters.search);
 
   const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const orderCol = COMPONENTS_VIEW_SORT_COLUMNS[sort.sortBy] || 'v.COMPONENT_ID';
@@ -255,15 +232,11 @@ export async function listComponentsFromView(filters, pagination, sort) {
 
   try {
     return await runCompRead(async (connection) => {
-      const countResult = await connection.execute(countSql, binds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
+      const countResult = await connection.execute(countSql, binds, ROW_OBJECT);
       const total = Number(countResult.rows?.[0]?.CNT ?? 0);
 
       const dataBinds = { ...binds, off: offset, lim: pagination.pageSize };
-      const dataResult = await connection.execute(dataSql, dataBinds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
+      const dataResult = await connection.execute(dataSql, dataBinds, ROW_OBJECT);
       const rows = (dataResult.rows || []).map(mapComponentsViewRow);
       return { rows, total };
     });
@@ -281,11 +254,7 @@ export async function getComponentByIdFromView(componentId, tenantId) {
   const sql = `${VIEW_SELECT_SQL} WHERE v.COMPONENT_ID = :id AND v.TENANT_ID = :tid`;
   try {
     return await runCompRead(async (connection) => {
-      const result = await connection.execute(
-        sql,
-        { id, tid },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
+      const result = await connection.execute(sql, { id, tid }, ROW_OBJECT);
       const row = result.rows?.[0];
       return row ? mapComponentsViewRow(row) : null;
     });

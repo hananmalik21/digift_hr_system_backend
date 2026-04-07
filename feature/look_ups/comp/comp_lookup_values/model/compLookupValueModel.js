@@ -9,12 +9,68 @@ import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../uti
  */
 class CompLookupValueModel {
   static TABLE_NAME = 'COMP.COMP_LOOKUP_VALUES';
-  static GRAPH_MEASURE = Object.freeze({
-    CATEGORY: 'components_by_comp_category_code',
-    PLAN_TYPE: 'plans_by_plan_type_code'
+
+  static ROW_OBJECT = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+
+  /** Matched in errors that must propagate to the client as 400 (not wrapped as DatabaseError). */
+  static UNSUPPORTED_COMPONENT_CHART_MSG_SUBSTR = 'not supported for component usage counts';
+
+  /**
+   * Maps COMP.COMP_LOOKUP_TYPES.TYPE_CODE (uppercase) to COMP.COMPONENTS_VIEW column
+   * for “how many components use this lookup value_code” chart data.
+   * Only whitelisted keys are interpolated into SQL (safe).
+   */
+  static COMPONENT_CHART_TYPE_TO_VIEW_COL = Object.freeze({
+    CATEGORY: 'COMP_CATEGORY_CODE',
+    COMP_CATEGORY: 'COMP_CATEGORY_CODE',
+    COMPONENT_CATEGORY: 'COMP_CATEGORY_CODE',
+    COMPONENT_TYPE: 'COMPONENT_TYPE_CODE',
+    COMPONENT_TYPE_CODE: 'COMPONENT_TYPE_CODE',
+    CALCULATION_METHOD: 'CALCULATION_METHOD_CODE',
+    CALCULATION_METHOD_CODE: 'CALCULATION_METHOD_CODE',
+    COMP_CALC_METHOD: 'CALCULATION_METHOD_CODE',
+    STATUS: 'STATUS',
+    COMPONENT_STATUS: 'STATUS',
+    CURRENCY: 'CURRENCY_CODE',
+    CURRENCY_CODE: 'CURRENCY_CODE',
+    BASE_AMOUNT_SOURCE: 'BASE_AMOUNT_SOURCE'
   });
 
-  static parseGraphFilters(filters = {}) {
+  /** @returns {string[]} TYPE_CODE values accepted for component usage charts */
+  static listSupportedComponentChartLookupTypeCodes() {
+    return Object.keys(CompLookupValueModel.COMPONENT_CHART_TYPE_TO_VIEW_COL).sort();
+  }
+
+  /**
+   * @param {string} typeCodeUpper - trimmed lookup type code, uppercase
+   * @returns {string|null} COMPONENTS_VIEW column name
+   */
+  static getComponentViewColumnForLookupTypeCode(typeCodeUpper) {
+    return CompLookupValueModel.COMPONENT_CHART_TYPE_TO_VIEW_COL[typeCodeUpper] ?? null;
+  }
+
+  /** User-facing message when lookup_type_code has no component chart mapping */
+  static unsupportedComponentChartTypeMessage(typeCodeTrim) {
+    const supported = CompLookupValueModel.listSupportedComponentChartLookupTypeCodes().join(', ');
+    return `lookup_type_code "${typeCodeTrim}" is not supported for component usage counts. Supported type codes: ${supported}`;
+  }
+
+  /** Appends optional ACTIVE_FLAG filter and standard ORDER BY for graph-count queries. */
+  static finalizeGraphCountsSql(baseSql, binds, activeFlag) {
+    let sql = baseSql;
+    if (activeFlag !== undefined) {
+      sql += ` AND a.ACTIVE_FLAG = :active_flag`;
+      binds.active_flag = activeFlag;
+    }
+    return `${sql} ORDER BY a.DISPLAY_SEQUENCE, a.VALUE_CODE`;
+  }
+
+  /**
+   * @param {object} filters - expects tenantId or tenant_id
+   * @throws {Error} tenant_id is required / invalid
+   * @returns {number}
+   */
+  static parseRequiredTenantIdNum(filters) {
     const tenantId = filters.tenantId ?? filters.tenant_id;
     if (tenantId === undefined || tenantId === null || tenantId === '') {
       throw new Error('tenant_id is required');
@@ -23,6 +79,17 @@ class CompLookupValueModel {
     if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
       throw new Error('tenant_id must be a valid positive number');
     }
+    return tenantIdNum;
+  }
+
+  /** Normalizes API boolean / Y / 1 to Oracle ACTIVE_FLAG. */
+  static coerceActiveFlagYn(value) {
+    if (value === undefined) return undefined;
+    return value === true || value === 'Y' || value === 1 || value === 'y' ? 'Y' : 'N';
+  }
+
+  static parseGraphFilters(filters = {}) {
+    const tenantIdNum = this.parseRequiredTenantIdNum(filters);
     const typeCode = filters.lookupTypeCode ?? filters.lookup_type_code;
     if (typeCode === undefined || typeCode === null || String(typeCode).trim() === '') {
       throw new Error('lookup_type_code is required');
@@ -31,13 +98,25 @@ class CompLookupValueModel {
 
     let activeFlag = undefined;
     if (filters.activeFlag !== undefined) {
-      activeFlag =
-        filters.activeFlag === true || filters.activeFlag === 'Y' || filters.activeFlag === 1
-          ? 'Y'
-          : 'N';
+      activeFlag = this.coerceActiveFlagYn(filters.activeFlag);
     }
 
     return { tenantIdNum, typeCodeTrim, typeCodeUpper: typeCodeTrim.toUpperCase(), activeFlag };
+  }
+
+  /** Shared catch path for graph-count SQL (preserves unsupported-type client errors). */
+  static rethrowGraphCountsError(error) {
+    if (
+      error instanceof Error &&
+      error.message.includes(CompLookupValueModel.UNSUPPORTED_COMPONENT_CHART_MSG_SUBSTR)
+    ) {
+      throw error;
+    }
+    if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+      throw new DatabaseError(DatabaseError.getUserFriendlyMessage(error), error);
+    }
+    if (error instanceof DatabaseError) throw error;
+    throw new DatabaseError('Failed to fetch lookup value graph counts', error);
   }
 
   static convertKeysToSnakeCase(obj) {
@@ -69,7 +148,7 @@ class CompLookupValueModel {
 
   static async executeQuery(query, bindParams = [], options = {}) {
     const result = await db.executeQuery(query, bindParams, {
-      outFormat: oracledb.OUT_FORMAT_OBJECT,
+      ...this.ROW_OBJECT,
       ...options
     });
     if (result.rows) {
@@ -107,22 +186,13 @@ class CompLookupValueModel {
 
   static async getNextDisplaySequence(connection, lookupTypeId) {
     const query = `SELECT NVL(MAX(DISPLAY_SEQUENCE), 0) + 1 AS NEXT_SEQ FROM ${this.TABLE_NAME} WHERE LOOKUP_TYPE_ID = :1`;
-    const result = await connection.execute(query, [lookupTypeId], {
-      outFormat: oracledb.OUT_FORMAT_OBJECT
-    });
+    const result = await connection.execute(query, [lookupTypeId], this.ROW_OBJECT);
     return result.rows[0]?.NEXT_SEQ ?? 1;
   }
 
   static async findAll(filters = {}) {
     try {
-      const tenantId = filters.tenantId ?? filters.tenant_id;
-      if (tenantId === undefined || tenantId === null || tenantId === '') {
-        throw new Error('tenant_id is required');
-      }
-      const tenantIdNum = Number(tenantId);
-      if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-        throw new Error('tenant_id must be a valid positive number');
-      }
+      const tenantIdNum = this.parseRequiredTenantIdNum(filters);
 
       const useTypeCodeJoin = filters.lookupTypeCode != null && String(filters.lookupTypeCode).trim() !== '';
       const fromClause = useTypeCodeJoin
@@ -164,7 +234,7 @@ class CompLookupValueModel {
         paramIndex++;
       }
       if (filters.activeFlag !== undefined) {
-        const v = filters.activeFlag === true || filters.activeFlag === 'Y' || filters.activeFlag === 1 ? 'Y' : 'N';
+        const v = this.coerceActiveFlagYn(filters.activeFlag);
         conditions.push(`a.ACTIVE_FLAG = :${paramIndex}`);
         bindParams.push(v);
         paramIndex++;
@@ -215,31 +285,35 @@ class CompLookupValueModel {
   }
 
   /**
-   * Chart data: each lookup value for a type (e.g. CATEGORY) with count of rows in
-   * COMP.COMPONENTS_VIEW where TENANT_ID matches and COMP_CATEGORY_CODE matches VALUE_CODE.
+   * Chart data: each lookup value for a COMP lookup type with count of components in
+   * COMP.COMPONENTS_VIEW where TENANT_ID matches and the view column for that type matches VALUE_CODE.
    * @param {{ tenantId: number, lookupTypeCode: string, activeFlag?: boolean }} filters
-   * @returns {Promise<Array<{ lookup_value_id, value_code, value_name, display_sequence, component_category_count }>>}
+   * @returns {Promise<Array<{ lookup_value_id, value_code, value_name, display_sequence, usage_count }>>}
    */
   static async findGraphCountsByLookupTypeCode(filters = {}) {
     try {
-      const { tenantIdNum, typeCodeTrim, activeFlag } = this.parseGraphFilters(filters);
+      const { tenantIdNum, typeCodeTrim, typeCodeUpper, activeFlag } = this.parseGraphFilters(filters);
+      const col = this.getComponentViewColumnForLookupTypeCode(typeCodeUpper);
+      if (!col) {
+        throw new Error(this.unsupportedComponentChartTypeMessage(typeCodeTrim));
+      }
 
-      let query = `
+      const baseSql = `
 SELECT
   a.LOOKUP_VALUE_ID,
   a.VALUE_CODE,
   a.VALUE_NAME,
   a.DISPLAY_SEQUENCE,
-  NVL(cat_cnt.CNT, 0) AS COMPONENT_CATEGORY_COUNT
+  NVL(usage_cnt.CNT, 0) AS USAGE_COUNT
 FROM ${this.TABLE_NAME} a
 INNER JOIN COMP.COMP_LOOKUP_TYPES t ON a.LOOKUP_TYPE_ID = t.LOOKUP_TYPE_ID
 LEFT JOIN (
-  SELECT UPPER(TRIM(c.COMP_CATEGORY_CODE)) AS CAT_CODE, COUNT(*) AS CNT
+  SELECT UPPER(TRIM(c.${col})) AS code_key, COUNT(*) AS CNT
   FROM COMP.COMPONENTS_VIEW c
   WHERE c.TENANT_ID = :tenant_id
-    AND c.COMP_CATEGORY_CODE IS NOT NULL
-  GROUP BY UPPER(TRIM(c.COMP_CATEGORY_CODE))
-) cat_cnt ON cat_cnt.CAT_CODE = UPPER(TRIM(a.VALUE_CODE))
+    AND c.${col} IS NOT NULL
+  GROUP BY UPPER(TRIM(c.${col}))
+) usage_cnt ON usage_cnt.code_key = UPPER(TRIM(a.VALUE_CODE))
 WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
   AND UPPER(t.TYPE_CODE) = UPPER(:lookup_type_code)`;
 
@@ -247,25 +321,12 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
         tenant_id: tenantIdNum,
         lookup_type_code: typeCodeTrim
       };
-
-      if (activeFlag !== undefined) {
-        query += ` AND a.ACTIVE_FLAG = :active_flag`;
-        binds.active_flag = activeFlag;
-      }
-
-      query += ` ORDER BY a.DISPLAY_SEQUENCE, a.VALUE_CODE`;
+      const query = this.finalizeGraphCountsSql(baseSql, binds, activeFlag);
 
       const result = await this.executeQuery(query, binds);
       return result.rows || [];
     } catch (error) {
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to fetch lookup value graph counts', error);
+      this.rethrowGraphCountsError(error);
     }
   }
 
@@ -279,7 +340,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
     try {
       const { tenantIdNum, typeCodeTrim, activeFlag } = this.parseGraphFilters(filters);
 
-      let query = `
+      const baseSql = `
 SELECT
   a.LOOKUP_VALUE_ID,
   a.VALUE_CODE,
@@ -289,12 +350,12 @@ SELECT
 FROM ${this.TABLE_NAME} a
 INNER JOIN COMP.COMP_LOOKUP_TYPES t ON a.LOOKUP_TYPE_ID = t.LOOKUP_TYPE_ID
 LEFT JOIN (
-  SELECT UPPER(TRIM(p.PLAN_TYPE_CODE)) AS PLAN_TYPE_CODE, COUNT(*) AS CNT
+  SELECT UPPER(TRIM(p.PLAN_TYPE_CODE)) AS code_key, COUNT(*) AS CNT
   FROM COMP.COMP_PLANS_FULL_V p
   WHERE p.ENTERPRISE_ID = :tenant_id
     AND p.PLAN_TYPE_CODE IS NOT NULL
   GROUP BY UPPER(TRIM(p.PLAN_TYPE_CODE))
-) pt_cnt ON pt_cnt.PLAN_TYPE_CODE = UPPER(TRIM(a.VALUE_CODE))
+) pt_cnt ON pt_cnt.code_key = UPPER(TRIM(a.VALUE_CODE))
 WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
   AND UPPER(t.TYPE_CODE) = UPPER(:lookup_type_code)`;
 
@@ -302,25 +363,12 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
         tenant_id: tenantIdNum,
         lookup_type_code: typeCodeTrim
       };
-
-      if (activeFlag !== undefined) {
-        query += ` AND a.ACTIVE_FLAG = :active_flag`;
-        binds.active_flag = activeFlag;
-      }
-
-      query += ` ORDER BY a.DISPLAY_SEQUENCE, a.VALUE_CODE`;
+      const query = this.finalizeGraphCountsSql(baseSql, binds, activeFlag);
 
       const result = await this.executeQuery(query, binds);
       return result.rows || [];
     } catch (error) {
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to fetch lookup value graph counts', error);
+      this.rethrowGraphCountsError(error);
     }
   }
 
@@ -369,15 +417,11 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
         let lookupValueId;
         try {
           const seqQuery = `SELECT COMP.COMP_LOOKUP_VALUES_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-          const seqResult = await connection.execute(seqQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
+          const seqResult = await connection.execute(seqQuery, [], this.ROW_OBJECT);
           lookupValueId = seqResult.rows[0].NEXT_ID;
         } catch (_) {
           const maxQuery = `SELECT NVL(MAX(LOOKUP_VALUE_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
-          const maxResult = await connection.execute(maxQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
+          const maxResult = await connection.execute(maxQuery, [], this.ROW_OBJECT);
           lookupValueId = maxResult.rows[0].NEXT_ID;
         }
 
@@ -417,7 +461,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
           data.VALUE_NAME ?? null,
           displaySequence,
           data.ACTIVE_FLAG !== undefined && data.ACTIVE_FLAG !== null
-            ? (data.ACTIVE_FLAG === true || data.ACTIVE_FLAG === 'Y' || data.ACTIVE_FLAG === 1 ? 'Y' : 'N')
+            ? this.coerceActiveFlagYn(data.ACTIVE_FLAG)
             : 'Y',
           userId || 'SYSTEM',
           now,
@@ -425,9 +469,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
           now
         ];
 
-        await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        await connection.execute(query, bindParams, this.ROW_OBJECT);
 
         const selectQuery = `SELECT
           RAWTOHEX(a.LOOKUP_VALUE_GUID) AS LOOKUP_VALUE_GUID,
@@ -445,9 +487,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
         FROM ${this.TABLE_NAME} a
         WHERE a.LOOKUP_VALUE_ID = :1`;
 
-        const selectResult = await connection.execute(selectQuery, [lookupValueId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const selectResult = await connection.execute(selectQuery, [lookupValueId], this.ROW_OBJECT);
 
         if (selectResult.rows && selectResult.rows.length > 0) {
           return this.convertKeysToSnakeCase(selectResult.rows[0]);
@@ -505,7 +545,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
           paramIndex++;
         }
         if (data.ACTIVE_FLAG !== undefined) {
-          const v = data.ACTIVE_FLAG === true || data.ACTIVE_FLAG === 'Y' || data.ACTIVE_FLAG === 1 ? 'Y' : 'N';
+          const v = this.coerceActiveFlagYn(data.ACTIVE_FLAG);
           updateFields.push(`ACTIVE_FLAG = :${paramIndex}`);
           bindParams.push(v);
           paramIndex++;
@@ -527,9 +567,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
             a.LAST_UPDATE_DATE
           FROM ${this.TABLE_NAME} a
           WHERE a.LOOKUP_VALUE_GUID = :1`;
-          const selectResult = await connection.execute(selectQuery, [guidBuffer], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
+          const selectResult = await connection.execute(selectQuery, [guidBuffer], this.ROW_OBJECT);
           if (selectResult.rows && selectResult.rows.length > 0) {
             return this.convertKeysToSnakeCase(selectResult.rows[0]);
           }
@@ -548,9 +586,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
           SET ${updateFields.join(', ')}
           WHERE LOOKUP_VALUE_GUID = :${paramIndex}`;
 
-        const updateResult = await connection.execute(updateQuery, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const updateResult = await connection.execute(updateQuery, bindParams, this.ROW_OBJECT);
 
         if (updateResult.rowsAffected === 0) {
           throw new DatabaseError('Lookup value not found');
@@ -571,9 +607,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
           a.LAST_UPDATE_DATE
         FROM ${this.TABLE_NAME} a
         WHERE a.LOOKUP_VALUE_GUID = :1`;
-        const selectResult = await connection.execute(selectQuery, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const selectResult = await connection.execute(selectQuery, [guidBuffer], this.ROW_OBJECT);
         if (selectResult.rows && selectResult.rows.length > 0) {
           return this.convertKeysToSnakeCase(selectResult.rows[0]);
         }
@@ -607,9 +641,7 @@ WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
 
       return await this.executeWithTransaction(async (connection) => {
         const query = `DELETE FROM ${this.TABLE_NAME} WHERE LOOKUP_VALUE_GUID = :1`;
-        const result = await connection.execute(query, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const result = await connection.execute(query, [guidBuffer], this.ROW_OBJECT);
 
         if (result.rowsAffected === 0) {
           throw new DatabaseError('Lookup value not found');

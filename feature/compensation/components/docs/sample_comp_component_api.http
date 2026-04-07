@@ -3,11 +3,14 @@
 @tenantId = 1
 @componentGuid = 00000000000000000000000000000000
 
-### List components (COMP.COMPONENTS_VIEW; tenant_id required). Response rows include optional `description`.
+### List components (tenant_id required). Optional filters: search, category|comp_category_code, status, calculation|calculation_method_code; page, page_size, sort.
 GET {{baseUrl}}/api/comp/components?tenant_id={{tenantId}}&page=1&page_size=20
 
-### List — keyword search matches component_code, component_name, description, formula_name, type, category
+### List — search matches component_code, component_name, or comp_category_code (partial, case-insensitive)
 GET {{baseUrl}}/api/comp/components?tenant_id={{tenantId}}&search=housing
+
+### List — filters: category (alias comp_category_code), status, calculation (alias calculation_method_code)
+GET {{baseUrl}}/api/comp/components?tenant_id={{tenantId}}&category=ALLOWANCE&status=ACTIVE&calculation=FIXED
 
 ### Get by numeric id (tenant_id query required). Response includes `description`.
 GET {{baseUrl}}/api/comp/components/123?tenant_id={{tenantId}}
