@@ -9,6 +9,36 @@ import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../uti
  */
 class CompLookupValueModel {
   static TABLE_NAME = 'COMP.COMP_LOOKUP_VALUES';
+  static GRAPH_MEASURE = Object.freeze({
+    CATEGORY: 'components_by_comp_category_code',
+    PLAN_TYPE: 'plans_by_plan_type_code'
+  });
+
+  static parseGraphFilters(filters = {}) {
+    const tenantId = filters.tenantId ?? filters.tenant_id;
+    if (tenantId === undefined || tenantId === null || tenantId === '') {
+      throw new Error('tenant_id is required');
+    }
+    const tenantIdNum = Number(tenantId);
+    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
+      throw new Error('tenant_id must be a valid positive number');
+    }
+    const typeCode = filters.lookupTypeCode ?? filters.lookup_type_code;
+    if (typeCode === undefined || typeCode === null || String(typeCode).trim() === '') {
+      throw new Error('lookup_type_code is required');
+    }
+    const typeCodeTrim = String(typeCode).trim();
+
+    let activeFlag = undefined;
+    if (filters.activeFlag !== undefined) {
+      activeFlag =
+        filters.activeFlag === true || filters.activeFlag === 'Y' || filters.activeFlag === 1
+          ? 'Y'
+          : 'N';
+    }
+
+    return { tenantIdNum, typeCodeTrim, typeCodeUpper: typeCodeTrim.toUpperCase(), activeFlag };
+  }
 
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
@@ -181,6 +211,116 @@ class CompLookupValueModel {
       }
       if (error instanceof DatabaseError) throw error;
       throw new DatabaseError('Failed to fetch lookup values', error);
+    }
+  }
+
+  /**
+   * Chart data: each lookup value for a type (e.g. CATEGORY) with count of rows in
+   * COMP.COMPONENTS_VIEW where TENANT_ID matches and COMP_CATEGORY_CODE matches VALUE_CODE.
+   * @param {{ tenantId: number, lookupTypeCode: string, activeFlag?: boolean }} filters
+   * @returns {Promise<Array<{ lookup_value_id, value_code, value_name, display_sequence, component_category_count }>>}
+   */
+  static async findGraphCountsByLookupTypeCode(filters = {}) {
+    try {
+      const { tenantIdNum, typeCodeTrim, activeFlag } = this.parseGraphFilters(filters);
+
+      let query = `
+SELECT
+  a.LOOKUP_VALUE_ID,
+  a.VALUE_CODE,
+  a.VALUE_NAME,
+  a.DISPLAY_SEQUENCE,
+  NVL(cat_cnt.CNT, 0) AS COMPONENT_CATEGORY_COUNT
+FROM ${this.TABLE_NAME} a
+INNER JOIN COMP.COMP_LOOKUP_TYPES t ON a.LOOKUP_TYPE_ID = t.LOOKUP_TYPE_ID
+LEFT JOIN (
+  SELECT UPPER(TRIM(c.COMP_CATEGORY_CODE)) AS CAT_CODE, COUNT(*) AS CNT
+  FROM COMP.COMPONENTS_VIEW c
+  WHERE c.TENANT_ID = :tenant_id
+    AND c.COMP_CATEGORY_CODE IS NOT NULL
+  GROUP BY UPPER(TRIM(c.COMP_CATEGORY_CODE))
+) cat_cnt ON cat_cnt.CAT_CODE = UPPER(TRIM(a.VALUE_CODE))
+WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
+  AND UPPER(t.TYPE_CODE) = UPPER(:lookup_type_code)`;
+
+      const binds = {
+        tenant_id: tenantIdNum,
+        lookup_type_code: typeCodeTrim
+      };
+
+      if (activeFlag !== undefined) {
+        query += ` AND a.ACTIVE_FLAG = :active_flag`;
+        binds.active_flag = activeFlag;
+      }
+
+      query += ` ORDER BY a.DISPLAY_SEQUENCE, a.VALUE_CODE`;
+
+      const result = await this.executeQuery(query, binds);
+      return result.rows || [];
+    } catch (error) {
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
+      }
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to fetch lookup value graph counts', error);
+    }
+  }
+
+  /**
+   * Chart data: each lookup value for a type (e.g. PLAN_TYPE) with count of rows in
+   * COMP.COMP_PLANS_FULL_V where enterprise/tenant matches and PLAN_TYPE_CODE matches VALUE_CODE.
+   * @param {{ tenantId: number, lookupTypeCode: string, activeFlag?: boolean }} filters
+   * @returns {Promise<Array<{ lookup_value_id, value_code, value_name, display_sequence, plan_type_count }>>}
+   */
+  static async findGraphCountsPlansByPlanType(filters = {}) {
+    try {
+      const { tenantIdNum, typeCodeTrim, activeFlag } = this.parseGraphFilters(filters);
+
+      let query = `
+SELECT
+  a.LOOKUP_VALUE_ID,
+  a.VALUE_CODE,
+  a.VALUE_NAME,
+  a.DISPLAY_SEQUENCE,
+  NVL(pt_cnt.CNT, 0) AS PLAN_TYPE_COUNT
+FROM ${this.TABLE_NAME} a
+INNER JOIN COMP.COMP_LOOKUP_TYPES t ON a.LOOKUP_TYPE_ID = t.LOOKUP_TYPE_ID
+LEFT JOIN (
+  SELECT UPPER(TRIM(p.PLAN_TYPE_CODE)) AS PLAN_TYPE_CODE, COUNT(*) AS CNT
+  FROM COMP.COMP_PLANS_FULL_V p
+  WHERE p.ENTERPRISE_ID = :tenant_id
+    AND p.PLAN_TYPE_CODE IS NOT NULL
+  GROUP BY UPPER(TRIM(p.PLAN_TYPE_CODE))
+) pt_cnt ON pt_cnt.PLAN_TYPE_CODE = UPPER(TRIM(a.VALUE_CODE))
+WHERE (a.TENANT_ID = :tenant_id OR a.TENANT_ID IS NULL)
+  AND UPPER(t.TYPE_CODE) = UPPER(:lookup_type_code)`;
+
+      const binds = {
+        tenant_id: tenantIdNum,
+        lookup_type_code: typeCodeTrim
+      };
+
+      if (activeFlag !== undefined) {
+        query += ` AND a.ACTIVE_FLAG = :active_flag`;
+        binds.active_flag = activeFlag;
+      }
+
+      query += ` ORDER BY a.DISPLAY_SEQUENCE, a.VALUE_CODE`;
+
+      const result = await this.executeQuery(query, binds);
+      return result.rows || [];
+    } catch (error) {
+      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+        throw new DatabaseError(
+          DatabaseError.getUserFriendlyMessage(error),
+          error
+        );
+      }
+      if (error instanceof DatabaseError) throw error;
+      throw new DatabaseError('Failed to fetch lookup value graph counts', error);
     }
   }
 

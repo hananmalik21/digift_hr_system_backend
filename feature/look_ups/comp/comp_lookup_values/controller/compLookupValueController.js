@@ -164,6 +164,80 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/graph-counts', async (req, res) => {
+  try {
+    const parseRequiredTenantId = (q) => {
+      const raw = q?.tenant_id;
+      if (raw === undefined || raw === null || String(raw).trim() === '') {
+        throw new Error('tenant_id is required');
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1) {
+        throw new Error('tenant_id must be a valid positive number');
+      }
+      return n;
+    };
+
+    const parseRequiredLookupTypeCode = (q) => {
+      const raw = q?.lookup_type_code;
+      if (raw === undefined || raw === null || String(raw).trim() === '') {
+        throw new Error('lookup_type_code is required');
+      }
+      return String(raw).trim();
+    };
+
+    const parseOptionalActiveFlag = (q) => {
+      if (q?.active_flag === undefined) return undefined;
+      const v = q.active_flag;
+      return v === 'true' || v === '1' || v === 'Y' || v === 'y';
+    };
+
+    const tenantIdNum = parseRequiredTenantId(req.query);
+    const lookupTypeCodeTrim = parseRequiredLookupTypeCode(req.query);
+    const filters = {
+      tenantId: tenantIdNum,
+      lookupTypeCode: lookupTypeCodeTrim
+    };
+    const af = parseOptionalActiveFlag(req.query);
+    if (af !== undefined) filters.activeFlag = af;
+
+    const type = lookupTypeCodeTrim.toUpperCase();
+    const graphQuery =
+      type === 'PLAN_TYPE'
+        ? { measure: 'plans_by_plan_type_code', fn: 'findGraphCountsPlansByPlanType', countKey: 'plan_type_count' }
+        : { measure: 'components_by_comp_category_code', fn: 'findGraphCountsByLookupTypeCode', countKey: 'component_category_count' };
+
+    const rows = await CompLookupValueModel[graphQuery.fn](filters);
+    const data = rows.map((r) => ({
+      lookup_value_id: r.lookup_value_id != null ? Number(r.lookup_value_id) : null,
+      value_code: r.value_code != null ? String(r.value_code) : null,
+      value_name: r.value_name != null ? String(r.value_name) : null,
+      display_sequence: r.display_sequence != null ? Number(r.display_sequence) : null,
+      count: Number(r[graphQuery.countKey] ?? 0) || 0
+    }));
+
+    res.json({
+      success: true,
+      message: 'Lookup value graph counts retrieved successfully',
+      meta: {
+        tenant_id: tenantIdNum,
+        lookup_type_code: lookupTypeCodeTrim,
+        measure: graphQuery.measure,
+        points: data.length
+      },
+      data
+    });
+  } catch (error) {
+    if (error.message?.includes('tenant_id')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error.message?.includes('lookup_type_code')) {
+      return sendBadRequest(res, req, error.message);
+    }
+    sendServerError(res, req, 'Failed to fetch lookup value graph counts', error);
+  }
+});
+
 router.get('/:guid', async (req, res) => {
   try {
     let guidHex32;
