@@ -64,6 +64,11 @@ function mapGraphCountRow(row, countKey) {
   };
 }
 
+/** Sum of per-lookup-value counts (components or plans represented in the series). */
+function sumGraphDataCounts(data) {
+  return data.reduce((sum, d) => sum + (Number(d.count) || 0), 0);
+}
+
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
@@ -248,6 +253,7 @@ router.get('/graph-counts', async (req, res) => {
 
     const rows = await CompLookupValueModel[graphQuery.fn](filters);
     const data = rows.map((r) => mapGraphCountRow(r, graphQuery.countKey));
+    const total_count = sumGraphDataCounts(data);
 
     res.json({
       success: true,
@@ -259,7 +265,8 @@ router.get('/graph-counts', async (req, res) => {
         ...(graphQuery.components_view_column != null
           ? { components_view_column: graphQuery.components_view_column }
           : {}),
-        points: data.length
+        points: data.length,
+        total_count
       },
       data
     });

@@ -15,6 +15,25 @@ import {
 const VIEW_NAME = 'COMP.COMP_SALARY_STRUCTURE_JSON_V';
 const LOG_TAG = 'compSalaryStructureJsonViewModel';
 
+const ROW_OBJECT = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+
+/** Allowed `status` query values for JSON view list filters. */
+export const STRUCTURE_LIST_STATUS_VALUES = Object.freeze(['ACTIVE', 'INACTIVE', 'ALL']);
+const STRUCTURE_LIST_STATUS_SET = new Set(STRUCTURE_LIST_STATUS_VALUES);
+
+/**
+ * @param {unknown} raw - e.g. query.status
+ * @returns {'ACTIVE'|'INACTIVE'|'ALL'|null}
+ */
+export function parseOptionalStructureListStatus(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  const u = String(raw).trim().toUpperCase();
+  if (!STRUCTURE_LIST_STATUS_SET.has(u)) {
+    throw new Error(`status must be ${STRUCTURE_LIST_STATUS_VALUES.join(', ')}`);
+  }
+  return u;
+}
+
 /** Tuned for wide JSON rows (STRUCTURE_OBJ + list); thin default in listSalaryStructuresFromJsonViewPaged. */
 const FETCH_ARRAY_LIST_WITH_STRUCTURE_OBJ_CAP = 25;
 const FETCH_ARRAY_DETAIL_CAP = 25;
@@ -199,12 +218,6 @@ function buildJsonViewWhereAndBinds(filters) {
   return { whereSql: `WHERE ${parts.join(' AND ')}`, binds };
 }
 
-function orderColumnForList(sort) {
-  const col =
-    SALARY_STRUCTURE_JSON_V_LIST_SORT_COLUMNS[sort.sortBy] || 'STRUCTURE_ID';
-  return col;
-}
-
 /**
  * @param {{
  *   enterprise_id: number,
@@ -240,14 +253,7 @@ export function buildJsonViewListFilterValues(input) {
     search_pattern = `%${esc}%`;
   }
 
-  let p_status = null;
-  if (input.status != null && String(input.status).trim() !== '') {
-    const u = String(input.status).trim().toUpperCase();
-    if (u !== 'ACTIVE' && u !== 'INACTIVE' && u !== 'ALL') {
-      throw new Error('status must be ACTIVE, INACTIVE, or ALL');
-    }
-    p_status = u;
-  }
+  const p_status = parseOptionalStructureListStatus(input.status);
 
   return {
     enterprise_id,
@@ -269,7 +275,7 @@ async function listSalaryStructuresFromJsonViewPaged(filters, pagination, sort, 
   const { selectSql, logLabel, fetchArraySize } = opts;
   const rowOffset = (pagination.page - 1) * pagination.pageSize;
   const fetchSize = pagination.pageSize;
-  const orderCol = orderColumnForList(sort);
+  const orderCol = SALARY_STRUCTURE_JSON_V_LIST_SORT_COLUMNS[sort.sortBy] || 'STRUCTURE_ID';
   const orderDir = sort.sortOrder === 'ASC' ? 'ASC' : 'DESC';
 
   const countSql = `SELECT COUNT(*) AS CNT FROM ${VIEW_NAME} ${whereSql}`;
@@ -292,13 +298,11 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
 
   try {
     return await withCompSchemaConnection(async (connection) => {
-      const countResult = await connection.execute(countSql, whereBinds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
+      const countResult = await connection.execute(countSql, whereBinds, ROW_OBJECT);
       const total = readScalarCount(countResult);
 
       const dataResult = await connection.execute(dataSql, dataBinds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        ...ROW_OBJECT,
         fetchArraySize: arraySize
       });
       return { rows: dataResult.rows || [], total };
@@ -360,9 +364,7 @@ export async function getSalaryStructureDetailRowFromJsonView(key) {
 
   try {
     return await withCompSchemaConnection(async (connection) => {
-      const result = await connection.execute(sql, binds, {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
+      const result = await connection.execute(sql, binds, ROW_OBJECT);
       return result.rows?.[0] ?? null;
     });
   } catch (err) {

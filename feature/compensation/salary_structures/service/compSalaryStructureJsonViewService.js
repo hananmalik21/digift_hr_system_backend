@@ -77,21 +77,12 @@ export function parseSalaryStructureListRequest(query) {
   const search =
     query.search != null && String(query.search).trim() !== '' ? String(query.search).trim() : null;
 
-  let status = null;
-  if (query.status != null && String(query.status).trim() !== '') {
-    const u = String(query.status).trim().toUpperCase();
-    if (u !== 'ACTIVE' && u !== 'INACTIVE' && u !== 'ALL') {
-      throw new Error('status must be ACTIVE, INACTIVE, or ALL');
-    }
-    status = u;
-  }
-
   const filterInput = buildJsonViewListFilterValues({
     enterprise_id,
     structure_id,
     structure_guid,
     search,
-    status
+    status: query.status
   });
 
   return { filterInput, pagination, sort };
