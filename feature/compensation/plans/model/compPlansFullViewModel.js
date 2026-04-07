@@ -121,7 +121,7 @@ function buildWhereSqlAndBinds(filters) {
   }
 
   if (filters.plan_name_pattern != null) {
-    parts.push(`UPPER(v.PLAN_NAME) LIKE UPPER(:plan_name_pattern) ESCAPE '\\\\'`);
+    parts.push(`UPPER(v.PLAN_NAME) LIKE UPPER(:plan_name_pattern) ESCAPE '\\'`);
     binds.plan_name_pattern = {
       val: filters.plan_name_pattern,
       type: oracledb.STRING,
@@ -185,10 +185,10 @@ function buildWhereSqlAndBinds(filters) {
       Math.max(4000, String(filters.search_pattern).length + 64)
     );
     parts.push(`(
-      UPPER(v.PLAN_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\\\'
-      OR UPPER(v.PLAN_NAME) LIKE UPPER(:search_pattern) ESCAPE '\\\\'
-      OR UPPER(v.CURRENCY_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\\\'
-      OR UPPER(v.PLAN_TYPE_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\\\'
+      UPPER(v.PLAN_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\'
+      OR UPPER(v.PLAN_NAME) LIKE UPPER(:search_pattern) ESCAPE '\\'
+      OR UPPER(v.CURRENCY_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\'
+      OR UPPER(v.PLAN_TYPE_CODE) LIKE UPPER(:search_pattern) ESCAPE '\\'
     )`);
     binds.search_pattern = {
       val: filters.search_pattern,
