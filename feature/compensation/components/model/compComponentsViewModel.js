@@ -41,6 +41,12 @@ function rowKeysUpper(row) {
   return out;
 }
 
+function toNumberOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
  * Maps DB row to API shape. Dates → ISO-8601; RAW(16) GUIDs via Buffer from driver.
  */
@@ -71,31 +77,32 @@ export function mapComponentsViewRow(row) {
 
   const descRaw = g('DESCRIPTION') ?? g('COMPONENT_DESCRIPTION');
   return normalizeComponentForGetResponse({
-    component_id: g('COMPONENT_ID') != null ? Number(g('COMPONENT_ID')) : null,
+    component_id: toNumberOrNull(g('COMPONENT_ID')),
     component_guid: componentGuid,
     component_code: g('COMPONENT_CODE') != null ? String(g('COMPONENT_CODE')) : null,
     component_name: g('COMPONENT_NAME') != null ? String(g('COMPONENT_NAME')) : null,
     description:
       descRaw != null && String(descRaw).trim() !== '' ? String(descRaw).trim() : null,
+    plan_usage_count: toNumberOrNull(g('PLAN_USAGE_COUNT')),
     component_type_code: g('COMPONENT_TYPE_CODE') != null ? String(g('COMPONENT_TYPE_CODE')) : null,
     calculation_method_code:
       g('CALCULATION_METHOD_CODE') != null ? String(g('CALCULATION_METHOD_CODE')) : null,
     base_amount_source: g('BASE_AMOUNT_SOURCE') != null ? String(g('BASE_AMOUNT_SOURCE')) : null,
     formula_name: g('FORMULA_NAME') != null ? String(g('FORMULA_NAME')) : null,
-    min_value: g('MIN_VALUE') != null ? Number(g('MIN_VALUE')) : null,
-    max_value: g('MAX_VALUE') != null ? Number(g('MAX_VALUE')) : null,
+    min_value: toNumberOrNull(g('MIN_VALUE')),
+    max_value: toNumberOrNull(g('MAX_VALUE')),
     currency_code: g('CURRENCY_CODE') != null ? String(g('CURRENCY_CODE')) : null,
     status: g('STATUS') != null ? String(g('STATUS')) : null,
-    tenant_id: g('TENANT_ID') != null ? Number(g('TENANT_ID')) : null,
+    tenant_id: toNumberOrNull(g('TENANT_ID')),
     comp_category_code: g('COMP_CATEGORY_CODE') != null ? String(g('COMP_CATEGORY_CODE')) : null,
     effective_start_date: toIso(g('EFFECTIVE_START_DATE')),
     effective_end_date: toIso(g('EFFECTIVE_END_DATE')),
     component_active_flag: componentActive != null ? String(componentActive) : null,
     adv_setting_id:
       g('ADV_SETTING_ID') != null
-        ? Number(g('ADV_SETTING_ID'))
+        ? toNumberOrNull(g('ADV_SETTING_ID'))
         : g('SETTING_ID') != null
-          ? Number(g('SETTING_ID'))
+          ? toNumberOrNull(g('SETTING_ID'))
           : null,
     adv_setting_guid: advSettingGuid,
     recurring_flag: g('RECURRING_FLAG') != null ? String(g('RECURRING_FLAG')) : null,
