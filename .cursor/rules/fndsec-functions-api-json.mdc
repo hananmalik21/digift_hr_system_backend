@@ -1,0 +1,28 @@
+---
+description: FNDSEC Functions APIs must use package JSON output directly
+globs: feature/security/functions/**/*
+alwaysApply: false
+---
+
+# FNDSEC Functions API (FNDSEC_FUNCTIONS_PKG)
+
+## GUIDs
+- Use **only** `function_guid` and `module_guid` in the API layer (no numeric IDs in request/response).
+- Accept GUIDs as **32-char hex strings** (optionally with dashes) and validate them.
+- When calling Oracle packages, bind GUIDs using the type required by the package:
+  - Prefer `RAW(16)` (`Buffer`) when package expects RAW
+  - Use `VARCHAR2(32)` hex string when package expects string GUID
+  - If uncertain, align using `ALL_ARGUMENTS` signature queries.
+
+## Package JSON OUT contract
+- For `CREATE_FUNCTION`, `UPDATE_FUNCTION`, `HARD_DELETE_FUNCTION`, the database returns the full object as **CLOB JSON** (`P_FUNCTION_JSON`).
+- Node must:
+  - Bind `P_FUNCTION_JSON` as `oracledb.CLOB` **OUT**
+  - Read the CLOB value and `JSON.parse()` it
+  - Return the parsed object **directly** as API `data` (do not re-map/reshape it)
+
+## Responses
+- Response shape:
+  - `{ "status": true|false, "message": "...", "data": <parsed_db_json_or_{}> }`
+- `message` should come from DB JSON when present (e.g. `data.message`), otherwise fallback to `"Success"` / the error message.
+
