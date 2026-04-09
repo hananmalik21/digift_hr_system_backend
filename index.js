@@ -72,6 +72,7 @@ import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.j
 import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
+import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -216,6 +217,9 @@ app.use('/api/abs', employeeLeaveBalanceController);
 
 // Face registration + attendance routes (Oracle-backed)
 app.use('/api/registerFace', faceAttendanceController);
+
+// Security - Modules (FNDSEC.FNDSEC_MODULES)
+app.use('/api/security/modules', fndsecModulesController);
 
 
 
