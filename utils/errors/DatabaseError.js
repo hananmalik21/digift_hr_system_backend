@@ -191,6 +191,40 @@ export class DatabaseError extends AppError {
       return 'Invalid date format. Please provide a valid date.';
     }
 
+    // ORA-01403: no data found — often SELECT INTO in a trigger when validation fails
+    if (errorNum === 1403 || message.includes('ORA-01403')) {
+      const upper = message.toUpperCase();
+      if (
+        upper.includes('FNDSEC_LKP_VAL') ||
+        upper.includes('FNDSEC_LOOKUP_VALUES') ||
+        upper.includes('LKP_VAL_BIU')
+      ) {
+        return 'This lookup value cannot be saved: the lookup type was not found, or it is not valid for your enterprise (global vs enterprise-specific rows). Check that lookup_type_id exists, and send enterprise_id when the parent type or rules are scoped to an enterprise.';
+      }
+      if (upper.includes('FNDSEC_LKP_TYP') || upper.includes('FNDSEC_LOOKUP_TYPES')) {
+        return 'This lookup type could not be validated. Check enterprise_id and that the type exists for your enterprise.';
+      }
+      return 'No matching record was found for the data you submitted. Check IDs and try again.';
+    }
+
+    // ORA-04088: error during trigger — keep message friendly when FNDSEC lookup triggers wrap ORA-01403
+    if (errorNum === 4088 || message.includes('ORA-04088')) {
+      const upper = message.toUpperCase();
+      if (upper.includes('FNDSEC_LKP_VAL') || upper.includes('FNDSEC_LOOKUP_VALUES')) {
+        return 'This lookup value cannot be saved: the database validation trigger failed. Usually lookup_type_id is wrong or missing, or enterprise_id does not match a global/enterprise lookup type. Verify the type exists and include enterprise_id if required.';
+      }
+      if (upper.includes('FNDSEC_LKP_TYP') || upper.includes('FNDSEC_LOOKUP_TYPES')) {
+        return 'This lookup type could not be saved because a database validation failed. Check enterprise_id and required fields.';
+      }
+      if (upper.includes('FNDSEC_LKP') || upper.includes('FNDSEC_LOOKUP')) {
+        return 'The database could not save this security lookup record. Check parent references and enterprise_id.';
+      }
+      if (message.includes('ORA-01403')) {
+        return 'The operation failed because a required related record was not found. Check your IDs and enterprise context.';
+      }
+      return 'The database could not complete this action because a trigger reported an error. Verify your input or contact support.';
+    }
+
     // ORA-20001: user-defined – use message for "Attendance Day does not exist", else schedule overlap
     if (errorNum === 20001 || message.includes('ORA-20001')) {
       const upper = message.toUpperCase();
@@ -355,7 +389,14 @@ export class DatabaseError extends AppError {
     if (errorNum === 1400 || message.includes('ORA-01400')) return 400; // Bad Request
     if (errorNum === 2290 || message.includes('ORA-02290')) return 400; // Bad Request
     if (errorNum === 20090 || message.includes('ORA-20090')) return 400; // Check constraint (e.g. attendance)
-    if (errorNum === 1403 || message.includes('ORA-01403')) return 400; // No data found (e.g. attendance_day_id not found)
+    if (errorNum === 1403 || message.includes('ORA-01403')) return 400; // No data found (e.g. trigger validation)
+    if (errorNum === 4088 || message.includes('ORA-04088')) {
+      const upper = message.toUpperCase();
+      if (upper.includes('FNDSEC_LKP') || upper.includes('FNDSEC_LOOKUP') || message.includes('ORA-01403')) {
+        return 400;
+      }
+      return 500;
+    }
     if (errorNum === 20010 || message.includes('ORA-20010')) return 404; // Current component version not found (GUID + tenant)
     if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
 
@@ -383,6 +424,14 @@ export class DatabaseError extends AppError {
     if (errorNum === 1400 || message.includes('ORA-01400')) return 'NOT_NULL_CONSTRAINT';
     if (errorNum === 2290 || message.includes('ORA-02290')) return 'CHECK_CONSTRAINT_VIOLATION';
     if (errorNum === 20010 || message.includes('ORA-20010')) return 'COMPONENT_VERSION_NOT_FOUND';
+    if (errorNum === 1403 || message.includes('ORA-01403')) return 'NO_DATA_FOUND';
+    if (errorNum === 4088 || message.includes('ORA-04088')) {
+      const upper = message.toUpperCase();
+      if (upper.includes('FNDSEC_LKP') || upper.includes('FNDSEC_LOOKUP') || message.includes('ORA-01403')) {
+        return 'NO_DATA_FOUND';
+      }
+      return 'TRIGGER_EXECUTION_ERROR';
+    }
 
     return 'DATABASE_ERROR';
   }
