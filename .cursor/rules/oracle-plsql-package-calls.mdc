@@ -1,0 +1,19 @@
+---
+description: Patterns for calling Oracle PL/SQL packages (binds, OUT params, ref cursors)
+globs: "**/*.sql"
+alwaysApply: false
+---
+
+# Oracle PL/SQL package calls
+
+- Prefer named notation: `P_PARAM => :bind`.
+- For `RAW(16)` GUIDs: use `HEXTORAW('32HEX')` in SQL or bind `Buffer` from Node; in PL/SQL use `SYS_GUID()` or `HEXTORAW`.
+- OUT parameters: declare local variables, pass to procedure, then `DBMS_OUTPUT` or return to caller.
+- Always use `EXCEPTION WHEN OTHERS` in runnable scripts; log `SQLERRM` and `DBMS_UTILITY.FORMAT_ERROR_BACKTRACE`.
+- `SYS_REFCURSOR`: open in package/procedure, fetch in loop, `CLOSE` in `FINALLY`-style block or after loop.
+
+## Sample package surface (reference)
+
+Assume `PKG_SAMPLE` with table columns: `ID`, `GUID`, `CODE`, `NAME`, `DESCRIPTION`, `ENTERPRISE_ID`, `ACTIVE_FLAG`, audit columns.
+
+Use realistic names: `p_id`, `p_guid`, `p_code`, `p_name`, `p_description`, `p_enterprise_id`, `p_active_flag`, `p_created_by`, `p_last_updated_by`.
