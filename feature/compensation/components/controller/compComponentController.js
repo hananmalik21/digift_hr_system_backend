@@ -358,18 +358,40 @@ function parseDeletedByBody(req) {
 }
 
 function mapDeleteOracleError(err) {
-  const msg = String(err?.message || err?.oracleError?.message || '').toUpperCase();
+  const rawMessage =
+    err?.technicalMessage ||
+    err?.oracleError?.message ||
+    err?.message ||
+    err?.cause?.message ||
+    '';
+  const upper = String(rawMessage || '').toUpperCase();
   const errorNum = Number(err?.errorNum);
-  if (errorNum === 20001 || msg.includes('ORA-20001')) {
-    return { status: 404, message: 'Component not found' };
+
+  // Known application errors raised from COMP.DELETE_COMPONENT_PKG.DELETE_COMPONENT
+  if (errorNum === 20001 || upper.includes('ORA-20001')) {
+    return { status: 404, message: 'Component not found', code: 'COMPONENT_NOT_FOUND' };
   }
-  if (errorNum === 20002 || msg.includes('ORA-20002')) {
-    return { status: 400, message: 'Deletion failed' };
+  if (errorNum === 20002 || upper.includes('ORA-20002')) {
+    return { status: 400, message: toUserFriendlyMessage(rawMessage) || 'Deletion failed', code: 'DELETE_FAILED' };
   }
-  if (errorNum === 20003 || msg.includes('ORA-20003')) {
-    return { status: 500, message: 'Generic deletion error' };
+  if (errorNum === 20003 || upper.includes('ORA-20003')) {
+    // Previously hardcoded to "Generic deletion error" — return the actual database message (sanitized).
+    return { status: 500, message: toUserFriendlyMessage(rawMessage) || 'Deletion failed', code: 'GENERIC_DELETE_ERROR' };
   }
-  return { status: 500, message: 'Failed to delete compensation component' };
+
+  // Common Oracle constraint errors (if package doesn't translate them)
+  if (upper.includes('ORA-02292')) {
+    return { status: 409, message: 'Cannot delete: this component is referenced by other records.', code: 'CHILD_RECORDS_EXIST' };
+  }
+  if (upper.includes('ORA-02291')) {
+    return { status: 400, message: 'Invalid reference: related record not found.', code: 'PARENT_KEY_NOT_FOUND' };
+  }
+
+  return {
+    status: 500,
+    message: toUserFriendlyMessage(rawMessage) || 'Failed to delete compensation component',
+    code: 'DELETE_ERROR'
+  };
 }
 
 // ----- Routes -----
@@ -550,7 +572,8 @@ router.delete('/:componentGuid', asyncHandler(async (req, res) => {
     const mapped = mapDeleteOracleError(err);
     return res.status(mapped.status).json({
       success: false,
-      message: mapped.message
+      message: mapped.message,
+      code: mapped.code
     });
   }
 }));
