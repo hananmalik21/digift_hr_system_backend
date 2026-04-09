@@ -73,6 +73,7 @@ import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
 import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
+import fndsecFunctionsController from './feature/security/functions/controller/fndsecFunctionsController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -220,6 +221,9 @@ app.use('/api/registerFace', faceAttendanceController);
 
 // Security - Modules (FNDSEC.FNDSEC_MODULES)
 app.use('/api/security/modules', fndsecModulesController);
+
+// Security - Functions (FNDSEC.FNDSEC_FUNCTIONS)
+app.use('/api/security/functions', fndsecFunctionsController);
 
 
 
