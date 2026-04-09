@@ -1,0 +1,12 @@
+---
+description: FNDSEC function roles — GUID path, RAW binds, DELETE_FUNCTION_ROLE
+globs: feature/security/function_roles/**/*.js
+alwaysApply: false
+---
+
+# FNDSEC function roles
+
+- **PUT** `/:functionRoleGuid` → `UPDATE_FUNCTION_ROLE` with `P_FUNCTION_ROLE_GUID` as **RAW(16)** (Buffer bind). Body JSON arrays: **`functions`**, **`inherited_roles`** → `P_FUNCTIONS_JSON` / `P_INHERITED_ROLES_JSON` (stringified).
+- **DELETE** `/:functionRoleGuid` → **`DELETE_FUNCTION_ROLE`** (`P_FUNCTION_ROLE_GUID` RAW, `P_ENTERPRISE_ID`).
+- Mount: `/api/security/function-roles` (GET list, GET by GUID, POST, PUT, DELETE). Module-scoped list: `/api/security/modules/:moduleId/function-roles`.
+- Responses use **`success`** (boolean), not `status`.

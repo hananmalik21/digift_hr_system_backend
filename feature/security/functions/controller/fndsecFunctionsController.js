@@ -21,12 +21,17 @@ function sendSuccess(res, message, data = {}, httpStatus = 200) {
 }
 
 function sendError(res, err) {
-  const msg =
-    err?.userMessage ||
-    (err instanceof ValidationError && Array.isArray(err.errors) && err.errors[0]) ||
-    err?.message ||
-    'Error';
   const httpStatus = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+
+  if (err instanceof ValidationError) {
+    const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
+    const message =
+      details.length > 0 ? details[0] : err.userMessage || err.message || 'Validation failed';
+    const data = details.length > 0 ? { errors: details } : {};
+    return send(res, { status: false, message, data }, httpStatus);
+  }
+
+  const msg = err?.userMessage || err?.message || 'Error';
   return send(res, { status: false, message: msg, data: {} }, httpStatus);
 }
 

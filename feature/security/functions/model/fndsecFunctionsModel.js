@@ -23,7 +23,12 @@ function parseGuidHexOrThrow(fieldName, guid) {
   const raw = String(guid ?? '').trim();
   const cleaned = raw.replace(/-/g, '');
   if (!/^[0-9A-Fa-f]{32}$/.test(cleaned)) {
-    throw new ValidationError('Validation failed', [`${fieldName} must be a 32-character hexadecimal string`]);
+    const len = cleaned.length;
+    throw new ValidationError('Validation failed', [
+      len === 0
+        ? `${fieldName} is required`
+        : `${fieldName} must be exactly 32 hexadecimal characters (no dashes); received ${len} character(s)`
+    ]);
   }
   // Preserve caller casing (some packages compare string GUIDs case-sensitively).
   return cleaned;
