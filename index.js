@@ -76,6 +76,8 @@ import fndsecModulesController from './feature/security/modules/controller/fndse
 import fndsecFunctionsController from './feature/security/functions/controller/fndsecFunctionsController.js';
 import fndsecFunctionRolesController from './feature/security/function_roles/controller/fndsecFunctionRolesController.js';
 import fndsecFunctionRolesByModuleRouter from './feature/security/function_roles/controller/fndsecFunctionRolesByModuleRouter.js';
+import fndsecLookupTypeController from './feature/security/lookups/fndsec_lookup_types/controller/fndsecLookupTypeController.js';
+import fndsecLookupValueController from './feature/security/lookups/fndsec_lookup_values/controller/fndsecLookupValueController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -230,6 +232,10 @@ app.use('/api/security/functions', fndsecFunctionsController);
 // Security - Function roles (FNDSEC.FNDSEC_FUNCTION_ROLES_PKG + view GETs)
 app.use('/api/security/function-roles', fndsecFunctionRolesController);
 app.use('/api/security/modules', fndsecFunctionRolesByModuleRouter);
+
+// Security - Lookups (FNDSEC.FNDSEC_LOOKUP_TYPES / FNDSEC_LOOKUP_VALUES; enterprise scope like COMP tenant)
+app.use('/api/security/lookup-types', fndsecLookupTypeController);
+app.use('/api/security/lookup-values', fndsecLookupValueController);
 
 
 
