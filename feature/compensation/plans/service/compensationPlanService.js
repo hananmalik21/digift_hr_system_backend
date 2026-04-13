@@ -56,6 +56,106 @@ BEGIN
 END;
 `;
 
+/**
+ * UPDATE_COMPENSATION_PLAN_PKG.UPDATE_PLAN does not reliably persist `components`
+ * into COMP.COMP_PLAN_COMPONENTS. When the client sends `components`, mirror the
+ * intended list with MERGE + DELETE (same transaction as UPDATE_PLAN).
+ * Set COMP_PLAN_SKIP_COMPONENTS_NODE_SYNC=true to skip (e.g. if the DB package is fixed later).
+ */
+const SKIP_PLAN_COMPONENTS_NODE_SYNC =
+  String(process.env.COMP_PLAN_SKIP_COMPONENTS_NODE_SYNC || '')
+    .trim()
+    .toLowerCase() === 'true' ||
+  String(process.env.COMP_PLAN_SKIP_COMPONENTS_NODE_SYNC || '').trim() === '1';
+
+const SYNC_PLAN_COMPONENTS_SQL = `
+DECLARE
+  l_plan_id NUMBER;
+  l_actor   VARCHAR2(200);
+BEGIN
+  SELECT p.plan_id
+    INTO l_plan_id
+    FROM comp.comp_plans p
+   WHERE p.plan_guid = HEXTORAW(:plan_guid_hex);
+
+  l_actor := NVL(SUBSTR(:actor, 1, 200), 'SYSTEM');
+
+  MERGE INTO comp.comp_plan_components t
+  USING (
+    SELECT l_plan_id AS plan_id,
+           j.component_id,
+           NVL(j.display_sequence, 1) AS display_sequence,
+           CASE
+             WHEN UPPER(TRIM(j.mandatory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS mandatory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.active_flag)) LIKE 'N%' THEN 'N'
+             ELSE 'Y'
+           END AS active_flag,
+           NVL(SUBSTR(TRIM(j.created_by), 1, 200), l_actor) AS row_created_by
+      FROM JSON_TABLE(
+             :components_json,
+             '$[*]'
+             COLUMNS (
+               component_id       NUMBER         PATH '$.component_id',
+               display_sequence   NUMBER         PATH '$.display_sequence',
+               mandatory_flag     VARCHAR2(10) PATH '$.mandatory_flag',
+               active_flag        VARCHAR2(10) PATH '$.active_flag',
+               created_by         VARCHAR2(200) PATH '$.created_by'
+             )
+           ) j
+     WHERE j.component_id IS NOT NULL
+  ) s
+  ON (t.plan_id = s.plan_id AND t.component_id = s.component_id)
+  WHEN MATCHED THEN
+    UPDATE SET
+      t.display_sequence   = s.display_sequence,
+      t.mandatory_flag     = s.mandatory_flag,
+      t.active_flag        = s.active_flag,
+      t.last_updated_by    = l_actor,
+      t.last_update_date   = SYSDATE
+  WHEN NOT MATCHED THEN
+    INSERT (
+      plan_component_id,
+      plan_id,
+      component_id,
+      display_sequence,
+      mandatory_flag,
+      active_flag,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date
+    )
+    VALUES (
+      comp.comp_plan_components_seq.NEXTVAL,
+      s.plan_id,
+      s.component_id,
+      s.display_sequence,
+      s.mandatory_flag,
+      s.active_flag,
+      s.row_created_by,
+      SYSDATE,
+      l_actor,
+      SYSDATE
+    );
+
+  DELETE FROM comp.comp_plan_components t
+   WHERE t.plan_id = l_plan_id
+     AND NOT EXISTS (
+           SELECT 1
+             FROM JSON_TABLE(
+                    :components_json,
+                    '$[*]'
+                    COLUMNS (component_id NUMBER PATH '$.component_id')
+                  ) j
+            WHERE j.component_id IS NOT NULL
+              AND j.component_id = t.component_id
+         );
+END;
+`;
+
 const EXEC_OPTS = { autoCommit: false };
 
 /**
@@ -142,6 +242,13 @@ export async function updateCompensationPlan(payload) {
     throw new Error(PLAN_GUID_VALIDATION_MESSAGE);
   }
 
+  const syncComponentsRequested =
+    !SKIP_PLAN_COMPONENTS_NODE_SYNC &&
+    Object.prototype.hasOwnProperty.call(payload, 'components');
+  if (syncComponentsRequested && payload.components != null && !Array.isArray(payload.components)) {
+    throw new Error('components must be an array when provided');
+  }
+
   return withPlanConnection(async (connection) => {
     await connection.execute(
       UPDATE_PLAN_SQL,
@@ -151,6 +258,21 @@ export async function updateCompensationPlan(payload) {
       },
       EXEC_OPTS
     );
+
+    if (syncComponentsRequested && Array.isArray(payload.components)) {
+      const actor = String(
+        body.last_updated_by ?? body.updated_by ?? body.created_by ?? 'SYSTEM'
+      ).trim();
+      await connection.execute(
+        SYNC_PLAN_COMPONENTS_SQL,
+        {
+          plan_guid_hex: { val: planGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING },
+          components_json: payloadToPlanJsonBind(payload.components),
+          actor: { val: actor || 'SYSTEM', dir: oracledb.BIND_IN, type: oracledb.STRING }
+        },
+        EXEC_OPTS
+      );
+    }
   });
 }
 

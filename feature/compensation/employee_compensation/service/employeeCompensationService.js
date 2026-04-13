@@ -8,6 +8,7 @@ import db from '../../../../config/db.js';
  *
  * Oracle: COMP.EMPLOYEE_COMPENSATION.t_component_rec must include currency_code (VARCHAR2)
  * and create/edit package bodies must persist it on COMP_EMP_COMP_ASSIGNMENT_DTL (or equivalent).
+ * Edit: t_component_rec must include adjustment_method (VARCHAR2), set from each components JSON object.
  */
 const CREATE_COMPONENTS_VIA_JSON = `
 DECLARE
@@ -185,6 +186,7 @@ BEGIN
       rec.component_id := o.get_number('component_id');
       rec.amount := o.get_number('amount');
       rec.currency_code := TRIM(UPPER(o.get_string('currency_code')));
+      rec.adjustment_method := TRIM(o.get_string('adjustment_method'));
       v_start := TRIM(o.get_string('effective_start_date'));
       rec.effective_start_date := TO_DATE(SUBSTR(v_start, 1, 10), 'YYYY-MM-DD');
       IF NOT o.has('effective_end_date')
@@ -314,7 +316,7 @@ export async function createEmployeeCompensationComponents(payload) {
  *   performance_rating: string | null,
  *   internal_notes: string | null,
  *   updated_by: string,
- *   components: object[]
+ *   components: { adjustment_method: string, ... }[]
  * }} payload
  * @param {import('multer').File[]} files
  * @param {string[]} [documentDescriptions]

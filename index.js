@@ -79,6 +79,7 @@ import fndsecFunctionRolesByModuleRouter from './feature/security/function_roles
 import fndsecLookupTypeController from './feature/security/lookups/fndsec_lookup_types/controller/fndsecLookupTypeController.js';
 import fndsecLookupValueController from './feature/security/lookups/fndsec_lookup_values/controller/fndsecLookupValueController.js';
 import fndsecDutyRolesController from './feature/security/duty_roles/controller/fndsecDutyRolesController.js';
+import fndsecDataRolesController from './feature/security/data_roles/controller/fndsecDataRolesController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -240,6 +241,9 @@ app.use('/api/security/lookup-values', fndsecLookupValueController);
 
 // Security - Duty roles (FNDSEC.FNDSEC_DUTY_ROLES_PKG)
 app.use('/api/security/duty-roles', fndsecDutyRolesController);
+
+// Security - Data roles (FNDSEC.FNDSEC_DATA_ROLES + FNDSEC_DATA_ROLES_PKG.CREATE_DATA_ROLE)
+app.use('/api/data-roles', fndsecDataRolesController);
 
 
 

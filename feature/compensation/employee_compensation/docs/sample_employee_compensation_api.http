@@ -26,6 +26,7 @@ Content-Type: application/json
 
 ### Edit — multipart/form-data (adjustment + stringified components + optional BLOB documents)
 ### Uploaded files are NOT stored in this repo or on app disk — only persisted in Oracle (e.g. COMP_ADJUSTMENT_DOCS.FILE_CONTENT).
+### Each object in "components" JSON must include "adjustment_method" (e.g. MANUAL, PERCENTAGE, AMOUNT_CHANGE).
 ### Field "components" must be a JSON array string. Files: "documents" or "documents[]" (repeat for multiple).
 ### Optional: document_descriptions = JSON string array, same order as files, e.g. ["Memo","Contract"]
 ### Use paths to files on your machine for curl @... (do not commit sample PDFs into the project).
@@ -33,7 +34,7 @@ POST http://localhost:3000/api/comp/employee-compensation/edit
 Content-Type: multipart/form-data; boundary=----digify
 
 ### curl (edit) — two files, components JSON inline
-# COMPONENTS='[{"component_id":101,"amount":1500,"currency_code":"USD","effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
+# COMPONENTS='[{"component_id":101,"amount":1500,"adjustment_method":"MANUAL","currency_code":"USD","effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
 # curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/edit" \
 #   -F "enterprise_id=1" \
 #   -F "employee_id=1001" \

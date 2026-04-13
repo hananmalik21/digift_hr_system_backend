@@ -128,6 +128,12 @@ function collectPlanJsonValidationErrors(payload, options) {
     }
   }
 
+  if (hasKey(payload, 'components') && payload.components != null) {
+    if (!Array.isArray(payload.components)) {
+      errors.push('components must be an array');
+    }
+  }
+
   return errors;
 }
 

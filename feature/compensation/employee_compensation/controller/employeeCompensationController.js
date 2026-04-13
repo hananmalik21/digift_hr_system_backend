@@ -107,7 +107,12 @@ function parseActiveFlag(value, rowNumber) {
   };
 }
 
-function validateComponentLines(components) {
+/**
+ * @param {object[]} components
+ * @param {{ requireAdjustmentMethod?: boolean }} [options]
+ */
+function validateComponentLines(components, options = {}) {
+  const { requireAdjustmentMethod = false } = options;
   const errors = [];
   if (!Array.isArray(components)) {
     errors.push('components must be an array');
@@ -127,6 +132,10 @@ function validateComponentLines(components) {
     if (!amt.ok) errors.push(amt.error);
     const cur = toCurrencyCode(c?.currency_code, p);
     if (!cur.ok) errors.push(cur.error);
+    if (requireAdjustmentMethod) {
+      const am = toNonEmptyString(c?.adjustment_method, `${p}.adjustment_method`);
+      if (!am.ok) errors.push(am.error);
+    }
     const af = parseActiveFlag(c?.active_flag, rowNumber);
     if (!af.ok) errors.push(af.error);
     if (
@@ -161,19 +170,25 @@ function validateComponentLines(components) {
     return { ok: false, errors, normalized: null };
   }
 
-  const normalized = components.map((c, idx) => ({
-    component_id: Number(c.component_id),
-    amount: Number(c.amount),
-    currency_code: String(c.currency_code).trim().toUpperCase(),
-    effective_start_date: String(c.effective_start_date).trim().slice(0, 10),
-    effective_end_date:
-      c.effective_end_date === undefined ||
-      c.effective_end_date === null ||
-      String(c.effective_end_date).trim() === ''
-        ? null
-        : String(c.effective_end_date).trim().slice(0, 10),
-    active_flag: parseActiveFlag(c?.active_flag, idx + 1).value
-  }));
+  const normalized = components.map((c, idx) => {
+    const row = {
+      component_id: Number(c.component_id),
+      amount: Number(c.amount),
+      currency_code: String(c.currency_code).trim().toUpperCase(),
+      effective_start_date: String(c.effective_start_date).trim().slice(0, 10),
+      effective_end_date:
+        c.effective_end_date === undefined ||
+        c.effective_end_date === null ||
+        String(c.effective_end_date).trim() === ''
+          ? null
+          : String(c.effective_end_date).trim().slice(0, 10),
+      active_flag: parseActiveFlag(c?.active_flag, idx + 1).value
+    };
+    if (requireAdjustmentMethod) {
+      row.adjustment_method = toNonEmptyString(c.adjustment_method, 'adjustment_method').value;
+    }
+    return row;
+  });
 
   return { ok: true, errors: [], normalized };
 }
@@ -296,7 +311,7 @@ function validateEditMultipart(req) {
   const componentsRaw = parseComponentsJson(body.components, errors);
   let lines = { ok: false, errors: [], normalized: null };
   if (componentsRaw != null) {
-    lines = validateComponentLines(componentsRaw);
+    lines = validateComponentLines(componentsRaw, { requireAdjustmentMethod: true });
     if (!lines.ok) errors.push(...lines.errors);
   }
 
