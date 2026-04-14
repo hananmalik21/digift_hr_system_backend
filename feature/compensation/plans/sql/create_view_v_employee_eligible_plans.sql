@@ -7,7 +7,8 @@
 --   @create_view_v_employee_eligible_plans.sql
 --
 -- API: GET .../eligible-for-employee?employee_guid=<32 hex>
---      → WHERE employee_guid = HEXTORAW(:hex). Align column names with EMPL.EMPLOYEES / COMP.COMP_PLANS.
+--      → WHERE employee_guid = HEXTORAW(:hex). Align column names with EMPL.EMPLOYEES / COMP.COMP_PLANS
+--        (incl. PLAN_TYPE_CODE).
 -- =============================================================================
 
 CREATE OR REPLACE VIEW comp.v_employee_eligible_plans AS
@@ -26,7 +27,8 @@ SELECT a.employee_id,
        cp.plan_id,
        cp.plan_guid,
        cp.plan_code,
-       cp.plan_name
+       cp.plan_name,
+       cp.plan_type_code
   FROM latest_assignment a
   JOIN empl.employees e
     ON e.enterprise_id = a.enterprise_id

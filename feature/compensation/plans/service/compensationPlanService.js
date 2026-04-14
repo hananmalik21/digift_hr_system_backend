@@ -398,6 +398,7 @@ SELECT v.enterprise_id,
        UPPER(RAWTOHEX(v.plan_guid)) AS plan_guid,
        v.plan_code,
        v.plan_name,
+       v.plan_type_code,
        (
          SELECT NVL(
            JSON_ARRAYAGG(
@@ -442,7 +443,7 @@ function parsePlanComponentsJson(raw) {
 }
 
 /**
- * Rows from COMP.V_EMPLOYEE_ELIGIBLE_PLANS (deploy sql/create_view_v_employee_eligible_plans.sql).
+ * Rows from COMP.V_EMPLOYEE_ELIGIBLE_PLANS (feature/compensation/plans/sql/create_view_v_employee_eligible_plans.sql).
  * Plan lines from COMP.COMP_PLAN_COMPONENTS + COMP.COMP_COMPONENTS (tenant_id = enterprise_id).
  * @param {string} employeeGuidHex 32-char uppercase hex (no 0x), for HEXTORAW
  * @returns {Promise<object[]>}
@@ -458,6 +459,7 @@ export async function getEligiblePlansForEmployee(employeeGuidHex) {
     plan_guid: r.PLAN_GUID ?? r.plan_guid,
     plan_code: r.PLAN_CODE ?? r.plan_code,
     plan_name: r.PLAN_NAME ?? r.plan_name,
+    plan_type_code: r.PLAN_TYPE_CODE ?? r.plan_type_code,
     components: parsePlanComponentsJson(r.COMPONENTS_JSON ?? r.components_json).map(
       normalizeComponentForGetResponse
     )
