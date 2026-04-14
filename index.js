@@ -151,6 +151,9 @@ app.use('/api/active-structure-stats', activeStructureStatsController);
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
 
+// Data roles (must be BEFORE /api catch-all so /api/data-roles is not matched as org structure :structureId)
+app.use('/api/data-roles', fndsecDataRolesController);
+
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
 // NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
@@ -243,11 +246,6 @@ app.use('/api/security/lookup-values', fndsecLookupValueController);
 
 // Security - Duty roles (FNDSEC.FNDSEC_DUTY_ROLES_PKG)
 app.use('/api/security/duty-roles', fndsecDutyRolesController);
-
-// Security - Data roles (FNDSEC.FNDSEC_DATA_ROLES + FNDSEC_DATA_ROLES_PKG.CREATE_DATA_ROLE)
-app.use('/api/data-roles', fndsecDataRolesController);
-
-
 
 // Initialize database pool on startup
 await createPool();

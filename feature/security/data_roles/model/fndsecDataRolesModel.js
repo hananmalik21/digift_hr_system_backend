@@ -17,11 +17,6 @@ const CREATE_PROC = `${PKG}.CREATE_DATA_ROLE`;
 const UPDATE_PROC = `${PKG}.UPDATE_DATA_ROLE`;
 
 const T_HEADER = 'FNDSEC.FNDSEC_DATA_ROLES';
-const T_POS = 'FNDSEC.FNDSEC_DATA_ROLE_POSITIONS';
-const T_GRADES = 'FNDSEC.FNDSEC_DATA_ROLE_GRADES';
-const T_JF = 'FNDSEC.FNDSEC_DATA_ROLE_JOB_FAMILIES';
-const T_JL = 'FNDSEC.FNDSEC_DATA_ROLE_JOB_LEVELS';
-const T_OU = 'FNDSEC.FNDSEC_DATA_ROLE_ORG_UNITS';
 
 function oracleApplicationErrorMessage(err) {
   const num = Number(err?.errorNum);
@@ -713,70 +708,6 @@ async function loadDataRoleIdByGuid(connection, enterpriseId, guidHex32) {
   return Number(row.DATA_ROLE_ID ?? row.data_role_id);
 }
 
-async function deleteChildRows(connection, dataRoleId) {
-  await connection.execute(`DELETE FROM ${T_OU} WHERE DATA_ROLE_ID = :1`, [dataRoleId], { autoCommit: false });
-  await connection.execute(`DELETE FROM ${T_POS} WHERE DATA_ROLE_ID = :1`, [dataRoleId], { autoCommit: false });
-  await connection.execute(`DELETE FROM ${T_GRADES} WHERE DATA_ROLE_ID = :1`, [dataRoleId], { autoCommit: false });
-  await connection.execute(`DELETE FROM ${T_JF} WHERE DATA_ROLE_ID = :1`, [dataRoleId], { autoCommit: false });
-  await connection.execute(`DELETE FROM ${T_JL} WHERE DATA_ROLE_ID = :1`, [dataRoleId], { autoCommit: false });
-}
-
-async function insertChildRows(connection, enterpriseId, dataRoleId, positions, grades, jobFamilies, jobLevels, orgUnits) {
-  for (const p of positions) {
-    const buf = guidToBuffer(p.position_id);
-    await connection.execute(
-      `INSERT INTO ${T_POS} (ENTERPRISE_ID, DATA_ROLE_ID, POSITION_ID, ACTIVE_FLAG) VALUES (:ent, :dr, :pid, :af)`,
-      { ent: enterpriseId, dr: dataRoleId, pid: buf, af: p.active_flag },
-      { autoCommit: false }
-    );
-  }
-  for (const g of grades) {
-    await connection.execute(
-      `INSERT INTO ${T_GRADES} (ENTERPRISE_ID, DATA_ROLE_ID, GRADE_ID, ACTIVE_FLAG) VALUES (:ent, :dr, :gid, :af)`,
-      { ent: enterpriseId, dr: dataRoleId, gid: g.grade_id, af: g.active_flag },
-      { autoCommit: false }
-    );
-  }
-  for (const j of jobFamilies) {
-    await connection.execute(
-      `INSERT INTO ${T_JF} (ENTERPRISE_ID, DATA_ROLE_ID, JOB_FAMILY_ID, ACTIVE_FLAG) VALUES (:ent, :dr, :jid, :af)`,
-      { ent: enterpriseId, dr: dataRoleId, jid: j.job_family_id, af: j.active_flag },
-      { autoCommit: false }
-    );
-  }
-  for (const j of jobLevels) {
-    await connection.execute(
-      `INSERT INTO ${T_JL} (ENTERPRISE_ID, DATA_ROLE_ID, JOB_LEVEL_ID, ACTIVE_FLAG) VALUES (:ent, :dr, :jid, :af)`,
-      { ent: enterpriseId, dr: dataRoleId, jid: j.job_level_id, af: j.active_flag },
-      { autoCommit: false }
-    );
-  }
-  for (const o of orgUnits) {
-    const buf = guidToBuffer(o.org_unit_id);
-    const start = o.effective_start_date ? new Date(o.effective_start_date + 'T00:00:00.000Z') : null;
-    const end = o.effective_end_date ? new Date(o.effective_end_date + 'T00:00:00.000Z') : null;
-    await connection.execute(
-      `INSERT INTO ${T_OU} (
-         ENTERPRISE_ID, DATA_ROLE_ID, ORG_UNIT_ID, ACTIVE_FLAG, HIERARCHY_LEVEL, INCLUDE_SUBORDINATES,
-         EFFECTIVE_START_DATE, EFFECTIVE_END_DATE
-       ) VALUES (
-         :ent, :dr, :ou, :af, :hl, :inc, :es, :ee
-       )`,
-      {
-        ent: enterpriseId,
-        dr: dataRoleId,
-        ou: buf,
-        af: o.active_flag,
-        hl: o.hierarchy_level,
-        inc: o.include_subordinates,
-        es: start,
-        ee: end
-      },
-      { autoCommit: false }
-    );
-  }
-}
-
 /**
  * POST /data-roles — FNDSEC.FNDSEC_DATA_ROLES_PKG.CREATE_DATA_ROLE
  */
@@ -1041,7 +972,7 @@ END;`;
  */
 export async function softDeleteDataRole(pathId, enterpriseIdRaw, actorRaw) {
   const enterpriseId = parseEnterpriseId(enterpriseIdRaw);
-  const actor = requireNonEmptyString('created_by or actor', actorRaw);
+  const actor = requireNonEmptyString('actor', actorRaw);
 
   return await withTransaction(async (connection) => {
     const { dataRoleId } = await lockHeaderRow(connection, enterpriseId, pathId);

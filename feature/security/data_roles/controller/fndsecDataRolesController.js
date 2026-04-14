@@ -8,6 +8,8 @@ import {
 } from '../../../../utils/errors/index.js';
 import {
   createDataRoleService,
+  getDataRoleByGuidFromView,
+  listDataRolesFromView,
   softDeleteDataRoleService,
   updateDataRoleService
 } from '../service/fndsecDataRolesService.js';
@@ -56,26 +58,75 @@ function sendError(res, err) {
   return send(res, { success: false, message: msg, data: {} }, statusCode);
 }
 
+/** Wraps a handler with asyncHandler and maps thrown errors to this router's JSON contract. */
+function route(handler) {
+  return asyncHandler(async (req, res) => {
+    try {
+      return await handler(req, res);
+    } catch (err) {
+      return sendError(res, err);
+    }
+  });
+}
+
+function resolveDeleteActor(req) {
+  return (
+    (req.body && (req.body.created_by ?? req.body.actor)) ??
+    req.query?.created_by ??
+    req.query?.actor
+  );
+}
+
+/**
+ * GET /api/data-roles?enterprise_id=&search=&role_name=&role_code=&status=&page=&page_size=
+ * search = single term matched against role_name OR role_code (LIKE)
+ * FNDSEC.FNDSEC_DATA_ROLES_FULL_V
+ */
+router.get(
+  '/',
+  route(async (req, res) => {
+    const { data, pagination } = await listDataRolesFromView(req.query || {});
+    return res.status(200).json({
+      success: true,
+      message: 'Data roles fetched successfully',
+      data,
+      pagination
+    });
+  })
+);
+
+/**
+ * GET /api/data-roles/:dataRoleGuid?enterprise_id=
+ * FNDSEC.FNDSEC_DATA_ROLES_FULL_V
+ */
+router.get(
+  '/:dataRoleGuid',
+  route(async (req, res) => {
+    const data = await getDataRoleByGuidFromView(req.params.dataRoleGuid, req.query?.enterprise_id);
+    return res.status(200).json({
+      success: true,
+      message: 'Data role fetched successfully',
+      data
+    });
+  })
+);
+
 /**
  * POST /api/data-roles
  * FNDSEC.FNDSEC_DATA_ROLES_PKG.CREATE_DATA_ROLE
  */
 router.post(
   '/',
-  asyncHandler(async (req, res) => {
-    try {
-      const result = await createDataRoleService(req.body || {});
-      return res.status(201).json({
-        success: true,
-        message: result.message,
-        data: {
-          data_role_id: result.data_role_id,
-          data_role_guid: result.data_role_guid
-        }
-      });
-    } catch (err) {
-      return sendError(res, err);
-    }
+  route(async (req, res) => {
+    const result = await createDataRoleService(req.body || {});
+    return res.status(201).json({
+      success: true,
+      message: result.message,
+      data: {
+        data_role_id: result.data_role_id,
+        data_role_guid: result.data_role_guid
+      }
+    });
   })
 );
 
@@ -85,17 +136,13 @@ router.post(
  */
 router.put(
   '/:dataRoleGuid',
-  asyncHandler(async (req, res) => {
-    try {
-      const result = await updateDataRoleService(req.params.dataRoleGuid, req.body || {});
-      return send(res, {
-        success: true,
-        message: result.message,
-        data: { data_role_guid: result.data_role_guid }
-      });
-    } catch (err) {
-      return sendError(res, err);
-    }
+  route(async (req, res) => {
+    const result = await updateDataRoleService(req.params.dataRoleGuid, req.body || {});
+    return send(res, {
+      success: true,
+      message: result.message,
+      data: { data_role_guid: result.data_role_guid }
+    });
   })
 );
 
@@ -105,21 +152,14 @@ router.put(
  */
 router.delete(
   '/:id',
-  asyncHandler(async (req, res) => {
-    try {
-      const actor =
-        (req.body && (req.body.created_by ?? req.body.actor)) ??
-        req.query?.created_by ??
-        req.query?.actor;
-      const result = await softDeleteDataRoleService(req.params.id, req.query?.enterprise_id, actor);
-      return send(res, {
-        success: true,
-        message: result.message,
-        data: { data_role_id: result.data_role_id }
-      });
-    } catch (err) {
-      return sendError(res, err);
-    }
+  route(async (req, res) => {
+    const actor = resolveDeleteActor(req);
+    const result = await softDeleteDataRoleService(req.params.id, req.query?.enterprise_id, actor);
+    return send(res, {
+      success: true,
+      message: result.message,
+      data: { data_role_id: result.data_role_id }
+    });
   })
 );
 
