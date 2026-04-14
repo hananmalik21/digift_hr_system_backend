@@ -59,8 +59,10 @@ function buildSql() {
     SELECT
       a.assignment_detail_id,
       a.assignment_detail_guid,
+      a.enterprise_id,
       a.employee_id,
       RAWTOHEX(a.employee_guid) AS employee_guid,
+      a.plan_id,
       a.component_id,
       a.component_code,
       a.component_name,
@@ -70,7 +72,8 @@ function buildSql() {
       a.effective_start_date,
       a.effective_end_date,
       a.change_source,
-      a.adjustment_id
+      a.adjustment_id,
+      a.active_flag
     FROM COMP.COMP_EMP_ASSIGNED_COMPONENTS_V a
     LEFT JOIN latest_plan_component lpc
       ON lpc.plan_id = a.plan_id
