@@ -91,6 +91,13 @@ function hasKey(obj, key) {
   return obj != null && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function normalizeFrequencyCode(value) {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  return s.toUpperCase();
+}
+
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -131,6 +138,20 @@ function collectPlanJsonValidationErrors(payload, options) {
   if (hasKey(payload, 'components') && payload.components != null) {
     if (!Array.isArray(payload.components)) {
       errors.push('components must be an array');
+    } else {
+      payload.components.forEach((c, idx) => {
+        if (c == null || Array.isArray(c) || typeof c !== 'object') {
+          errors.push(`components[${idx}] must be an object`);
+          return;
+        }
+
+        if (hasKey(c, 'frequency_code') && c.frequency_code != null) {
+          const normalized = normalizeFrequencyCode(c.frequency_code);
+          if (!normalized) {
+            errors.push(`components[${idx}].frequency_code must be a non-empty string`);
+          }
+        }
+      });
     }
   }
 

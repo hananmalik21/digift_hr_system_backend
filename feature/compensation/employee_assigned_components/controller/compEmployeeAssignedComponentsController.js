@@ -36,23 +36,42 @@ router.get(
 
     const sql = `
       SELECT
-        assignment_detail_id,
-        assignment_detail_guid,
-        employee_id,
-        RAWTOHEX(employee_guid) AS employee_guid,
-        component_id,
-        component_code,
-        component_name,
-        amount,
-        currency_code,
-        effective_start_date,
-        effective_end_date,
-        change_source,
-        adjustment_id
-      FROM COMP.COMP_EMP_ASSIGNED_COMPONENTS_V
-      WHERE employee_guid = HEXTORAW(:employee_guid)
-        AND active_flag = 'Y'
-        AND (effective_end_date IS NULL OR effective_end_date >= TRUNC(SYSDATE))
+        a.assignment_detail_id,
+        a.assignment_detail_guid,
+        a.employee_id,
+        RAWTOHEX(a.employee_guid) AS employee_guid,
+        a.component_id,
+        a.component_code,
+        a.component_name,
+        p.frequency_code,
+        a.amount,
+        a.currency_code,
+        a.effective_start_date,
+        a.effective_end_date,
+        a.change_source,
+        a.adjustment_id
+      FROM COMP.COMP_EMP_ASSIGNED_COMPONENTS_V a
+      LEFT JOIN (
+        SELECT plan_id, component_id, frequency_code
+        FROM (
+          SELECT
+            plan_id,
+            component_id,
+            frequency_code,
+            ROW_NUMBER() OVER (
+              PARTITION BY plan_id, component_id
+              ORDER BY plan_component_id DESC
+            ) AS rn
+          FROM COMP.COMP_PLAN_COMPONENTS
+          WHERE active_flag = 'Y'
+        )
+        WHERE rn = 1
+      ) p
+        ON p.plan_id = a.plan_id
+       AND p.component_id = a.component_id
+      WHERE a.employee_guid = HEXTORAW(:employee_guid)
+        AND a.active_flag = 'Y'
+        AND (a.effective_end_date IS NULL OR a.effective_end_date >= TRUNC(SYSDATE))
       ORDER BY effective_start_date DESC, assignment_detail_id DESC
     `;
 

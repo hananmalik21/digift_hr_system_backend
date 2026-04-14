@@ -79,7 +79,6 @@ BEGIN
    WHERE p.plan_guid = HEXTORAW(:plan_guid_hex);
 
   l_actor := NVL(SUBSTR(:actor, 1, 200), 'SYSTEM');
-
   MERGE INTO comp.comp_plan_components t
   USING (
     SELECT l_plan_id AS plan_id,
@@ -155,6 +154,117 @@ BEGIN
          );
 END;
 `;
+
+const SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_SQL = `
+DECLARE
+  l_plan_id NUMBER;
+  l_actor   VARCHAR2(200);
+BEGIN
+  SELECT p.plan_id
+    INTO l_plan_id
+    FROM comp.comp_plans p
+   WHERE p.plan_guid = HEXTORAW(:plan_guid_hex);
+
+  l_actor := NVL(SUBSTR(:actor, 1, 200), 'SYSTEM');
+
+  MERGE INTO comp.comp_plan_components t
+  USING (
+    SELECT l_plan_id AS plan_id,
+           j.component_id,
+           NVL(j.display_sequence, 1) AS display_sequence,
+           CASE
+             WHEN UPPER(TRIM(j.mandatory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS mandatory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.active_flag)) LIKE 'N%' THEN 'N'
+             ELSE 'Y'
+           END AS active_flag,
+           NULLIF(UPPER(TRIM(j.frequency_code)), '') AS frequency_code,
+           NVL(SUBSTR(TRIM(j.created_by), 1, 200), l_actor) AS row_created_by
+      FROM JSON_TABLE(
+             :components_json,
+             '$[*]'
+             COLUMNS (
+               component_id       NUMBER         PATH '$.component_id',
+               display_sequence   NUMBER         PATH '$.display_sequence',
+               mandatory_flag     VARCHAR2(10) PATH '$.mandatory_flag',
+               active_flag        VARCHAR2(10) PATH '$.active_flag',
+               frequency_code     VARCHAR2(30) PATH '$.frequency_code',
+               created_by         VARCHAR2(200) PATH '$.created_by'
+             )
+           ) j
+     WHERE j.component_id IS NOT NULL
+  ) s
+  ON (t.plan_id = s.plan_id AND t.component_id = s.component_id)
+  WHEN MATCHED THEN
+    UPDATE SET
+      t.display_sequence   = s.display_sequence,
+      t.mandatory_flag     = s.mandatory_flag,
+      t.active_flag        = s.active_flag,
+      t.frequency_code     = s.frequency_code,
+      t.last_updated_by    = l_actor,
+      t.last_update_date   = SYSDATE
+  WHEN NOT MATCHED THEN
+    INSERT (
+      plan_component_id,
+      plan_id,
+      component_id,
+      display_sequence,
+      mandatory_flag,
+      active_flag,
+      frequency_code,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date
+    )
+    VALUES (
+      comp.comp_plan_components_seq.NEXTVAL,
+      s.plan_id,
+      s.component_id,
+      s.display_sequence,
+      s.mandatory_flag,
+      s.active_flag,
+      s.frequency_code,
+      s.row_created_by,
+      SYSDATE,
+      l_actor,
+      SYSDATE
+    );
+
+  DELETE FROM comp.comp_plan_components t
+   WHERE t.plan_id = l_plan_id
+     AND NOT EXISTS (
+           SELECT 1
+             FROM JSON_TABLE(
+                    :components_json,
+                    '$[*]'
+                    COLUMNS (component_id NUMBER PATH '$.component_id')
+                  ) j
+            WHERE j.component_id IS NOT NULL
+              AND j.component_id = t.component_id
+         );
+END;
+`;
+
+let cachedHasPlanComponentFrequencyCode = null;
+
+async function hasPlanComponentFrequencyCodeColumn(connection) {
+  if (cachedHasPlanComponentFrequencyCode !== null) return cachedHasPlanComponentFrequencyCode;
+  const result = await connection.execute(
+    `
+      SELECT COUNT(*) AS cnt
+        FROM all_tab_columns c
+       WHERE c.owner = 'COMP'
+         AND c.table_name = 'COMP_PLAN_COMPONENTS'
+         AND c.column_name = 'FREQUENCY_CODE'
+    `
+  );
+  const cnt = result?.rows?.[0]?.[0] ?? result?.rows?.[0]?.CNT ?? 0;
+  cachedHasPlanComponentFrequencyCode = Number(cnt) > 0;
+  return cachedHasPlanComponentFrequencyCode;
+}
 
 const EXEC_OPTS = { autoCommit: false };
 
@@ -263,8 +373,10 @@ export async function updateCompensationPlan(payload) {
       const actor = String(
         body.last_updated_by ?? body.updated_by ?? body.created_by ?? 'SYSTEM'
       ).trim();
+      const hasFreq = await hasPlanComponentFrequencyCodeColumn(connection);
+      const sql = hasFreq ? SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_SQL : SYNC_PLAN_COMPONENTS_SQL;
       await connection.execute(
-        SYNC_PLAN_COMPONENTS_SQL,
+        sql,
         {
           plan_guid_hex: { val: planGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING },
           components_json: payloadToPlanJsonBind(payload.components),
