@@ -34,7 +34,7 @@ POST http://localhost:3000/api/comp/employee-compensation/edit
 Content-Type: multipart/form-data; boundary=----digify
 
 ### curl (edit) — two files, components JSON inline
-# COMPONENTS='[{"component_id":101,"amount":1500,"adjustment_method":"MANUAL","currency_code":"USD","effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y"}]'
+# COMPONENTS='[{"component_id":101,"amount":1500,"adjustment_method":"MANUAL","currency_code":"USD","effective_start_date":"2026-05-01","effective_end_date":null,"active_flag":"Y","replace_flag":"TRUE"}]'
 # curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/edit" \
 #   -F "enterprise_id=1" \
 #   -F "employee_id=1001" \

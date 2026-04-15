@@ -107,6 +107,27 @@ function parseActiveFlag(value, rowNumber) {
   };
 }
 
+function parseTriFlag(value, fieldPath) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { ok: true, value: null };
+  }
+  if (typeof value === 'boolean') {
+    return { ok: true, value: value ? 'TRUE' : 'FALSE' };
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return { ok: false, error: `${fieldPath} must be a boolean` };
+    }
+    return { ok: true, value: value !== 0 ? 'TRUE' : 'FALSE' };
+  }
+  const s = String(value).trim().toUpperCase();
+  if (s === 'TRUE' || s === 'FALSE' || s === '1' || s === '0' || s === 'Y' || s === 'N' || s === 'YES' || s === 'NO') {
+    const truthy = s === 'TRUE' || s === '1' || s === 'Y' || s === 'YES';
+    return { ok: true, value: truthy ? 'TRUE' : 'FALSE' };
+  }
+  return { ok: false, error: `${fieldPath} must be TRUE/FALSE (or boolean)` };
+}
+
 /**
  * @param {object[]} components
  * @param {{ requireAdjustmentMethod?: boolean }} [options]
@@ -123,6 +144,11 @@ function validateComponentLines(components, options = {}) {
     return { ok: false, errors, normalized: null };
   }
 
+  /** @type {{ ok: boolean, error?: string, value: string | null }[]} */
+  const replaceFlags = [];
+  /** @type {{ ok: boolean, error?: string, value: string | null }[]} */
+  const deleteFlags = [];
+
   components.forEach((c, idx) => {
     const p = `components[${idx}]`;
     const rowNumber = idx + 1;
@@ -138,6 +164,18 @@ function validateComponentLines(components, options = {}) {
     }
     const af = parseActiveFlag(c?.active_flag, rowNumber);
     if (!af.ok) errors.push(af.error);
+
+    const replaceFlag = parseTriFlag(c?.replace_flag ?? c?.replace, `${p}.replace_flag`);
+    replaceFlags[idx] = replaceFlag;
+    if (!replaceFlag.ok) errors.push(replaceFlag.error);
+
+    const deleteFlag = parseTriFlag(c?.delete_flag ?? c?.delete, `${p}.delete_flag`);
+    deleteFlags[idx] = deleteFlag;
+    if (!deleteFlag.ok) errors.push(deleteFlag.error);
+
+    if (replaceFlag.value === 'TRUE' && deleteFlag.value === 'TRUE') {
+      errors.push(`${p} cannot set both replace and delete to true`);
+    }
     if (
       c?.effective_start_date === undefined ||
       c?.effective_start_date === null ||
@@ -187,6 +225,12 @@ function validateComponentLines(components, options = {}) {
     if (requireAdjustmentMethod) {
       row.adjustment_method = toNonEmptyString(c.adjustment_method, 'adjustment_method').value;
     }
+
+    const replaceFlag = replaceFlags[idx];
+    const deleteFlag = deleteFlags[idx];
+    if (replaceFlag.value != null) row.replace_flag = replaceFlag.value;
+    if (deleteFlag.value != null) row.delete_flag = deleteFlag.value;
+
     return row;
   });
 
@@ -195,7 +239,7 @@ function validateComponentLines(components, options = {}) {
 
 function httpStatusForOracle(error) {
   const { kind, message } = classifyEmployeeCompOracleError(error);
-  if (kind === 'already_attached' || kind === 'not_attached') {
+  if (kind === 'already_attached' || kind === 'not_attached' || kind === 'missing_active_component') {
     return { status: HTTP.BAD_REQUEST, message };
   }
   return {

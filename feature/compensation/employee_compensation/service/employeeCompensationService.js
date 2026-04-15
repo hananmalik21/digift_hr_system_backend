@@ -123,6 +123,21 @@ export function classifyEmployeeCompOracleError(error) {
   const norm = line.replace(/\s+/g, ' ').toLowerCase();
 
   if (
+    norm.includes('ora-20121') ||
+    (norm.includes('active component does not exist') && norm.includes('component_id'))
+  ) {
+    const m = line.match(/component_id\s+(\d+)/i);
+    const componentId = m ? Number(m[1]) : null;
+    return {
+      kind: 'missing_active_component',
+      message: componentId
+        ? `Active component does not exist for COMPONENT_ID ${componentId}. If this employee does not already have this component, send replace_flag=TRUE (or replace=true).`
+        : 'Active component does not exist for the provided COMPONENT_ID. If this employee does not already have this component, send replace_flag=TRUE (or replace=true).',
+      component_id: componentId
+    };
+  }
+
+  if (
     norm.includes('plan is already attached with employee') ||
     (norm.includes('already') && norm.includes('attached') && norm.includes('employee'))
   ) {
@@ -182,6 +197,7 @@ BEGIN
       rec COMP.EMPLOYEE_COMPENSATION.t_component_rec;
       v_start VARCHAR2(40);
       v_end VARCHAR2(40);
+      v_flag VARCHAR2(20);
     BEGIN
       rec.component_id := o.get_number('component_id');
       rec.amount := o.get_number('amount');
@@ -204,6 +220,25 @@ BEGIN
         rec.active_flag := 'Y';
       ELSE
         rec.active_flag := SUBSTR(TRIM(UPPER(o.get_string('active_flag'))), 1, 1);
+      END IF;
+
+      -- Pass through optional flags used by the package logic.
+      -- NOTE: JSON_OBJECT_T.get_type often returns 'SCALAR' for primitives (including booleans),
+      -- so we normalize via JSON_ELEMENT_T.to_string() which works across scalar types.
+      IF o.has('replace_flag') AND o.get_type('replace_flag') <> 'NULL' THEN
+        v_flag := UPPER(TRIM(TREAT(o.get('replace_flag') AS JSON_ELEMENT_T).to_string()));
+        rec.replace_flag := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END;
+      ELSIF o.has('replace') AND o.get_type('replace') <> 'NULL' THEN
+        v_flag := UPPER(TRIM(TREAT(o.get('replace') AS JSON_ELEMENT_T).to_string()));
+        rec.replace_flag := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END;
+      END IF;
+
+      IF o.has('delete_flag') AND o.get_type('delete_flag') <> 'NULL' THEN
+        v_flag := UPPER(TRIM(TREAT(o.get('delete_flag') AS JSON_ELEMENT_T).to_string()));
+        rec.delete_flag := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END;
+      ELSIF o.has('delete') AND o.get_type('delete') <> 'NULL' THEN
+        v_flag := UPPER(TRIM(TREAT(o.get('delete') AS JSON_ELEMENT_T).to_string()));
+        rec.delete_flag := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END;
       END IF;
       l_tab.EXTEND;
       l_tab(l_tab.COUNT) := rec;
