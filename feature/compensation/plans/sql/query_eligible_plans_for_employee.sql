@@ -1,6 +1,7 @@
 -- =============================================================================
 -- Eligible plans for one employee by GUID (32 hex, same as API).
 -- Requires: @create_view_v_employee_eligible_plans.sql (with employee_guid + plan_guid)
+-- Component JSON block: keep in sync with compensationPlanService.js (sqlPlanComponentsJsonSubquery).
 -- =============================================================================
 
 SELECT v.enterprise_id,

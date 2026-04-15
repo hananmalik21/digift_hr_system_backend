@@ -4,7 +4,8 @@ import {
   createCompensationPlan,
   updateCompensationPlan,
   deleteCompensationPlan,
-  getEligiblePlansForEmployee
+  getEligiblePlansForEmployee,
+  getPlanComponentsByPlanGuid
 } from '../service/compensationPlanService.js';
 import {
   normalizePlanGuidHex,
@@ -13,10 +14,12 @@ import {
 } from '../planGuid.js';
 
 const EMPLOYEE_GUID_REQUIRED = 'employee_guid is required';
+/** Same wording as ORACLE_PLAN_ERROR_MAP.ORA_20002 for consistent client handling */
+const MSG_PLAN_NOT_FOUND = 'Compensation plan not found';
 
 const router = express.Router();
 
-const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
+const HTTP = { BAD_REQUEST: 400, OK: 200, NOT_FOUND: 404, SERVER_ERROR: 500 };
 
 const ORA_STACK_CODE = 'ORA-06512';
 const ORACLE_PLAN_ERROR_MAP = {
@@ -62,6 +65,25 @@ function sendBadRequest(res, message) {
     success: false,
     message
   });
+}
+
+function sendNotFound(res, message = MSG_PLAN_NOT_FOUND) {
+  return res.status(HTTP.NOT_FOUND).json({
+    success: false,
+    message
+  });
+}
+
+/**
+ * @returns {string | null} normalized 32-char hex, or null after sending 400
+ */
+function requireNormalizedPlanGuidParam(planGuid, res) {
+  const normalized = normalizePlanGuidHex(planGuid);
+  if (!normalized) {
+    sendBadRequest(res, PLAN_GUID_VALIDATION_MESSAGE);
+    return null;
+  }
+  return normalized;
 }
 
 function sendPlanDbError(res, error) {
@@ -228,12 +250,32 @@ router.put('/update', asyncHandler(async (req, res) => {
   }
 }));
 
-router.delete('/:planGuid', asyncHandler(async (req, res) => {
-  const { planGuid } = req.params;
-  const normalizedPlanGuid = normalizePlanGuidHex(planGuid);
-  if (!normalizedPlanGuid) {
-    return sendBadRequest(res, PLAN_GUID_VALIDATION_MESSAGE);
+/**
+ * GET /api/compensation/plans/:planGuid/components
+ * Lines linked to the plan (COMP.COMP_PLAN_COMPONENTS + master COMP.COMP_COMPONENTS).
+ */
+router.get('/:planGuid/components', asyncHandler(async (req, res) => {
+  const normalizedPlanGuid = requireNormalizedPlanGuidParam(req.params.planGuid, res);
+  if (!normalizedPlanGuid) return;
+
+  try {
+    const data = await getPlanComponentsByPlanGuid(normalizedPlanGuid);
+    if (data == null) {
+      return sendNotFound(res);
+    }
+    return res.status(HTTP.OK).json({
+      success: true,
+      message: 'Plan components fetched successfully',
+      ...data
+    });
+  } catch (error) {
+    return sendPlanDbError(res, error);
   }
+}));
+
+router.delete('/:planGuid', asyncHandler(async (req, res) => {
+  const normalizedPlanGuid = requireNormalizedPlanGuidParam(req.params.planGuid, res);
+  if (!normalizedPlanGuid) return;
 
   const deletedBy = req.body?.deleted_by ?? 'SYSTEM';
 

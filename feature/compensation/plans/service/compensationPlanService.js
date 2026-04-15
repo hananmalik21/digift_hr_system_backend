@@ -389,16 +389,12 @@ export async function updateCompensationPlan(payload) {
 }
 
 /**
- * @param {string} planGuid
- * @param {string} deletedBy
+ * Shared JSON subquery: plan component lines + component master (tenant = enterprise).
+ * @param {string} enterpriseSqlExpr e.g. `v.enterprise_id` or `p.enterprise_id` (caller-controlled, not user input)
+ * @param {string} planIdSqlExpr e.g. `v.plan_id` or `p.plan_id`
  */
-const ELIGIBLE_PLANS_FOR_EMPLOYEE_SQL = `
-SELECT v.enterprise_id,
-       v.plan_id,
-       UPPER(RAWTOHEX(v.plan_guid)) AS plan_guid,
-       v.plan_code,
-       v.plan_name,
-       v.plan_type_code,
+function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
+  return `
        (
          SELECT NVL(
            JSON_ARRAYAGG(
@@ -421,12 +417,34 @@ SELECT v.enterprise_id,
            FROM comp.comp_plan_components pc
            JOIN comp.comp_components c
              ON c.component_id = pc.component_id
-            AND c.tenant_id = v.enterprise_id
-          WHERE pc.plan_id = v.plan_id
-       ) AS components_json
+            AND c.tenant_id = ${enterpriseSqlExpr}
+          WHERE pc.plan_id = ${planIdSqlExpr}
+       ) AS components_json`;
+}
+
+const ELIGIBLE_PLANS_FOR_EMPLOYEE_SQL = `
+SELECT v.enterprise_id,
+       v.plan_id,
+       UPPER(RAWTOHEX(v.plan_guid)) AS plan_guid,
+       v.plan_code,
+       v.plan_name,
+       v.plan_type_code,
+       ${sqlPlanComponentsJsonSubquery('v.enterprise_id', 'v.plan_id')}
   FROM comp.v_employee_eligible_plans v
  WHERE v.employee_guid = HEXTORAW(:employee_guid_hex)
  ORDER BY v.plan_id
+`;
+
+const PLAN_COMPONENTS_BY_PLAN_GUID_SQL = `
+SELECT p.enterprise_id,
+       p.plan_id,
+       UPPER(RAWTOHEX(p.plan_guid)) AS plan_guid,
+       p.plan_code,
+       p.plan_name,
+       p.plan_type_code,
+       ${sqlPlanComponentsJsonSubquery('p.enterprise_id', 'p.plan_id')}
+  FROM comp.comp_plans p
+ WHERE p.plan_guid = HEXTORAW(:plan_guid_hex)
 `;
 
 function parsePlanComponentsJson(raw) {
@@ -442,6 +460,26 @@ function parsePlanComponentsJson(raw) {
   }
 }
 
+function normalizedPlanComponentsFromRow(rawJson) {
+  return parsePlanComponentsJson(rawJson).map(normalizeComponentForGetResponse);
+}
+
+/**
+ * @param {object} r Oracle row (upper or lower column keys)
+ * @returns {{ enterprise_id: *, plan_id: *, plan_guid: *, plan_code: *, plan_name: *, plan_type_code: *, components: object[] }}
+ */
+function mapPlanRowWithComponents(r) {
+  return {
+    enterprise_id: r.ENTERPRISE_ID ?? r.enterprise_id,
+    plan_id: r.PLAN_ID ?? r.plan_id,
+    plan_guid: r.PLAN_GUID ?? r.plan_guid,
+    plan_code: r.PLAN_CODE ?? r.plan_code,
+    plan_name: r.PLAN_NAME ?? r.plan_name,
+    plan_type_code: r.PLAN_TYPE_CODE ?? r.plan_type_code,
+    components: normalizedPlanComponentsFromRow(r.COMPONENTS_JSON ?? r.components_json)
+  };
+}
+
 /**
  * Rows from COMP.V_EMPLOYEE_ELIGIBLE_PLANS (feature/compensation/plans/sql/create_view_v_employee_eligible_plans.sql).
  * Plan lines from COMP.COMP_PLAN_COMPONENTS + COMP.COMP_COMPONENTS (tenant_id = enterprise_id).
@@ -453,17 +491,21 @@ export async function getEligiblePlansForEmployee(employeeGuidHex) {
     employee_guid_hex: employeeGuidHex
   });
   const rows = result.rows ?? [];
-  return rows.map((r) => ({
-    enterprise_id: r.ENTERPRISE_ID ?? r.enterprise_id,
-    plan_id: r.PLAN_ID ?? r.plan_id,
-    plan_guid: r.PLAN_GUID ?? r.plan_guid,
-    plan_code: r.PLAN_CODE ?? r.plan_code,
-    plan_name: r.PLAN_NAME ?? r.plan_name,
-    plan_type_code: r.PLAN_TYPE_CODE ?? r.plan_type_code,
-    components: parsePlanComponentsJson(r.COMPONENTS_JSON ?? r.components_json).map(
-      normalizeComponentForGetResponse
-    )
-  }));
+  return rows.map(mapPlanRowWithComponents);
+}
+
+/**
+ * Plan lines from COMP.COMP_PLAN_COMPONENTS + COMP.COMP_COMPONENTS (tenant_id = enterprise_id).
+ * @param {string} planGuidHex 32-char uppercase hex (no 0x), for HEXTORAW
+ * @returns {Promise<object | null>} plan header + components, or null if no plan row
+ */
+export async function getPlanComponentsByPlanGuid(planGuidHex) {
+  const result = await executeQuery(PLAN_COMPONENTS_BY_PLAN_GUID_SQL, {
+    plan_guid_hex: planGuidHex
+  });
+  const r = result.rows?.[0];
+  if (!r) return null;
+  return mapPlanRowWithComponents(r);
 }
 
 export async function deleteCompensationPlan(planGuid, deletedBy) {
