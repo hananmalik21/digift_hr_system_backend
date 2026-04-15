@@ -33,9 +33,15 @@ Content-Type: application/json
 
 ### Edit — multipart/form-data (adjustment + stringified components + optional BLOB documents)
 ### Uploaded files are NOT stored in this repo or on app disk — only persisted in Oracle (e.g. COMP_ADJUSTMENT_DOCS.FILE_CONTENT).
+### enterprise_id is required (same as create). Postman form-data must include it alongside employee_id and plan_id.
 ### Each object in "components" JSON must include "adjustment_method" (e.g. MANUAL, PERCENTAGE, AMOUNT_CHANGE).
-### Field "components" must be a JSON array string. Files: "documents" or "documents[]" (repeat for multiple).
+### Field "components" must be valid JSON (watch commas between properties) — a JSON array string in form-data.
+### Files: "documents" or "documents[]" (repeat for multiple).
 ### Optional: document_descriptions = JSON string array, same order as files, e.g. ["Memo","Contract"]
+### Add a new pay component while updating an existing one: send multiple objects in one array, e.g.
+###   [{"component_id":101,...,"adjustment_method":"MANUAL","active_flag":"Y"},{"component_id":102,...,"replace_flag":"TRUE","adjustment_method":"MANUAL","active_flag":"Y"}]
+### If Oracle returns ORA-20121 / no active assignment for a component_id, that row is usually a first-time insert: set "replace_flag":"TRUE" on that object only.
+### Debug: set env COMP_LOG_COMPONENT_FLAGS=1 (or true) to print a one-line components snapshot before edit_components (default off).
 ### Use paths to files on your machine for curl @... (do not commit sample PDFs into the project).
 POST http://localhost:3000/api/comp/employee-compensation/edit
 Content-Type: multipart/form-data; boundary=----digify

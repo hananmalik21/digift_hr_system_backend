@@ -41,6 +41,34 @@ const uploadEditMiddleware = uploadEdit.fields([
   { name: 'documents[]', maxCount: EMP_COMP_MAX_EDIT_DOCUMENTS }
 ]);
 
+/**
+ * @param {unknown} err
+ * @param {import('express').Response} res
+ * @returns {boolean} whether a response was sent
+ */
+function respondToEditMulterError(err, res) {
+  if (!(err instanceof multer.MulterError)) return false;
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    res.status(HTTP.BAD_REQUEST).json({
+      success: false,
+      message: `Each file must be at most ${EDIT_MAX_FILE_MB} MB`
+    });
+    return true;
+  }
+  if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+    res.status(HTTP.BAD_REQUEST).json({
+      success: false,
+      message: `At most ${EMP_COMP_MAX_EDIT_DOCUMENTS} document(s) allowed`
+    });
+    return true;
+  }
+  res.status(HTTP.BAD_REQUEST).json({
+    success: false,
+    message: err.message || 'Upload failed'
+  });
+  return true;
+}
+
 function stripOracleHelpUrl(text) {
   return (text || '').replace(/\s*Help:\s*https?:\/\/[^\s]*/gi, '').trim();
 }
@@ -464,24 +492,7 @@ router.post(
   '/edit',
   (req, res, next) => {
     uploadEditMiddleware(req, res, (err) => {
-      if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(HTTP.BAD_REQUEST).json({
-            success: false,
-            message: `Each file must be at most ${EDIT_MAX_FILE_MB} MB`
-          });
-        }
-        if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
-          return res.status(HTTP.BAD_REQUEST).json({
-            success: false,
-            message: `At most ${EMP_COMP_MAX_EDIT_DOCUMENTS} document(s) allowed`
-          });
-        }
-        return res.status(HTTP.BAD_REQUEST).json({
-          success: false,
-          message: err.message || 'Upload failed'
-        });
-      }
+      if (respondToEditMulterError(err, res)) return;
       if (err) {
         return res.status(HTTP.SERVER_ERROR).json({
           success: false,
