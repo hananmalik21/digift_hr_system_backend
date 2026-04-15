@@ -2,6 +2,9 @@
 GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=80
 
+### Assigned components — COMP.COMP_EMP_ASSIGNED_COMPONENTS_V (employee_guid required, 32 hex; hyphens optional)
+GET http://localhost:3000/api/comp/employee-assigned-components?employee_guid=4CC128141B67EDF8E0633519000A56F3
+
 ### Create — JSON only (no documents, no adjustment_id)
 POST http://localhost:3000/api/comp/employee-compensation/create
 Content-Type: application/json

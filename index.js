@@ -59,6 +59,7 @@ import compLookupValueController from './feature/look_ups/comp/comp_lookup_value
 import compComponentController from './feature/compensation/components/controller/compComponentController.js';
 import compSalaryStructureRoutes from './feature/compensation/salary_structures/routes/compSalaryStructures.routes.js';
 import compAdjustmentsRoutes from './feature/compensation/adjustments/routes/compAdjustments.routes.js';
+import compEmployeeAssignedComponentsRoutes from './feature/compensation/employee_assigned_components/routes/compEmployeeAssignedComponents.routes.js';
 import compensationPlanController from './feature/compensation/plans/controller/compensationPlanController.js';
 import compPlansFullViewController from './feature/compensation/plans/controller/compPlansFullViewController.js';
 import employeeCompensationController from './feature/compensation/employee_compensation/controller/employeeCompensationController.js';
@@ -220,6 +221,7 @@ app.use('/api/comp/components', compComponentController);
 app.use('/api/comp/employee-compensation', employeeCompensationController);
 app.use('/api/comp', compSalaryStructureRoutes);
 app.use('/api/comp', compAdjustmentsRoutes);
+app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
 app.use('/api/comp', compPlansFullViewController);
 app.use('/api/compensation/plans', compensationPlanController);
 app.use('/api/abs', leavePolicyController);
