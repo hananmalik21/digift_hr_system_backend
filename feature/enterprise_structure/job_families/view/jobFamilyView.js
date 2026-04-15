@@ -15,10 +15,28 @@ function convertKeysToSnakeCase(obj) {
   return converted;
 }
 
-export function sendJobFamilyList(res, req, jobFamilies) {
+export function sendJobFamilyList(res, req, jobFamilies, meta = {}) {
+  const list = Array.isArray(jobFamilies) ? jobFamilies : [];
+
+  const responseMeta = {
+    ...(meta?.filters ? { filters: meta.filters } : {})
+  };
+
+  if (meta?.pagination) {
+    responseMeta.pagination = {
+      page: meta.pagination.page || 1,
+      page_size: meta.pagination.pageSize || list.length,
+      total: meta?.total !== undefined ? meta.total : list.length,
+      total_pages: meta.pagination.totalPages || 1,
+      has_next: Boolean(meta.pagination.hasNext),
+      has_previous: Boolean(meta.pagination.hasPrevious)
+    };
+  }
+
   res.json({
     success: true,
-    data: convertKeysToSnakeCase(jobFamilies)
+    meta: responseMeta,
+    data: convertKeysToSnakeCase(list)
   });
 }
 
