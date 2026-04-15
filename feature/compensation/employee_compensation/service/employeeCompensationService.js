@@ -117,6 +117,18 @@ function getOracleErrorMessage(error) {
   return error.message || String(error);
 }
 
+function summarizeComponentFlagsForLog(components) {
+  if (!Array.isArray(components)) return [];
+  return components.map((c, idx) => ({
+    idx,
+    component_id: c?.component_id ?? null,
+    replace_flag: c?.replace_flag ?? null,
+    replace: Object.prototype.hasOwnProperty.call(c || {}, 'replace') ? c.replace : undefined,
+    delete_flag: c?.delete_flag ?? null,
+    delete: Object.prototype.hasOwnProperty.call(c || {}, 'delete') ? c.delete : undefined
+  }));
+}
+
 export function classifyEmployeeCompOracleError(error) {
   const raw = getOracleErrorMessage(error);
   const line = raw.split(/\n/)[0].replace(/\s*Help:\s*https?:\/\/[^\s]*/gi, '').trim();
@@ -395,6 +407,34 @@ export async function editEmployeeCompensationComponents(
     };
 
     appendDocumentBinds(binds, files.slice(0, EMP_COMP_MAX_EDIT_DOCUMENTS), documentDescriptions);
+
+    // Debug aid: confirm whether replace/delete flags survived controller normalization + JSON stringify.
+    //
+    // Default: enabled when NODE_ENV is development/test (or unset) unless explicitly disabled.
+    // Override:
+    // - COMP_LOG_COMPONENT_FLAGS=1|true|yes|0|false|no
+    const rawFlag = String(process.env.COMP_LOG_COMPONENT_FLAGS ?? '').trim().toLowerCase();
+    const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+    const envAllowsDefault =
+      nodeEnv === '' || nodeEnv === 'development' || nodeEnv === 'dev' || nodeEnv === 'test';
+    const logFlags =
+      rawFlag === '1' ||
+      rawFlag === 'true' ||
+      rawFlag === 'yes' ||
+      (rawFlag === '' && envAllowsDefault);
+    if (logFlags) {
+      // eslint-disable-next-line no-console
+      console.info(
+        '[employee-compensation/edit] component flags snapshot',
+        JSON.stringify({
+          enterprise_id: payload.enterprise_id,
+          employee_id: payload.employee_id,
+          plan_id: payload.plan_id,
+          docCount,
+          components: summarizeComponentFlagsForLog(payload.components)
+        })
+      );
+    }
 
     await connection.execute(plsql, binds, { autoCommit: false });
 
