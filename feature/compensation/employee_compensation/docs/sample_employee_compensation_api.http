@@ -1,3 +1,7 @@
+### Plan full details — COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (enterprise_id required; employee_id, plan_id optional)
+GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
+# GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=80
+
 ### Create — JSON only (no documents, no adjustment_id)
 POST http://localhost:3000/api/comp/employee-compensation/create
 Content-Type: application/json

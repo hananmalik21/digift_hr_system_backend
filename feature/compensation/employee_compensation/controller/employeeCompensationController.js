@@ -1,12 +1,15 @@
 import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { sendSuccess } from '../../../../utils/response.js';
 import {
   createEmployeeCompensationComponents,
   editEmployeeCompensationComponents,
   classifyEmployeeCompOracleError,
   EMP_COMP_MAX_EDIT_DOCUMENTS
 } from '../service/employeeCompensationService.js';
+import { getEmployeePlanFullDetails } from '../service/employeePlanFullDetailsService.js';
+import { parsePlanFullDetailsQuery } from '../validation/employeePlanFullDetailsQuery.js';
 
 const router = express.Router();
 
@@ -396,6 +399,41 @@ function validateEditMultipart(req) {
     documentDescriptions: descriptions
   };
 }
+
+/**
+ * GET /api/comp/employee-compensation
+ *
+ * Rows from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (totals precomputed in the view).
+ * Query: enterprise_id (required), employee_id (optional), plan_id (optional).
+ */
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    const parsed = parsePlanFullDetailsQuery(req.query);
+    if (!parsed.ok) {
+      return res.status(HTTP.BAD_REQUEST).json({
+        status: false,
+        message: parsed.message,
+        data: null
+      });
+    }
+
+    try {
+      const rows = await getEmployeePlanFullDetails(parsed.data);
+      return sendSuccess(res, {
+        message: 'Fetched successfully',
+        data: rows,
+        statusCode: HTTP.OK
+      });
+    } catch {
+      return res.status(HTTP.SERVER_ERROR).json({
+        status: false,
+        message: 'Failed to fetch employee plan full details',
+        data: null
+      });
+    }
+  })
+);
 
 router.post('/create', asyncHandler(async (req, res) => {
   const validation = validateCreateBody(req.body || {});
