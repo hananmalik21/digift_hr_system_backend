@@ -48,6 +48,40 @@ function toNumberOrNull(v) {
 }
 
 /**
+ * Normalize an Oracle view "JSON array" column into a string[].
+ * - Accepts actual arrays (already parsed by the driver)
+ * - Also accepts JSON text that parses to an array
+ * - Never comma-splits strings (legacy format no longer supported)
+ * - Null/empty → []
+ */
+function normalizeJsonStringArray(v) {
+  if (v == null) return [];
+
+  if (Array.isArray(v)) {
+    return v
+      .map((x) => (x == null ? '' : String(x).trim()))
+      .filter((s) => s !== '');
+  }
+
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s === '') return [];
+    if (!s.startsWith('[')) return [];
+    try {
+      const parsed = JSON.parse(s);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((x) => (x == null ? '' : String(x).trim()))
+        .filter((t) => t !== '');
+    } catch (_) {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+/**
  * Maps DB row to API shape. Dates → ISO-8601; RAW(16) GUIDs via Buffer from driver.
  */
 export function mapComponentsViewRow(row) {
@@ -83,6 +117,7 @@ export function mapComponentsViewRow(row) {
     component_name: g('COMPONENT_NAME') != null ? String(g('COMPONENT_NAME')) : null,
     description:
       descRaw != null && String(descRaw).trim() !== '' ? String(descRaw).trim() : null,
+    location_codes: normalizeJsonStringArray(g('LOCATION_CODES')),
     plan_usage_count: toNumberOrNull(g('PLAN_USAGE_COUNT')),
     component_type_code: g('COMPONENT_TYPE_CODE') != null ? String(g('COMPONENT_TYPE_CODE')) : null,
     calculation_method_code:
