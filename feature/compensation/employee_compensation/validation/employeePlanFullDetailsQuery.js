@@ -14,12 +14,31 @@ export const planFullDetailsQuerySchema = z.object({
   plan_id: z.preprocess(
     emptyToUndef,
     z.coerce.number().int().positive({ message: 'plan_id must be a positive integer' }).optional()
+  ),
+  page: z.preprocess(
+    emptyToUndef,
+    z.coerce
+      .number()
+      .int()
+      .positive({ message: 'page must be a positive integer' })
+      .optional()
+      .default(1)
+  ),
+  limit: z.preprocess(
+    emptyToUndef,
+    z.coerce
+      .number()
+      .int()
+      .positive({ message: 'limit must be a positive integer' })
+      .max(200, { message: 'limit must be at most 200' })
+      .optional()
+      .default(25)
   )
 });
 
 /**
  * @param {import('express').Request['query']} query
- * @returns {{ ok: true, data: { enterprise_id: number, employee_id?: number, plan_id?: number } } | { ok: false, message: string }}
+ * @returns {{ ok: true, data: { enterprise_id: number, employee_id?: number, plan_id?: number, page: number, limit: number } } | { ok: false, message: string }}
  */
 export function parsePlanFullDetailsQuery(query) {
   const parsed = planFullDetailsQuerySchema.safeParse(query);

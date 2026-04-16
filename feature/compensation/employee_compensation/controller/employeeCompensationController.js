@@ -447,10 +447,25 @@ router.get(
     }
 
     try {
-      const rows = await getEmployeePlanFullDetails(parsed.data);
+      const { enterprise_id, employee_id, plan_id, page, limit } = parsed.data;
+      const { rows, total } = await getEmployeePlanFullDetails(
+        { enterprise_id, employee_id, plan_id },
+        { page, limit }
+      );
+      const totalPages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
       return sendSuccess(res, {
         message: 'Fetched successfully',
         data: rows,
+        meta: {
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        },
         statusCode: HTTP.OK
       });
     } catch {

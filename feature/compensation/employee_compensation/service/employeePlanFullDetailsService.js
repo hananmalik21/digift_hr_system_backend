@@ -2,7 +2,7 @@ import { executeQuery } from '../../../../config/db.js';
 import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
 
 /** Single source of truth: COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (totals precomputed in the view). */
-const PLAN_FULL_DETAILS_SQL = `
+const PLAN_FULL_DETAILS_PAGED_SQL = `
   SELECT
     ENTERPRISE_ID,
     EMPLOYEE_ID,
@@ -21,12 +21,14 @@ const PLAN_FULL_DETAILS_SQL = `
     STRUCTURE_NAME,
     TOTAL_BASE_SALARY,
     TOTAL_ALLOWANCE,
-    TOTAL_BENEFITS
+    TOTAL_BENEFITS,
+    COUNT(*) OVER () AS TOTAL_COUNT
   FROM COMP.V_EMPLOYEE_PLAN_FULL_DETAILS
   WHERE ENTERPRISE_ID = :p_enterprise_id
     AND (:p_employee_id IS NULL OR EMPLOYEE_ID = :p_employee_id)
     AND (:p_plan_id IS NULL OR PLAN_ID = :p_plan_id)
   ORDER BY EMPLOYEE_ID, PLAN_ID
+  OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
 `;
 
 /**
@@ -109,6 +111,8 @@ async function mapRowWithParsedOrgStructure(row) {
   const next = { ...row };
   delete next.ORG_STRUCTURE_LIST;
   delete next.org_structure_list;
+  delete next.TOTAL_COUNT;
+  delete next.total_count;
   const orgParsed = await parseOrgStructureListColumn(orgSource);
   const snake = convertKeysToSnakeCase(next);
   return { ...snake, org_structure_list: orgParsed };
@@ -116,16 +120,27 @@ async function mapRowWithParsedOrgStructure(row) {
 
 /**
  * @param {{ enterprise_id: number, employee_id?: number, plan_id?: number }} filters
- * @returns {Promise<Record<string, unknown>[]>}
+ * @param {{ page: number, limit: number }} pagination
+ * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
  */
-export async function getEmployeePlanFullDetails(filters) {
+export async function getEmployeePlanFullDetails(filters, pagination = { page: 1, limit: 25 }) {
   const { enterprise_id, employee_id, plan_id } = filters;
+  const page = Number(pagination?.page ?? 1);
+  const limit = Number(pagination?.limit ?? 25);
+  const offset = Math.max(0, (Math.max(1, page) - 1) * Math.max(1, limit));
   const binds = {
     p_enterprise_id: enterprise_id,
     p_employee_id: employee_id ?? null,
-    p_plan_id: plan_id ?? null
+    p_plan_id: plan_id ?? null,
+    p_offset: offset,
+    p_limit: Math.max(1, limit)
   };
-  const result = await executeQuery(PLAN_FULL_DETAILS_SQL, binds);
+  const result = await executeQuery(PLAN_FULL_DETAILS_PAGED_SQL, binds);
   const rawRows = result?.rows || [];
-  return Promise.all(rawRows.map((row) => mapRowWithParsedOrgStructure(row)));
+  const total =
+    rawRows.length > 0
+      ? Number(rawRows[0]?.TOTAL_COUNT ?? rawRows[0]?.total_count ?? 0)
+      : 0;
+  const rows = await Promise.all(rawRows.map((row) => mapRowWithParsedOrgStructure(row)));
+  return { rows, total };
 }

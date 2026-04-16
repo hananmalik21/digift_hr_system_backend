@@ -1,6 +1,10 @@
 ### Plan full details — COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (enterprise_id required; employee_id, plan_id optional)
 GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=80
+# Pagination (defaults: page=1, limit=25; limit max 200)
+# GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&page=1&limit=25
+# GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&page=2&limit=25
+# GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&page=1&limit=10
 
 ### Assigned components — COMP.COMP_EMP_ASSIGNED_COMPONENTS_V (employee_guid required, 32 hex; hyphens optional)
 GET http://localhost:3000/api/comp/employee-assigned-components?employee_guid=4CC128141B67EDF8E0633519000A56F3
