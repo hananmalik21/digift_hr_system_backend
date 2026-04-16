@@ -19,12 +19,12 @@ function plsqlJsonTriFlagAssign(primaryKey, fallbackKey, outField) {
               TRIM(BOTH '"' FROM TRIM(TREAT(o.get('${key}') AS JSON_ELEMENT_T).to_string()))
             );
         END;
-        rec.${outField} := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END`;
+        rec.${outField} := CASE WHEN v_flag IN ('TRUE','1','Y','YES') THEN 'TRUE' ELSE 'FALSE' END;`;
 
   return `
       IF o.has('${primaryKey}') AND o.get_type('${primaryKey}') <> 'NULL' THEN${parseAndAssign(primaryKey)}
       ELSIF o.has('${fallbackKey}') AND o.get_type('${fallbackKey}') <> 'NULL' THEN${parseAndAssign(fallbackKey)}
-      END IF`;
+      END IF;`;
 }
 
 /**
