@@ -61,6 +61,11 @@ BEGIN
       v_flag VARCHAR2(20);
     BEGIN
       rec.component_id := o.get_number('component_id');
+      IF o.has('plan_id') AND o.get_type('plan_id') <> 'NULL' THEN
+        rec.plan_id := o.get_number('plan_id');
+      ELSE
+        rec.plan_id := NULL;
+      END IF;
       rec.amount := o.get_number('amount');
       rec.currency_code := TRIM(UPPER(o.get_string('currency_code')));
       rec.adjustment_method := TRIM(o.get_string('adjustment_method'));

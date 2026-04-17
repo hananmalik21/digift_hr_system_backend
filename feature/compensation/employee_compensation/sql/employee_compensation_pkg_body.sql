@@ -1,4 +1,8 @@
 -- =============================================================================
+-- OUTDATED STUB — do not deploy for production multi-plan adjustments.
+-- Authoritative package spec + body: deploy_employee_compensation_multi_plan.sql
+-- (t_component_rec.plan_id, edit_components header without ADJUSTMENT_DETAILS.PLAN_ID).
+-- =============================================================================
 -- Package body: COMP.EMPLOYEE_COMPENSATION
 -- Requires PACKAGE spec t_component_rec to include active_flag (CHAR(1)).
 -- Inserts into COMP.COMP_EMP_COMP_ASSIGNMENT_DTL. Does NOT COMMIT — Node commits.

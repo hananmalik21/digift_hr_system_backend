@@ -92,6 +92,19 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Distinct plan ids from assignment JSON lines (multi-plan adjustments). */
+function collectDistinctPlanIdsFromAssignmentJson(arr) {
+  if (!Array.isArray(arr)) return [];
+  const set = new Set();
+  for (const item of arr) {
+    if (!item || typeof item !== 'object') continue;
+    const raw = item.plan_id ?? item.PLAN_ID;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) set.add(n);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
 function toIsoDateOrNull(v) {
   if (v == null) return null;
   if (v instanceof Date && Number.isFinite(v.getTime())) return v.toISOString();
@@ -153,7 +166,16 @@ function buildWhereClause(filters, entCol) {
     binds.employee_id = filters.employee_id;
   }
   if (filters.plan_id != null) {
-    whereParts.push('v.PLAN_ID = :plan_id');
+    // PLAN_ID lives on COMP_ADJUSTMENT_LINES (multi-plan); header may omit it.
+    whereParts.push(
+      `EXISTS (
+         SELECT 1
+           FROM COMP.COMP_ADJUSTMENT_LINES al
+          WHERE al.adjustment_id = v.ADJUSTMENT_ID
+            AND al.${entCol} = v.${entCol}
+            AND al.plan_id = :plan_id
+       )`
+    );
     binds.plan_id = filters.plan_id;
   }
   if (filters.status != null) {
@@ -180,12 +202,20 @@ export function mapAdjustmentFullViewRow(row) {
   const total_salary = toNumberOrNull(g('TOTAL_SALARY'));
   const previous_salary = toNumberOrNull(g('PREVIOUS_SALARY'));
 
+  const headerPlanId = toNumberOrNull(g('PLAN_ID'));
+  const plan_ids = collectDistinctPlanIdsFromAssignmentJson(assignment_details_json);
+  const plan_id =
+    headerPlanId ?? (plan_ids.length === 1 ? plan_ids[0] : null);
+  const plan_ids_out =
+    plan_ids.length > 0 ? plan_ids : headerPlanId != null ? [headerPlanId] : [];
+
   return {
     adjustment_id: toNumberOrNull(g('ADJUSTMENT_ID')),
     adjustment_guid: guidHex(g('ADJUSTMENT_GUID')),
     enterprise_id: toNumberOrNull(g('ENTERPRISE_ID') ?? g('TENANT_ID')),
     employee_id: toNumberOrNull(g('EMPLOYEE_ID')),
-    plan_id: toNumberOrNull(g('PLAN_ID')),
+    plan_id,
+    plan_ids: plan_ids_out,
     component_id: toNumberOrNull(g('COMPONENT_ID')),
     adjustment_type: strOrNull(r, 'ADJUSTMENT_TYPE'),
     effective_date: toIsoDateOrNull(g('EFFECTIVE_DATE')),

@@ -1,28 +1,41 @@
-### Plan full details — COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (enterprise_id required; employee_id, plan_id optional)
+### Plan full details — rows from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS; totals from COMP.V_EMP_ASSIGNED_COMPONENTS_FULL
 GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=80
 # Pagination (defaults: page=1, limit=25; limit max 200)
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&page=1&limit=25
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&page=2&limit=25
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&page=1&limit=10
+# Regression check (allowance must NOT appear in total_base_salary):
+# GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=76
 
 ### Assigned components — COMP.COMP_EMP_ASSIGNED_COMPONENTS_V (employee_guid required, 32 hex; hyphens optional)
 GET http://localhost:3000/api/comp/employee-assigned-components?employee_guid=4CC128141B67EDF8E0633519000A56F3
 
 ### Create — JSON only (no documents, no adjustment_id)
+### plan_id: required on every components[] row only — do not send top-level plan_id.
+### One row can use the same plan_id as another; different plan_id per row is allowed (multi-plan).
 POST http://localhost:3000/api/comp/employee-compensation/create
 Content-Type: application/json
 
 {
   "enterprise_id": 1,
   "employee_id": 1001,
-  "plan_id": 10,
   "created_by": "SYSTEM",
   "components": [
     {
+      "plan_id": 80,
       "component_id": 101,
       "amount": 1000,
-      "currency_code": "USD",
+      "currency_code": "PKR",
+      "effective_start_date": "2026-04-01",
+      "effective_end_date": null,
+      "active_flag": "Y"
+    },
+    {
+      "plan_id": 81,
+      "component_id": 102,
+      "amount": 500,
+      "currency_code": "PKR",
       "effective_start_date": "2026-04-01",
       "effective_end_date": null,
       "active_flag": "Y"
@@ -33,15 +46,16 @@ Content-Type: application/json
 ### curl (create)
 # curl -s -X POST "http://localhost:3000/api/comp/employee-compensation/create" \
 #   -H "Content-Type: application/json" \
-#   -d '{"enterprise_id":1,"employee_id":1001,"plan_id":10,"created_by":"SYSTEM","components":[{"component_id":101,"amount":1000,"currency_code":"USD","effective_start_date":"2026-04-01","effective_end_date":null,"active_flag":"Y"}]}'
+#   -d '{"enterprise_id":1,"employee_id":1001,"created_by":"SYSTEM","components":[{"plan_id":80,"component_id":101,"amount":1000,"currency_code":"PKR","effective_start_date":"2026-04-01","effective_end_date":null,"active_flag":"Y"}]}'
 
 ### Edit — multipart/form-data (adjustment + stringified components + optional BLOB documents)
 ### Uploaded files are NOT stored in this repo or on app disk — only persisted in Oracle (e.g. COMP_ADJUSTMENT_DOCS.FILE_CONTENT).
 ### enterprise_id is required (same as create). Postman form-data must include it alongside employee_id.
 ### plan_id: optional at top level if every components[] row includes "plan_id". Otherwise top-level plan_id is the default for rows that omit it.
-### Multiple plans in one edit: send different plan_id per row (top-level plan_id may be omitted when every row has plan_id). Documents attach to the first plan batch only (same adjustment metadata for all batches).
+### Multiple plans in one edit: send different plan_id per row (top-level plan_id may be omitted when every row has plan_id). One Oracle edit_components call → one ADJUSTMENT_ID; documents attach to that single adjustment.
+### Verify (SQL as COMP): one row in COMP_ADJUSTMENT_DETAILS for the new ADJUSTMENT_ID (PLAN_ID null/absent on header); COMP_ADJUSTMENT_LINES shows one row per component with matching PLAN_ID each.
 ### Each object in "components" JSON must include "adjustment_method" (e.g. MANUAL, PERCENTAGE, AMOUNT_CHANGE).
-### Field "components" must be valid JSON (watch commas between properties) — a JSON array string in form-data.
+### Field "components" must be valid JSON: a JSON *array* string in form-data (start with "["), e.g. [{"plan_id":80,...}] not {"plan_id":80,...}.
 ### Files: "documents" or "documents[]" (repeat for multiple).
 ### Optional: document_descriptions = JSON string array, same order as files, e.g. ["Memo","Contract"]
 ### Add a new pay component while updating an existing one: send multiple objects in one array, e.g.

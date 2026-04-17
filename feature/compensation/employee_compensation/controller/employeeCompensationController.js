@@ -303,14 +303,37 @@ function validateCreateBody(body) {
   if (!ent.ok) errors.push(ent.error);
   const emp = toInt(body?.employee_id, 'employee_id');
   if (!emp.ok) errors.push(emp.error);
-  const plan = toInt(body?.plan_id, 'plan_id');
-  if (!plan.ok) errors.push(plan.error);
+
+  if (
+    body?.plan_id !== undefined &&
+    body?.plan_id !== null &&
+    String(body.plan_id).trim() !== ''
+  ) {
+    errors.push(
+      'plan_id must not be sent at the top level for create; set a positive plan_id on each components[] row'
+    );
+  }
 
   const created = toNonEmptyString(body?.created_by, 'created_by');
   if (!created.ok) errors.push(created.error);
 
   const lines = validateComponentLines(body?.components);
   if (!lines.ok) errors.push(...lines.errors);
+
+  /** @type {Array<object & { plan_id: number }> | null} */
+  let mergedComponents = null;
+  if (lines.ok && lines.normalized) {
+    mergedComponents = [];
+    for (let idx = 0; idx < lines.normalized.length; idx++) {
+      const row = lines.normalized[idx];
+      const pid = toInt(row.plan_id, `components[${idx}].plan_id`);
+      if (!pid.ok) {
+        errors.push(pid.error);
+      } else {
+        mergedComponents.push({ ...row, plan_id: pid.value });
+      }
+    }
+  }
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -321,9 +344,9 @@ function validateCreateBody(body) {
     payload: {
       enterprise_id: ent.value,
       employee_id: emp.value,
-      plan_id: plan.value,
+      plan_id: null,
       created_by: created.value,
-      components: lines.normalized
+      components: mergedComponents
     }
   };
 }
@@ -333,15 +356,21 @@ function parseComponentsJson(raw, errors) {
     errors.push('components is required');
     return null;
   }
+  const str = String(raw).trim();
   try {
-    const parsed = JSON.parse(String(raw));
+    const parsed = JSON.parse(str);
     if (!Array.isArray(parsed)) {
-      errors.push('components must be a JSON array');
+      errors.push('components must be a JSON array (e.g. wrap your object in [ ])');
       return null;
     }
     return parsed;
-  } catch {
-    errors.push('components must be valid JSON');
+  } catch (e) {
+    const detail = e instanceof SyntaxError ? e.message : String(e?.message || e);
+    const arrayHint =
+      /^\s*\{/.test(str) && !/^\s*\[/.test(str)
+        ? ' Send a JSON array: [ { ... } ] not a lone { ... }.'
+        : '';
+    errors.push(`components must be valid JSON (${detail}).${arrayHint}`);
     return null;
   }
 }
@@ -475,7 +504,7 @@ function validateEditMultipart(req) {
 /**
  * GET /api/comp/employee-compensation
  *
- * Rows from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS (totals precomputed in the view).
+ * Rows from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS; totals aggregated from COMP.V_EMP_ASSIGNED_COMPONENTS_FULL.
  * Query: enterprise_id (required), employee_id (optional), plan_id (optional).
  */
 router.get(

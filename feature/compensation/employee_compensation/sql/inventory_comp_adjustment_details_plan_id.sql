@@ -1,0 +1,22 @@
+-- =============================================================================
+-- Inventory: COMP.COMP_ADJUSTMENT_DETAILS.PLAN_ID (header column)
+-- Run as documentation only — not executed as a script.
+-- Use before DROP/MODIFY plan_id on COMP_ADJUSTMENT_DETAILS (see
+-- alter_comp_adjustment_details_drop_plan_id.sql).
+-- =============================================================================
+--
+-- Repository consumers (Node / SQL in this repo):
+--   - feature/compensation/adjustments/model/compAdjustmentDetailsFullViewModel.js
+--       mapAdjustmentFullViewRow: plan_id / plan_ids from header + assignment JSON;
+--       list filter uses EXISTS on COMP.COMP_ADJUSTMENT_LINES when filtering by plan_id.
+--   - feature/compensation/adjustments/utils/adjustmentRowMappers.js
+--       (shared row shape for COMP_ADJUSTMENT_DETAILS_FULL_V).
+--   - feature/compensation/employee_compensation/sql/deploy_employee_compensation_multi_plan.sql
+--       create_components / edit_components: per-row plan_id (NVL with p_plan_id); edit header omits PLAN_ID.
+--
+-- Database objects to verify in Oracle (not in repo — DBA inventory):
+--   - View COMP.COMP_ADJUSTMENT_DETAILS_FULL_V (column PLAN_ID if sourced from header).
+--   - Foreign keys, indexes, and reports referencing COMP_ADJUSTMENT_DETAILS.PLAN_ID.
+--   - Materialized views or synonyms on that column.
+--
+-- =============================================================================
