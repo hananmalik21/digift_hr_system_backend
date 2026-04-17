@@ -117,10 +117,32 @@ function parseIsoDateOnly(iso) {
   return new Date(Date.UTC(y, m - 1, d));
 }
 
+function stripPlanIdForOracle(row) {
+  if (row == null || typeof row !== 'object') return row;
+  const { plan_id: _omit, ...rest } = row;
+  return rest;
+}
+
+/**
+ * @param {Array<object & { plan_id: number }>} rows
+ * @returns {[number, object[]][]} sorted by plan_id ascending
+ */
+function groupComponentsByPlanId(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const pid = Number(row.plan_id);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+    if (!map.has(pid)) map.set(pid, []);
+    map.get(pid).push(stripPlanIdForOracle(row));
+  }
+  return [...map.entries()].sort((a, b) => a[0] - b[0]);
+}
+
 function summarizeComponentRowsForLog(components) {
   if (!Array.isArray(components)) return [];
   return components.map((c, idx) => ({
     idx,
+    plan_id: c?.plan_id ?? null,
     component_id: c?.component_id ?? null,
     amount: c?.amount ?? null,
     adjustment_method: c?.adjustment_method ?? null,
@@ -242,7 +264,7 @@ export async function createEmployeeCompensationComponents(payload) {
  * @param {{
  *   enterprise_id: number,
  *   employee_id: number,
- *   plan_id: number,
+ *   plan_id: number | null,
  *   adjustment_type: string,
  *   effective_date: string,
  *   reason_code: string,
@@ -251,7 +273,7 @@ export async function createEmployeeCompensationComponents(payload) {
  *   performance_rating: string | null,
  *   internal_notes: string | null,
  *   updated_by: string,
- *   components: { adjustment_method: string, ... }[]
+ *   components: (object & { plan_id: number, adjustment_method: string })[]
  * }} payload
  * @param {import('multer').File[]} files
  * @param {string[]} [documentDescriptions]
@@ -266,29 +288,12 @@ export async function editEmployeeCompensationComponents(
       ? null
       : String(payload.performance_rating).trim();
 
-  const docCount = Math.min(files.length, EMP_COMP_MAX_EDIT_DOCUMENTS);
-  const plsql = buildEditComponentsPlsql(docCount);
-
-  const binds = {
-    enterprise_id: payload.enterprise_id,
-    employee_id: payload.employee_id,
-    plan_id: payload.plan_id,
-    adjustment_type: String(payload.adjustment_type).trim(),
-    effective_date: {
-      val: parseIsoDateOnly(payload.effective_date),
-      dir: oracledb.BIND_IN,
-      type: oracledb.DATE
-    },
-    reason_code: String(payload.reason_code).trim(),
-    budget_code: String(payload.budget_code).trim(),
-    justification_text: textClobBind(payload.justification_text),
-    performance_rating: perf,
-    internal_notes: nullableTextClobBind(payload.internal_notes),
-    updated_by: String(payload.updated_by).trim(),
-    components_json: componentsJsonBind(JSON.stringify(payload.components))
-  };
-
-  appendDocumentBinds(binds, files.slice(0, EMP_COMP_MAX_EDIT_DOCUMENTS), documentDescriptions);
+  const fileSlice = files.slice(0, EMP_COMP_MAX_EDIT_DOCUMENTS);
+  const maxDocCount = Math.min(files.length, EMP_COMP_MAX_EDIT_DOCUMENTS);
+  const planBatches = groupComponentsByPlanId(payload.components);
+  if (planBatches.length === 0) {
+    throw new Error('No component rows with a valid plan_id after grouping');
+  }
 
   if (shouldLogEmployeeCompEditComponents()) {
     // eslint-disable-next-line no-console
@@ -298,13 +303,41 @@ export async function editEmployeeCompensationComponents(
         enterprise_id: payload.enterprise_id,
         employee_id: payload.employee_id,
         plan_id: payload.plan_id,
-        docCount,
+        plan_ids: planBatches.map(([id]) => id),
+        docCountFirstBatchOnly: maxDocCount,
         components: summarizeComponentRowsForLog(payload.components)
       })
     );
   }
 
   await withCompConnection(async (connection) => {
-    await connection.execute(plsql, binds, { autoCommit: false });
+    let batchIndex = 0;
+    for (const [planId, oracleComponents] of planBatches) {
+      const docCount = batchIndex === 0 ? maxDocCount : 0;
+      const plsql = buildEditComponentsPlsql(docCount);
+      const binds = {
+        enterprise_id: payload.enterprise_id,
+        employee_id: payload.employee_id,
+        plan_id: planId,
+        adjustment_type: String(payload.adjustment_type).trim(),
+        effective_date: {
+          val: parseIsoDateOnly(payload.effective_date),
+          dir: oracledb.BIND_IN,
+          type: oracledb.DATE
+        },
+        reason_code: String(payload.reason_code).trim(),
+        budget_code: String(payload.budget_code).trim(),
+        justification_text: textClobBind(payload.justification_text),
+        performance_rating: perf,
+        internal_notes: nullableTextClobBind(payload.internal_notes),
+        updated_by: String(payload.updated_by).trim(),
+        components_json: componentsJsonBind(JSON.stringify(oracleComponents))
+      };
+      if (docCount > 0) {
+        appendDocumentBinds(binds, fileSlice, documentDescriptions);
+      }
+      await connection.execute(plsql, binds, { autoCommit: false });
+      batchIndex += 1;
+    }
   });
 }

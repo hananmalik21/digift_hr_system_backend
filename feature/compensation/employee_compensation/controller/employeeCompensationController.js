@@ -88,6 +88,14 @@ function toInt(value, field) {
   return { ok: true, value: n };
 }
 
+/** Empty / missing → null; otherwise same rules as toInt. */
+function toOptionalPositiveInt(value, field) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return { ok: true, value: null };
+  }
+  return toInt(value, field);
+}
+
 function toNumberAmount(value, field) {
   if (value === undefined || value === null || value === '') {
     return { ok: false, error: `${field} is required` };
@@ -204,6 +212,11 @@ function validateComponentLines(components, options = {}) {
     deleteFlags[idx] = deleteFlag;
     if (!deleteFlag.ok) errors.push(deleteFlag.error);
 
+    if (c?.plan_id != null && String(c.plan_id).trim() !== '') {
+      const pid = toInt(c.plan_id, `${p}.plan_id`);
+      if (!pid.ok) errors.push(pid.error);
+    }
+
     if (replaceFlag.value === 'TRUE' && deleteFlag.value === 'TRUE') {
       errors.push(`${p} cannot set both replace and delete to true`);
     }
@@ -261,6 +274,10 @@ function validateComponentLines(components, options = {}) {
     const deleteFlag = deleteFlags[idx];
     if (replaceFlag.value != null) row.replace_flag = replaceFlag.value;
     if (deleteFlag.value != null) row.delete_flag = deleteFlag.value;
+
+    if (c?.plan_id != null && String(c.plan_id).trim() !== '') {
+      row.plan_id = Number(c.plan_id);
+    }
 
     return row;
   });
@@ -357,8 +374,8 @@ function validateEditMultipart(req) {
   if (!ent.ok) errors.push(ent.error);
   const emp = toInt(body.employee_id, 'employee_id');
   if (!emp.ok) errors.push(emp.error);
-  const plan = toInt(body.plan_id, 'plan_id');
-  if (!plan.ok) errors.push(plan.error);
+  const planOpt = toOptionalPositiveInt(body.plan_id, 'plan_id');
+  if (!planOpt.ok) errors.push(planOpt.error);
 
   const adjType = toNonEmptyString(body.adjustment_type, 'adjustment_type');
   if (!adjType.ok) errors.push(adjType.error);
@@ -390,6 +407,27 @@ function validateEditMultipart(req) {
     if (!lines.ok) errors.push(...lines.errors);
   }
 
+  /** @type {Array<object & { plan_id: number }> | null} */
+  let mergedComponents = null;
+  if (lines.ok && lines.normalized) {
+    mergedComponents = [];
+    const defaultPlanId = planOpt.value;
+    for (let idx = 0; idx < lines.normalized.length; idx++) {
+      const row = lines.normalized[idx];
+      const resolved =
+        row.plan_id != null && Number.isFinite(Number(row.plan_id))
+          ? Number(row.plan_id)
+          : defaultPlanId;
+      if (resolved == null || !Number.isFinite(resolved) || resolved <= 0) {
+        errors.push(
+          `components[${idx}] needs a positive plan_id, or provide top-level plan_id for rows that omit it`
+        );
+      } else {
+        mergedComponents.push({ ...row, plan_id: resolved });
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
@@ -407,12 +445,18 @@ function validateEditMultipart(req) {
   const files = collectEditUploadFiles(req);
   const descriptions = parseDocumentDescriptions(body.document_descriptions);
 
+  const distinctPlanIds =
+    mergedComponents != null
+      ? [...new Set(mergedComponents.map((r) => r.plan_id))].sort((a, b) => a - b)
+      : [];
+
   return {
     ok: true,
     payload: {
       enterprise_id: ent.value,
       employee_id: emp.value,
-      plan_id: plan.value,
+      /** When all rows target one plan, set for backward compatibility; null if multiple plans. */
+      plan_id: distinctPlanIds.length === 1 ? distinctPlanIds[0] : null,
       adjustment_type: adjType.value,
       effective_date: String(body.effective_date).trim().slice(0, 10),
       reason_code: reason.value,
@@ -421,7 +465,7 @@ function validateEditMultipart(req) {
       performance_rating: perf,
       internal_notes: notes,
       updated_by: updated.value,
-      components: lines.normalized
+      components: mergedComponents
     },
     files,
     documentDescriptions: descriptions
