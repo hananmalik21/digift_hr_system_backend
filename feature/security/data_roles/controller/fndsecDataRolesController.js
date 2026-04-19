@@ -6,6 +6,7 @@ import {
   NotFoundError,
   ValidationError
 } from '../../../../utils/errors/index.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import {
   createDataRoleService,
   getDataRoleByGuidFromView,
@@ -85,12 +86,23 @@ function resolveDeleteActor(req) {
 router.get(
   '/',
   route(async (req, res) => {
-    const { data, pagination } = await listDataRolesFromView(req.query || {});
+    const { data, total, page, page_size } = await listDataRolesFromView(req.query || {});
+    const p = buildPaginationMeta(page, page_size, total);
     return res.status(200).json({
       success: true,
       message: 'Data roles fetched successfully',
       data,
-      pagination
+      meta: {
+        total,
+        pagination: {
+          page: p.page,
+          page_size: p.pageSize,
+          total: p.total,
+          total_pages: p.totalPages,
+          has_next: p.hasNext,
+          has_previous: p.hasPrevious
+        }
+      }
     });
   })
 );

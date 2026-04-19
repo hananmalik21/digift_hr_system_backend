@@ -3,6 +3,7 @@ import db from '../../../../config/db.js';
 import { guidToBuffer } from '../../../../src/utils/oracleGuid.js';
 import { normalizeHex32 } from '../../../../utils/guidUtils.js';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 
 const PKG_CREATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.CREATE_JOB_ROLE';
 const PKG_UPDATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.UPDATE_JOB_ROLE';
@@ -416,6 +417,20 @@ function mapJobRolesJsonViewRow(row) {
   };
 }
 
+function metaFromPaginationMeta(p) {
+  return {
+    total: p.total,
+    pagination: {
+      page: p.page,
+      page_size: p.pageSize,
+      total: p.total,
+      total_pages: p.totalPages,
+      has_next: p.hasNext,
+      has_previous: p.hasPrevious
+    }
+  };
+}
+
 const JOB_ROLES_JSON_VIEW_SELECT = `
   SELECT
     v.job_role_id,
@@ -476,30 +491,14 @@ export async function getJobRolesFromJsonView(filters = {}) {
 
     // Always return pagination metadata so clients have a consistent contract.
     if (!paginationRequested) {
-      return {
-        data,
-        meta: {
-          pagination: {
-            page: 1,
-            limit: data.length,
-            total: data.length,
-            hasMore: false
-          }
-        }
-      };
+      const len = data.length;
+      const pageSize = len > 0 ? len : 1;
+      const p = buildPaginationMeta(1, pageSize, len);
+      return { data, meta: metaFromPaginationMeta(p) };
     }
 
-    return {
-      data,
-      meta: {
-        pagination: {
-          page,
-          limit,
-          total,
-          hasMore: total != null ? offset + data.length < total : false
-        }
-      }
-    };
+    const p = buildPaginationMeta(page, limit, total);
+    return { data, meta: metaFromPaginationMeta(p) };
   } catch (err) {
     if (err instanceof ValidationError) throw err;
     throw new DatabaseError(err?.message || 'Database error', err);

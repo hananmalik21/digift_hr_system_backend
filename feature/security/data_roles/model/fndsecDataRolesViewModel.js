@@ -240,17 +240,11 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_limit ROWS ONLY`;
       for (const row of dataResult.rows || []) {
         data.push(await mapViewRowToOutput(rowKeyMap(row)));
       }
-      const total_pages = total_records === 0 ? 0 : Math.ceil(total_records / page_size);
       return {
         data,
-        pagination: {
-          page,
-          page_size,
-          total_records,
-          total_pages,
-          has_prev_page: page > 1,
-          has_next_page: page * page_size < total_records
-        }
+        total: total_records,
+        page,
+        page_size
       };
     });
   } catch (err) {

@@ -1,6 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { parseDutyRoleGuidOrThrow, parseEnterpriseIdQuery } from '../model/fndsecDutyRolesModel.js';
 import {
   createDutyRoleService,
@@ -75,7 +76,7 @@ router.post(
 );
 
 /**
- * GET /api/security/duty-roles?enterprise_id=&search=&active_flag=&page=&limit=
+ * GET /api/security/duty-roles?enterprise_id=&search=&active_flag=&page=&limit=&page_size=
  * FNDSEC.FNDSEC_DUTY_ROLES_FULL_JSON_V
  * (Registered before /:dutyRoleGuid so list is not captured by the param route.)
  */
@@ -83,11 +84,23 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     try {
-      const { data, count } = await listDutyRolesFromView(req.query || {});
+      const { data, count, page, limit } = await listDutyRolesFromView(req.query || {});
+      const p = buildPaginationMeta(page, limit, count);
       return res.status(200).json({
         success: true,
         count,
-        data
+        data,
+        meta: {
+          total: count,
+          pagination: {
+            page: p.page,
+            page_size: p.pageSize,
+            total: p.total,
+            total_pages: p.totalPages,
+            has_next: p.hasNext,
+            has_previous: p.hasPrevious
+          }
+        }
       });
     } catch (err) {
       return sendError(res, err);

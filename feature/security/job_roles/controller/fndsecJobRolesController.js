@@ -1,7 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
-import { sendList } from '../../../../utils/response.js';
+import { sendSuccess } from '../../../../utils/response.js';
 import {
   createJobRole,
   deleteJobRole,
@@ -44,15 +44,17 @@ function sendError(res, err) {
  * - role_code (partial match)
  * - role_name (partial match)
  * - status
+ * - page, limit | page_size | pageSize (omit all four to return full list with meta.pagination for that page)
  *
- * Response rows: `job_role_guid` is a 32-char uppercase hex string; `*_json` fields are parsed arrays (empty → []).
+ * Response: `status`, `message`, `data`, `meta` (meta.total + meta.pagination: page, page_size, total, total_pages, has_next, has_previous).
+ * Rows: `job_role_guid` is 32-char uppercase hex; `*_json` fields are parsed arrays (empty → []).
  */
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     try {
       const result = await getJobRolesFromJsonView(req.query || {});
-      return sendList(res, {
+      return sendSuccess(res, {
         message: 'Fetched successfully',
         data: result?.data || [],
         meta: result?.meta || {}

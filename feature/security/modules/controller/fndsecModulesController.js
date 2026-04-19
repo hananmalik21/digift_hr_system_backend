@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendCreated, sendDeleted, sendList, sendSuccess, sendUpdated } from '../../../../utils/response.js';
+import { sendCreated, sendDeleted, sendSuccess, sendUpdated } from '../../../../utils/response.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import {
@@ -114,11 +114,21 @@ router.get(
     const filters = parseModuleListQuery(req);
     const pagination = parseListPagination(req.query);
     const { rows, total } = await listModules(filters, pagination);
-    const meta = buildPaginationMeta(pagination.page, pagination.pageSize, total);
-    return sendList(res, {
+    const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
+    return sendSuccess(res, {
       message: 'Modules fetched successfully',
       data: rows,
-      meta: { total, pagination: meta }
+      meta: {
+        total,
+        pagination: {
+          page: p.page,
+          page_size: p.pageSize,
+          total: p.total,
+          total_pages: p.totalPages,
+          has_next: p.hasNext,
+          has_previous: p.hasPrevious
+        }
+      }
     });
   })
 );

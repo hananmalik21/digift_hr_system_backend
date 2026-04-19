@@ -1,5 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { sendSuccess as sendSuccessResponse } from '../../../../utils/response.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   createFunction,
@@ -109,9 +111,23 @@ router.get(
     try {
       const filters = parseFunctionListQuery(req);
       const pagination = parseListPagination(req.query);
-      const { rows, total, page, pageSize } = await listFunctions(filters, pagination);
-      // Return rows directly in data (requested). Keep paging info inside message for visibility.
-      return sendDbJson(res, { message: 'Functions fetched successfully', data: rows });
+      const { rows, total } = await listFunctions(filters, pagination);
+      const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
+      return sendSuccessResponse(res, {
+        message: 'Functions fetched successfully',
+        data: rows,
+        meta: {
+          total,
+          pagination: {
+            page: p.page,
+            page_size: p.pageSize,
+            total: p.total,
+            total_pages: p.totalPages,
+            has_next: p.hasNext,
+            has_previous: p.hasPrevious
+          }
+        }
+      });
     } catch (err) {
       return sendError(res, err);
     }

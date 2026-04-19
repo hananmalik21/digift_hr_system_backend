@@ -27,7 +27,7 @@ function validateActiveFlagOptional(raw) {
 
 function parsePageLimit(query) {
   const rawPage = query?.page;
-  const rawLimit = query?.limit;
+  const rawLimit = query?.limit ?? query?.page_size;
 
   let page = DEFAULT_PAGE;
   if (isNonEmptyTrimmed(rawPage)) {
@@ -42,7 +42,9 @@ function parsePageLimit(query) {
   if (isNonEmptyTrimmed(rawLimit)) {
     const l = Number.parseInt(String(rawLimit), 10);
     if (!Number.isFinite(l) || !Number.isInteger(l) || l < 1) {
-      throw new ValidationError('Validation failed', ['limit must be numeric and at least 1']);
+      throw new ValidationError('Validation failed', [
+        'limit (or page_size) must be numeric and at least 1'
+      ]);
     }
     limit = l;
   }
@@ -234,7 +236,7 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_limit ROWS ONLY`;
       for (const row of dataResult.rows || []) {
         rows.push(await mapRowToOutput(rowKeyMap(row)));
       }
-      return { data: rows, count: total };
+      return { data: rows, count: total, page, limit };
     });
   } catch (err) {
     rethrowUnlessOperational(err, 'listDutyRolesFromView');
