@@ -1,14 +1,20 @@
 import { z } from 'zod';
 import { emptyQueryToUndef } from './queryParamUtils.js';
 
-export const planFullDetailsQuerySchema = z.object({
-  enterprise_id: z.coerce
-    .number()
-    .int()
-    .positive({ message: 'enterprise_id must be a positive integer' }),
+export const latestComponentHistoryQuerySchema = z.object({
+  enterprise_id: z.preprocess(
+    emptyQueryToUndef,
+    z.coerce
+      .number()
+      .int()
+      .positive({ message: 'enterprise_id must be a positive integer' })
+  ),
   employee_id: z.preprocess(
     emptyQueryToUndef,
-    z.coerce.number().int().positive({ message: 'employee_id must be a positive integer' }).optional()
+    z.coerce
+      .number()
+      .int()
+      .positive({ message: 'employee_id must be a positive integer' })
   ),
   plan_id: z.preprocess(
     emptyQueryToUndef,
@@ -37,10 +43,10 @@ export const planFullDetailsQuerySchema = z.object({
 
 /**
  * @param {import('express').Request['query']} query
- * @returns {{ ok: true, data: { enterprise_id: number, employee_id?: number, plan_id?: number, page: number, limit: number } } | { ok: false, message: string }}
+ * @returns {{ ok: true, data: { enterprise_id: number, employee_id: number, plan_id?: number, page: number, limit: number } } | { ok: false, message: string }}
  */
-export function parsePlanFullDetailsQuery(query) {
-  const parsed = planFullDetailsQuerySchema.safeParse(query);
+export function parseLatestComponentHistoryQuery(query) {
+  const parsed = latestComponentHistoryQuerySchema.safeParse(query);
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message || 'Invalid query';
     return { ok: false, message };

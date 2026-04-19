@@ -8,6 +8,10 @@ GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
 # Regression check (allowance must NOT appear in total_base_salary):
 # GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1&employee_id=299&plan_id=76
 
+### Latest component history — one row per component (ROW_NUMBER); pagination: page, limit (defaults 1 / 25; limit max 200)
+# GET http://localhost:3000/api/comp/employee/latest-component-history?enterprise_id=1&employee_id=299
+# GET http://localhost:3000/api/comp/employee/latest-component-history?enterprise_id=1&employee_id=299&plan_id=80&page=1&limit=25
+
 ### Assigned components — COMP.COMP_EMP_ASSIGNED_COMPONENTS_V (employee_guid required, 32 hex; hyphens optional)
 GET http://localhost:3000/api/comp/employee-assigned-components?employee_guid=4CC128141B67EDF8E0633519000A56F3
 
