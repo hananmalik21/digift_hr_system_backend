@@ -148,6 +148,7 @@ function safeJsonParseOrNull(v) {
 
 function mapViewRow(row) {
   return {
+    function_id: row.FUNCTION_ID != null ? Number(row.FUNCTION_ID) : null,
     function_guid: row.FUNCTION_GUID ?? null,
     enterprise_id: row.ENTERPRISE_ID != null ? Number(row.ENTERPRISE_ID) : null,
     function_code: row.FUNCTION_CODE ?? null,
@@ -207,6 +208,7 @@ export async function listFunctions(filters, pagination) {
 
   const dataSql = `
     SELECT
+      FUNCTION_ID,
       FUNCTION_GUID,
       ENTERPRISE_ID,
       FUNCTION_CODE,
@@ -252,6 +254,7 @@ export async function getFunctionByGuid(enterpriseId, functionGuid) {
 
   const sql = `
     SELECT
+      FUNCTION_ID,
       FUNCTION_GUID,
       ENTERPRISE_ID,
       FUNCTION_CODE,
