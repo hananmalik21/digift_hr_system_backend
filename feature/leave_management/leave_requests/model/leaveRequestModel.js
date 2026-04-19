@@ -4,6 +4,7 @@ import oracledb from 'oracledb';
 import crypto from 'crypto';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../utils/guidUtils.js';
+import { safeJson } from '../../../../services/emplEmployeeListService.js';
 
 /** Status used when normalizing legacy PENDING to SUBMITTED */
 const REQUEST_STATUS_SUBMITTED = 'SUBMITTED';
@@ -41,6 +42,9 @@ class LeaveRequestModel {
   static mapRowToLeaveRequest(row) {
     this.normalizeRequestStatus(row);
 
+    let orgStructureList = safeJson(row.emp_org_structure_list);
+    if (!Array.isArray(orgStructureList)) orgStructureList = [];
+
     const employeeInfo = row.emp_employee_id
       ? {
           employee_id: row.emp_employee_id,
@@ -56,7 +60,7 @@ class LeaveRequestModel {
           position_name_en: row.emp_position_name_en ?? null,
           position_name_ar: row.emp_position_name_ar ?? null,
           position_name: row.emp_position_name_en ?? row.emp_position_name_ar ?? null,
-          org_structure_list: row.emp_org_structure_list ?? null
+          org_structure_list: orgStructureList
         }
       : null;
 
