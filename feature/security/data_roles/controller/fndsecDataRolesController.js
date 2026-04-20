@@ -160,18 +160,55 @@ router.put(
 
 /**
  * DELETE /api/data-roles/:id?enterprise_id=
- * Soft delete: STATUS = INACTIVE. Body or query: created_by or actor (required).
+ * FNDSEC.FNDSEC_DATA_ROLES_PKG.DELETE_DATA_ROLE. Body or query: created_by or actor (required).
  */
 router.delete(
   '/:id',
   route(async (req, res) => {
     const actor = resolveDeleteActor(req);
-    const result = await softDeleteDataRoleService(req.params.id, req.query?.enterprise_id, actor);
-    return send(res, {
-      success: true,
-      message: result.message,
-      data: { data_role_id: result.data_role_id }
-    });
+    try {
+      const result = await softDeleteDataRoleService(req.params.id, req.query?.enterprise_id, actor);
+      const msg = result?.message != null ? String(result.message).trim() : '';
+
+      if (msg === 'Deleted successfully') {
+        return res.status(200).json({
+          success: true,
+          message: msg,
+          data: {
+            data_role_id: result?.data_role_id ?? null,
+            data_role_guid: result?.data_role_guid ?? null
+          }
+        });
+      }
+      if (msg === 'Data role not found.') {
+        return res.status(404).json({ success: false, message: msg, data: null });
+      }
+      if (msg.includes('Cannot delete this data role because it is referenced by other records')) {
+        return res.status(409).json({ success: false, message: msg, data: null });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: msg || 'Unexpected response while deleting data role.',
+        data: null
+      });
+    } catch (err) {
+      // Keep existing validation/auth patterns, but return the required clean delete JSON shape.
+      if (err instanceof ValidationError) {
+        const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
+        const message = details[0] || err.userMessage || err.message || 'Validation failed';
+        return res.status(400).json({ success: false, message, data: null });
+      }
+      if (err instanceof NotFoundError) {
+        return res.status(404).json({ success: false, message: 'Data role not found.', data: null });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Unable to delete data role at the moment. Please try again later.',
+        data: null
+      });
+    }
   })
 );
 

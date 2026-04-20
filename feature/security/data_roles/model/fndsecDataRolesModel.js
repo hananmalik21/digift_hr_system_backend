@@ -15,6 +15,7 @@ const LOG_TAG = 'fndsecDataRolesModel';
 const PKG = 'FNDSEC.FNDSEC_DATA_ROLES_PKG';
 const CREATE_PROC = `${PKG}.CREATE_DATA_ROLE`;
 const UPDATE_PROC = `${PKG}.UPDATE_DATA_ROLE`;
+const DELETE_PROC = `${PKG}.DELETE_DATA_ROLE`;
 
 const T_HEADER = 'FNDSEC.FNDSEC_DATA_ROLES';
 
@@ -968,24 +969,49 @@ END;`;
 }
 
 /**
- * DELETE /data-roles/:id — soft delete (STATUS = INACTIVE)
+ * DELETE /data-roles/:id — package delete
  */
 export async function softDeleteDataRole(pathId, enterpriseIdRaw, actorRaw) {
   const enterpriseId = parseEnterpriseId(enterpriseIdRaw);
   const actor = requireNonEmptyString('actor', actorRaw);
 
-  return await withTransaction(async (connection) => {
-    const { dataRoleId } = await lockHeaderRow(connection, enterpriseId, pathId);
-    const now = new Date();
-    await connection.execute(
-      `UPDATE ${T_HEADER}
-       SET STATUS = 'INACTIVE',
-           LAST_UPDATED_BY = :lb,
-           LAST_UPDATE_DATE = :ld
-       WHERE DATA_ROLE_ID = :id AND ENTERPRISE_ID = :e`,
-      { lb: actor, ld: now, id: dataRoleId, e: enterpriseId },
-      { autoCommit: false }
-    );
-    return { data_role_id: dataRoleId, message: 'Data role marked inactive.' };
-  });
+  const plsql = `
+BEGIN
+  ${DELETE_PROC}(
+    P_DATA_ROLE_GUID  => HEXTORAW(:P_DATA_ROLE_GUID),
+    P_ACTOR           => :P_ACTOR,
+    P_MESSAGE         => :P_MESSAGE
+  );
+END;`;
+
+  try {
+    return await withConnection(async (connection) => {
+      // Preserve existing tenant/id validation style by locking the header row first.
+      const { dataRoleId, dataRoleGuid } = await lockHeaderRow(connection, enterpriseId, pathId);
+      const guidHex = parseDataRoleGuidOrThrow('data_role_guid (resolved from id)', dataRoleGuid);
+
+      const binds = {
+        P_DATA_ROLE_GUID: { val: guidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
+        P_ACTOR: { val: actor, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+        P_MESSAGE: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      };
+
+      const result = await connection.execute(plsql, binds, {
+        autoCommit: true,
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+
+      const msgRaw = readOut(result, 'P_MESSAGE', 'p_message');
+      const msg = msgRaw != null ? String(msgRaw).trim() : '';
+
+      return {
+        data_role_id: dataRoleId,
+        data_role_guid: guidHex,
+        message: msg
+      };
+    });
+  } catch (err) {
+    // If Oracle errors before returning P_MESSAGE, treat it as an execution failure (handled upstream).
+    rethrowKnownOrWrapDb(err, 'deleteDataRole');
+  }
 }
