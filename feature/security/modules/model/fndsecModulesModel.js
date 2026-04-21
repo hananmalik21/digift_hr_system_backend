@@ -12,7 +12,6 @@ const MODULE_LIST_SEARCH_MAX_LEN = 200;
 const MODULE_SELECT_COLUMNS = [
   'MODULE_ID',
   'MODULE_GUID',
-  'ENTERPRISE_ID',
   'MODULE_CODE',
   'MODULE_NAME',
   'DESCRIPTION',
@@ -31,18 +30,25 @@ const MODULE_SELECT_COLUMNS = [
   'LAST_UPDATE_DATE'
 ].join(', ');
 
-const MODULE_DETAIL_SQL = `SELECT ${MODULE_SELECT_COLUMNS} FROM ${TABLE} WHERE ENTERPRISE_ID = :enterprise_id AND MODULE_GUID = HEXTORAW(:module_guid_hex)`;
+const MODULE_DETAIL_BY_GUID_SQL = `SELECT ${MODULE_SELECT_COLUMNS} FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`;
+const MODULE_DETAIL_BY_ID_SQL = `SELECT ${MODULE_SELECT_COLUMNS} FROM ${TABLE} WHERE MODULE_ID = :module_id`;
 
-function moduleDetailBinds(enterpriseId, guidHex) {
-  return {
-    enterprise_id: { val: enterpriseId, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
+/** @param {import('oracledb').Connection} connection */
+async function selectModuleByGuidMapped(connection, guidHex) {
+  const result = await connection.execute(MODULE_DETAIL_BY_GUID_SQL, {
     module_guid_hex: { val: guidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 }
-  };
+  }, {
+    outFormat: oracledb.OUT_FORMAT_OBJECT
+  });
+  const row = result.rows?.[0];
+  return row ? mapModuleRow(row) : null;
 }
 
 /** @param {import('oracledb').Connection} connection */
-async function selectModuleMapped(connection, enterpriseId, guidHex) {
-  const result = await connection.execute(MODULE_DETAIL_SQL, moduleDetailBinds(enterpriseId, guidHex), {
+async function selectModuleByIdMapped(connection, moduleId) {
+  const result = await connection.execute(MODULE_DETAIL_BY_ID_SQL, {
+    module_id: { val: moduleId, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
+  }, {
     outFormat: oracledb.OUT_FORMAT_OBJECT
   });
   const row = result.rows?.[0];
@@ -67,14 +73,6 @@ function rethrowKnownOrWrapDb(err, context) {
   if (err instanceof DatabaseError) throw err;
   console.error(`[${LOG_TAG}] ${context}`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', err?.message || err);
   throw new DatabaseError(err?.message || 'Database error', err, null);
-}
-
-function parsePositiveEnterpriseId(raw) {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ValidationError('Validation failed', ['enterprise_id must be a valid positive number']);
-  }
-  return n;
 }
 
 function isAffirmativeFlag(v) {
@@ -204,7 +202,6 @@ function mapModuleRow(row) {
   return {
     module_id: row.MODULE_ID != null ? Number(row.MODULE_ID) : null,
     module_guid,
-    enterprise_id: row.ENTERPRISE_ID != null ? Number(row.ENTERPRISE_ID) : null,
     module_code: row.MODULE_CODE ?? null,
     module_name: row.MODULE_NAME ?? null,
     description: row.DESCRIPTION ?? null,
@@ -235,78 +232,60 @@ async function withConnection(fn) {
   }
 }
 
-async function ensureUniqueWithinEnterprise(connection, enterpriseId, { module_code, module_name }, excludeGuidHex) {
-  if (module_code != null && String(module_code).trim() !== '') {
-    const sql = `
+async function ensureUniqueModuleCode(connection, moduleCode, excludeWhereSql, excludeBinds) {
+  if (moduleCode == null || String(moduleCode).trim() === '') return;
+  const sql = `
       SELECT COUNT(*) AS CNT
       FROM ${TABLE}
-      WHERE ENTERPRISE_ID = :enterprise_id
-        AND UPPER(TRIM(MODULE_CODE)) = UPPER(TRIM(:module_code))
-        ${excludeGuidHex ? 'AND MODULE_GUID <> HEXTORAW(:exclude_guid_hex)' : ''}
+      WHERE UPPER(TRIM(MODULE_CODE)) = UPPER(TRIM(:module_code))
+      ${excludeWhereSql || ''}
     `;
-    const binds = {
-      enterprise_id: { val: enterpriseId, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-      module_code: { val: String(module_code), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 }
-    };
-    if (excludeGuidHex) {
-      binds.exclude_guid_hex = {
-        val: excludeGuidHex,
-        type: oracledb.STRING,
-        dir: oracledb.BIND_IN,
-        maxSize: 32
-      };
-    }
-    const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    const cnt = Number(r.rows?.[0]?.CNT ?? 0);
-    if (cnt > 0) {
-      throw new ConflictError('duplicate module_code');
-    }
-  }
-
-  if (module_name != null && String(module_name).trim() !== '') {
-    const sql = `
-      SELECT COUNT(*) AS CNT
-      FROM ${TABLE}
-      WHERE ENTERPRISE_ID = :enterprise_id
-        AND UPPER(TRIM(MODULE_NAME)) = UPPER(TRIM(:module_name))
-        ${excludeGuidHex ? 'AND MODULE_GUID <> HEXTORAW(:exclude_guid_hex)' : ''}
-    `;
-    const binds = {
-      enterprise_id: { val: enterpriseId, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-      module_name: { val: String(module_name), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 400 }
-    };
-    if (excludeGuidHex) {
-      binds.exclude_guid_hex = {
-        val: excludeGuidHex,
-        type: oracledb.STRING,
-        dir: oracledb.BIND_IN,
-        maxSize: 32
-      };
-    }
-    const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    const cnt = Number(r.rows?.[0]?.CNT ?? 0);
-    if (cnt > 0) {
-      throw new ConflictError('duplicate module_name');
-    }
+  const binds = {
+    module_code: { val: String(moduleCode), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 },
+    ...(excludeBinds || {})
+  };
+  const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+  const cnt = Number(r.rows?.[0]?.CNT ?? 0);
+  if (cnt > 0) {
+    throw new ConflictError('Module code already exists');
   }
 }
 
-export async function getModuleByGuid(enterpriseId, moduleGuid) {
-  const guidHex = parseModuleGuidHexOrThrow(moduleGuid);
+function parseModuleIdOrNull(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
+  }
+  return n;
+}
+
+function parseModuleIdentifierOrThrow(idOrGuid) {
+  const id = parseModuleIdOrNull(idOrGuid);
+  if (id != null) return { kind: 'id', module_id: id };
+  const guidHex = parseModuleGuidHexOrThrow(idOrGuid);
+  return { kind: 'guid', module_guid_hex: guidHex };
+}
+
+export async function getModuleByGuidOrId(moduleGuidOrId) {
+  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
   return withConnection(async (connection) => {
-    const mapped = await selectModuleMapped(connection, enterpriseId, guidHex);
+    const mapped =
+      ident.kind === 'id'
+        ? await selectModuleByIdMapped(connection, ident.module_id)
+        : await selectModuleByGuidMapped(connection, ident.module_guid_hex);
     if (!mapped) {
-      throw new NotFoundError('record not found');
+      throw new NotFoundError('Module not found');
     }
     return mapped;
   });
 }
 
 export async function listModules(filters, pagination) {
-  const where = ['ENTERPRISE_ID = :enterprise_id'];
-  const binds = {
-    enterprise_id: { val: filters.enterprise_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
-  };
+  const where = [`ACTIVE_FLAG = 'Y'`];
+  const binds = {};
 
   if (filters.search) {
     const term = String(filters.search).trim().slice(0, MODULE_LIST_SEARCH_MAX_LEN);
@@ -326,10 +305,6 @@ export async function listModules(filters, pagination) {
   if (filters.status_code) {
     where.push('STATUS_CODE = :status_code');
     binds.status_code = { val: String(filters.status_code), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 };
-  }
-  if (filters.active_flag) {
-    where.push('ACTIVE_FLAG = :active_flag');
-    binds.active_flag = { val: String(filters.active_flag).trim().toUpperCase(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 1 };
   }
   if (filters.category_code) {
     where.push('CATEGORY_CODE = :category_code');
@@ -376,7 +351,6 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
 
 export async function createModule(input, actor) {
   const required = [
-    'enterprise_id',
     'module_code',
     'module_name',
     'category_code',
@@ -392,8 +366,6 @@ export async function createModule(input, actor) {
   }
   if (errors.length > 0) throw new ValidationError('Validation failed', errors);
 
-  const enterpriseId = parsePositiveEnterpriseId(input.enterprise_id);
-
   validateYnField('active_flag', input.active_flag);
   validateYnField('is_system_flag', input.is_system_flag);
 
@@ -405,15 +377,11 @@ export async function createModule(input, actor) {
   const iconBuf = base64ToBufferOrThrow(input.icon_buffer ?? input.icon);
 
   return withConnection(async (connection) => {
-    await ensureUniqueWithinEnterprise(connection, enterpriseId, {
-      module_code: input.module_code,
-      module_name: input.module_name
-    });
+    await ensureUniqueModuleCode(connection, input.module_code);
 
     const sql = `
       INSERT INTO ${TABLE} (
         MODULE_GUID,
-        ENTERPRISE_ID,
         MODULE_CODE,
         MODULE_NAME,
         DESCRIPTION,
@@ -432,7 +400,6 @@ export async function createModule(input, actor) {
         LAST_UPDATE_DATE
       ) VALUES (
         HEXTORAW(:module_guid_hex),
-        :enterprise_id,
         :module_code,
         :module_name,
         :description,
@@ -454,7 +421,6 @@ export async function createModule(input, actor) {
 
     const binds = {
       module_guid_hex: { val: moduleGuidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 },
-      enterprise_id: { val: enterpriseId, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
       module_code: { val: String(input.module_code).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 },
       module_name: { val: String(input.module_name).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 400 },
       description: { val: input.description != null ? String(input.description) : null, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 4000 },
@@ -473,7 +439,7 @@ export async function createModule(input, actor) {
 
     try {
       await connection.execute(sql, binds, { autoCommit: true });
-      const full = await selectModuleMapped(connection, enterpriseId, moduleGuidHex);
+      const full = await selectModuleByGuidMapped(connection, moduleGuidHex);
       if (!full) {
         throw new DatabaseError(
           'reload_after_insert_failed',
@@ -488,9 +454,8 @@ export async function createModule(input, actor) {
   });
 }
 
-export async function updateModule(moduleGuid, enterpriseId, patch, actor) {
-  const guidHex = parseModuleGuidHexOrThrow(moduleGuid);
-  const ent = parsePositiveEnterpriseId(enterpriseId);
+export async function updateModule(moduleGuidOrId, patch, actor) {
+  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
 
   if (patch.active_flag !== undefined) validateYnField('active_flag', patch.active_flag);
   if (patch.is_system_flag !== undefined) validateYnField('is_system_flag', patch.is_system_flag);
@@ -505,30 +470,38 @@ export async function updateModule(moduleGuid, enterpriseId, patch, actor) {
 
   return withConnection(async (connection) => {
     const exists = await connection.execute(
-      `SELECT IS_SYSTEM_FLAG FROM ${TABLE} WHERE ENTERPRISE_ID = :enterprise_id AND MODULE_GUID = HEXTORAW(:module_guid_hex)`,
-      {
-        enterprise_id: { val: ent, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-        module_guid_hex: { val: guidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 }
-      },
+      ident.kind === 'id'
+        ? `SELECT IS_SYSTEM_FLAG FROM ${TABLE} WHERE MODULE_ID = :module_id`
+        : `SELECT IS_SYSTEM_FLAG FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`,
+      ident.kind === 'id'
+        ? { module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
+        : { module_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     if (!exists.rows?.[0]) {
-      throw new NotFoundError('record not found');
+      throw new NotFoundError('Module not found');
     }
 
-    await ensureUniqueWithinEnterprise(
-      connection,
-      ent,
-      { module_code: patch.module_code, module_name: patch.module_name },
-      guidHex
-    );
+    if (Object.prototype.hasOwnProperty.call(patch, 'module_code')) {
+      await ensureUniqueModuleCode(
+        connection,
+        patch.module_code,
+        ident.kind === 'id' ? 'AND MODULE_ID <> :exclude_module_id' : 'AND MODULE_GUID <> HEXTORAW(:exclude_guid_hex)',
+        ident.kind === 'id'
+          ? { exclude_module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
+          : { exclude_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } }
+      );
+    }
 
     const sets = [];
     const binds = {
-      enterprise_id: { val: ent, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-      module_guid_hex: { val: guidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 },
       last_updated_by: { val: String(actor || 'SYSTEM'), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 }
     };
+    if (ident.kind === 'id') {
+      binds.module_id = { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN };
+    } else {
+      binds.module_guid_hex = { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 };
+    }
 
     function setIfProvided(field, col, type, maxSize) {
       if (!Object.prototype.hasOwnProperty.call(patch, field)) return;
@@ -591,18 +564,20 @@ export async function updateModule(moduleGuid, enterpriseId, patch, actor) {
     const sql = `
       UPDATE ${TABLE}
       SET ${sets.join(', ')}
-      WHERE ENTERPRISE_ID = :enterprise_id
-        AND MODULE_GUID = HEXTORAW(:module_guid_hex)
+      WHERE ${ident.kind === 'id' ? 'MODULE_ID = :module_id' : 'MODULE_GUID = HEXTORAW(:module_guid_hex)'}
     `;
 
     try {
       const res = await connection.execute(sql, binds, { autoCommit: true });
       if ((res.rowsAffected ?? 0) < 1) {
-        throw new NotFoundError('record not found');
+        throw new NotFoundError('Module not found');
       }
-      const updated = await selectModuleMapped(connection, ent, guidHex);
+      const updated =
+        ident.kind === 'id'
+          ? await selectModuleByIdMapped(connection, ident.module_id)
+          : await selectModuleByGuidMapped(connection, ident.module_guid_hex);
       if (!updated) {
-        throw new NotFoundError('record not found');
+        throw new NotFoundError('Module not found');
       }
       return updated;
     } catch (err) {
@@ -616,15 +591,14 @@ const DELETE_MODULE_PKG = 'FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE';
 /**
  * Hard delete via Oracle API package (not a soft delete).
  */
-export async function deleteModule(moduleGuid, enterpriseId, actor) {
+export async function deleteModule(moduleGuid, actor) {
   const guidHex = parseModuleGuidHexOrThrow(moduleGuid);
-  const ent = parsePositiveEnterpriseId(enterpriseId);
+  const lastUpdatedBy = actor;
 
   const plsql = `
 BEGIN
   ${DELETE_MODULE_PKG}(
     P_MODULE_GUID     => :p_module_guid,
-    P_ENTERPRISE_ID   => :p_enterprise_id,
     P_LAST_UPDATED_BY => :p_last_updated_by
   );
 END;
@@ -632,9 +606,9 @@ END;
 
   return withConnection(async (connection) => {
     try {
-      const snapshot = await selectModuleMapped(connection, ent, guidHex);
+      const snapshot = await selectModuleByGuidMapped(connection, guidHex);
       if (!snapshot) {
-        throw new NotFoundError('record not found');
+        throw new NotFoundError('Module not found');
       }
 
       await connection.execute(
@@ -646,9 +620,8 @@ END;
             dir: oracledb.BIND_IN,
             maxSize: 32
           },
-          p_enterprise_id: { val: ent, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
           p_last_updated_by: {
-            val: String(actor || 'SYSTEM'),
+            val: String(lastUpdatedBy || 'SYSTEM'),
             type: oracledb.STRING,
             dir: oracledb.BIND_IN,
             maxSize: 200
@@ -662,7 +635,7 @@ END;
       const msg = String(err?.message || '');
       const num = Number(err?.errorNum);
       if (num === 1403 || num === 20001 || /ORA-20001/.test(msg)) {
-        throw new NotFoundError('record not found');
+        throw new NotFoundError('Module not found');
       }
       if (num === 20002 || /ORA-20002/.test(msg) || /SYSTEM MODULE|IS_SYSTEM/i.test(msg.toUpperCase())) {
         throw new ValidationError('Validation failed', ['Cannot delete system module']);

@@ -9,11 +9,10 @@ import {
   updateModule,
   deleteModule,
   listModules,
-  getModuleByGuid
+  getModuleByGuidOrId
 } from '../model/fndsecModulesModel.js';
 import {
   resolveActor,
-  parseEnterpriseIdFrom,
   parseModuleListQuery,
   parseListPagination,
   mapModuleConflict
@@ -48,7 +47,7 @@ function attachIconBuffer(body, file) {
 
 /**
  * POST /api/security/modules
- * Create module (module_guid generated server-side). enterprise_id must be in body.
+ * Create module (module_guid generated server-side).
  */
 router.post(
   '/',
@@ -71,7 +70,7 @@ router.post(
 
 /**
  * PUT /api/security/modules/:moduleGuid
- * Update module by module_guid + enterprise_id (mandatory).
+ * Update module by module_id OR module_guid.
  */
 router.put(
   '/:moduleGuid',
@@ -79,10 +78,9 @@ router.put(
   handleMulterError,
   asyncHandler(async (req, res) => {
     const actor = resolveActor(req);
-    const enterpriseId = parseEnterpriseIdFrom(req, { fromBody: true });
     const patch = attachIconBuffer({ ...(req.body || {}) }, req.file);
     try {
-      const data = await updateModule(req.params.moduleGuid, enterpriseId, patch, actor);
+      const data = await updateModule(req.params.moduleGuid, patch, actor);
       return sendUpdated(res, { message: 'Module updated successfully', data });
     } catch (err) {
       throw mapModuleConflict(err) || err;
@@ -91,22 +89,21 @@ router.put(
 );
 
 /**
- * DELETE /api/security/modules/:moduleGuid?enterprise_id=
- * Hard delete via FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE.
+ * DELETE /api/security/modules/:moduleGuid
+ * Hard delete via FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE (global modules).
  */
 router.delete(
   '/:moduleGuid',
   asyncHandler(async (req, res) => {
     const actor = resolveActor(req);
-    const enterpriseId = parseEnterpriseIdFrom(req);
-    const data = await deleteModule(req.params.moduleGuid, enterpriseId, actor);
+    const data = await deleteModule(req.params.moduleGuid, actor);
     return sendDeleted(res, { message: 'Module deleted successfully', data });
   })
 );
 
 /**
- * GET /api/security/modules?enterprise_id=&page=&page_size=&search=&status_code=&active_flag=&category_code=
- * Paginated list ordered by display_order; includes total count and icon base64.
+ * GET /api/security/modules?page=&page_size=&search=&status_code=&category_code=
+ * Global list of active modules ordered by display_order; includes total count and icon base64.
  */
 router.get(
   '/',
@@ -134,14 +131,13 @@ router.get(
 );
 
 /**
- * GET /api/security/modules/:moduleGuid?enterprise_id=
- * Get full module by guid (enterprise filtered), includes icon base64 and audit fields.
+ * GET /api/security/modules/:moduleGuid
+ * Get full module by guid OR numeric module_id; includes icon base64 and audit fields.
  */
 router.get(
   '/:moduleGuid',
   asyncHandler(async (req, res) => {
-    const enterpriseId = parseEnterpriseIdFrom(req);
-    const data = await getModuleByGuid(enterpriseId, req.params.moduleGuid);
+    const data = await getModuleByGuidOrId(req.params.moduleGuid);
     return sendSuccess(res, { message: 'Module fetched successfully', data });
   })
 );
