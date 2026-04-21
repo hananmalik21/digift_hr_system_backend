@@ -55,6 +55,36 @@ async function selectModuleByIdMapped(connection, moduleId) {
   return row ? mapModuleRow(row) : null;
 }
 
+export async function getModuleIconBufferByGuidOrId(moduleGuidOrId) {
+  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
+  const sql =
+    ident.kind === 'id'
+      ? `SELECT ICON FROM ${TABLE} WHERE MODULE_ID = :module_id`
+      : `SELECT ICON FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`;
+  const binds =
+    ident.kind === 'id'
+      ? { module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
+      : { module_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } };
+
+  return withConnection(async (connection) => {
+    const result = await connection.execute(
+      sql,
+      binds,
+      {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        fetchInfo: { ICON: { type: oracledb.BUFFER } }
+      }
+    );
+    const row = result.rows?.[0];
+    if (!row) throw new NotFoundError('Module not found');
+    const buf = row.ICON ?? row.icon ?? null;
+    if (!buf || !(Buffer.isBuffer(buf) || buf instanceof Uint8Array)) {
+      throw new NotFoundError('Icon not found');
+    }
+    return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  });
+}
+
 function readScalarCount(result) {
   const row = result?.rows?.[0];
   if (row == null || typeof row !== 'object' || Array.isArray(row)) return 0;

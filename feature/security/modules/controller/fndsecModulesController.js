@@ -9,7 +9,8 @@ import {
   updateModule,
   deleteModule,
   listModules,
-  getModuleByGuidOrId
+  getModuleByGuidOrId,
+  getModuleIconBufferByGuidOrId
 } from '../model/fndsecModulesModel.js';
 import { listActiveSubModulesByModuleId } from '../../sub_modules/model/fndsecSubModulesModel.js';
 import {
@@ -50,6 +51,16 @@ function baseUrlFromReq(req) {
   return `${req.protocol}://${req.get('host')}`;
 }
 
+function withModuleIconUrl(req, m) {
+  if (!m || typeof m !== 'object') return m;
+  const id = m.module_guid || m.module_id;
+  if (!id) return m;
+  return {
+    ...m,
+    icon_url: `${baseUrlFromReq(req)}/api/security/modules/${id}/icon`
+  };
+}
+
 function withSubModuleIconUrlNoIcon(req, sm) {
   if (!sm || typeof sm !== 'object') return sm;
   // eslint-disable-next-line no-unused-vars
@@ -59,6 +70,19 @@ function withSubModuleIconUrlNoIcon(req, sm) {
     ? { ...rest, icon_url: `${baseUrlFromReq(req)}/api/security/sub-modules/${id}/icon` }
     : rest;
 }
+
+/**
+ * GET /api/security/modules/:moduleGuid/icon
+ * Download icon as binary.
+ */
+router.get(
+  '/:moduleGuid/icon',
+  asyncHandler(async (req, res) => {
+    const buf = await getModuleIconBufferByGuidOrId(req.params.moduleGuid);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    return res.status(200).send(buf);
+  })
+);
 
 /**
  * POST /api/security/modules
@@ -75,7 +99,7 @@ router.post(
       const result = await createModule(body, actor);
       return sendCreated(res, {
         message: 'Module created successfully',
-        data: result
+        data: withModuleIconUrl(req, result)
       });
     } catch (err) {
       throw mapModuleConflict(err) || err;
@@ -96,7 +120,7 @@ router.put(
     const patch = attachIconBuffer({ ...(req.body || {}) }, req.file);
     try {
       const data = await updateModule(req.params.moduleGuid, patch, actor);
-      return sendUpdated(res, { message: 'Module updated successfully', data });
+      return sendUpdated(res, { message: 'Module updated successfully', data: withModuleIconUrl(req, data) });
     } catch (err) {
       throw mapModuleConflict(err) || err;
     }
@@ -112,7 +136,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const actor = resolveActor(req);
     const data = await deleteModule(req.params.moduleGuid, actor);
-    return sendDeleted(res, { message: 'Module deleted successfully', data });
+    return sendDeleted(res, { message: 'Module deleted successfully', data: withModuleIconUrl(req, data) });
   })
 );
 
@@ -129,7 +153,7 @@ router.get(
     const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
     return sendSuccess(res, {
       message: 'Modules fetched successfully',
-      data: rows,
+      data: Array.isArray(rows) ? rows.map((m) => withModuleIconUrl(req, m)) : rows,
       meta: {
         total,
         pagination: {
@@ -153,7 +177,7 @@ router.get(
   '/:moduleGuid',
   asyncHandler(async (req, res) => {
     const data = await getModuleByGuidOrId(req.params.moduleGuid);
-    return sendSuccess(res, { message: 'Module fetched successfully', data });
+    return sendSuccess(res, { message: 'Module fetched successfully', data: withModuleIconUrl(req, data) });
   })
 );
 
