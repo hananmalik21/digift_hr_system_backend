@@ -2,7 +2,6 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { NotFoundError, ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 // NOTE: We validate GUIDs locally; packages may compare GUID strings case-sensitively.
-import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
 
 const LOG_TAG = 'fndsecFunctionsModel';
 
@@ -147,10 +146,21 @@ function safeJsonParseOrNull(v) {
 }
 
 function mapViewRow(row) {
+  const moduleObj = safeJsonParseOrNull(row.MODULE_OBJ);
+  const module =
+    moduleObj == null
+      ? null
+      : {
+          module_id: moduleObj.module_id != null ? Number(moduleObj.module_id) : (row.MODULE_ID != null ? Number(row.MODULE_ID) : null),
+          module_guid: moduleObj.module_guid ?? null,
+          module_code: moduleObj.module_code ?? null,
+          module_name: moduleObj.module_name ?? null
+        };
+
   return {
     function_id: row.FUNCTION_ID != null ? Number(row.FUNCTION_ID) : null,
     function_guid: row.FUNCTION_GUID ?? null,
-    enterprise_id: row.ENTERPRISE_ID != null ? Number(row.ENTERPRISE_ID) : null,
+    module_id: row.MODULE_ID != null ? Number(row.MODULE_ID) : (module?.module_id ?? null),
     function_code: row.FUNCTION_CODE ?? null,
     function_name: row.FUNCTION_NAME ?? null,
     description: row.DESCRIPTION ?? null,
@@ -160,71 +170,45 @@ function mapViewRow(row) {
     display_order: row.DISPLAY_ORDER != null ? Number(row.DISPLAY_ORDER) : null,
     active_flag: row.ACTIVE_FLAG ?? null,
     is_system_flag: row.IS_SYSTEM_FLAG ?? null,
-    created_by: row.CREATED_BY ?? null,
-    creation_date: toIso(row.CREATION_DATE),
-    last_updated_by: row.LAST_UPDATED_BY ?? null,
-    last_update_date: toIso(row.LAST_UPDATE_DATE),
-    module_obj: safeJsonParseOrNull(row.MODULE_OBJ)
+    module
   };
 }
 
 export async function listFunctions(filters, pagination) {
-  const ent = parsePositiveEnterpriseId(filters?.enterprise_id);
+  // DB view already handles joins; do not join in API.
+  // Support only optional filters: function_id, module_id, function_code, active_flag
   const page = Number(pagination?.page || 1);
   const pageSize = Number(pagination?.pageSize || 20);
   const offset = (page - 1) * pageSize;
 
-  const where = ['ENTERPRISE_ID = :enterprise_id'];
+  validateYn('active_flag', filters?.active_flag);
+
   const binds = {
-    enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+    function_id: { val: filters?.function_id ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    module_id: { val: filters?.module_id ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    function_code: {
+      val: filters?.function_code != null && String(filters.function_code).trim() !== '' ? String(filters.function_code).trim() : null,
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 200
+    },
+    active_flag: {
+      val: filters?.active_flag != null ? String(filters.active_flag).trim().toUpperCase() : null,
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 1
+    }
   };
 
-  if (filters?.active_flag) {
-    where.push('ACTIVE_FLAG = :active_flag');
-    binds.active_flag = { val: String(filters.active_flag).toUpperCase(), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 };
-  }
-
-  if (filters?.module_guid) {
-    const mg = parseGuidHexOrThrow('module_guid', filters.module_guid);
-    // module_guid is inside MODULE_OBJ JSON per spec.
-    where.push(`JSON_VALUE(MODULE_OBJ, '$.module_guid' RETURNING VARCHAR2(32)) = :module_guid`);
-    binds.module_guid = { val: mg, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 };
-  }
-
-  if (filters?.search) {
-    const s = String(filters.search).trim().slice(0, 200);
-    const escaped = escapeLikePattern(s);
-    where.push(`(
-      UPPER(FUNCTION_CODE) LIKE UPPER(:search) ESCAPE '\\'
-      OR UPPER(FUNCTION_NAME) LIKE UPPER(:search) ESCAPE '\\'
-      OR UPPER(ROUTE_URL) LIKE UPPER(:search) ESCAPE '\\'
-    )`);
-    binds.search = { val: `%${escaped}%`, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 260 };
-  }
-
-  const whereSql = `WHERE ${where.join(' AND ')}`;
+  const whereSql = `WHERE (:function_id IS NULL OR FUNCTION_ID = :function_id)
+    AND (:module_id IS NULL OR MODULE_ID = :module_id)
+    AND (:function_code IS NULL OR FUNCTION_CODE = :function_code)
+    AND (:active_flag IS NULL OR ACTIVE_FLAG = :active_flag)`;
 
   const countSql = `SELECT COUNT(*) AS CNT FROM ${FUNCTIONS_VIEW} ${whereSql}`;
 
   const dataSql = `
-    SELECT
-      FUNCTION_ID,
-      FUNCTION_GUID,
-      ENTERPRISE_ID,
-      FUNCTION_CODE,
-      FUNCTION_NAME,
-      DESCRIPTION,
-      FUNCTION_TYPE,
-      PERMISSION_KEY,
-      ROUTE_URL,
-      DISPLAY_ORDER,
-      ACTIVE_FLAG,
-      IS_SYSTEM_FLAG,
-      CREATED_BY,
-      CREATION_DATE,
-      LAST_UPDATED_BY,
-      LAST_UPDATE_DATE,
-      MODULE_OBJ
+    SELECT *
     FROM ${FUNCTIONS_VIEW}
     ${whereSql}
     ORDER BY NVL(DISPLAY_ORDER, 999999), FUNCTION_NAME
@@ -248,32 +232,13 @@ export async function listFunctions(filters, pagination) {
   }
 }
 
-export async function getFunctionByGuid(enterpriseId, functionGuid) {
-  const ent = parsePositiveEnterpriseId(enterpriseId);
+export async function getFunctionByGuid(functionGuid) {
   const fg = parseGuidHexOrThrow('function_guid', functionGuid);
 
   const sql = `
-    SELECT
-      FUNCTION_ID,
-      FUNCTION_GUID,
-      ENTERPRISE_ID,
-      FUNCTION_CODE,
-      FUNCTION_NAME,
-      DESCRIPTION,
-      FUNCTION_TYPE,
-      PERMISSION_KEY,
-      ROUTE_URL,
-      DISPLAY_ORDER,
-      ACTIVE_FLAG,
-      IS_SYSTEM_FLAG,
-      CREATED_BY,
-      CREATION_DATE,
-      LAST_UPDATED_BY,
-      LAST_UPDATE_DATE,
-      MODULE_OBJ
+    SELECT *
     FROM ${FUNCTIONS_VIEW}
-    WHERE ENTERPRISE_ID = :enterprise_id
-      AND FUNCTION_GUID = :function_guid
+    WHERE FUNCTION_GUID = :function_guid
   `;
 
   try {
@@ -281,13 +246,12 @@ export async function getFunctionByGuid(enterpriseId, functionGuid) {
       const r = await connection.execute(
         sql,
         {
-          enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
           function_guid: { val: fg, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 }
         },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       const row = r.rows?.[0];
-      if (!row) throw new NotFoundError('function_guid not found for enterprise_id');
+      if (!row) throw new NotFoundError('function_guid not found');
       return mapViewRow(row);
     });
   } catch (err) {

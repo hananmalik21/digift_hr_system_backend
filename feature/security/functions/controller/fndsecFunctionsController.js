@@ -1,7 +1,5 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendSuccess as sendSuccessResponse } from '../../../../utils/response.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   createFunction,
@@ -112,22 +110,10 @@ router.get(
       const filters = parseFunctionListQuery(req);
       const pagination = parseListPagination(req.query);
       const { rows, total } = await listFunctions(filters, pagination);
-      const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
-      return sendSuccessResponse(res, {
-        message: 'Functions fetched successfully',
-        data: rows,
-        meta: {
-          total,
-          pagination: {
-            page: p.page,
-            page_size: p.pageSize,
-            total: p.total,
-            total_pages: p.totalPages,
-            has_next: p.hasNext,
-            has_previous: p.hasPrevious
-          }
-        }
-      });
+      // New contract for functions fetch: { success: true, data: [...] }
+      // Ignore legacy enterprise_id if provided by old clients.
+      void total;
+      return res.status(200).json({ success: true, data: rows });
     } catch (err) {
       return sendError(res, err);
     }
@@ -142,9 +128,9 @@ router.get(
   '/:functionGuid',
   asyncHandler(async (req, res) => {
     try {
-      const enterpriseId = parseEnterpriseIdFrom(req);
-      const data = await getFunctionByGuid(enterpriseId, req.params.functionGuid);
-      return sendDbJson(res, { message: 'Function fetched successfully', data });
+      // Ignore legacy enterprise_id if provided by old clients.
+      const data = await getFunctionByGuid(req.params.functionGuid);
+      return res.status(200).json({ success: true, data: [data] });
     } catch (err) {
       return sendError(res, err);
     }

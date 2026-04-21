@@ -29,6 +29,16 @@ function parseOptionalString(obj, key) {
   return s === '' ? null : s;
 }
 
+function parseOptionalNumber(obj, key) {
+  const raw = obj?.[key];
+  if (raw === undefined || raw === null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new ValidationError('Validation failed', [`${key} must be a valid number`]);
+  }
+  return n;
+}
+
 export function parseOptionalYn(obj, key) {
   const v = parseOptionalString(obj, key);
   if (v == null) return null;
@@ -49,14 +59,15 @@ export function parseListPagination(query) {
 }
 
 /**
- * GET /api/security/functions?enterprise_id=&page=&page_size=&search=&module_guid=&active_flag=
+ * GET /api/security/functions?function_id=&module_id=&function_code=&active_flag=
+ * Note: `enterprise_id` may still be sent by old clients; it is ignored.
  */
 export function parseFunctionListQuery(req) {
   const q = req.query || {};
   return {
-    enterprise_id: parseEnterpriseIdFrom(req),
-    search: parseOptionalString(q, 'search'),
-    module_guid: parseOptionalString(q, 'module_guid'),
+    function_id: parseOptionalNumber(q, 'function_id'),
+    module_id: parseOptionalNumber(q, 'module_id'),
+    function_code: parseOptionalString(q, 'function_code'),
     active_flag: parseOptionalYn(q, 'active_flag')
   };
 }
