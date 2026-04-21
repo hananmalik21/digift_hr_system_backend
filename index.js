@@ -76,6 +76,7 @@ import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
 import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
+import fndsecSubModulesController from './feature/security/sub_modules/controller/fndsecSubModulesController.js';
 import fndsecFunctionsController from './feature/security/functions/controller/fndsecFunctionsController.js';
 import fndsecFunctionRolesController from './feature/security/function_roles/controller/fndsecFunctionRolesController.js';
 import fndsecFunctionRolesByModuleRouter from './feature/security/function_roles/controller/fndsecFunctionRolesByModuleRouter.js';
@@ -237,6 +238,9 @@ app.use('/api/registerFace', faceAttendanceController);
 
 // Security - Modules (FNDSEC.FNDSEC_MODULES)
 app.use('/api/security/modules', fndsecModulesController);
+
+// Security - Sub-modules (FNDSEC.FNDSEC_SUB_MODULES)
+app.use('/api/security/sub-modules', fndsecSubModulesController);
 
 // Security - Functions (FNDSEC.FNDSEC_FUNCTIONS)
 app.use('/api/security/functions', fndsecFunctionsController);

@@ -349,6 +349,10 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
   });
 }
 
+/**
+ * Returns active modules with their active sub-modules (global, no enterprise scoping).
+ * Used by the combined hierarchy endpoint.
+ */
 export async function createModule(input, actor) {
   const required = [
     'module_code',

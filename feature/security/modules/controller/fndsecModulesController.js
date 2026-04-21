@@ -11,6 +11,7 @@ import {
   listModules,
   getModuleByGuidOrId
 } from '../model/fndsecModulesModel.js';
+import { listActiveSubModulesByModuleId } from '../../sub_modules/model/fndsecSubModulesModel.js';
 import {
   resolveActor,
   parseModuleListQuery,
@@ -43,6 +44,20 @@ function attachIconBuffer(body, file) {
     body.icon_buffer = file.buffer;
   }
   return body;
+}
+
+function baseUrlFromReq(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+function withSubModuleIconUrlNoIcon(req, sm) {
+  if (!sm || typeof sm !== 'object') return sm;
+  // eslint-disable-next-line no-unused-vars
+  const { icon, ...rest } = sm;
+  const id = rest.sub_module_guid || rest.sub_module_id;
+  return id
+    ? { ...rest, icon_url: `${baseUrlFromReq(req)}/api/security/sub-modules/${id}/icon` }
+    : rest;
 }
 
 /**
@@ -139,6 +154,21 @@ router.get(
   asyncHandler(async (req, res) => {
     const data = await getModuleByGuidOrId(req.params.moduleGuid);
     return sendSuccess(res, { message: 'Module fetched successfully', data });
+  })
+);
+
+/**
+ * GET /api/security/modules/:moduleIdOrGuid/sub-modules
+ * Returns active sub-modules for a single module (no base64 icon; uses icon_url).
+ */
+router.get(
+  '/:moduleIdOrGuid/sub-modules',
+  asyncHandler(async (req, res) => {
+    const rows = await listActiveSubModulesByModuleId(req.params.moduleIdOrGuid);
+    return sendSuccess(res, {
+      message: 'Sub-modules fetched successfully',
+      data: Array.isArray(rows) ? rows.map((sm) => withSubModuleIconUrlNoIcon(req, sm)) : rows
+    });
   })
 );
 
