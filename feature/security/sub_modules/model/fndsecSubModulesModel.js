@@ -497,10 +497,10 @@ export async function updateSubModule(subModuleGuidOrId, patch, actor) {
         : await selectByGuidMapped(connection, ident.sub_module_guid_hex);
     if (!existing) throw new NotFoundError('Sub-module not found');
 
-    const moduleIdForUniq =
-      Object.prototype.hasOwnProperty.call(patch, 'module_id') && patch.module_id != null && String(patch.module_id).trim() !== ''
-        ? parsePositiveIdOrThrow('module_id', patch.module_id)
-        : existing.module_id;
+    if (patch?.module_id == null || String(patch.module_id).trim() === '') {
+      throw new ValidationError('Validation failed', ['module_id is required']);
+    }
+    const moduleIdForUniq = parsePositiveIdOrThrow('module_id', patch.module_id);
 
     if (Object.prototype.hasOwnProperty.call(patch, 'sub_module_code')) {
       await ensureUniqueWithinModule(
@@ -528,10 +528,9 @@ export async function updateSubModule(subModuleGuidOrId, patch, actor) {
       if (maxSize) binds[field].maxSize = maxSize;
     }
 
-    if (Object.prototype.hasOwnProperty.call(patch, 'module_id')) {
-      sets.push('MODULE_ID = :module_id');
-      binds.module_id = { val: moduleIdForUniq, type: oracledb.NUMBER, dir: oracledb.BIND_IN };
-    }
+    // module_id is required on update
+    sets.push('MODULE_ID = :module_id');
+    binds.module_id = { val: moduleIdForUniq, type: oracledb.NUMBER, dir: oracledb.BIND_IN };
     setIfProvided('sub_module_code', 'SUB_MODULE_CODE', oracledb.STRING, 200);
     setIfProvided('sub_module_name', 'SUB_MODULE_NAME', oracledb.STRING, 400);
     setIfProvided('description', 'DESCRIPTION', oracledb.STRING, 4000);
