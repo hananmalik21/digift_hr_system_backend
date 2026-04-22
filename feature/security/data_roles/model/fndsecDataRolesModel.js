@@ -104,18 +104,6 @@ function validateYn(fieldName, v) {
   return u;
 }
 
-function parseDateOnly(fieldName, v, { required = false } = {}) {
-  if (v === undefined || v === null || String(v).trim() === '') {
-    if (required) throw new ValidationError('Validation failed', [`${fieldName} is required`]);
-    return null;
-  }
-  const d = new Date(String(v).trim());
-  if (!Number.isFinite(d.getTime())) {
-    throw new ValidationError('Validation failed', [`${fieldName} must be a valid date (YYYY-MM-DD)`]);
-  }
-  return d;
-}
-
 /** JSON text for CLOB IN, or NULL when the array is empty (per Oracle package contract). */
 function arrayToJsonClobOrNull(fieldName, arr) {
   if (!Array.isArray(arr)) {
@@ -549,24 +537,11 @@ function normalizeOrgUnitsInput(arr) {
       throw new ValidationError('Validation failed', [`org_units[${i}].hierarchy_level must be an integer from 1 to 10`]);
     }
     const include_subordinates = validateYn(`org_units[${i}].include_subordinates`, row?.include_subordinates);
-    const effective_start_date = parseDateOnly(`org_units[${i}].effective_start_date`, row?.effective_start_date, {
-      required: true
-    });
-    const effective_end_date = parseDateOnly(`org_units[${i}].effective_end_date`, row?.effective_end_date, {
-      required: false
-    });
-    if (effective_end_date && effective_start_date && effective_end_date < effective_start_date) {
-      throw new ValidationError('Validation failed', [
-        `org_units[${i}].effective_end_date must be greater than or equal to effective_start_date`
-      ]);
-    }
     return {
       org_unit_id,
       active_flag,
       hierarchy_level: hl,
-      include_subordinates,
-      effective_start_date: effective_start_date ? effective_start_date.toISOString().slice(0, 10) : null,
-      effective_end_date: effective_end_date ? effective_end_date.toISOString().slice(0, 10) : null
+      include_subordinates
     };
   });
 }
