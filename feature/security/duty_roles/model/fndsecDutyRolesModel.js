@@ -53,17 +53,20 @@ function isOraNoDataFound(err) {
 }
 
 function oracleApplicationErrorMessage(err) {
+  const raw = String(err?.message || '').trim();
+  if (!raw) return null;
+
   const num = Number(err?.errorNum);
-  const msg = String(err?.message || '').trim();
-  if (Number.isFinite(num) && num >= 20000 && num <= 20999 && msg) {
-    // Typical: ORA-20001: <message>
-    const cleaned = msg.replace(/^ORA-\d{5}:\s*/i, '').trim();
-    return cleaned || msg;
-  }
-  // Also handle when driver doesn't populate errorNum reliably.
-  const m = msg.match(/ORA-20\d{3}:\s*(.*)$/i);
-  if (m && m[1]) return String(m[1]).trim();
-  return null;
+  const absNum = Number.isFinite(num) ? Math.abs(num) : NaN;
+  const isAppByNum = absNum >= 20000 && absNum <= 20999;
+  if (!isAppByNum && !/ORA-20\d{3}/i.test(raw)) return null;
+
+  // Typical: ORA-20000: <user text>\nORA-06512: ... — keep only the raised message.
+  const m = raw.match(/ORA-20\d{3}:\s*(.*)/is);
+  let text = m ? String(m[1] || '').trim() : raw.replace(/^ORA-20\d{3}:\s*/i, '').trim();
+  text = text.split(/\nORA-\d{5}:/)[0].trim();
+  text = text.replace(/Help:\s*https?:\/\/[^\s\n]*/gi, '').trim();
+  return text || null;
 }
 
 /**
@@ -140,6 +143,14 @@ function optStringOrNull(v, maxLen) {
   return maxLen ? s.slice(0, maxLen) : s;
 }
 
+/** CREATE/UPDATE P_DESCRIPTION: null if absent, null, or whitespace-only (max 4000). UPDATE null preserves DB value per package. */
+function optionalDescriptionOrNull(v) {
+  if (v === undefined || v == null) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  return s.slice(0, 4000);
+}
+
 function optDateOrNull(fieldName, v) {
   if (v === undefined) return undefined;
   if (v == null || String(v).trim() === '') return null;
@@ -160,6 +171,16 @@ function jsonArrayToClobStringOrNull(fieldName, v) {
     return JSON.stringify(v);
   } catch {
     throw new ValidationError('Validation failed', [`${fieldName} must be valid JSON`]);
+  }
+}
+
+/** CREATE package mapping: CLOB null unless a non-empty array (safe JSON.stringify). */
+function stringifyNonEmptyArrayOrNull(fieldName, value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    throw new ValidationError('Validation failed', [`${fieldName} must be serializable JSON`]);
   }
 }
 
@@ -323,22 +344,37 @@ async function fetchAllFromRefCursor(cursor) {
 }
 
 export async function createDutyRole(input) {
-  const enterpriseId = parseRequiredEnterpriseId(input?.enterprise_id);
-  requireNonEmptyString('duty_role_name', input?.duty_role_name);
-  requireNonEmptyString('duty_role_code', input?.duty_role_code);
-  const actor = requireNonEmptyString('actor', input?.actor);
+  const body = input ?? {};
+  const enterpriseId = parseRequiredEnterpriseId(body.enterprise_id);
+  requireNonEmptyString('duty_role_name', body.duty_role_name);
+  requireNonEmptyString('duty_role_code', body.duty_role_code);
+  const actor = requireNonEmptyString('actor', body.actor);
 
-  validateYn('requires_manager_approval', input?.requires_manager_approval);
-  validateYn('active_flag', input?.active_flag);
+  const pCategoryCode = body.category_code ?? null;
+  const pStatus = body.status ?? null;
+  const pDescription = body.description ?? null;
 
-  const functionRolesJson = jsonArrayToClobStringOrNull('function_roles', input?.function_roles);
-  const inheritedDutyRolesJson = jsonArrayToClobStringOrNull(
+  const effectiveRaw = body.effective_date ?? null;
+  const expirationRaw = body.expiration_date ?? null;
+  const effectiveDate =
+    effectiveRaw == null || String(effectiveRaw).trim() === ''
+      ? null
+      : optDateOrNull('effective_date', effectiveRaw);
+  const expirationDate =
+    expirationRaw == null || String(expirationRaw).trim() === ''
+      ? null
+      : optDateOrNull('expiration_date', expirationRaw);
+
+  const pFunctionRolesJson = stringifyNonEmptyArrayOrNull('function_roles', body.function_roles);
+  const pInheritedDutyRolesJson = stringifyNonEmptyArrayOrNull(
     'inherited_duty_roles',
-    input?.inherited_duty_roles
+    body.inherited_duty_roles
   );
 
-  const effectiveDate = optDateOrNull('effective_date', input?.effective_date);
-  const expirationDate = optDateOrNull('expiration_date', input?.expiration_date);
+  const pRequiresManagerApproval = String(body.requires_manager_approval ?? 'N').trim().toUpperCase();
+  const pActiveFlag = String(body.active_flag ?? 'Y').trim().toUpperCase();
+  validateYn('requires_manager_approval', pRequiresManagerApproval);
+  validateYn('active_flag', pActiveFlag);
 
   const plsql = `
 BEGIN
@@ -369,57 +405,57 @@ END;`;
         {
           p_enterprise_id: { val: enterpriseId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
           p_duty_role_name: {
-            val: String(input.duty_role_name).trim(),
+            val: String(body.duty_role_name).trim(),
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 400
           },
           p_duty_role_code: {
-            val: String(input.duty_role_code).trim(),
+            val: String(body.duty_role_code).trim(),
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 200
           },
           p_category_code: {
-            val: optStringOrNull(input?.category_code, 60) ?? null,
+            val: pCategoryCode != null ? String(pCategoryCode).slice(0, 60) : null,
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 60
           },
           p_status: {
-            val: optStringOrNull(input?.status, 60) ?? null,
+            val: pStatus != null ? String(pStatus).slice(0, 60) : null,
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 60
           },
           p_description: {
-            val: input?.description != null ? String(input.description) : null,
+            val: pDescription != null ? String(pDescription).slice(0, 4000) : null,
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 4000
           },
-          p_effective_date: { val: effectiveDate ?? null, dir: oracledb.BIND_IN, type: oracledb.DATE },
+          p_effective_date: { val: effectiveDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           p_expiration_date: {
-            val: expirationDate ?? null,
+            val: expirationDate,
             dir: oracledb.BIND_IN,
             type: oracledb.DATE
           },
           p_requires_manager_approval: {
-            val: input?.requires_manager_approval != null ? String(input.requires_manager_approval).trim().toUpperCase() : null,
+            val: pRequiresManagerApproval,
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 1
           },
           p_active_flag: {
-            val: input?.active_flag != null ? String(input.active_flag).trim().toUpperCase() : null,
+            val: pActiveFlag,
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 1
           },
           p_created_by: { val: actor, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          p_function_roles_json: { val: functionRolesJson ?? null, dir: oracledb.BIND_IN, type: oracledb.CLOB },
+          p_function_roles_json: { val: pFunctionRolesJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
           p_inherited_duty_roles_json: {
-            val: inheritedDutyRolesJson ?? null,
+            val: pInheritedDutyRolesJson,
             dir: oracledb.BIND_IN,
             type: oracledb.CLOB
           },
@@ -518,7 +554,7 @@ END;`;
             maxSize: 60
           },
           p_description: {
-            val: input?.description != null ? String(input.description) : null,
+            val: optionalDescriptionOrNull(input?.description),
             dir: oracledb.BIND_IN,
             type: oracledb.STRING,
             maxSize: 4000

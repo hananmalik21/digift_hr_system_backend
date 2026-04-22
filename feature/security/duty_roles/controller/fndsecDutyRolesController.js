@@ -54,6 +54,7 @@ function requireActor(body) {
 /**
  * POST /api/security/duty-roles
  * FNDSEC.FNDSEC_DUTY_ROLES_PKG.CREATE_DUTY_ROLE
+ * Body: `description` is optional; omitted/null/blank sends null to the package.
  */
 router.post(
   '/',
@@ -65,8 +66,6 @@ router.post(
       return res.status(201).json({
         success: true,
         message: 'Duty role created successfully.',
-        duty_role_id: result.duty_role_id,
-        duty_role_guid: result.duty_role_guid,
         data: result.duty_role_obj ?? {}
       });
     } catch (err) {
@@ -111,6 +110,7 @@ router.get(
 /**
  * PUT /api/security/duty-roles/:dutyRoleGuid
  * FNDSEC.FNDSEC_DUTY_ROLES_PKG.UPDATE_DUTY_ROLE
+ * Body: `description` is optional; omitted/null/blank sends null so the package keeps the existing description.
  */
 router.put(
   '/:dutyRoleGuid',
