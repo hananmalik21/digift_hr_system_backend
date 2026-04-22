@@ -46,6 +46,15 @@ function normalizeData(val) {
   return val;
 }
 
+function handleViewQueryError(res, err) {
+  if (err instanceof ValidationError) {
+    const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
+    const message = details[0] || err.message || 'Validation failed';
+    return sendViewFail(res, message, 400);
+  }
+  return sendViewFail(res, err?.message || String(err));
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -53,12 +62,7 @@ router.get(
       const { data, pagination } = await listFunctionRolesFromView(req.query || {}, null);
       return res.status(200).json({ success: true, data, pagination });
     } catch (err) {
-      if (err instanceof ValidationError) {
-        const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
-        const message = details[0] || err.message || 'Validation failed';
-        return sendViewFail(res, message, 400);
-      }
-      return sendViewFail(res, err?.message || String(err));
+      return handleViewQueryError(res, err);
     }
   })
 );
@@ -70,12 +74,7 @@ router.get(
       const { data } = await getFunctionRoleByGuidFromView(req.params.functionRoleGuid, req.query?.enterprise_id);
       return res.status(200).json({ success: true, data });
     } catch (err) {
-      if (err instanceof ValidationError) {
-        const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
-        const message = details[0] || err.message || 'Validation failed';
-        return sendViewFail(res, message, 400);
-      }
-      return sendViewFail(res, err?.message || String(err));
+      return handleViewQueryError(res, err);
     }
   })
 );

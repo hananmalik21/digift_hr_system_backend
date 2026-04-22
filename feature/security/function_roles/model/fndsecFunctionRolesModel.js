@@ -1,7 +1,13 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
+import { bindRawGuid16, withDbSession } from '../utils/dbUtils.js';
+import {
+  jsonToClobListField,
+  sanitizeDirectFunctionAssignments,
+  sanitizeInheritedRoleAssignments
+} from '../utils/jsonListPayload.js';
+import { resolveYnFlagsForUpdate } from '../utils/resolveYnFlagsForUpdate.js';
 
 const LOG_TAG = 'fndsecFunctionRolesModel';
 
@@ -10,10 +16,35 @@ const CREATE_PROC = `${PKG}.CREATE_FUNCTION_ROLE`;
 const UPDATE_PROC = `${PKG}.UPDATE_FUNCTION_ROLE`;
 const DELETE_PROC = `${PKG}.DELETE_FUNCTION_ROLE`;
 
+/** Matches typical FNDSEC VARCHAR2 column sizes for package binds. */
+const LEN = {
+  ROLE_CODE: 200,
+  ROLE_NAME: 400,
+  DESCRIPTION: 4000,
+  STATUS_CODE: 60,
+  ACTOR: 200,
+  YN: 1
+};
+
+function oracleApplicationErrorUserMessage(err) {
+  const num = Number(err?.errorNum);
+  const msg = String(err?.message || '').trim();
+  if (Number.isFinite(num) && num >= 20000 && num <= 20999 && msg) {
+    const line = msg.replace(/^ORA-\d{5}:\s*/i, '').split('\n')[0].trim();
+    return line || msg;
+  }
+  const m = msg.match(/ORA-20\d{3}:\s*([^\n]+)/i);
+  return m ? String(m[1]).trim() : null;
+}
+
 function rethrowKnownOrWrapDb(err, context) {
   if (err instanceof ValidationError) throw err;
+  const appMsg = oracleApplicationErrorUserMessage(err);
+  if (appMsg) {
+    throw new ValidationError('Validation failed', [appMsg]);
+  }
   console.error(`[${LOG_TAG}] ${context}`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', err?.message || err);
-  throw err;
+  throw new DatabaseError(err?.message || 'Database error', err);
 }
 
 function parseGuidHexOrThrow(fieldName, guid) {
@@ -52,16 +83,6 @@ function requireNonEmptyString(fieldName, v) {
   return String(v).trim();
 }
 
-function jsonToClobString(fieldName, v) {
-  if (v == null) return null;
-  if (typeof v === 'string') return v;
-  try {
-    return JSON.stringify(v);
-  } catch {
-    throw new ValidationError('Validation failed', [`${fieldName} must be valid JSON`]);
-  }
-}
-
 function optDate(fieldName, v) {
   if (v === undefined) return undefined;
   if (v == null || String(v).trim() === '') return null;
@@ -72,21 +93,42 @@ function optDate(fieldName, v) {
   return d;
 }
 
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
-
 function isOraNoDataFound(err) {
   const msg = String(err?.message || '');
   const num = Number(err?.errorNum);
   return num === 1403 || /ORA-01403/.test(msg);
+}
+
+function bindStrIn(maxSize, val) {
+  return { val, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize };
+}
+
+function bindNumIn(val) {
+  return { val, dir: oracledb.BIND_IN, type: oracledb.NUMBER };
+}
+
+function optionalTrimmedString(patch, key) {
+  if (patch?.[key] === undefined) return null;
+  if (patch[key] == null) return null;
+  return String(patch[key]).trim();
+}
+
+function optionalDescription(patch) {
+  if (patch?.description === undefined) return null;
+  if (patch.description == null) return null;
+  return String(patch.description);
+}
+
+function optionalNumber(patch, key) {
+  if (patch?.[key] === undefined) return null;
+  if (patch[key] == null) return null;
+  return Number(patch[key]);
+}
+
+function parseOptionalModuleId(patch) {
+  if (patch?.module_id === undefined) return undefined;
+  if (patch.module_id == null) return null;
+  return Number(patch.module_id);
 }
 
 /**
@@ -105,8 +147,16 @@ export async function createFunctionRole(input, actor) {
 
   const startDate = optDate('start_date', input?.start_date);
   const endDate = optDate('end_date', input?.end_date);
-  const functionsJson = jsonToClobString('functions_json', input?.functions_json);
-  const inheritedJson = jsonToClobString('inherited_roles_json', input?.inherited_roles_json);
+  const functionsJson = jsonToClobListField(
+    'functions_json',
+    input?.functions_json,
+    sanitizeDirectFunctionAssignments
+  );
+  const inheritedJson = jsonToClobListField(
+    'inherited_roles_json',
+    input?.inherited_roles_json,
+    sanitizeInheritedRoleAssignments
+  );
 
   const plsql = `
 BEGIN
@@ -131,24 +181,40 @@ BEGIN
 END;`;
 
   try {
-    return await withConnection(async (connection) => {
+    return await withDbSession(async (connection) => {
       const result = await connection.execute(
         plsql,
         {
-          p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_module_id: { val: moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_role_code: { val: String(input.role_code).trim(), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          p_role_name: { val: String(input.role_name).trim(), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
-          p_description: { val: input.description != null ? String(input.description) : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
-          p_status_code: { val: input.status_code != null ? String(input.status_code).trim() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
-          p_display_order: { val: input.display_order != null && String(input.display_order).trim() !== '' ? Number(input.display_order) : null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_active_flag: { val: input.active_flag != null ? String(input.active_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_is_system_flag: { val: input.is_system_flag != null ? String(input.is_system_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
+          p_enterprise_id: bindNumIn(ent),
+          p_module_id: bindNumIn(moduleId),
+          p_role_code: bindStrIn(LEN.ROLE_CODE, String(input.role_code).trim()),
+          p_role_name: bindStrIn(LEN.ROLE_NAME, String(input.role_name).trim()),
+          p_description: bindStrIn(LEN.DESCRIPTION, input.description != null ? String(input.description) : null),
+          p_status_code: bindStrIn(
+            LEN.STATUS_CODE,
+            input.status_code != null ? String(input.status_code).trim() : null
+          ),
+          p_display_order: {
+            val:
+              input.display_order != null && String(input.display_order).trim() !== ''
+                ? Number(input.display_order)
+                : null,
+            dir: oracledb.BIND_IN,
+            type: oracledb.NUMBER
+          },
+          p_active_flag: bindStrIn(
+            LEN.YN,
+            input.active_flag != null ? String(input.active_flag).trim().toUpperCase() : null
+          ),
+          p_is_system_flag: bindStrIn(
+            LEN.YN,
+            input.is_system_flag != null ? String(input.is_system_flag).trim().toUpperCase() : null
+          ),
           p_start_date: { val: startDate ?? null, dir: oracledb.BIND_IN, type: oracledb.DATE },
           p_end_date: { val: endDate ?? null, dir: oracledb.BIND_IN, type: oracledb.DATE },
           p_functions_json: { val: functionsJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
           p_inherited_roles_json: { val: inheritedJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
-          p_created_by: { val: String(input?.created_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+          p_created_by: bindStrIn(LEN.ACTOR, String(input?.created_by ?? actor ?? 'SYSTEM')),
           o_function_role_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
           o_function_role_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 }
         },
@@ -176,10 +242,19 @@ export async function updateFunctionRole(functionRoleGuidRaw, enterpriseId, patc
   const roleGuidHex = parseGuidHexOrThrow('function_role_guid', functionRoleGuidRaw);
   const guidBuf = Buffer.from(roleGuidHex, 'hex');
   const ent = parsePositiveEnterpriseId(enterpriseId);
-  const moduleId =
-    patch?.module_id === undefined ? undefined : patch.module_id == null ? null : Number(patch.module_id);
+  const moduleId = parseOptionalModuleId(patch || {});
   if (moduleId !== undefined && moduleId !== null && (!Number.isFinite(moduleId) || moduleId <= 0)) {
     throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
+  }
+  if (patch?.active_flag === null) {
+    throw new ValidationError('Validation failed', [
+      'active_flag cannot be null; omit the field to keep the current value, or send Y or N'
+    ]);
+  }
+  if (patch?.is_system_flag === null) {
+    throw new ValidationError('Validation failed', [
+      'is_system_flag cannot be null; omit the field to keep the current value, or send Y or N'
+    ]);
   }
   validateYn('active_flag', patch?.active_flag);
   validateYn('is_system_flag', patch?.is_system_flag);
@@ -187,12 +262,12 @@ export async function updateFunctionRole(functionRoleGuidRaw, enterpriseId, patc
 
   const startDate = optDate('start_date', patch?.start_date);
   const endDate = optDate('end_date', patch?.end_date);
-  const functionsJson =
-    patch?.functions === undefined ? undefined : jsonToClobString('functions', patch.functions);
-  const inheritedJson =
-    patch?.inherited_roles === undefined
-      ? undefined
-      : jsonToClobString('inherited_roles', patch.inherited_roles);
+  const functionsJson = jsonToClobListField('functions', patch?.functions, sanitizeDirectFunctionAssignments);
+  const inheritedJson = jsonToClobListField(
+    'inherited_roles',
+    patch?.inherited_roles,
+    sanitizeInheritedRoleAssignments
+  );
 
   const plsql = `
 BEGIN
@@ -216,25 +291,34 @@ BEGIN
 END;`;
 
   try {
-    return await withConnection(async (connection) => {
+    return await withDbSession(async (connection) => {
+      const { activeFlagForPkg, isSystemFlagForPkg } = await resolveYnFlagsForUpdate(
+        connection,
+        guidBuf,
+        ent,
+        patch || {}
+      );
+      validateYn('active_flag', activeFlagForPkg);
+      validateYn('is_system_flag', isSystemFlagForPkg);
+
       await connection.execute(
         plsql,
         {
-          p_function_role_guid: { val: guidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 },
-          p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+          p_function_role_guid: bindRawGuid16(guidBuf),
+          p_enterprise_id: bindNumIn(ent),
           p_module_id: { val: moduleId === undefined ? null : moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_role_code: { val: patch?.role_code === undefined ? null : (patch.role_code == null ? null : String(patch.role_code).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          p_role_name: { val: patch?.role_name === undefined ? null : (patch.role_name == null ? null : String(patch.role_name).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
-          p_description: { val: patch?.description === undefined ? null : (patch.description == null ? null : String(patch.description)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
-          p_status_code: { val: patch?.status_code === undefined ? null : (patch.status_code == null ? null : String(patch.status_code).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
-          p_display_order: { val: patch?.display_order === undefined ? null : (patch.display_order == null ? null : Number(patch.display_order)), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_active_flag: { val: patch?.active_flag === undefined ? null : (patch.active_flag == null ? null : String(patch.active_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_is_system_flag: { val: patch?.is_system_flag === undefined ? null : (patch.is_system_flag == null ? null : String(patch.is_system_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
+          p_role_code: bindStrIn(LEN.ROLE_CODE, optionalTrimmedString(patch, 'role_code')),
+          p_role_name: bindStrIn(LEN.ROLE_NAME, optionalTrimmedString(patch, 'role_name')),
+          p_description: bindStrIn(LEN.DESCRIPTION, optionalDescription(patch)),
+          p_status_code: bindStrIn(LEN.STATUS_CODE, optionalTrimmedString(patch, 'status_code')),
+          p_display_order: { val: optionalNumber(patch, 'display_order'), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+          p_active_flag: bindStrIn(LEN.YN, activeFlagForPkg),
+          p_is_system_flag: bindStrIn(LEN.YN, isSystemFlagForPkg),
           p_start_date: { val: startDate === undefined ? null : startDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           p_end_date: { val: endDate === undefined ? null : endDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
-          p_functions_json: { val: functionsJson === undefined ? null : functionsJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
-          p_inherited_roles_json: { val: inheritedJson === undefined ? null : inheritedJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
-          p_last_updated_by: { val: String(patch?.last_updated_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 }
+          p_functions_json: { val: functionsJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
+          p_inherited_roles_json: { val: inheritedJson, dir: oracledb.BIND_IN, type: oracledb.CLOB },
+          p_last_updated_by: bindStrIn(LEN.ACTOR, String(patch?.last_updated_by ?? actor ?? 'SYSTEM'))
         },
         { autoCommit: true }
       );
@@ -262,12 +346,12 @@ BEGIN
 END;`;
 
   try {
-    return await withConnection(async (connection) => {
+    return await withDbSession(async (connection) => {
       await connection.execute(
         plsql,
         {
-          p_function_role_guid: { val: guidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 },
-          p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+          p_function_role_guid: bindRawGuid16(guidBuf),
+          p_enterprise_id: bindNumIn(ent)
         },
         { autoCommit: true }
       );

@@ -1,13 +1,11 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
 import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
+import { bindRawGuid16, withDbSession, ORACLE_OBJECT_ROW } from '../utils/dbUtils.js';
 
 const VIEW = 'FNDSEC.FNDSEC_FUNCTION_ROLES_JSON_V';
-
-const ROW_OPTS = { outFormat: oracledb.OUT_FORMAT_OBJECT };
 
 const OUTPUT_KEYS = [
   'function_role_id',
@@ -68,6 +66,48 @@ function rowKeyMap(row) {
   return m;
 }
 
+function bindOptionalPositiveModuleId(moduleId, binds, parts) {
+  const mid = Number(moduleId);
+  if (!Number.isFinite(mid) || mid <= 0) {
+    throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
+  }
+  binds.module_id = bindNumIn(mid);
+  parts.push('v.MODULE_ID = :module_id');
+}
+
+/** Drop view/JSON artifacts like `[{}]` or joined rows with no function identity. */
+function filterFunctionAssignmentRows(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((item) => {
+    if (item == null || typeof item !== 'object') return false;
+    const id = item.function_id;
+    if (id != null && String(id).trim() !== '') {
+      const n = Number(id);
+      if (Number.isFinite(n) && n > 0) return true;
+    }
+    const g = item.function_guid;
+    if (g != null && String(g).trim() !== '') return true;
+    return false;
+  });
+}
+
+async function parseFunctionsFromRowLob(functionsJsonRaw) {
+  const fj = await readLobVal(functionsJsonRaw);
+  if (fj == null) return [];
+  const s = String(fj).trim();
+  if (!s) return [];
+  try {
+    const p = JSON.parse(s);
+    return filterFunctionAssignmentRows(Array.isArray(p) ? p : []);
+  } catch {
+    return [];
+  }
+}
+
+function bindNumIn(val) {
+  return { val, dir: oracledb.BIND_IN, type: oracledb.NUMBER };
+}
+
 async function readLobVal(v) {
   if (v == null) return null;
   if (typeof v === 'string') return v;
@@ -95,42 +135,19 @@ async function pickOutput(m) {
     }
     o[k] = v ?? null;
   }
-  let functions = [];
-  const fj = await readLobVal(m.functions_json);
-  if (fj != null) {
-    const s = String(fj);
-    if (s.trim()) {
-      try {
-        const p = JSON.parse(s);
-        functions = Array.isArray(p) ? p : [];
-      } catch {
-        functions = [];
-      }
-    }
-  }
-  o.functions = functions;
+  o.functions = await parseFunctionsFromRowLob(m.functions_json);
   return o;
 }
 
 function buildListFilters(query, fixedModuleId) {
   const enterprise_id = parseEnterpriseId(query.enterprise_id);
-  const binds = { enterprise_id: { val: enterprise_id, dir: oracledb.BIND_IN, type: oracledb.NUMBER } };
+  const binds = { enterprise_id: bindNumIn(enterprise_id) };
   const parts = ['v.ENTERPRISE_ID = :enterprise_id'];
 
   if (fixedModuleId != null) {
-    const mid = Number(fixedModuleId);
-    if (!Number.isFinite(mid) || mid <= 0) {
-      throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
-    }
-    binds.module_id = { val: mid, dir: oracledb.BIND_IN, type: oracledb.NUMBER };
-    parts.push('v.MODULE_ID = :module_id');
+    bindOptionalPositiveModuleId(fixedModuleId, binds, parts);
   } else if (query.module_id !== undefined && query.module_id !== null && String(query.module_id).trim() !== '') {
-    const mid = Number(query.module_id);
-    if (!Number.isFinite(mid) || mid <= 0) {
-      throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
-    }
-    binds.module_id = { val: mid, dir: oracledb.BIND_IN, type: oracledb.NUMBER };
-    parts.push('v.MODULE_ID = :module_id');
+    bindOptionalPositiveModuleId(query.module_id, binds, parts);
   }
 
   if (query.role_code !== undefined && query.role_code !== null && String(query.role_code).trim() !== '') {
@@ -164,17 +181,6 @@ function buildListFilters(query, fixedModuleId) {
   return { whereSql: parts.length ? `WHERE ${parts.join(' AND ')}` : '', binds };
 }
 
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
-
 export async function listFunctionRolesFromView(query, fixedModuleId) {
   const { page, pageSize } = parsePageLimit(query);
   const { whereSql, binds } = buildListFilters(query, fixedModuleId);
@@ -194,10 +200,10 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY`;
     fetch_size: { val: pageSize, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
   };
 
-  return withConnection(async (connection) => {
-    const countResult = await connection.execute(countSql, binds, ROW_OPTS);
+  return withDbSession(async (connection) => {
+    const countResult = await connection.execute(countSql, binds, ORACLE_OBJECT_ROW);
     const total = Number(countResult.rows?.[0]?.CNT ?? countResult.rows?.[0]?.cnt ?? 0) || 0;
-    const dataResult = await connection.execute(dataSql, dataBinds, ROW_OPTS);
+    const dataResult = await connection.execute(dataSql, dataBinds, ORACLE_OBJECT_ROW);
     const rows = [];
     for (const row of dataResult.rows || []) {
       rows.push(await pickOutput(rowKeyMap(row)));
@@ -221,12 +227,12 @@ WHERE v.FUNCTION_ROLE_GUID = :function_role_guid
   AND v.ENTERPRISE_ID = :enterprise_id`;
 
   const binds = {
-    function_role_guid: { val: guidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 },
-    enterprise_id: { val: enterprise_id, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+    function_role_guid: bindRawGuid16(guidBuf),
+    enterprise_id: bindNumIn(enterprise_id)
   };
 
-  return withConnection(async (connection) => {
-    const result = await connection.execute(sql, binds, ROW_OPTS);
+  return withDbSession(async (connection) => {
+    const result = await connection.execute(sql, binds, ORACLE_OBJECT_ROW);
     const row = result.rows?.[0];
     if (!row) return { data: null };
     return { data: await pickOutput(rowKeyMap(row)) };
