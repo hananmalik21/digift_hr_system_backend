@@ -288,3 +288,21 @@ export function sendDeleted(res, req, message, orgUnitId) {
   });
 }
 
+/**
+ * Org unit parent hierarchy (ENT.ORG_UNITS) — response shape per API contract (no meta wrapper).
+ */
+export function sendOrgUnitHierarchySuccess(res, data) {
+  res.json({
+    success: true,
+    message: 'Org unit hierarchy fetched successfully',
+    data
+  });
+}
+
+export function sendOrgUnitHierarchyNotFound(res) {
+  res.json({
+    success: false,
+    message: 'No hierarchy found'
+  });
+}
+

@@ -1044,6 +1044,47 @@ ORDER BY 1 DESC NULLS LAST, 10 NULLS LAST`;
 
     return roots;
   }
+
+  /**
+   * Parent chain for an org unit within an enterprise (top → bottom: root company first).
+   * Uses CONNECT BY upward from the selected node; scoped by ENTERPRISE_ID on START and CONNECT BY.
+   */
+  static PARENT_HIERARCHY_BY_ENTERPRISE_SQL = `
+SELECT
+    ROW_NUMBER() OVER (ORDER BY LVL DESC) AS DISPLAY_LEVEL,
+    LVL AS LEVEL_FROM_SELECTED_NODE,
+    RAWTOHEX(ORG_UNIT_ID) AS ORG_UNIT_ID,
+    RAWTOHEX(PARENT_ORG_UNIT_ID) AS PARENT_ORG_UNIT_ID,
+    ORG_UNIT_CODE,
+    ORG_UNIT_NAME_EN,
+    LEVEL_CODE,
+    ENTERPRISE_ID
+FROM (
+    SELECT
+        LEVEL AS LVL,
+        ou.ORG_UNIT_ID,
+        ou.PARENT_ORG_UNIT_ID,
+        ou.ORG_UNIT_CODE,
+        ou.ORG_UNIT_NAME_EN,
+        ou.LEVEL_CODE,
+        ou.ENTERPRISE_ID
+    FROM ENT.ORG_UNITS ou
+    START WITH
+        ou.ORG_UNIT_ID = HEXTORAW(:1)
+        AND ou.ENTERPRISE_ID = :2
+    CONNECT BY NOCYCLE
+        PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
+        AND PRIOR ou.ENTERPRISE_ID = ou.ENTERPRISE_ID
+)
+ORDER BY LVL DESC`;
+
+  static async findParentHierarchyByEnterprise(enterpriseId, orgUnitIdHex32) {
+    const result = await this.executeQuery(this.PARENT_HIERARCHY_BY_ENTERPRISE_SQL, [
+      orgUnitIdHex32,
+      enterpriseId
+    ]);
+    return result.rows || [];
+  }
 }
 
 export default OrgUnitModel;

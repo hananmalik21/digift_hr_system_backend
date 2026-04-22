@@ -14,7 +14,9 @@ import {
   sendBadRequest,
   sendServerError,
   sendNotFound,
-  sendConflict
+  sendConflict,
+  sendOrgUnitHierarchySuccess,
+  sendOrgUnitHierarchyNotFound
 } from '../view/orgUnitView.js';
 import { sendActiveStructureLevels } from '../../hr_org_structures/view/hrOrgStructureView.js';
 
@@ -180,6 +182,43 @@ router.get('/org-units/tree/active', async (req, res) => {
     });
   } catch (error) {
     handleOrgUnitRouteError(res, req, error, 'Failed to fetch active structure tree');
+  }
+});
+
+/**
+ * @route   GET /org-units/:enterpriseId/:orgUnitId/hierarchy
+ * @desc    Parent hierarchy for one org unit (ENT.ORG_UNITS), scoped by enterprise. Ordered root → leaf.
+ * @example curl -s "http://localhost:3000/api/org-units/1/ABCD1234ABCD1234ABCD1234ABCD1234/hierarchy"
+ */
+router.get('/org-units/:enterpriseId/:orgUnitId/hierarchy', async (req, res) => {
+  try {
+    const entRaw = req.params.enterpriseId;
+    const ouRaw = req.params.orgUnitId;
+
+    if (entRaw === undefined || entRaw === null || String(entRaw).trim() === '') {
+      return sendBadRequest(res, req, 'enterprise_id is required');
+    }
+    if (ouRaw === undefined || ouRaw === null || String(ouRaw).trim() === '') {
+      return sendBadRequest(res, req, 'org_unit_id is required');
+    }
+
+    const enterpriseId = parseInt(String(entRaw).trim(), 10);
+    if (Number.isNaN(enterpriseId) || enterpriseId <= 0) {
+      return sendBadRequest(res, req, 'enterprise_id must be a valid positive number');
+    }
+
+    const orgUnitHex = normalizeHex32(ouRaw);
+    if (!isHex32(orgUnitHex)) {
+      return sendBadRequest(res, req, 'org_unit_id must be a 32-character hexadecimal string');
+    }
+
+    const rows = await OrgUnitModel.findParentHierarchyByEnterprise(enterpriseId, orgUnitHex);
+    if (!rows.length) {
+      return sendOrgUnitHierarchyNotFound(res);
+    }
+    sendOrgUnitHierarchySuccess(res, rows);
+  } catch (error) {
+    handleOrgUnitRouteError(res, req, error, 'Failed to fetch org unit hierarchy');
   }
 });
 
