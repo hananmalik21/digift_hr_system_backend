@@ -147,14 +147,12 @@ export async function createFunctionRole(input, actor) {
 
   const startDate = optDate('start_date', input?.start_date);
   const endDate = optDate('end_date', input?.end_date);
-  const functionsJson = jsonToClobListField(
-    'functions_json',
-    input?.functions_json,
-    sanitizeDirectFunctionAssignments
-  );
+  const functionsInput = input?.functions ?? input?.functions_json;
+  const inheritedRolesInput = input?.inherited_roles ?? input?.inherited_roles_json;
+  const functionsJson = jsonToClobListField('functions', functionsInput, sanitizeDirectFunctionAssignments);
   const inheritedJson = jsonToClobListField(
-    'inherited_roles_json',
-    input?.inherited_roles_json,
+    'inherited_roles',
+    inheritedRolesInput,
     sanitizeInheritedRoleAssignments
   );
 
@@ -262,10 +260,12 @@ export async function updateFunctionRole(functionRoleGuidRaw, enterpriseId, patc
 
   const startDate = optDate('start_date', patch?.start_date);
   const endDate = optDate('end_date', patch?.end_date);
-  const functionsJson = jsonToClobListField('functions', patch?.functions, sanitizeDirectFunctionAssignments);
+  const functionsInput = patch?.functions ?? patch?.functions_json;
+  const inheritedRolesInput = patch?.inherited_roles ?? patch?.inherited_roles_json;
+  const functionsJson = jsonToClobListField('functions', functionsInput, sanitizeDirectFunctionAssignments);
   const inheritedJson = jsonToClobListField(
     'inherited_roles',
-    patch?.inherited_roles,
+    inheritedRolesInput,
     sanitizeInheritedRoleAssignments
   );
 
