@@ -17,7 +17,7 @@ const NOT_FOUND_MESSAGE =
  *
  * By id: enterprise_id, employee_id, plan_id (all required).
  * By guid: employee_guid, plan_guid (required); enterprise_id (optional).
- * Source: COMP.V_EMP_PLAN_ACTIVE_COMPONENTS_JSON (includes optional salary structure:
+ * Source: COMP.V_EMP_PLAN_ACTIVE_COMPONENTS_JSON (employee_name from view; optional salary structure:
  * structure_id, structure_guid, structure_code, structure_name, structure_currency_code, structure_effective_from, structure_effective_to).
  */
 router.get(
