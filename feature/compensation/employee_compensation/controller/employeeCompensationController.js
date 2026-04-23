@@ -505,7 +505,9 @@ function validateEditMultipart(req) {
  * GET /api/comp/employee-compensation
  *
  * Rows from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS; totals aggregated from COMP.V_EMP_ASSIGNED_COMPONENTS_FULL.
- * Query: enterprise_id (required), employee_id (optional), plan_id (optional).
+ * Query: enterprise_id (required); employee_id / plan_id (optional); employee_guid / plan_guid (optional,
+ * 32-char hex, hyphens optional). When a GUID query param is present and valid, it filters instead of the
+ * corresponding numeric id. Response rows include employee_guid and plan_guid as uppercase hex strings.
  */
 router.get(
   '/',
@@ -520,9 +522,10 @@ router.get(
     }
 
     try {
-      const { enterprise_id, employee_id, plan_id, page, limit } = parsed.data;
+      const { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex, page, limit } =
+        parsed.data;
       const { rows, total } = await getEmployeePlanFullDetails(
-        { enterprise_id, employee_id, plan_id },
+        { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex },
         { page, limit }
       );
       const totalPages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;

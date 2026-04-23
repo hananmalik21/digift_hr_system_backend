@@ -7,26 +7,45 @@ import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead
  * - row shape from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS
  * - category totals from COMP.V_EMP_ASSIGNED_COMPONENTS_FULL (grouped by enterprise_id/employee_id/plan_id)
  *
+ * Filter: when `employee_guid_hex` / `plan_guid_hex` are non-null, those match RAW(16) on the view and
+ * take precedence over numeric `employee_id` / `plan_id`. Totals use `filtered_keys` so GUID-only filters
+ * stay correct without requiring GUID columns on V_EMP_ASSIGNED_COMPONENTS_FULL.
+ *
  * This ensures ALLOWANCE totals never leak into TOTAL_BASE_SALARY.
  */
 const PLAN_FULL_DETAILS_PAGED_SQL = `
-  WITH totals AS (
+  WITH filtered_keys AS (
+    SELECT DISTINCT v.enterprise_id, v.employee_id, v.plan_id
+      FROM COMP.V_EMPLOYEE_PLAN_FULL_DETAILS v
+     WHERE v.ENTERPRISE_ID = :p_enterprise_id
+       AND (
+             (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
+          OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
+       )
+       AND (
+             (:p_plan_guid_hex IS NOT NULL AND v.PLAN_GUID = HEXTORAW(:p_plan_guid_hex))
+          OR (:p_plan_guid_hex IS NULL AND (:p_plan_id IS NULL OR v.PLAN_ID = :p_plan_id))
+       )
+  ),
+  totals AS (
     SELECT
-      enterprise_id,
-      employee_id,
-      plan_id,
-      SUM(NVL(total_base_salary, 0)) AS total_base_salary,
-      SUM(NVL(total_allowance, 0))   AS total_allowance,
-      SUM(NVL(total_benefits, 0))    AS total_benefits
-    FROM COMP.V_EMP_ASSIGNED_COMPONENTS_FULL
-    WHERE enterprise_id = :p_enterprise_id
-      AND (:p_employee_id IS NULL OR employee_id = :p_employee_id)
-      AND (:p_plan_id IS NULL OR plan_id = :p_plan_id)
-    GROUP BY enterprise_id, employee_id, plan_id
+      a.enterprise_id,
+      a.employee_id,
+      a.plan_id,
+      SUM(NVL(a.total_base_salary, 0)) AS total_base_salary,
+      SUM(NVL(a.total_allowance, 0))   AS total_allowance,
+      SUM(NVL(a.total_benefits, 0))    AS total_benefits
+    FROM COMP.V_EMP_ASSIGNED_COMPONENTS_FULL a
+    INNER JOIN filtered_keys fk
+      ON fk.enterprise_id = a.enterprise_id
+     AND fk.employee_id = a.employee_id
+     AND fk.plan_id = a.plan_id
+    GROUP BY a.enterprise_id, a.employee_id, a.plan_id
   )
   SELECT
     v.ENTERPRISE_ID,
     v.EMPLOYEE_ID,
+    UPPER(RAWTOHEX(v.EMPLOYEE_GUID)) AS EMPLOYEE_GUID,
     v.EMPLOYEE_NUMBER,
     v.EMPLOYEE_NAME,
     v.ORG_STRUCTURE_LIST,
@@ -34,6 +53,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
     v.GRADE_NUMBER,
     v.GRADE_CATEGORY,
     v.PLAN_ID,
+    UPPER(RAWTOHEX(v.PLAN_GUID)) AS PLAN_GUID,
     v.PLAN_CODE,
     v.PLAN_NAME,
     v.STATUS_CODE,
@@ -50,8 +70,14 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
    AND t.employee_id = v.employee_id
    AND t.plan_id = v.plan_id
   WHERE v.ENTERPRISE_ID = :p_enterprise_id
-    AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id)
-    AND (:p_plan_id IS NULL OR v.PLAN_ID = :p_plan_id)
+    AND (
+          (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
+       OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
+    )
+    AND (
+          (:p_plan_guid_hex IS NOT NULL AND v.PLAN_GUID = HEXTORAW(:p_plan_guid_hex))
+       OR (:p_plan_guid_hex IS NULL AND (:p_plan_id IS NULL OR v.PLAN_ID = :p_plan_id))
+    )
   ORDER BY v.EMPLOYEE_ID, v.PLAN_ID
   OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
 `;
@@ -74,12 +100,18 @@ async function mapRowWithParsedOrgStructure(row) {
 }
 
 /**
- * @param {{ enterprise_id: number, employee_id?: number, plan_id?: number }} filters
+ * @param {{
+ *   enterprise_id: number;
+ *   employee_id?: number;
+ *   plan_id?: number;
+ *   employee_guid_hex?: string | null;
+ *   plan_guid_hex?: string | null;
+ * }} filters
  * @param {{ page: number, limit: number }} pagination
  * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
  */
 export async function getEmployeePlanFullDetails(filters, pagination = { page: 1, limit: 25 }) {
-  const { enterprise_id, employee_id, plan_id } = filters;
+  const { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex } = filters;
   const page = Number(pagination?.page ?? 1);
   const limit = Number(pagination?.limit ?? 25);
   const offset = Math.max(0, (Math.max(1, page) - 1) * Math.max(1, limit));
@@ -87,6 +119,8 @@ export async function getEmployeePlanFullDetails(filters, pagination = { page: 1
     p_enterprise_id: enterprise_id,
     p_employee_id: employee_id ?? null,
     p_plan_id: plan_id ?? null,
+    p_employee_guid_hex: employee_guid_hex ?? null,
+    p_plan_guid_hex: plan_guid_hex ?? null,
     p_offset: offset,
     p_limit: Math.max(1, limit)
   };
