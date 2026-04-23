@@ -86,6 +86,7 @@ import fndsecLookupValueController from './feature/security/lookups/fndsec_looku
 import fndsecDutyRolesController from './feature/security/duty_roles/controller/fndsecDutyRolesController.js';
 import fndsecDataRolesController from './feature/security/data_roles/controller/fndsecDataRolesController.js';
 import fndsecJobRolesController from './feature/security/job_roles/controller/fndsecJobRolesController.js';
+import fndsecWorkLocationsController from './feature/security/work_locations/controller/fndsecWorkLocationsController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -262,6 +263,9 @@ app.use('/api/security/duty-roles', fndsecDutyRolesController);
 
 // Security - Job roles (FNDSEC.FNDSEC_JOB_ROLES_PKG)
 app.use('/api/security/job-roles', fndsecJobRolesController);
+
+// Security - Work locations (FNDSEC.FNDSEC_WORK_LOCATIONS_PKG)
+app.use('/api/security/work-locations', fndsecWorkLocationsController);
 
 // Initialize database pool on startup
 await createPool();
