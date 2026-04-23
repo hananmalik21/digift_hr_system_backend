@@ -1,5 +1,6 @@
 import { executeQuery } from '../../../../config/db.js';
 import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead.js';
 
 /**
  * Plan full details list:
@@ -56,76 +57,6 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
 `;
 
 /**
- * Oracle may return VARCHAR2, CLOB as string, or a Lob with getData() (Promise or callback).
- * @param {unknown} value
- * @returns {Promise<string|null>}
- */
-async function oracleTextToString(value) {
-  if (value == null) return null;
-  if (typeof value === 'string') return value;
-  if (Buffer.isBuffer(value)) return value.toString('utf8');
-  if (typeof value === 'object' && typeof value.getData === 'function') {
-    try {
-      const pending = value.getData();
-      if (pending != null && typeof pending.then === 'function') {
-        const data = await pending;
-        return data != null ? String(data) : null;
-      }
-      if (pending !== undefined) {
-        return pending != null ? String(pending) : null;
-      }
-    } catch {
-      /* try callback-style getData next */
-    }
-    try {
-      const data = await new Promise((resolve, reject) => {
-        value.getData((err, d) => (err ? reject(err) : resolve(d)));
-      });
-      return data != null ? String(data) : null;
-    } catch {
-      return null;
-    }
-  }
-  return String(value);
-}
-
-/**
- * @param {string|null|undefined} text
- * @returns {unknown} Parsed JSON or original string on failure / non-JSON shape.
- */
-function parseJsonLoose(text) {
-  if (text == null) return null;
-  const s = text.replace(/^\uFEFF/, '').trim();
-  if (s === '' || s.toLowerCase() === 'null') return null;
-  if (!s.startsWith('[') && !s.startsWith('{')) return text;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return text;
-  }
-}
-
-/**
- * @param {unknown} value
- * @returns {Promise<unknown>}
- */
-async function parseOrgStructureListColumn(value) {
-  if (value == null) return null;
-  if (Array.isArray(value)) return value;
-  if (
-    typeof value === 'object' &&
-    !Buffer.isBuffer(value) &&
-    !(value instanceof Date) &&
-    typeof value.getData !== 'function'
-  ) {
-    return value;
-  }
-  const text = await oracleTextToString(value);
-  if (text == null) return null;
-  return parseJsonLoose(text);
-}
-
-/**
  * Strip JSON column before `convertKeysToSnakeCase` so Lob-like values are not deep-copied as plain objects.
  * @param {Record<string, unknown>} row
  * @returns {Promise<Record<string, unknown>>}
@@ -137,7 +68,7 @@ async function mapRowWithParsedOrgStructure(row) {
   delete next.org_structure_list;
   delete next.TOTAL_COUNT;
   delete next.total_count;
-  const orgParsed = await parseOrgStructureListColumn(orgSource);
+  const orgParsed = await parseOrgStructureListFromOracle(orgSource);
   const snake = convertKeysToSnakeCase(next);
   return { ...snake, org_structure_list: orgParsed };
 }

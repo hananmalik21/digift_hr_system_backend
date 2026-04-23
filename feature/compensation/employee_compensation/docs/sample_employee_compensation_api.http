@@ -12,6 +12,14 @@ GET http://localhost:3000/api/comp/employee-compensation?enterprise_id=1
 # GET http://localhost:3000/api/comp/employee/latest-component-history?enterprise_id=1&employee_id=299
 # GET http://localhost:3000/api/comp/employee/latest-component-history?enterprise_id=1&employee_id=299&plan_id=80&page=1&limit=25
 
+### Active plan components (single employee + plan) — COMP.V_EMP_PLAN_ACTIVE_COMPONENTS_JSON
+### Response adds linked salary structure (nullable): structure_id, structure_guid, structure_code, structure_name, structure_currency_code, structure_effective_from, structure_effective_to
+### By id: enterprise_id, employee_id, plan_id (all required)
+# GET http://localhost:3000/api/comp/employee/employee-compensation-plan-details?enterprise_id=1&employee_id=1001&plan_id=200
+### By guid: employee_guid + plan_guid as 32-char hex (hyphens optional); optional enterprise_id
+# GET http://localhost:3000/api/comp/employee/employee-compensation-plan-details?employee_guid=4CC128141B67EDF8E0633519000A56F3&plan_guid=<32_HEX_PLAN_GUID>
+# GET http://localhost:3000/api/comp/employee/employee-compensation-plan-details?enterprise_id=1&employee_guid=4CC128141B67EDF8E0633519000A56F3&plan_guid=<32_HEX_PLAN_GUID>
+
 ### Assigned components — COMP.COMP_EMP_ASSIGNED_COMPONENTS_V (employee_guid required, 32 hex; hyphens optional)
 GET http://localhost:3000/api/comp/employee-assigned-components?employee_guid=4CC128141B67EDF8E0633519000A56F3
 
