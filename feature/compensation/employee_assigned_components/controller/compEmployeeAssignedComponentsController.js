@@ -37,7 +37,8 @@ function firstIssueMessage(zodError, fallback) {
 function buildSql() {
   // Notes:
   // - `COMP.COMP_EMP_ASSIGNED_COMPONENTS_V` is the sole assignment source (no manual base-table joins).
-  // - `COMP.COMP_PLAN_COMPONENTS` supplies `frequency_code`; dedupe by latest `PLAN_COMPONENT_ID`.
+  // - `frequency_code`: prefer latest `COMP_PLAN_COMPONENTS` row (any active_flag — inactive lines
+  //   still carry the configured pay frequency); fall back to `a.frequency_code` when the view exposes it.
   return `
     WITH latest_plan_component AS (
       SELECT
@@ -54,7 +55,6 @@ function buildSql() {
             ORDER BY plan_component_id DESC
           ) AS rn
         FROM COMP.COMP_PLAN_COMPONENTS
-        WHERE active_flag = 'Y'
       )
       WHERE rn = 1
     )
@@ -68,7 +68,10 @@ function buildSql() {
       a.component_id,
       a.component_code,
       a.component_name,
-      lpc.frequency_code,
+      COALESCE(lpc.frequency_code, a.frequency_code) AS frequency_code,
+      a.process_status,
+      a.pay_run_id,
+      a.processed_date,
       a.amount,
       a.currency_code,
       a.effective_start_date,
@@ -91,6 +94,8 @@ function buildSql() {
  * GET /api/comp/employee-assigned-components?employee_guid=...
  *
  * Active assigned compensation component lines for one employee (from COMP.COMP_EMP_ASSIGNED_COMPONENTS_V).
+ * Each row includes pay frequency (`frequency_code`), processing state (`process_status`, `pay_run_id`,
+ * `processed_date`), and existing assignment fields.
  */
 router.get(
   '/employee-assigned-components',
