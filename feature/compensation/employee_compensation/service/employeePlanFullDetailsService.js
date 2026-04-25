@@ -60,6 +60,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
     v.STRUCTURE_ID,
     v.STRUCTURE_CODE,
     v.STRUCTURE_NAME,
+    v.TOTAL_COMPENSATION,
     NVL(t.total_base_salary, 0) AS TOTAL_BASE_SALARY,
     NVL(t.total_allowance, 0)   AS TOTAL_ALLOWANCE,
     NVL(t.total_benefits, 0)    AS TOTAL_BENEFITS,
@@ -96,7 +97,16 @@ async function mapRowWithParsedOrgStructure(row) {
   delete next.total_count;
   const orgParsed = await parseOrgStructureListFromOracle(orgSource);
   const snake = convertKeysToSnakeCase(next);
-  return { ...snake, org_structure_list: orgParsed };
+  const totalCompRaw = snake.total_compensation;
+  const totalCompNum =
+    totalCompRaw === null || totalCompRaw === undefined || totalCompRaw === ''
+      ? totalCompRaw
+      : Number(totalCompRaw);
+  return {
+    ...snake,
+    ...(Number.isFinite(totalCompNum) ? { total_compensation: totalCompNum } : null),
+    org_structure_list: orgParsed
+  };
 }
 
 /**
