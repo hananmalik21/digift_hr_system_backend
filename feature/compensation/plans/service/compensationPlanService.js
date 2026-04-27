@@ -280,6 +280,42 @@ const PLAN_JSON_STRING_MAX = (() => {
   return n;
 })();
 
+// Small in-memory TTL cache for plan component reads.
+// Big win for repeated UI refreshes; safe because updates/deletes invalidate.
+const PLAN_COMPONENTS_CACHE_TTL_MS = (() => {
+  const raw = process.env.COMP_PLAN_COMPONENTS_CACHE_TTL_MS;
+  if (raw === undefined || raw === '') return 15000;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return 15000;
+  return n;
+})();
+
+/** @type {Map<string, { expiresAt: number, value: any }>} */
+const planComponentsCache = new Map();
+
+function cacheGetPlan(planGuidHex) {
+  if (PLAN_COMPONENTS_CACHE_TTL_MS <= 0) return null;
+  const hit = planComponentsCache.get(planGuidHex);
+  if (!hit) return null;
+  if (Date.now() >= hit.expiresAt) {
+    planComponentsCache.delete(planGuidHex);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSetPlan(planGuidHex, value) {
+  if (PLAN_COMPONENTS_CACHE_TTL_MS <= 0) return;
+  // prevent unbounded growth if many different plan guids are requested
+  if (planComponentsCache.size > 500) planComponentsCache.clear();
+  planComponentsCache.set(planGuidHex, { value, expiresAt: Date.now() + PLAN_COMPONENTS_CACHE_TTL_MS });
+}
+
+function cacheInvalidatePlan(planGuidHex) {
+  if (!planGuidHex) return;
+  planComponentsCache.delete(planGuidHex);
+}
+
 function getOracleErrorMessage(error) {
   if (!error) return 'Unknown Oracle error';
   return error.message || String(error);
@@ -385,6 +421,9 @@ export async function updateCompensationPlan(payload) {
         EXEC_OPTS
       );
     }
+
+    // ensure subsequent reads don't serve stale plan/components
+    cacheInvalidatePlan(planGuidHex);
   });
 }
 
@@ -405,6 +444,8 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
                'component_name' VALUE c.component_name,
                'description' VALUE c.description,
                'component_type_code' VALUE c.component_type_code,
+               'min_value' VALUE c.min_value,
+               'max_value' VALUE c.max_value,
                'display_sequence' VALUE pc.display_sequence,
                'mandatory_flag' VALUE pc.mandatory_flag,
                'active_flag' VALUE pc.active_flag
@@ -500,12 +541,17 @@ export async function getEligiblePlansForEmployee(employeeGuidHex) {
  * @returns {Promise<object | null>} plan header + components, or null if no plan row
  */
 export async function getPlanComponentsByPlanGuid(planGuidHex) {
+  const cached = cacheGetPlan(planGuidHex);
+  if (cached !== null) return cached;
+
   const result = await executeQuery(PLAN_COMPONENTS_BY_PLAN_GUID_SQL, {
     plan_guid_hex: planGuidHex
   });
   const r = result.rows?.[0];
   if (!r) return null;
-  return mapPlanRowWithComponents(r);
+  const mapped = mapPlanRowWithComponents(r);
+  cacheSetPlan(planGuidHex, mapped);
+  return mapped;
 }
 
 export async function deleteCompensationPlan(planGuid, deletedBy) {
@@ -523,5 +569,7 @@ export async function deleteCompensationPlan(planGuid, deletedBy) {
       },
       EXEC_OPTS
     );
+
+    cacheInvalidatePlan(hex);
   });
 }
