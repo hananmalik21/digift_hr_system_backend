@@ -61,6 +61,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
     v.STRUCTURE_CODE,
     v.STRUCTURE_NAME,
     v.TOTAL_COMPENSATION,
+    NVL(v.TOTAL_RETRO_AMOUNT, 0) AS TOTAL_RETRO_AMOUNT,
     NVL(t.total_base_salary, 0) AS TOTAL_BASE_SALARY,
     NVL(t.total_allowance, 0)   AS TOTAL_ALLOWANCE,
     NVL(t.total_benefits, 0)    AS TOTAL_BENEFITS,
@@ -102,9 +103,15 @@ async function mapRowWithParsedOrgStructure(row) {
     totalCompRaw === null || totalCompRaw === undefined || totalCompRaw === ''
       ? totalCompRaw
       : Number(totalCompRaw);
+  const totalRetroRaw = snake.total_retro_amount;
+  const totalRetroNum =
+    totalRetroRaw === null || totalRetroRaw === undefined || totalRetroRaw === ''
+      ? totalRetroRaw
+      : Number(totalRetroRaw);
   return {
     ...snake,
     ...(Number.isFinite(totalCompNum) ? { total_compensation: totalCompNum } : null),
+    ...(Number.isFinite(totalRetroNum) ? { total_retro_amount: totalRetroNum } : null),
     org_structure_list: orgParsed
   };
 }
