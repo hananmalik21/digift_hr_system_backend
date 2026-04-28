@@ -20,6 +20,8 @@ const CREATE_COMPONENTS_VIA_JSON = `
 DECLARE
   l_tab COMP.EMPLOYEE_COMPENSATION.t_component_tab := COMP.EMPLOYEE_COMPENSATION.t_component_tab();
   j JSON_ARRAY_T := JSON_ARRAY_T(:components_json);
+  l_success VARCHAR2(1) := 'N';
+  l_message VARCHAR2(4000);
 BEGIN
   FOR i IN 0 .. j.get_size() - 1 LOOP
     DECLARE
@@ -58,13 +60,25 @@ BEGIN
       l_tab(l_tab.COUNT) := rec;
     END;
   END LOOP;
-  COMP.EMPLOYEE_COMPENSATION.create_components(
-    p_enterprise_id => :enterprise_id,
-    p_employee_id   => :employee_id,
-    p_plan_id       => :plan_id,
-    p_components    => l_tab,
-    p_created_by    => :created_by
-  );
+  BEGIN
+    COMP.EMPLOYEE_COMPENSATION.create_components(
+      p_enterprise_id => :enterprise_id,
+      p_employee_id   => :employee_id,
+      p_plan_id       => :plan_id,
+      p_components    => l_tab,
+      p_created_by    => :created_by,
+      x_success       => l_success,
+      x_message       => l_message
+    );
+  EXCEPTION
+    WHEN OTHERS THEN
+      l_success := 'N';
+      IF l_message IS NULL OR TRIM(l_message) IS NULL THEN
+        l_message := 'Unable to process request';
+      END IF;
+  END;
+  :x_success := NVL(l_success, 'N');
+  :x_message := NVL(l_message, 'Unable to process request');
 END;
 `;
 
@@ -256,18 +270,25 @@ function appendDocumentBinds(binds, files, descriptions) {
  */
 export async function createEmployeeCompensationComponents(payload) {
   const planIdBind = resolveComponentsPlanBind(payload.components, payload.plan_id);
-  await withCompConnection(async (connection) => {
-    await connection.execute(
+  return await withCompConnection(async (connection) => {
+    const result = await connection.execute(
       CREATE_COMPONENTS_VIA_JSON,
       {
         enterprise_id: payload.enterprise_id,
         employee_id: payload.employee_id,
         plan_id: planIdBind,
         created_by: String(payload.created_by),
-        components_json: componentsJsonBind(JSON.stringify(payload.components))
+        components_json: componentsJsonBind(JSON.stringify(payload.components)),
+        x_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 1 },
+        x_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
       },
       { autoCommit: false }
     );
+    const success = result?.outBinds?.x_success === 'Y';
+    return {
+      success,
+      message: String(result?.outBinds?.x_message ?? '').trim()
+    };
   });
 }
 
@@ -318,7 +339,7 @@ export async function editEmployeeCompensationComponents(
     );
   }
 
-  await withCompConnection(async (connection) => {
+  return await withCompConnection(async (connection) => {
     const plsql = buildEditComponentsPlsql(maxDocCount);
     const binds = {
       enterprise_id: payload.enterprise_id,
@@ -336,11 +357,18 @@ export async function editEmployeeCompensationComponents(
       performance_rating: perf,
       internal_notes: nullableTextClobBind(payload.internal_notes),
       updated_by: String(payload.updated_by).trim(),
-      components_json: componentsJsonBind(JSON.stringify(payload.components))
+      components_json: componentsJsonBind(JSON.stringify(payload.components)),
+      x_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 1 },
+      x_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
     };
     if (maxDocCount > 0) {
       appendDocumentBinds(binds, fileSlice, documentDescriptions);
     }
-    await connection.execute(plsql, binds, { autoCommit: false });
+    const result = await connection.execute(plsql, binds, { autoCommit: false });
+    const success = result?.outBinds?.x_success === 'Y';
+    return {
+      success,
+      message: String(result?.outBinds?.x_message ?? '').trim()
+    };
   });
 }
