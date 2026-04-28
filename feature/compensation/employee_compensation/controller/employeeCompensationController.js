@@ -64,7 +64,7 @@ function respondToEditMulterError(err, res) {
   }
   res.status(HTTP.BAD_REQUEST).json({
     success: false,
-    message: err.message || 'Upload failed'
+    message: 'Upload failed'
   });
   return true;
 }
@@ -565,16 +565,16 @@ router.post('/create', asyncHandler(async (req, res) => {
   }
 
   try {
-    await createEmployeeCompensationComponents(validation.payload);
-    return res.status(HTTP.OK).json({
-      success: true,
-      message: SUCCESS_MESSAGE
+    const result = await createEmployeeCompensationComponents(validation.payload);
+    const success = result?.success === true;
+    return res.status(success ? HTTP.OK : HTTP.BAD_REQUEST).json({
+      success,
+      message: result?.message ?? ''
     });
-  } catch (error) {
-    const { status, message } = httpStatusForOracle(error);
-    return res.status(status).json({
+  } catch {
+    return res.status(HTTP.BAD_REQUEST).json({
       success: false,
-      message
+      message: 'Unable to process request'
     });
   }
 }));
@@ -587,7 +587,7 @@ router.post(
       if (err) {
         return res.status(HTTP.SERVER_ERROR).json({
           success: false,
-          message: err.message || 'Upload failed'
+          message: 'Upload failed'
         });
       }
       next();
@@ -604,20 +604,20 @@ router.post(
     }
 
     try {
-      await editEmployeeCompensationComponents(
+      const result = await editEmployeeCompensationComponents(
         validation.payload,
         validation.files,
         validation.documentDescriptions
       );
-      return res.status(HTTP.OK).json({
-        success: true,
-        message: SUCCESS_MESSAGE
+      const success = result?.success === true;
+      return res.status(success ? HTTP.OK : HTTP.BAD_REQUEST).json({
+        success,
+        message: result?.message ?? ''
       });
-    } catch (error) {
-      const { status, message } = httpStatusForOracle(error);
-      return res.status(status).json({
+    } catch {
+      return res.status(HTTP.BAD_REQUEST).json({
         success: false,
-        message
+        message: 'Unable to process request'
       });
     }
   })

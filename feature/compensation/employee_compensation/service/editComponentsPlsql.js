@@ -51,6 +51,8 @@ DECLARE
   l_tab COMP.EMPLOYEE_COMPENSATION.t_component_tab := COMP.EMPLOYEE_COMPENSATION.t_component_tab();
   l_docs COMP.EMPLOYEE_COMPENSATION.t_doc_tab := COMP.EMPLOYEE_COMPENSATION.t_doc_tab();
   j JSON_ARRAY_T := JSON_ARRAY_T(:components_json);
+  l_success VARCHAR2(1) := 'N';
+  l_message VARCHAR2(4000);
 BEGIN
   FOR i IN 0 .. j.get_size() - 1 LOOP
     DECLARE
@@ -96,21 +98,33 @@ BEGIN
     END;
   END LOOP;
 ${docBlock}
-  COMP.EMPLOYEE_COMPENSATION.edit_components(
-    p_enterprise_id        => :enterprise_id,
-    p_employee_id          => :employee_id,
-    p_plan_id              => :plan_id,
-    p_adjustment_type      => :adjustment_type,
-    p_effective_date       => :effective_date,
-    p_reason_code          => :reason_code,
-    p_budget_code          => :budget_code,
-    p_justification_text   => :justification_text,
-    p_performance_rating   => :performance_rating,
-    p_internal_notes       => :internal_notes,
-    p_components           => l_tab,
-    p_docs                 => l_docs,
-    p_updated_by           => :updated_by
-  );
+  BEGIN
+    COMP.EMPLOYEE_COMPENSATION.edit_components(
+      p_enterprise_id        => :enterprise_id,
+      p_employee_id          => :employee_id,
+      p_plan_id              => :plan_id,
+      p_adjustment_type      => :adjustment_type,
+      p_effective_date       => :effective_date,
+      p_reason_code          => :reason_code,
+      p_budget_code          => :budget_code,
+      p_justification_text   => :justification_text,
+      p_performance_rating   => :performance_rating,
+      p_internal_notes       => :internal_notes,
+      p_components           => l_tab,
+      p_docs                 => l_docs,
+      p_updated_by           => :updated_by,
+      x_success              => l_success,
+      x_message              => l_message
+    );
+  EXCEPTION
+    WHEN OTHERS THEN
+      l_success := 'N';
+      IF l_message IS NULL OR TRIM(l_message) IS NULL THEN
+        l_message := 'Unable to process request';
+      END IF;
+  END;
+  :x_success := NVL(l_success, 'N');
+  :x_message := NVL(l_message, 'Unable to process request');
 END;
 `;
 }
