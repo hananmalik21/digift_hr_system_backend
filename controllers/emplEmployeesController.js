@@ -5,12 +5,27 @@
 
 import multer from 'multer';
 import { updateEmployeeAllInOne, validateUpdateBody } from '../services/emplEmployeeAllInOneService.js';
+import { deleteEmployee } from '../services/emplEmployeeDeleteService.js';
 import { getConnection } from '../config/db.js';
 import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
 import { getEmployeeListRowByEmployeeId } from '../feature/employee_management/employees/controller/employeeController.js';
 import EmployeeModel from '../feature/employee_management/employees/model/employeeModel.js';
 
 const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
+
+function extractOracleFriendlyMessage(err) {
+  const raw = String(err?.message ?? err ?? '').trim();
+  if (!raw) return 'Failed to delete employee';
+  const lines = raw
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith('ORA-06512'));
+  const first = (lines[0] ?? raw).trim();
+  return first
+    .replace(/^ORA-\d{5}:\s*/i, '')
+    .replace(/^ORA-20001:\s*/i, '')
+    .trim() || 'Failed to delete employee';
+}
 
 const uploadAllInOne = multer({
   storage: multer.memoryStorage(),
@@ -203,5 +218,44 @@ export async function updateEmployeeAllInOneHandler(req, res) {
     if (connection) {
       try { await connection.close(); } catch (_) {}
     }
+  }
+}
+
+/**
+ * DELETE /api/delete-employee
+ * Body: { enterprise_id, employee_id, actor }
+ * Calls EMPL.EMPL_EMPLOYEE_DELETE_API_PKG.DELETE_EMPLOYEE.
+ *
+ * Success: { success: true, message: "Employee deleted successfully" }
+ * Error:   { success: false, message: "<friendly message>" } (no ORA codes/details)
+ */
+export async function deleteEmployeeHandler(req, res) {
+  const body = req.body || {};
+  const enterpriseId = body.enterprise_id ?? body.enterpriseId ?? body.ENTERPRISE_ID;
+  const employeeId = body.employee_id ?? body.employeeId ?? body.EMPLOYEE_ID;
+  const actor = body.actor ?? body.ACTOR ?? 'SYSTEM';
+
+  try {
+    await deleteEmployee(null, {
+      enterprise_id: enterpriseId,
+      employee_id: employeeId,
+      actor
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Employee inactivated successfully'
+    });
+  } catch (err) {
+    const friendly = extractOracleFriendlyMessage(err);
+    if (/already\s+inactive/i.test(friendly)) {
+      return res.status(200).json({
+        success: true,
+        message: 'Employee is already inactive'
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      message: friendly
+    });
   }
 }
