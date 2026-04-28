@@ -120,6 +120,13 @@ function normalizeFrequencyCode(value) {
   return s.toUpperCase();
 }
 
+function isValidYnFlag(value) {
+  if (value === undefined || value === null) return true; // treated as default by service layer
+  const s = String(value).trim().toUpperCase();
+  if (!s) return true; // treated as default
+  return s === 'Y' || s === 'N';
+}
+
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -173,6 +180,20 @@ function collectPlanJsonValidationErrors(payload, options) {
             errors.push(`components[${idx}].frequency_code must be a non-empty string`);
           }
         }
+
+        const advancedFlags = [
+          'prorated_flag',
+          'taxable_flag',
+          'pensionable_flag',
+          'statutory_flag',
+          'include_in_ctc_flag',
+          'optional_flag'
+        ];
+        advancedFlags.forEach((flag) => {
+          if (hasKey(c, flag) && !isValidYnFlag(c[flag])) {
+            errors.push(`components[${idx}].${flag} must be "Y" or "N"`);
+          }
+        });
       });
     }
   }

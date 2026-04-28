@@ -31,6 +31,22 @@ Content-Type: application/json
     "currency_code": "KWD",
     "created_by": "ADMIN"
   },
+  "components": [
+    {
+      "component_id": 101,
+      "display_sequence": 1,
+      "mandatory_flag": "Y",
+      "active_flag": "Y",
+      "frequency_code": "MONTHLY",
+      "prorated_flag": "N",
+      "taxable_flag": "N",
+      "pensionable_flag": "N",
+      "statutory_flag": "N",
+      "include_in_ctc_flag": "N",
+      "optional_flag": "N",
+      "created_by": "ADMIN"
+    }
+  ],
   "positions": [
     {
       "position_id": "4D64578D1ECC0E6AE0633519000AF3AC",
@@ -52,6 +68,22 @@ Content-Type: application/json
     "currency_code": "KWD",
     "created_by": "ADMIN"
   },
+  "components": [
+    {
+      "component_id": 101,
+      "display_sequence": 1,
+      "mandatory_flag": "Y",
+      "active_flag": "Y",
+      "frequency_code": "MONTHLY",
+      "prorated_flag": "N",
+      "taxable_flag": "N",
+      "pensionable_flag": "N",
+      "statutory_flag": "N",
+      "include_in_ctc_flag": "N",
+      "optional_flag": "N",
+      "created_by": "ADMIN"
+    }
+  ],
   "positions": [
     {
       "position_id": "4D64578D1ECC0E6AE0633519000AF3AC",
