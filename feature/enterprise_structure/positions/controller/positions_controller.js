@@ -1,6 +1,12 @@
 // features/positions/controller/positions_controller.js
 import express from 'express';
 import PositionsModel from '../model/positions_model.js';
+import {
+  POSITION_ALLOWED_EMPLOYMENT_TYPES,
+  POSITION_ALLOWED_STATUS,
+  POSITION_GUID_FIELDS,
+  POSITION_NUMERIC_FIELDS,
+} from '../constants/positions_constants.js';
 import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
@@ -36,6 +42,17 @@ function isHex32Guid(v) {
 function validatePosition(data, isUpdate = false) {
   const errors = [];
   const empty = (v) => v === undefined || v === null || String(v).trim() === '';
+  const parseStepNumbers = (value) => {
+    if (value === undefined || value === null || value === '') return [];
+    const items = Array.isArray(value) ? value : [value];
+    const steps = [];
+    for (const item of items) {
+      const n = Number(item);
+      if (!Number.isInteger(n) || n < 1) return null;
+      steps.push(n);
+    }
+    return steps;
+  };
   const reqIfCreate = (field, msg) => {
     if (!isUpdate && empty(data[field])) errors.push(msg);
   };
@@ -61,35 +78,25 @@ function validatePosition(data, isUpdate = false) {
   reqIfCreate('BUDGETED_MAX_KD', 'budgeted_max_kd is required');
 
   // GUID checks
-  const guidFields = ['ORG_STRUCTURE_ID', 'ORG_UNIT_ID', 'REPORTS_TO_POSITION_ID', 'POSITION_ID'];
-  for (const f of guidFields) {
+  for (const f of POSITION_GUID_FIELDS) {
     if (!empty(data[f]) && !isHex32Guid(data[f])) {
       errors.push(`${f.toLowerCase()} must be a valid GUID (32-hex or UUID)`);
     }
   }
 
   // numeric checks
-  const numericFields = [
-    'JOB_FAMILY_ID',
-    'JOB_LEVEL_ID',
-    'GRADE_ID',
-    'STEP_NO',
-    'NUMBER_OF_POSITIONS',
-    'FILLED_POSITIONS',
-    'BUDGETED_MIN_KD',
-    'BUDGETED_MAX_KD',
-    'ACTUAL_AVG_KD',
-  ];
-
-  for (const f of numericFields) {
+  for (const f of POSITION_NUMERIC_FIELDS) {
     if (data[f] !== undefined && data[f] !== null && data[f] !== '' && isNaN(Number(data[f]))) {
       errors.push(`${f.toLowerCase()} must be a number`);
     }
   }
 
-  if (data.STEP_NO !== undefined && data.STEP_NO !== null && data.STEP_NO !== '') {
-    const step = parseInt(data.STEP_NO, 10);
-    if (isNaN(step) || step < 1 || step > 5) errors.push('step_no must be between 1 and 5');
+  const providedStepInput = data.STEP_NOS !== undefined ? data.STEP_NOS : data.STEP_NO;
+  if (providedStepInput !== undefined && providedStepInput !== null && providedStepInput !== '') {
+    const steps = parseStepNumbers(providedStepInput);
+    if (!steps || steps.length === 0) {
+      errors.push('step_no must be a positive integer (>= 1) or an array of positive integers');
+    }
   }
 
   if (data.NUMBER_OF_POSITIONS !== undefined) {
@@ -116,16 +123,46 @@ function validatePosition(data, isUpdate = false) {
 
   if (data.STATUS !== undefined && data.STATUS !== null && data.STATUS !== '') {
     const v = String(data.STATUS).toUpperCase();
-    if (!['ACTIVE', 'INACTIVE'].includes(v)) errors.push('status must be ACTIVE or INACTIVE');
+    if (!POSITION_ALLOWED_STATUS.includes(v)) {
+      errors.push(`status must be one of: ${POSITION_ALLOWED_STATUS.join(', ')}`);
+    }
   }
 
   if (data.EMPLOYMENT_TYPE !== undefined && data.EMPLOYMENT_TYPE !== null && data.EMPLOYMENT_TYPE !== '') {
     const v = String(data.EMPLOYMENT_TYPE).toUpperCase();
-    const allowed = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'TEMP'];
-    if (!allowed.includes(v)) errors.push(`employment_type must be one of: ${allowed.join(', ')}`);
+    if (!POSITION_ALLOWED_EMPLOYMENT_TYPES.includes(v)) {
+      errors.push(`employment_type must be one of: ${POSITION_ALLOWED_EMPLOYMENT_TYPES.join(', ')}`);
+    }
   }
 
   return errors;
+}
+
+function normalizeBodyGuidFields(data) {
+  if (data.ORG_STRUCTURE_ID) data.ORG_STRUCTURE_ID = normalizeGuidString(data.ORG_STRUCTURE_ID);
+  if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
+  if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
+}
+
+async function handleUpdate(req, res) {
+  try {
+    const tenantId = getTenantId(req);
+    const id = normalizeGuidString(req.params.id);
+    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+
+    const data = toUpperCaseKeys(req.body);
+    const errors = validatePosition(data, true);
+    if (errors.length) return sendBadRequest(res, req, errors);
+
+    normalizeBodyGuidFields(data);
+
+    const updated = await PositionsModel.update(id, data, getUserId(req), tenantId);
+    return sendUpdated(res, req, updated);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+    if (error?.code === 'UNIQUE_CONSTRAINT_VIOLATION') return sendConflict(res, req, error.userMessage || error.message, error);
+    return sendServerError(res, req, 'Failed to update position', error);
+  }
 }
 
 /**
@@ -242,9 +279,7 @@ router.post('/', async (req, res) => {
     const errors = validatePosition(data, false);
     if (errors.length) return sendBadRequest(res, req, errors);
 
-    if (data.ORG_STRUCTURE_ID) data.ORG_STRUCTURE_ID = normalizeGuidString(data.ORG_STRUCTURE_ID);
-    if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
-    if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
+    normalizeBodyGuidFields(data);
 
     const created = await PositionsModel.create(data, getUserId(req));
     return sendCreated(res, req, created);
@@ -259,36 +294,12 @@ router.post('/', async (req, res) => {
  * PUT /api/positions/:id
  * Body: tenant_id (required for filtering; cannot be changed), ...other fields
  */
-router.put('/:id', async (req, res) => {
-  try {
-    const tenantId = getTenantId(req);
-    const id = normalizeGuidString(req.params.id);
-    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
-
-    const data = toUpperCaseKeys(req.body);
-    const errors = validatePosition(data, true);
-    if (errors.length) return sendBadRequest(res, req, errors);
-
-    if (data.ORG_STRUCTURE_ID) data.ORG_STRUCTURE_ID = normalizeGuidString(data.ORG_STRUCTURE_ID);
-    if (data.ORG_UNIT_ID) data.ORG_UNIT_ID = normalizeGuidString(data.ORG_UNIT_ID);
-    if (data.REPORTS_TO_POSITION_ID) data.REPORTS_TO_POSITION_ID = normalizeGuidString(data.REPORTS_TO_POSITION_ID);
-
-    const updated = await PositionsModel.update(id, data, getUserId(req), tenantId);
-    return sendUpdated(res, req, updated);
-  } catch (error) {
-    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
-    if (error?.code === 'UNIQUE_CONSTRAINT_VIOLATION') return sendConflict(res, req, error.userMessage || error.message, error);
-    return sendServerError(res, req, 'Failed to update position', error);
-  }
-});
+router.put('/:id', handleUpdate);
 
 /**
  * PATCH -> same as PUT
  */
-router.patch('/:id', async (req, res) => {
-  req.method = 'PUT';
-  return router.handle(req, res);
-});
+router.patch('/:id', handleUpdate);
 
 /**
  * DELETE /api/positions/:id

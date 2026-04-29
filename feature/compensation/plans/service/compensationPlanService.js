@@ -56,6 +56,41 @@ BEGIN
 END;
 `;
 
+const ADVANCED_COMPONENT_FLAG_KEYS = [
+  'prorated_flag',
+  'taxable_flag',
+  'pensionable_flag',
+  'statutory_flag',
+  'include_in_ctc_flag',
+  'optional_flag'
+];
+
+function normalizeYnFlag(value) {
+  if (value === undefined || value === null) return 'N';
+  const s = String(value).trim().toUpperCase();
+  if (!s) return 'N';
+  if (s === 'Y' || s.startsWith('Y')) return 'Y';
+  if (s === 'N' || s.startsWith('N')) return 'N';
+  return 'N';
+}
+
+function normalizeAdvancedComponentFlags(component) {
+  if (component == null || typeof component !== 'object' || Array.isArray(component)) return component;
+  const out = { ...component };
+  ADVANCED_COMPONENT_FLAG_KEYS.forEach((k) => {
+    out[k] = normalizeYnFlag(component[k]);
+  });
+  return out;
+}
+
+function normalizePayloadComponentsAdvancedFlags(payload) {
+  if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  if (!Object.prototype.hasOwnProperty.call(payload, 'components')) return payload;
+  if (payload.components == null) return payload;
+  if (!Array.isArray(payload.components)) return payload;
+  return { ...payload, components: payload.components.map(normalizeAdvancedComponentFlags) };
+}
+
 /**
  * UPDATE_COMPENSATION_PLAN_PKG.UPDATE_PLAN does not reliably persist `components`
  * into COMP.COMP_PLAN_COMPONENTS. When the client sends `components`, mirror the
@@ -68,6 +103,7 @@ const SKIP_PLAN_COMPONENTS_NODE_SYNC =
     .toLowerCase() === 'true' ||
   String(process.env.COMP_PLAN_SKIP_COMPONENTS_NODE_SYNC || '').trim() === '1';
 
+// Base sync SQL (works even if advanced flag columns don't exist).
 const SYNC_PLAN_COMPONENTS_SQL = `
 DECLARE
   l_plan_id NUMBER;
@@ -248,6 +284,283 @@ BEGIN
 END;
 `;
 
+// Advanced sync SQL (requires the new advanced flag columns to exist).
+const SYNC_PLAN_COMPONENTS_ADV_SQL = `
+DECLARE
+  l_plan_id NUMBER;
+  l_actor   VARCHAR2(200);
+BEGIN
+  SELECT p.plan_id
+    INTO l_plan_id
+    FROM comp.comp_plans p
+   WHERE p.plan_guid = HEXTORAW(:plan_guid_hex);
+
+  l_actor := NVL(SUBSTR(:actor, 1, 200), 'SYSTEM');
+  MERGE INTO comp.comp_plan_components t
+  USING (
+    SELECT l_plan_id AS plan_id,
+           j.component_id,
+           NVL(j.display_sequence, 1) AS display_sequence,
+           CASE
+             WHEN UPPER(TRIM(j.mandatory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS mandatory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.active_flag)) LIKE 'N%' THEN 'N'
+             ELSE 'Y'
+           END AS active_flag,
+           CASE
+             WHEN UPPER(TRIM(j.prorated_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS prorated_flag,
+           CASE
+             WHEN UPPER(TRIM(j.taxable_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS taxable_flag,
+           CASE
+             WHEN UPPER(TRIM(j.pensionable_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS pensionable_flag,
+           CASE
+             WHEN UPPER(TRIM(j.statutory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS statutory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.include_in_ctc_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS include_in_ctc_flag,
+           CASE
+             WHEN UPPER(TRIM(j.optional_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS optional_flag,
+           NVL(SUBSTR(TRIM(j.created_by), 1, 200), l_actor) AS row_created_by
+      FROM JSON_TABLE(
+             :components_json,
+             '$[*]'
+             COLUMNS (
+               component_id        NUMBER         PATH '$.component_id',
+               display_sequence    NUMBER         PATH '$.display_sequence',
+               mandatory_flag      VARCHAR2(10) PATH '$.mandatory_flag',
+               active_flag         VARCHAR2(10) PATH '$.active_flag',
+               prorated_flag       VARCHAR2(10) PATH '$.prorated_flag',
+               taxable_flag        VARCHAR2(10) PATH '$.taxable_flag',
+               pensionable_flag    VARCHAR2(10) PATH '$.pensionable_flag',
+               statutory_flag      VARCHAR2(10) PATH '$.statutory_flag',
+               include_in_ctc_flag VARCHAR2(10) PATH '$.include_in_ctc_flag',
+               optional_flag       VARCHAR2(10) PATH '$.optional_flag',
+               created_by          VARCHAR2(200) PATH '$.created_by'
+             )
+           ) j
+     WHERE j.component_id IS NOT NULL
+  ) s
+  ON (t.plan_id = s.plan_id AND t.component_id = s.component_id)
+  WHEN MATCHED THEN
+    UPDATE SET
+      t.display_sequence    = s.display_sequence,
+      t.mandatory_flag      = s.mandatory_flag,
+      t.active_flag         = s.active_flag,
+      t.prorated_flag       = s.prorated_flag,
+      t.taxable_flag        = s.taxable_flag,
+      t.pensionable_flag    = s.pensionable_flag,
+      t.statutory_flag      = s.statutory_flag,
+      t.include_in_ctc_flag = s.include_in_ctc_flag,
+      t.optional_flag       = s.optional_flag,
+      t.last_updated_by     = l_actor,
+      t.last_update_date    = SYSDATE
+  WHEN NOT MATCHED THEN
+    INSERT (
+      plan_component_id,
+      plan_id,
+      component_id,
+      display_sequence,
+      mandatory_flag,
+      active_flag,
+      prorated_flag,
+      taxable_flag,
+      pensionable_flag,
+      statutory_flag,
+      include_in_ctc_flag,
+      optional_flag,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date
+    )
+    VALUES (
+      comp.comp_plan_components_seq.NEXTVAL,
+      s.plan_id,
+      s.component_id,
+      s.display_sequence,
+      s.mandatory_flag,
+      s.active_flag,
+      s.prorated_flag,
+      s.taxable_flag,
+      s.pensionable_flag,
+      s.statutory_flag,
+      s.include_in_ctc_flag,
+      s.optional_flag,
+      s.row_created_by,
+      SYSDATE,
+      l_actor,
+      SYSDATE
+    );
+
+  DELETE FROM comp.comp_plan_components t
+   WHERE t.plan_id = l_plan_id
+     AND NOT EXISTS (
+           SELECT 1
+             FROM JSON_TABLE(
+                    :components_json,
+                    '$[*]'
+                    COLUMNS (component_id NUMBER PATH '$.component_id')
+                  ) j
+            WHERE j.component_id IS NOT NULL
+              AND j.component_id = t.component_id
+         );
+END;
+`;
+
+const SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_ADV_SQL = `
+DECLARE
+  l_plan_id NUMBER;
+  l_actor   VARCHAR2(200);
+BEGIN
+  SELECT p.plan_id
+    INTO l_plan_id
+    FROM comp.comp_plans p
+   WHERE p.plan_guid = HEXTORAW(:plan_guid_hex);
+
+  l_actor := NVL(SUBSTR(:actor, 1, 200), 'SYSTEM');
+
+  MERGE INTO comp.comp_plan_components t
+  USING (
+    SELECT l_plan_id AS plan_id,
+           j.component_id,
+           NVL(j.display_sequence, 1) AS display_sequence,
+           CASE
+             WHEN UPPER(TRIM(j.mandatory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS mandatory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.active_flag)) LIKE 'N%' THEN 'N'
+             ELSE 'Y'
+           END AS active_flag,
+           NULLIF(UPPER(TRIM(j.frequency_code)), '') AS frequency_code,
+           CASE
+             WHEN UPPER(TRIM(j.prorated_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS prorated_flag,
+           CASE
+             WHEN UPPER(TRIM(j.taxable_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS taxable_flag,
+           CASE
+             WHEN UPPER(TRIM(j.pensionable_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS pensionable_flag,
+           CASE
+             WHEN UPPER(TRIM(j.statutory_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS statutory_flag,
+           CASE
+             WHEN UPPER(TRIM(j.include_in_ctc_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS include_in_ctc_flag,
+           CASE
+             WHEN UPPER(TRIM(j.optional_flag)) LIKE 'Y%' THEN 'Y'
+             ELSE 'N'
+           END AS optional_flag,
+           NVL(SUBSTR(TRIM(j.created_by), 1, 200), l_actor) AS row_created_by
+      FROM JSON_TABLE(
+             :components_json,
+             '$[*]'
+             COLUMNS (
+               component_id        NUMBER         PATH '$.component_id',
+               display_sequence    NUMBER         PATH '$.display_sequence',
+               mandatory_flag      VARCHAR2(10) PATH '$.mandatory_flag',
+               active_flag         VARCHAR2(10) PATH '$.active_flag',
+               frequency_code      VARCHAR2(30) PATH '$.frequency_code',
+               prorated_flag       VARCHAR2(10) PATH '$.prorated_flag',
+               taxable_flag        VARCHAR2(10) PATH '$.taxable_flag',
+               pensionable_flag    VARCHAR2(10) PATH '$.pensionable_flag',
+               statutory_flag      VARCHAR2(10) PATH '$.statutory_flag',
+               include_in_ctc_flag VARCHAR2(10) PATH '$.include_in_ctc_flag',
+               optional_flag       VARCHAR2(10) PATH '$.optional_flag',
+               created_by          VARCHAR2(200) PATH '$.created_by'
+             )
+           ) j
+     WHERE j.component_id IS NOT NULL
+  ) s
+  ON (t.plan_id = s.plan_id AND t.component_id = s.component_id)
+  WHEN MATCHED THEN
+    UPDATE SET
+      t.display_sequence    = s.display_sequence,
+      t.mandatory_flag      = s.mandatory_flag,
+      t.active_flag         = s.active_flag,
+      t.frequency_code      = s.frequency_code,
+      t.prorated_flag       = s.prorated_flag,
+      t.taxable_flag        = s.taxable_flag,
+      t.pensionable_flag    = s.pensionable_flag,
+      t.statutory_flag      = s.statutory_flag,
+      t.include_in_ctc_flag = s.include_in_ctc_flag,
+      t.optional_flag       = s.optional_flag,
+      t.last_updated_by     = l_actor,
+      t.last_update_date    = SYSDATE
+  WHEN NOT MATCHED THEN
+    INSERT (
+      plan_component_id,
+      plan_id,
+      component_id,
+      display_sequence,
+      mandatory_flag,
+      active_flag,
+      frequency_code,
+      prorated_flag,
+      taxable_flag,
+      pensionable_flag,
+      statutory_flag,
+      include_in_ctc_flag,
+      optional_flag,
+      created_by,
+      creation_date,
+      last_updated_by,
+      last_update_date
+    )
+    VALUES (
+      comp.comp_plan_components_seq.NEXTVAL,
+      s.plan_id,
+      s.component_id,
+      s.display_sequence,
+      s.mandatory_flag,
+      s.active_flag,
+      s.frequency_code,
+      s.prorated_flag,
+      s.taxable_flag,
+      s.pensionable_flag,
+      s.statutory_flag,
+      s.include_in_ctc_flag,
+      s.optional_flag,
+      s.row_created_by,
+      SYSDATE,
+      l_actor,
+      SYSDATE
+    );
+
+  DELETE FROM comp.comp_plan_components t
+   WHERE t.plan_id = l_plan_id
+     AND NOT EXISTS (
+           SELECT 1
+             FROM JSON_TABLE(
+                    :components_json,
+                    '$[*]'
+                    COLUMNS (component_id NUMBER PATH '$.component_id')
+                  ) j
+            WHERE j.component_id IS NOT NULL
+              AND j.component_id = t.component_id
+         );
+END;
+`;
+
 let cachedHasPlanComponentFrequencyCode = null;
 
 async function hasPlanComponentFrequencyCodeColumn(connection) {
@@ -264,6 +577,38 @@ async function hasPlanComponentFrequencyCodeColumn(connection) {
   const cnt = result?.rows?.[0]?.[0] ?? result?.rows?.[0]?.CNT ?? 0;
   cachedHasPlanComponentFrequencyCode = Number(cnt) > 0;
   return cachedHasPlanComponentFrequencyCode;
+}
+
+let cachedHasPlanComponentAdvancedFlags = null;
+
+async function hasPlanComponentAdvancedFlagColumns(connection) {
+  if (cachedHasPlanComponentAdvancedFlags !== null) return cachedHasPlanComponentAdvancedFlags;
+  const result = await connection.execute(
+    `
+      SELECT COUNT(*) AS cnt
+        FROM all_tab_columns c
+       WHERE c.owner = 'COMP'
+         AND c.table_name = 'COMP_PLAN_COMPONENTS'
+         AND c.column_name IN (
+           'PRORATED_FLAG',
+           'TAXABLE_FLAG',
+           'PENSIONABLE_FLAG',
+           'STATUTORY_FLAG',
+           'INCLUDE_IN_CTC_FLAG',
+           'OPTIONAL_FLAG'
+         )
+    `
+  );
+  const cnt = result?.rows?.[0]?.[0] ?? result?.rows?.[0]?.CNT ?? 0;
+  cachedHasPlanComponentAdvancedFlags = Number(cnt) === 6;
+  return cachedHasPlanComponentAdvancedFlags;
+}
+
+function pickComponentsSyncSql({ hasFreq, hasAdvanced }) {
+  if (hasAdvanced) {
+    return hasFreq ? SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_ADV_SQL : SYNC_PLAN_COMPONENTS_ADV_SQL;
+  }
+  return hasFreq ? SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_SQL : SYNC_PLAN_COMPONENTS_SQL;
 }
 
 const EXEC_OPTS = { autoCommit: false };
@@ -361,10 +706,11 @@ async function withPlanConnection(fn) {
  */
 export async function createCompensationPlan(payload) {
   return withPlanConnection(async (connection) => {
+    const normalizedPayload = normalizePayloadComponentsAdvancedFlags(payload);
     const result = await connection.execute(
       CREATE_PLAN_SQL,
       {
-        p_plan_json: payloadToPlanJsonBind(payload),
+        p_plan_json: payloadToPlanJsonBind(normalizedPayload),
         p_plan_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
       },
       EXEC_OPTS
@@ -383,6 +729,7 @@ export async function updateCompensationPlan(payload) {
   if (body.plan_guid != null) {
     body.plan_guid = String(body.plan_guid).trim().toUpperCase();
   }
+  const normalizedBody = normalizePayloadComponentsAdvancedFlags(body);
   const planGuidHex = normalizePlanGuidHex(body.plan_guid);
   if (!planGuidHex) {
     throw new Error(PLAN_GUID_VALIDATION_MESSAGE);
@@ -399,7 +746,7 @@ export async function updateCompensationPlan(payload) {
     await connection.execute(
       UPDATE_PLAN_SQL,
       {
-        p_plan_json: payloadToPlanJsonBind(body),
+        p_plan_json: payloadToPlanJsonBind(normalizedBody),
         plan_guid_hex: { val: planGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING }
       },
       EXEC_OPTS
@@ -410,12 +757,14 @@ export async function updateCompensationPlan(payload) {
         body.last_updated_by ?? body.updated_by ?? body.created_by ?? 'SYSTEM'
       ).trim();
       const hasFreq = await hasPlanComponentFrequencyCodeColumn(connection);
-      const sql = hasFreq ? SYNC_PLAN_COMPONENTS_WITH_FREQUENCY_SQL : SYNC_PLAN_COMPONENTS_SQL;
+      const hasAdvanced = await hasPlanComponentAdvancedFlagColumns(connection);
+      const sql = pickComponentsSyncSql({ hasFreq, hasAdvanced });
+      const normalizedComponents = normalizedBody.components || [];
       await connection.execute(
         sql,
         {
           plan_guid_hex: { val: planGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING },
-          components_json: payloadToPlanJsonBind(payload.components),
+          components_json: payloadToPlanJsonBind(normalizedComponents),
           actor: { val: actor || 'SYSTEM', dir: oracledb.BIND_IN, type: oracledb.STRING }
         },
         EXEC_OPTS
