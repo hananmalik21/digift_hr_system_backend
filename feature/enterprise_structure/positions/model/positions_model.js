@@ -1,9 +1,12 @@
 // features/positions/model/positions_model.js
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
+import { POSITION_ALLOWED_EMPLOYMENT_TYPES, POSITION_ALLOWED_STATUS } from '../constants/positions_constants.js';
 
 class PositionsModel {
   static TABLE_NAME = 'ENT.POSITIONS';
+  static ALLOWED_STATUS = new Set(POSITION_ALLOWED_STATUS);
+  static ALLOWED_EMPLOYMENT_TYPES = new Set(POSITION_ALLOWED_EMPLOYMENT_TYPES);
 
   // ----------------------------
   // helpers
@@ -130,6 +133,71 @@ class PositionsModel {
     return n;
   }
 
+  static normalizeStepNumbers(v, field = 'step_no') {
+    if (this.isMissing(v)) return null;
+    const values = Array.isArray(v) ? v : [v];
+    if (!values.length) {
+      const err = new Error(`${field} must contain at least one step value`);
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const out = values.map((item) => {
+      const n = Number(item);
+      if (!Number.isInteger(n) || n < 1) {
+        const err = new Error(`${field} values must be positive integers (>= 1)`);
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      return n;
+    });
+    return out;
+  }
+
+  static normalizeStatus(v, { required = false, defaultValue = null } = {}) {
+    if (this.isMissing(v)) {
+      if (required && defaultValue === null) {
+        const err = new Error('status is required');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      return defaultValue;
+    }
+    const normalized = String(v).trim().toUpperCase();
+    if (!this.ALLOWED_STATUS.has(normalized)) {
+      const err = new Error(`status must be one of: ${Array.from(this.ALLOWED_STATUS).join(', ')}`);
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    return normalized;
+  }
+
+  static normalizeEmploymentType(v, { required = false } = {}) {
+    if (this.isMissing(v)) {
+      if (required) {
+        const err = new Error('employment_type is required');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      return null;
+    }
+    const normalized = String(v).trim().toUpperCase();
+    if (!this.ALLOWED_EMPLOYMENT_TYPES.has(normalized)) {
+      const err = new Error(
+        `employment_type must be one of: ${Array.from(this.ALLOWED_EMPLOYMENT_TYPES).join(', ')}`
+      );
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
+    return normalized;
+  }
+
   static async executeQuery(sql, bindParams = [], options = {}) {
     try {
       const result = await db.executeQuery(sql, bindParams, {
@@ -246,6 +314,7 @@ class PositionsModel {
         g.GRADE_NUMBER   AS GRADE_NUMBER_REF,
 
         p.STEP_NO,
+        p.STEP_NOS_JSON,
         p.NUMBER_OF_POSITIONS,
         p.FILLED_POSITIONS,
         p.EMPLOYMENT_TYPE,
@@ -284,9 +353,21 @@ class PositionsModel {
       } catch (_) {}
     }
 
+    let step_nos = row.step_nos_json;
+    if (typeof step_nos === 'string' && step_nos.trim() !== '') {
+      try {
+        step_nos = JSON.parse(step_nos);
+      } catch (_) {}
+    }
+    if (!Array.isArray(step_nos)) {
+      const fallbackStep = Number(row.step_no);
+      step_nos = Number.isInteger(fallbackStep) && fallbackStep > 0 ? [fallbackStep] : [];
+    }
+
     const shaped = {
       ...row,
       org_path_json,
+      step_nos,
       org_structure: {
         structure_id: row.org_structure_id,
         structure_code: row.org_structure_code_ref ?? null,
@@ -328,6 +409,7 @@ class PositionsModel {
     for (const k of Object.keys(shaped)) {
       if (k.endsWith('_ref')) delete shaped[k];
     }
+    delete shaped.step_nos_json;
 
     return shaped;
   }
@@ -477,7 +559,10 @@ class PositionsModel {
       throw err;
     }
 
-    const stepNo = this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 }) ?? 1;
+    const requestedStepsInput = payload.step_nos !== undefined ? payload.step_nos : payload.step_no;
+    const normalizedSteps = this.normalizeStepNumbers(requestedStepsInput, 'step_no');
+    const stepNo = normalizedSteps?.[0] ?? 1;
+    const stepNosJson = JSON.stringify(normalizedSteps ?? [stepNo]);
 
     const minKd = this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd');
     const maxKd = this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd');
@@ -491,6 +576,12 @@ class PositionsModel {
     const totalPos = this.numOptional(payload.number_of_positions) ?? 1;
     const filled = this.numOptional(payload.filled_positions) ?? 0;
 
+    if (totalPos < 1) {
+      const err = new Error('number_of_positions must be >= 1');
+      err.code = 'VALIDATION_ERROR';
+      err.statusCode = 400;
+      throw err;
+    }
     if (filled < 0) {
       const err = new Error('filled_positions must be >= 0');
       err.code = 'VALIDATION_ERROR';
@@ -525,6 +616,7 @@ class PositionsModel {
             JOB_LEVEL_ID,
             GRADE_ID,
             STEP_NO,
+            STEP_NOS_JSON,
             NUMBER_OF_POSITIONS,
             FILLED_POSITIONS,
             EMPLOYMENT_TYPE,
@@ -544,7 +636,7 @@ class PositionsModel {
             :orgStructureId, :orgUnitId, :orgPathJson,
             :costCenter, :location,
             :jobFamilyId, :jobLevelId, :gradeId,
-            :stepNo, :numberOfPositions, :filledPositions,
+            :stepNo, :stepNosJson, :numberOfPositions, :filledPositions,
             :employmentType,
             :budgetedMinKd, :budgetedMaxKd, :actualAvgKd,
             :reportsToPositionId,
@@ -556,7 +648,7 @@ class PositionsModel {
         const bindVars = {
           tenantId: { val: tenantIdNum, dir: oracledb.BIND_IN },
           positionCode: { val: this.strRequired(payload.position_code, 'position_code'), dir: oracledb.BIND_IN },
-          status: { val: String(payload.status ?? 'ACTIVE').toUpperCase(), dir: oracledb.BIND_IN },
+          status: { val: this.normalizeStatus(payload.status, { defaultValue: 'ACTIVE' }), dir: oracledb.BIND_IN },
           positionTitleEn: { val: this.strRequired(payload.position_title_en, 'position_title_en'), dir: oracledb.BIND_IN },
           positionTitleAr: { val: this.strOptional(payload.position_title_ar), dir: oracledb.BIND_IN },
           orgStructureId: { val: this.raw16Required(payload.org_structure_id, 'org_structure_id'), dir: oracledb.BIND_IN },
@@ -568,9 +660,10 @@ class PositionsModel {
           jobLevelId: { val: this.numRequired(payload.job_level_id, 'job_level_id'), dir: oracledb.BIND_IN },
           gradeId: { val: this.numRequired(payload.grade_id, 'grade_id'), dir: oracledb.BIND_IN },
           stepNo: { val: stepNo, dir: oracledb.BIND_IN },
+          stepNosJson: { val: stepNosJson, dir: oracledb.BIND_IN },
           numberOfPositions: { val: totalPos, dir: oracledb.BIND_IN },
           filledPositions: { val: filled, dir: oracledb.BIND_IN },
-          employmentType: { val: this.strRequired(payload.employment_type, 'employment_type'), dir: oracledb.BIND_IN },
+          employmentType: { val: this.normalizeEmploymentType(payload.employment_type, { required: true }), dir: oracledb.BIND_IN },
           budgetedMinKd: { val: minKd, dir: oracledb.BIND_IN },
           budgetedMaxKd: { val: maxKd, dir: oracledb.BIND_IN },
           actualAvgKd: { val: this.numOptional(payload.actual_avg_kd), dir: oracledb.BIND_IN },
@@ -658,6 +751,63 @@ class PositionsModel {
     delete payload.tenant_id;
 
     return await this.executeWithTransaction(async (connection) => {
+      const currentSql = `
+        SELECT
+          NUMBER_OF_POSITIONS,
+          FILLED_POSITIONS,
+          BUDGETED_MIN_KD,
+          BUDGETED_MAX_KD
+        FROM ${this.TABLE_NAME}
+        WHERE POSITION_ID = :1 AND TENANT_ID = :2
+      `;
+      const currentRowResult = await connection.execute(currentSql, [idBuf, tenantIdNum], {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+      });
+      if (!currentRowResult?.rows?.length) return null;
+      const currentRow = this.toLowerCaseKeys(this.buffersToHexInRow(currentRowResult.rows[0]));
+
+      const nextNumberOfPositions =
+        payload.number_of_positions !== undefined
+          ? this.numRequired(payload.number_of_positions, 'number_of_positions')
+          : Number(currentRow.number_of_positions ?? 0);
+      const nextFilledPositions =
+        payload.filled_positions !== undefined
+          ? this.numRequired(payload.filled_positions, 'filled_positions')
+          : Number(currentRow.filled_positions ?? 0);
+      const nextBudgetedMinKd =
+        payload.budgeted_min_kd !== undefined
+          ? this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd')
+          : Number(currentRow.budgeted_min_kd ?? 0);
+      const nextBudgetedMaxKd =
+        payload.budgeted_max_kd !== undefined
+          ? this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd')
+          : Number(currentRow.budgeted_max_kd ?? 0);
+
+      if (nextNumberOfPositions < 1) {
+        const err = new Error('number_of_positions must be >= 1');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      if (nextFilledPositions < 0) {
+        const err = new Error('filled_positions must be >= 0');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      if (nextFilledPositions > nextNumberOfPositions) {
+        const err = new Error('filled_positions must be <= number_of_positions');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+      if (nextBudgetedMinKd > nextBudgetedMaxKd) {
+        const err = new Error('budgeted_min_kd must be <= budgeted_max_kd');
+        err.code = 'VALIDATION_ERROR';
+        err.statusCode = 400;
+        throw err;
+      }
+
       const sets = [];
       const binds = [];
       let i = 1;
@@ -669,7 +819,7 @@ class PositionsModel {
       };
 
       if (payload.position_code !== undefined) add('POSITION_CODE', this.strRequired(payload.position_code, 'position_code'));
-      if (payload.status !== undefined) add('STATUS', String(payload.status).toUpperCase());
+      if (payload.status !== undefined) add('STATUS', this.normalizeStatus(payload.status, { required: true }));
       if (payload.position_title_en !== undefined) add('POSITION_TITLE_EN', this.strRequired(payload.position_title_en, 'position_title_en'));
       if (payload.position_title_ar !== undefined) add('POSITION_TITLE_AR', this.strOptional(payload.position_title_ar));
 
@@ -685,13 +835,20 @@ class PositionsModel {
       if (payload.job_level_id !== undefined) add('JOB_LEVEL_ID', this.numRequired(payload.job_level_id, 'job_level_id'));
       if (payload.grade_id !== undefined) add('GRADE_ID', this.numRequired(payload.grade_id, 'grade_id'));
 
-      if (payload.step_no !== undefined) add('STEP_NO', this.intOptional(payload.step_no, 'step_no', { min: 1, max: 5 }));
-      if (payload.number_of_positions !== undefined) add('NUMBER_OF_POSITIONS', this.numRequired(payload.number_of_positions, 'number_of_positions'));
-      if (payload.filled_positions !== undefined) add('FILLED_POSITIONS', this.numRequired(payload.filled_positions, 'filled_positions'));
+      if (payload.step_no !== undefined || payload.step_nos !== undefined) {
+        const stepInput = payload.step_nos !== undefined ? payload.step_nos : payload.step_no;
+        const normalizedSteps = this.normalizeStepNumbers(stepInput, 'step_no');
+        add('STEP_NO', normalizedSteps[0]);
+        add('STEP_NOS_JSON', JSON.stringify(normalizedSteps));
+      }
+      if (payload.number_of_positions !== undefined) add('NUMBER_OF_POSITIONS', nextNumberOfPositions);
+      if (payload.filled_positions !== undefined) add('FILLED_POSITIONS', nextFilledPositions);
 
-      if (payload.employment_type !== undefined) add('EMPLOYMENT_TYPE', this.strRequired(payload.employment_type, 'employment_type'));
-      if (payload.budgeted_min_kd !== undefined) add('BUDGETED_MIN_KD', this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd'));
-      if (payload.budgeted_max_kd !== undefined) add('BUDGETED_MAX_KD', this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd'));
+      if (payload.employment_type !== undefined) {
+        add('EMPLOYMENT_TYPE', this.normalizeEmploymentType(payload.employment_type, { required: true }));
+      }
+      if (payload.budgeted_min_kd !== undefined) add('BUDGETED_MIN_KD', nextBudgetedMinKd);
+      if (payload.budgeted_max_kd !== undefined) add('BUDGETED_MAX_KD', nextBudgetedMaxKd);
       if (payload.actual_avg_kd !== undefined) add('ACTUAL_AVG_KD', this.numOptional(payload.actual_avg_kd));
 
       if (payload.reports_to_position_id !== undefined) add('REPORTS_TO_POSITION_ID', this.raw16Optional(payload.reports_to_position_id, 'reports_to_position_id'));
