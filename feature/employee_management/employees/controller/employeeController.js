@@ -553,6 +553,11 @@ export function mapRowToFullDetailsShape(row) {
   assignmentOut.org_structure_list = parseOrgStructureList(row.ORG_STRUCTURE_LIST ?? row.org_structure_list ?? row.ORG_STRUCTURE_LIST_JSON ?? row.org_structure_list_json);
   delete assignmentOut.org_structure_list_json;
 
+  const budgetedMinKd = row.BUDGETED_MIN_KD ?? row.budgeted_min_kd ?? null;
+  const budgetedMaxKd = row.BUDGETED_MAX_KD ?? row.budgeted_max_kd ?? null;
+  assignmentOut.budgeted_min_kd = budgetedMinKd;
+  assignmentOut.budgeted_max_kd = budgetedMaxKd;
+
   const positionIdVal = row.POSITION_ID ?? row.position_id ?? groups.assignment.POSITION_ID ?? groups.assignment.position_id;
   const positionId = positionIdVal != null && typeof positionIdVal === 'object' && Buffer.isBuffer(positionIdVal)
     ? toHex(positionIdVal)
@@ -562,7 +567,9 @@ export function mapRowToFullDetailsShape(row) {
       position_id: positionId,
       position_code: row.POSITION_CODE ?? row.position_code ?? null,
       status: row.POSITION_STATUS ?? row.position_status ?? null,
-      position_title_en: row.POSITION_NAME_EN ?? row.POSITION_TITLE_EN ?? row.position_name_en ?? row.position_title_en ?? null
+      position_title_en: row.POSITION_NAME_EN ?? row.POSITION_TITLE_EN ?? row.position_name_en ?? row.position_title_en ?? null,
+      budgeted_min_kd: budgetedMinKd,
+      budgeted_max_kd: budgetedMaxKd
     };
   } else {
     assignmentOut.position = null;
