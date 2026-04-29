@@ -793,6 +793,7 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
                'component_name' VALUE c.component_name,
                'description' VALUE c.description,
                'component_type_code' VALUE c.component_type_code,
+               'comp_category_code' VALUE c.comp_category_code,
                'min_value' VALUE c.min_value,
                'max_value' VALUE c.max_value,
                'display_sequence' VALUE pc.display_sequence,
