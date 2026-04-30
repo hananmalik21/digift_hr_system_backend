@@ -46,6 +46,8 @@ const QuerySchema = z
     from_date: z.any().optional(),
     to_date: z.any().optional(),
     search: z.any().optional(),
+    page: z.any().optional(),
+    page_size: z.any().optional(),
     limit: z.any().optional(),
     offset: z.any().optional()
   })
@@ -84,10 +86,38 @@ export function parseSalaryChangeHistoryQuery(rawQuery) {
   if (toTrimmedString(q.from_date) && !fromDate) throw new Error('from_date must be YYYY-MM-DD');
   if (toTrimmedString(q.to_date) && !toDate) throw new Error('to_date must be YYYY-MM-DD');
 
+  const pageRaw = toIntOrNull(q.page);
+  const pageSizeRaw = toIntOrNull(q.page_size);
   const limitRaw = toIntOrNull(q.limit);
   const offsetRaw = toIntOrNull(q.offset);
-  const limit = Math.min(200, Math.max(1, limitRaw ?? 50));
-  const offset = Math.max(0, offsetRaw ?? 0);
+
+  const hasPagePaging = pageRaw != null || pageSizeRaw != null;
+  const hasLimitOffset = limitRaw != null || offsetRaw != null;
+
+  let page = 1;
+  let pageSize = 50;
+  let limit = 50;
+  let offset = 0;
+
+  if (hasPagePaging) {
+    if (pageRaw != null && pageRaw < 1) throw new Error('page must be a positive integer');
+    if (pageSizeRaw != null && pageSizeRaw < 1) throw new Error('page_size must be a positive integer');
+    page = pageRaw ?? 1;
+    pageSize = Math.min(200, pageSizeRaw ?? 50);
+    limit = pageSize;
+    offset = (page - 1) * pageSize;
+  } else if (hasLimitOffset) {
+    limit = Math.min(200, Math.max(1, limitRaw ?? 50));
+    offset = Math.max(0, offsetRaw ?? 0);
+    page = Math.floor(offset / limit) + 1;
+    pageSize = limit;
+  } else {
+    // Default to "other APIs" style defaults.
+    page = 1;
+    pageSize = 50;
+    limit = pageSize;
+    offset = 0;
+  }
 
   return {
     enterprise_id: enterpriseId,
@@ -101,6 +131,8 @@ export function parseSalaryChangeHistoryQuery(rawQuery) {
     from_date: fromDate,
     to_date: toDate,
     search: toTrimmedString(q.search),
+    page,
+    page_size: pageSize,
     limit,
     offset
   };

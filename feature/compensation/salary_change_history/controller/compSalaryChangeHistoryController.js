@@ -7,6 +7,7 @@
 
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { fetchSalaryChangeHistory } from '../service/compSalaryChangeHistoryService.js';
 import { parseSalaryChangeHistoryQuery } from '../utils/parseSalaryChangeHistoryQuery.js';
@@ -19,11 +20,24 @@ function sendFail(res, statusCode, message) {
   return res.status(statusCode).json({ success: false, message: String(message || 'Request failed') });
 }
 
+function paginationBody(page, limit, total) {
+  const meta = buildPaginationMeta(page, limit, total);
+  return {
+    page: meta.page,
+    limit: meta.pageSize,
+    total: meta.total,
+    total_pages: meta.totalPages,
+    has_next: meta.hasNext,
+    has_previous: meta.hasPrevious
+  };
+}
+
 /**
  * GET /api/compensation/salary-change-history
  * Query Parameters:
  * - enterprise_id (required)
- * - employee_id?, employee_guid?, search?, org_unit_id?, level_code?, status?, change_type?, reason_code?, from_date?, to_date?, limit?, offset?
+ * - employee_id?, employee_guid?, search?, org_unit_id?, level_code?, status?, change_type?, reason_code?, from_date?, to_date?
+ * - Pagination: page?, page_size? (preferred) or limit?, offset?
  */
 export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
   let parsed;
@@ -46,7 +60,8 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
       success: true,
       summary: total > 0 ? safeSummary : { employee_count: 0, total_impact: 0, currency_code: null },
       count: total,
-      data: rows || []
+      data: rows || [],
+      pagination: paginationBody(parsed.page, parsed.page_size, total)
     });
   } catch (err) {
     // Never leak Oracle details.
