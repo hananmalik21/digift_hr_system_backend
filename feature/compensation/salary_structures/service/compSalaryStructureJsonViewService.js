@@ -74,8 +74,13 @@ export function parseSalaryStructureListRequest(query) {
   const structure_id = parseOptionalStructureIdFromQuery(query);
   const structure_guid = parseOptionalStructureGuidHexFromQuery(query);
 
-  const search =
-    query.search != null && String(query.search).trim() !== '' ? String(query.search).trim() : null;
+  const searchRaw =
+    query.search != null && String(query.search).trim() !== ''
+      ? query.search
+      : query.q != null && String(query.q).trim() !== ''
+        ? query.q
+        : null;
+  const search = searchRaw != null ? String(searchRaw).trim() : null;
 
   const filterInput = buildJsonViewListFilterValues({
     enterprise_id,

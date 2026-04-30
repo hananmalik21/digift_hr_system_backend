@@ -5,6 +5,9 @@
 ### List salary structures — with TYPE_LOCATION_COLS off, STRUCTURE_OBJ is selected by default so structure_type_code + location_obj match details
 GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&page=1&limit=10&search=&status=ALL&sort_by=structure_code&sort_order=asc
 
+### List salary structures — search alias (q): matches structure_code OR structure_name (case-insensitive)
+GET {{baseUrl}}/api/comp/salary-structures?enterprise_id=1&page=1&limit=10&q=SAL_STR&status=ALL&sort_by=structure_code&sort_order=asc
+
 ### Sample list row (structure_type_code + location_obj match GET …/salary-structures-details shape for those keys)
 # {
 #   "structure_id": 10,
