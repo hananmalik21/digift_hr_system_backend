@@ -34,7 +34,11 @@ function firstIssueMessage(zodError, fallback) {
   return zodError?.issues?.[0]?.message || fallback;
 }
 
-function buildSql() {
+function buildSql({ includeCompCategoryCode } = { includeCompCategoryCode: true }) {
+  const compCategorySelect = includeCompCategoryCode
+    ? 'a.comp_category_code AS comp_category_code'
+    : "CAST(NULL AS VARCHAR2(100)) AS comp_category_code";
+
   // Notes:
   // - `COMP.COMP_EMP_ASSIGNED_COMPONENTS_V` is the sole assignment source (no manual base-table joins).
   // - `frequency_code`: prefer latest `COMP_PLAN_COMPONENTS` row (any active_flag — inactive lines
@@ -68,6 +72,7 @@ function buildSql() {
       a.component_id,
       a.component_code,
       a.component_name,
+      ${compCategorySelect},
       COALESCE(lpc.frequency_code, a.frequency_code) AS frequency_code,
       a.process_status,
       a.pay_run_id,
@@ -106,17 +111,41 @@ router.get(
     }
 
     const { employee_guid } = parsed.data;
-    const sql = buildSql();
-
-    try {
-      const result = await executeQuery(sql, { employee_guid });
-      const rows = convertKeysToSnakeCase(result?.rows || []);
-      return sendSuccess(res, {
+    const sendOk = (rows) =>
+      sendSuccess(res, {
         message: 'Fetched successfully',
         data: rows,
         statusCode: HTTP.OK
       });
-    } catch {
+
+    try {
+      const result = await executeQuery(buildSql({ includeCompCategoryCode: true }), { employee_guid });
+      return sendOk(convertKeysToSnakeCase(result?.rows || []));
+    } catch (err) {
+      // Backward compatible fallback:
+      // If the view hasn't been deployed with COMP_CATEGORY_CODE yet, Oracle raises ORA-00904.
+      // In that case, retry with a NULL placeholder so the API doesn't fail and returns null.
+      if (err?.errorNum === 904) {
+        try {
+          const fallbackSql = buildSql({ includeCompCategoryCode: false });
+          const fallbackResult = await executeQuery(fallbackSql, { employee_guid });
+          return sendOk(convertKeysToSnakeCase(fallbackResult?.rows || []));
+        } catch (fallbackErr) {
+          console.error(
+            '[compEmployeeAssignedComponents] listEmployeeAssignedComponents (fallback failed)',
+            fallbackErr?.errorNum != null ? `ORA-${fallbackErr.errorNum}` : '',
+            fallbackErr?.message || fallbackErr
+          );
+          // Fall through to error response below (keep original failure behavior).
+        }
+      }
+
+      console.error(
+        '[compEmployeeAssignedComponents] listEmployeeAssignedComponents',
+        err?.errorNum != null ? `ORA-${err.errorNum}` : '',
+        err?.message || err
+      );
+
       return sendFailure(
         res,
         HTTP.SERVER_ERROR,
