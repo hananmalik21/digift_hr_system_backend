@@ -65,6 +65,7 @@ import compPlansFullViewController from './feature/compensation/plans/controller
 import employeeCompensationController from './feature/compensation/employee_compensation/controller/employeeCompensationController.js';
 import employeeLatestComponentHistoryController from './feature/compensation/employee_compensation/controller/employeeLatestComponentHistoryController.js';
 import employeeCompensationPlanDetailsController from './feature/compensation/employee_compensation/controller/employeeCompensationPlanDetailsController.js';
+import compSalaryChangeHistoryRoutes from './feature/compensation/salary_change_history/routes/compSalaryChangeHistory.routes.js';
 import timeZoneController from './feature/time_management/time_zones/controller/timeZoneController.js';
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
@@ -234,6 +235,7 @@ app.use('/api/comp', compAdjustmentsRoutes);
 app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
 app.use('/api/comp', compPlansFullViewController);
 app.use('/api/compensation/plans', compensationPlanController);
+app.use('/api/compensation', compSalaryChangeHistoryRoutes);
 app.use('/api/abs', leavePolicyController);
 
 // Employee Leave Balances routes
