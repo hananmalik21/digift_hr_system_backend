@@ -3,6 +3,7 @@
  * Handles database operations for compensation components via Oracle packages:
  * - COMP.COMP_COMPONENT_CREATE_PKG.CREATE_COMPONENT
  * - COMP.COMP_COMPONENT_UPDATE_PKG.UPDATE_COMPONENT
+ * Pay basis and amortizable flag are passed only to those packages (COMP.COMP_COMPONENTS_ADVANCED_SETTINGS), not the header table.
  * and read operations for GET by component_guid.
  * component_guid is RAW(16) in DB; APIs use 32-character uppercase HEX string.
  */
@@ -79,6 +80,20 @@ function rawToHex(raw) {
 function normalizeYn(value, defaultVal = 'N') {
   if (value == null || String(value).trim() === '') return defaultVal;
   return String(value).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
+}
+
+/** Map COMP.COMP_COMPONENTS_ADVANCED_SETTINGS row to API fields. */
+function shapeAdvancedSettingsRow(row) {
+  if (!row) {
+    return { pay_basis: null, amortizable_flag: 'N' };
+  }
+  const pb = row.PAY_BASIS ?? row.pay_basis;
+  const af = row.AMORTIZABLE_FLAG ?? row.amortizable_flag;
+  return {
+    pay_basis:
+      pb != null && String(pb).trim() !== '' ? String(pb).trim() : null,
+    amortizable_flag: normalizeYn(af != null ? String(af).trim() : null, 'N')
+  };
 }
 
 /**
@@ -174,7 +189,9 @@ function buildCreateBinds(payload) {
     P_LOCATION_CODES_JSON: locJson ?? '[]',
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
-    P_CREATED_BY: optStr(payload.created_by)
+    P_CREATED_BY: optStr(payload.created_by),
+    P_PAY_BASIS: optStr(payload.pay_basis),
+    P_AMORTIZABLE_FLAG: normalizeYn(flags.amortizable_flag, 'N')
   };
 }
 
@@ -213,7 +230,9 @@ function buildUpdateBinds(componentGuidBuffer, payload) {
     P_LOCATION_CODES_JSON: locJson ?? '[]',
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
-    P_UPDATED_BY: optStr(payload.updated_by)
+    P_UPDATED_BY: optStr(payload.updated_by),
+    P_PAY_BASIS: optStr(payload.pay_basis),
+    P_AMORTIZABLE_FLAG: normalizeYn(flags.amortizable_flag, 'N')
   };
 }
 
@@ -266,6 +285,8 @@ export async function createComponent(payload) {
         P_ALL_EMPLOYEES_FLAG      => :P_ALL_EMPLOYEES_FLAG,
         P_LOCATION_CODES          => L_LOC,
         P_CREATED_BY              => :P_CREATED_BY,
+        P_PAY_BASIS               => :P_PAY_BASIS,
+        P_AMORTIZABLE_FLAG        => :P_AMORTIZABLE_FLAG,
         P_COMPONENT_ID            => :P_COMPONENT_ID
       );
     END;
@@ -284,7 +305,7 @@ export async function createComponent(payload) {
         );
       }
       const fetchGuidSql = `
-        SELECT COMPONENT_ID, RAWTOHEX(COMPONENT_GUID) AS COMPONENT_GUID, DESCRIPTION
+        SELECT RAWTOHEX(COMPONENT_GUID) AS COMPONENT_GUID
         FROM COMP.COMP_COMPONENTS WHERE COMPONENT_ID = :id
       `;
       const guidResult = await connection.execute(
@@ -296,14 +317,9 @@ export async function createComponent(payload) {
       const componentGuid = row?.COMPONENT_GUID
         ? String(row.COMPONENT_GUID).toUpperCase()
         : null;
-      const description =
-        row?.DESCRIPTION != null && String(row.DESCRIPTION).trim() !== ''
-          ? String(row.DESCRIPTION).trim()
-          : null;
       return {
         component_id: id,
-        component_guid: componentGuid,
-        description
+        component_guid: componentGuid
       };
     },
     'create compensation component',
@@ -360,7 +376,9 @@ export async function updateComponent(componentGuid, payload) {
         P_TAXABLE_FLAG            => :P_TAXABLE_FLAG,
         P_ALL_EMPLOYEES_FLAG      => :P_ALL_EMPLOYEES_FLAG,
         P_LOCATION_CODES          => L_LOC,
-        P_UPDATED_BY              => :P_UPDATED_BY
+        P_UPDATED_BY              => :P_UPDATED_BY,
+        P_PAY_BASIS               => :P_PAY_BASIS,
+        P_AMORTIZABLE_FLAG        => :P_AMORTIZABLE_FLAG
       );
     END;
   `;
@@ -386,24 +404,44 @@ export async function updateComponent(componentGuid, payload) {
       payloadForUpdate = { ...payload, description: existingDesc };
     }
 
+    const needsPayBasisDefault = !Object.prototype.hasOwnProperty.call(
+      payload,
+      'pay_basis'
+    );
+    const needsAmortizableDefault = !Object.prototype.hasOwnProperty.call(
+      payload.flags || {},
+      'amortizable_flag'
+    );
+    if (needsPayBasisDefault || needsAmortizableDefault) {
+      const advCurSql = `
+        SELECT s.PAY_BASIS, s.AMORTIZABLE_FLAG
+        FROM COMP.COMP_COMPONENTS c
+        LEFT JOIN COMP.COMP_COMPONENTS_ADVANCED_SETTINGS s ON s.COMPONENT_ID = c.COMPONENT_ID
+        WHERE c.COMPONENT_GUID = HEXTORAW(:guid)
+      `;
+      const advCur = await connection.execute(
+        advCurSql,
+        { guid: normalizedGuid },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      const curAdv = shapeAdvancedSettingsRow(advCur.rows?.[0]);
+      payloadForUpdate = {
+        ...payloadForUpdate,
+        ...(needsPayBasisDefault ? { pay_basis: curAdv.pay_basis } : {}),
+        ...(needsAmortizableDefault
+          ? {
+              flags: {
+                ...(payloadForUpdate.flags || {}),
+                amortizable_flag: curAdv.amortizable_flag
+              }
+            }
+          : {})
+      };
+    }
+
     const binds = buildUpdateBinds(guidBuffer, payloadForUpdate);
     await connection.execute(plsql, binds, { autoCommit: false });
-    const fetchSql = `
-      SELECT DESCRIPTION
-      FROM COMP.COMP_COMPONENTS
-      WHERE COMPONENT_GUID = HEXTORAW(:guid)
-    `;
-    const fetchResult = await connection.execute(
-      fetchSql,
-      { guid: normalizedGuid },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    const descRow = fetchResult.rows?.[0];
-    const description =
-      descRow?.DESCRIPTION != null && String(descRow.DESCRIPTION).trim() !== ''
-        ? String(descRow.DESCRIPTION).trim()
-        : null;
-    return { component_guid: normalizedGuid, description };
+    return { component_guid: normalizedGuid };
   }, 'update compensation component');
 }
 
@@ -519,6 +557,21 @@ export async function getComponentByGuid(componentGuid) {
 
     const componentId = headerRow.COMPONENT_ID;
     let locationCodes = [];
+    let advanced = { pay_basis: null, amortizable_flag: 'N' };
+
+    try {
+      const advSql = `
+        SELECT PAY_BASIS, AMORTIZABLE_FLAG
+        FROM COMP.COMP_COMPONENTS_ADVANCED_SETTINGS
+        WHERE COMPONENT_ID = :id
+      `;
+      const advResult = await connection.execute(
+        advSql,
+        { id: componentId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      advanced = shapeAdvancedSettingsRow(advResult.rows?.[0]);
+    } catch (_) {}
 
     try {
       const locSql = `
@@ -562,12 +615,14 @@ export async function getComponentByGuid(componentGuid) {
         statutory_flag: h.statutory_flag ?? 'N',
         include_in_ctc_flag: h.include_in_ctc_flag ?? 'N',
         prorated_flag: h.prorated_flag ?? 'N',
-        taxable_flag: h.taxable_flag ?? 'N'
+        taxable_flag: h.taxable_flag ?? 'N',
+        amortizable_flag: advanced.amortizable_flag
       },
       eligibility: {
         all_employees_flag: h.all_employees_flag ?? 'N',
         location_codes: locationCodes
-      }
+      },
+      pay_basis: advanced.pay_basis
     });
   } catch (err) {
     if (err instanceof NotFoundError) throw err;

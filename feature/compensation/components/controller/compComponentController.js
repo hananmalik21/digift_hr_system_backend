@@ -6,7 +6,10 @@
  * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
  * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
  *
- * Optional body field: description (maps to COMP.COMP_COMPONENTS.DESCRIPTION, trimmed; max length from env COMP_COMPONENT_DESCRIPTION_MAX, default 4000).
+ * Optional body field: description (maps to COMP.COMP_COMPONENTS.DESCRIPTION, trimmed; max length from env COMP_COMPONENT_DESCRIPTION_MAX, default 4000). Create/update success responses return only component_id + component_guid (create) or component_guid (update); use GET for full row.
+ * Optional: pay_basis; flags.amortizable_flag (Y|N). Create defaults amortizable_flag to N when omitted under flags.
+ *   Update: omit pay_basis or omit flags.amortizable_flag to keep current advanced-settings values.
+ *   Passed only to create/update packages, not the header table. Top-level amortizable_flag is rejected.
  */
 
 import express from 'express';
@@ -50,6 +53,12 @@ const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const COMP_COMPONENT_DESCRIPTION_MAX = (() => {
   const n = Number(process.env.COMP_COMPONENT_DESCRIPTION_MAX);
   return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 32767) : 4000;
+})();
+
+/** Max length for pay_basis (VARCHAR2 in advanced settings); override via env. */
+const COMP_COMPONENT_PAY_BASIS_MAX = (() => {
+  const n = Number(process.env.COMP_COMPONENT_PAY_BASIS_MAX);
+  return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 32767) : 500;
 })();
 
 function parseRequiredPositiveInt(query, key) {
@@ -202,7 +211,8 @@ const FLAG_KEYS = [
   'statutory_flag',
   'include_in_ctc_flag',
   'prorated_flag',
-  'taxable_flag'
+  'taxable_flag',
+  'amortizable_flag'
 ];
 
 /**
@@ -329,11 +339,30 @@ function validateDescription(data) {
   return errors;
 }
 
+/**
+ * Optional pay_basis; reject legacy top-level amortizable_flag (use flags.amortizable_flag).
+ */
+function validatePayBasis(data) {
+  const errors = [];
+  if (data.amortizable_flag !== undefined) {
+    errors.push('amortizable_flag must be sent under flags (flags.amortizable_flag)');
+  }
+  if (data.pay_basis !== undefined && data.pay_basis !== null) {
+    if (typeof data.pay_basis !== 'string') {
+      errors.push('pay_basis must be a string');
+    } else if (data.pay_basis.trim().length > COMP_COMPONENT_PAY_BASIS_MAX) {
+      errors.push(`pay_basis must be at most ${COMP_COMPONENT_PAY_BASIS_MAX} characters`);
+    }
+  }
+  return errors;
+}
+
 function validateComponentPayload(data, isUpdate) {
   const errors = [
     ...validateRequired(data, isUpdate),
     ...validateTenantId(data),
     ...validateDescription(data),
+    ...validatePayBasis(data),
     ...validateYnFlags(data),
     ...validateArrays(data),
     ...validateMinMax(data),

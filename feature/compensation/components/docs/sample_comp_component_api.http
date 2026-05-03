@@ -49,6 +49,37 @@ Content-Type: application/json
   "created_by": "ADMIN"
 }
 
+### Create component with pay_basis and amortizable_flag (advanced settings table only; not header)
+POST {{baseUrl}}/api/comp/components
+Content-Type: application/json
+
+{
+  "tenant_id": 1,
+  "component_code": "BONUS_M",
+  "component_name": "Monthly Bonus",
+  "component_type_code": "EARNING",
+  "calculation_method_code": "FIXED",
+  "status": "ACTIVE",
+  "active_flag": "Y",
+  "comp_category_code": "ALLOWANCE",
+  "pay_basis": "MONTHLY",
+  "flags": {
+    "recurring_flag": "Y",
+    "optional_flag": "N",
+    "pensionable_flag": "N",
+    "statutory_flag": "N",
+    "include_in_ctc_flag": "Y",
+    "prorated_flag": "Y",
+    "taxable_flag": "Y",
+    "amortizable_flag": "Y"
+  },
+  "eligibility": {
+    "all_employees_flag": "Y",
+    "location_codes": []
+  },
+  "created_by": "ADMIN"
+}
+
 ### Create component without description (backward compatible; stored as null)
 POST {{baseUrl}}/api/comp/components
 Content-Type: application/json
@@ -93,6 +124,7 @@ Content-Type: application/json
   "active_flag": "Y",
   "comp_category_code": "ALLOWANCE",
   "effective_start_date": "2026-01-01",
+  "pay_basis": "MONTHLY",
   "flags": {
     "recurring_flag": "Y",
     "optional_flag": "N",
@@ -100,7 +132,8 @@ Content-Type: application/json
     "statutory_flag": "N",
     "include_in_ctc_flag": "Y",
     "prorated_flag": "Y",
-    "taxable_flag": "Y"
+    "taxable_flag": "Y",
+    "amortizable_flag": "N"
   },
   "eligibility": {
     "all_employees_flag": "Y",

@@ -1,6 +1,8 @@
 -- Run as COMP schema (or user with access to ALL_ARGUMENTS).
 -- Use the result to align Node.js bind names and types for CREATE_COMPONENT / UPDATE_COMPONENT.
 -- Expected: P_DESCRIPTION on create (optional) and update; API field name: description.
+-- Expected: P_PAY_BASIS (optional), P_AMORTIZABLE_FLAG (default N); API: pay_basis, flags.amortizable_flag.
+--   Stored in COMP.COMP_COMPONENTS_ADVANCED_SETTINGS only (not COMP.COMP_COMPONENTS).
 --
 -- COMP.COMP_COMPONENT_CREATE_PKG.CREATE_COMPONENT:
 SELECT
