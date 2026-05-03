@@ -62,7 +62,8 @@ const ADVANCED_COMPONENT_FLAG_KEYS = [
   'pensionable_flag',
   'statutory_flag',
   'include_in_ctc_flag',
-  'optional_flag'
+  'optional_flag',
+  'amortizable_flag'
 ];
 
 function normalizeYnFlag(value) {
@@ -74,15 +75,31 @@ function normalizeYnFlag(value) {
   return 'N';
 }
 
+/** Optional plan-component pay_basis; trim + uppercase (allowed values validated in controller). */
+function normalizePayBasisForPlanJson(value) {
+  if (value === undefined || value === null) return undefined;
+  const s = String(value).trim();
+  if (!s) return undefined;
+  return s.toUpperCase();
+}
+
 function normalizeAdvancedComponentFlags(component) {
   if (component == null || typeof component !== 'object' || Array.isArray(component)) return component;
   const out = { ...component };
   ADVANCED_COMPONENT_FLAG_KEYS.forEach((k) => {
     out[k] = normalizeYnFlag(component[k]);
   });
+  const pb = normalizePayBasisForPlanJson(component.pay_basis);
+  if (pb !== undefined) out.pay_basis = pb;
+  else delete out.pay_basis;
   return out;
 }
 
+/**
+ * Normalizes each `components[]` row before JSON.stringify for P_PLAN_JSON (CLOB).
+ * `amortizable_flag` defaults to N; `pay_basis` is trimmed + uppercased when present.
+ * Plan-component advanced settings (COMP.COMP_PLAN_COMP_ADV_SETTINGS) are supplied only via this JSON, not separate binds.
+ */
 function normalizePayloadComponentsAdvancedFlags(payload) {
   if (payload == null || typeof payload !== 'object' || Array.isArray(payload)) return payload;
   if (!Object.prototype.hasOwnProperty.call(payload, 'components')) return payload;
@@ -798,7 +815,9 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
                'max_value' VALUE c.max_value,
                'display_sequence' VALUE pc.display_sequence,
                'mandatory_flag' VALUE pc.mandatory_flag,
-               'active_flag' VALUE pc.active_flag
+               'active_flag' VALUE pc.active_flag,
+               'amortizable_flag' VALUE NVL(adv.amortizable_flag, 'N'),
+               'pay_basis' VALUE adv.pay_basis
              )
              ORDER BY NVL(pc.display_sequence, 999999), pc.plan_component_id
              RETURNING CLOB
@@ -809,6 +828,8 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
            JOIN comp.comp_components c
              ON c.component_id = pc.component_id
             AND c.tenant_id = ${enterpriseSqlExpr}
+           LEFT JOIN comp.comp_plan_comp_adv_settings adv
+             ON adv.plan_component_id = pc.plan_component_id
           WHERE pc.plan_id = ${planIdSqlExpr}
        ) AS components_json`;
 }
@@ -902,6 +923,21 @@ export async function getPlanComponentsByPlanGuid(planGuidHex) {
   const mapped = mapPlanRowWithComponents(r);
   cacheSetPlan(planGuidHex, mapped);
   return mapped;
+}
+
+/**
+ * @param {number} planId
+ * @returns {Promise<string | null>} 32-char uppercase plan_guid hex, or null
+ */
+export async function getPlanGuidHexByPlanId(planId) {
+  const n = Number(planId);
+  if (!Number.isFinite(n) || n < 1) return null;
+  const result = await executeQuery(
+    `SELECT UPPER(RAWTOHEX(p.plan_guid)) AS plan_guid FROM comp.comp_plans p WHERE p.plan_id = :id`,
+    { id: n }
+  );
+  const row = result.rows?.[0];
+  return row?.PLAN_GUID ?? row?.plan_guid ?? null;
 }
 
 export async function deleteCompensationPlan(planGuid, deletedBy) {

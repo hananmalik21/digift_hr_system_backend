@@ -1,5 +1,8 @@
 /**
  * COMP.COMP_PLANS_FULL_V — paginated list (header or full row) and single row by plan_id.
+ * PLAN_COMPONENTS_JSON in the view should include plan-component advanced fields
+ * (e.g. amortizable_flag, pay_basis from COMP.COMP_PLAN_COMP_ADV_SETTINGS) aligned with
+ * compensationPlanService.js `sqlPlanComponentsJsonSubquery` when the view is maintained in SQL.
  */
 
 import oracledb from 'oracledb';

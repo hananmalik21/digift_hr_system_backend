@@ -413,7 +413,7 @@ END;
 /
 */
 
--- Oracle Database Actions: sql/query_eligible_plans_for_employee.sql (bind :employee_guid_hex).
+-- Eligible plans query: see ELIGIBLE_PLANS_FOR_EMPLOYEE_SQL in compensationPlanService.js (bind :employee_guid_hex).
 -- Package GET_ELIGIBLE_PLANS_FOR_EMPLOYEE still uses numeric employee_id + enterprise_id.
 --
 -- Examples (SQL*Plus / SQLcl):

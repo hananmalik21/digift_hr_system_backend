@@ -5,7 +5,8 @@ import {
   updateCompensationPlan,
   deleteCompensationPlan,
   getEligiblePlansForEmployee,
-  getPlanComponentsByPlanGuid
+  getPlanComponentsByPlanGuid,
+  getPlanGuidHexByPlanId
 } from '../service/compensationPlanService.js';
 import {
   normalizePlanGuidHex,
@@ -127,6 +128,14 @@ function isValidYnFlag(value) {
   return s === 'Y' || s === 'N';
 }
 
+const PLAN_COMPONENT_PAY_BASIS_CODES = new Set([
+  'BASIC',
+  'GROSS',
+  'NET',
+  'ALLOWANCE_BASED',
+  'CUSTOM'
+]);
+
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -187,13 +196,23 @@ function collectPlanJsonValidationErrors(payload, options) {
           'pensionable_flag',
           'statutory_flag',
           'include_in_ctc_flag',
-          'optional_flag'
+          'optional_flag',
+          'amortizable_flag'
         ];
         advancedFlags.forEach((flag) => {
           if (hasKey(c, flag) && !isValidYnFlag(c[flag])) {
             errors.push(`components[${idx}].${flag} must be "Y" or "N"`);
           }
         });
+
+        if (hasKey(c, 'pay_basis') && c.pay_basis != null) {
+          const pb = String(c.pay_basis).trim().toUpperCase();
+          if (pb && !PLAN_COMPONENT_PAY_BASIS_CODES.has(pb)) {
+            errors.push(
+              `components[${idx}].pay_basis must be one of: ${[...PLAN_COMPONENT_PAY_BASIS_CODES].join(', ')}`
+            );
+          }
+        }
       });
     }
   }
@@ -245,11 +264,28 @@ router.post('/create', asyncHandler(async (req, res) => {
 
   try {
     const planId = await createCompensationPlan(payload);
-    return res.status(HTTP.OK).json({
+    const body = {
       success: true,
       message: 'Compensation plan created successfully',
       plan_id: planId
-    });
+    };
+    if (planId != null) {
+      const planGuidHex = await getPlanGuidHexByPlanId(planId);
+      if (planGuidHex) {
+        const snapshot = await getPlanComponentsByPlanGuid(planGuidHex);
+        if (snapshot) {
+          Object.assign(body, {
+            plan_guid: snapshot.plan_guid,
+            enterprise_id: snapshot.enterprise_id,
+            plan_code: snapshot.plan_code,
+            plan_name: snapshot.plan_name,
+            plan_type_code: snapshot.plan_type_code,
+            components: snapshot.components
+          });
+        }
+      }
+    }
+    return res.status(HTTP.OK).json(body);
   } catch (error) {
     return sendPlanDbError(res, error);
   }
@@ -261,11 +297,27 @@ router.put('/update', asyncHandler(async (req, res) => {
   if (!validation.ok) return sendBadRequest(res, validation.message);
 
   try {
+    const normalizedGuid = normalizePlanGuidHex(payload.plan_guid);
     await updateCompensationPlan(payload);
-    return res.status(HTTP.OK).json({
+    const body = {
       success: true,
       message: 'Compensation plan updated successfully'
-    });
+    };
+    if (normalizedGuid) {
+      const snapshot = await getPlanComponentsByPlanGuid(normalizedGuid);
+      if (snapshot) {
+        Object.assign(body, {
+          plan_guid: snapshot.plan_guid,
+          enterprise_id: snapshot.enterprise_id,
+          plan_id: snapshot.plan_id,
+          plan_code: snapshot.plan_code,
+          plan_name: snapshot.plan_name,
+          plan_type_code: snapshot.plan_type_code,
+          components: snapshot.components
+        });
+      }
+    }
+    return res.status(HTTP.OK).json(body);
   } catch (error) {
     return sendPlanDbError(res, error);
   }
