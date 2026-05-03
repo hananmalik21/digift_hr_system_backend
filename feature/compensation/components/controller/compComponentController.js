@@ -10,7 +10,7 @@
  * Advanced settings (COMP.COMP_COMPONENTS_ADVANCED_SETTINGS only): pay_basis, amortizable_flag — may be sent at request root
  *   (merged into flags for package header flags) and/or under flags.*; root wins on conflict. pay_basis is trimmed + uppercased for storage.
  *   amortizable_flag Y|N, default N when omitted.
- * Create/update success responses: component_id + component_guid (create), component_guid (update); pay_basis and amortizable_flag are not included in API responses.
+ * Create/update success responses: component_id + component_guid (create), component_guid (update). GET list/detail include pay_basis and amortizable_flag from COMPONENTS_VIEW / advanced settings.
  */
 
 import express from 'express';

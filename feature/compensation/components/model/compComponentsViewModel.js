@@ -81,6 +81,11 @@ function normalizeJsonStringArray(v) {
   return [];
 }
 
+function normalizeYnList(v, defaultVal = 'N') {
+  if (v == null || String(v).trim() === '') return defaultVal;
+  return String(v).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
+}
+
 /**
  * Maps DB row to API shape. Dates → ISO-8601; RAW(16) GUIDs via Buffer from driver.
  */
@@ -110,6 +115,11 @@ export function mapComponentsViewRow(row) {
     g('COMPONENT_ACTIVE_FLAG') != null ? g('COMPONENT_ACTIVE_FLAG') : g('ACTIVE_FLAG');
 
   const descRaw = g('DESCRIPTION') ?? g('COMPONENT_DESCRIPTION');
+
+  const payRaw = g('PAY_BASIS');
+  const pay_basis =
+    payRaw != null && String(payRaw).trim() !== '' ? String(payRaw).trim() : null;
+  const amortizable_flag = normalizeYnList(g('AMORTIZABLE_FLAG'), 'N');
 
   return normalizeComponentForGetResponse({
     component_id: toNumberOrNull(g('COMPONENT_ID')),
@@ -148,6 +158,8 @@ export function mapComponentsViewRow(row) {
     include_in_ctc_flag: g('INCLUDE_IN_CTC_FLAG') != null ? String(g('INCLUDE_IN_CTC_FLAG')) : null,
     prorated_flag: g('PRORATED_FLAG') != null ? String(g('PRORATED_FLAG')) : null,
     taxable_flag: g('TAXABLE_FLAG') != null ? String(g('TAXABLE_FLAG')) : null,
+    pay_basis,
+    amortizable_flag,
     adv_active_flag: g('ADV_ACTIVE_FLAG') != null ? String(g('ADV_ACTIVE_FLAG')) : null,
     created_by: g('CREATED_BY') != null ? String(g('CREATED_BY')) : null,
     creation_date: toIso(g('CREATION_DATE')),

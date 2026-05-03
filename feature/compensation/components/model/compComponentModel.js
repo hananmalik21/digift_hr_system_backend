@@ -589,6 +589,20 @@ export async function getComponentByGuid(componentGuid) {
 
     const componentId = headerRow.COMPONENT_ID;
     let locationCodes = [];
+    let advanced = { pay_basis: null, amortizable_flag: 'N' };
+    try {
+      const advSql = `
+        SELECT PAY_BASIS, AMORTIZABLE_FLAG
+        FROM COMP.COMP_COMPONENTS_ADVANCED_SETTINGS
+        WHERE COMPONENT_ID = :id
+      `;
+      const advResult = await connection.execute(
+        advSql,
+        { id: componentId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      advanced = shapeAdvancedSettingsRow(advResult.rows?.[0]);
+    } catch (_) {}
 
     try {
       const locSql = `
@@ -632,12 +646,14 @@ export async function getComponentByGuid(componentGuid) {
         statutory_flag: h.statutory_flag ?? 'N',
         include_in_ctc_flag: h.include_in_ctc_flag ?? 'N',
         prorated_flag: h.prorated_flag ?? 'N',
-        taxable_flag: h.taxable_flag ?? 'N'
+        taxable_flag: h.taxable_flag ?? 'N',
+        amortizable_flag: advanced.amortizable_flag
       },
       eligibility: {
         all_employees_flag: h.all_employees_flag ?? 'N',
         location_codes: locationCodes
-      }
+      },
+      pay_basis: advanced.pay_basis
     });
   } catch (err) {
     if (err instanceof NotFoundError) throw err;
