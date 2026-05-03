@@ -75,7 +75,7 @@ function normalizeYnFlag(value) {
   return 'N';
 }
 
-/** Optional plan-component pay_basis; trim + uppercase (allowed values validated in controller). */
+/** Optional plan-component pay_basis; trim + uppercase for storage. */
 function normalizePayBasisForPlanJson(value) {
   if (value === undefined || value === null) return undefined;
   const s = String(value).trim();

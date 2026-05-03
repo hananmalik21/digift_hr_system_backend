@@ -128,14 +128,6 @@ function isValidYnFlag(value) {
   return s === 'Y' || s === 'N';
 }
 
-const PLAN_COMPONENT_PAY_BASIS_CODES = new Set([
-  'BASIC',
-  'GROSS',
-  'NET',
-  'ALLOWANCE_BASED',
-  'CUSTOM'
-]);
-
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -204,15 +196,6 @@ function collectPlanJsonValidationErrors(payload, options) {
             errors.push(`components[${idx}].${flag} must be "Y" or "N"`);
           }
         });
-
-        if (hasKey(c, 'pay_basis') && c.pay_basis != null) {
-          const pb = String(c.pay_basis).trim().toUpperCase();
-          if (pb && !PLAN_COMPONENT_PAY_BASIS_CODES.has(pb)) {
-            errors.push(
-              `components[${idx}].pay_basis must be one of: ${[...PLAN_COMPONENT_PAY_BASIS_CODES].join(', ')}`
-            );
-          }
-        }
       });
     }
   }
