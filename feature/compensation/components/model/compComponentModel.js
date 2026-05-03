@@ -113,6 +113,44 @@ function stringArrayToJson(arr) {
   return list.length === 0 ? null : JSON.stringify(list);
 }
 
+/** pay_basis may be sent at payload root or under flags (same bind to Oracle). */
+function resolvePayBasisFromPayload(payload) {
+  if (payload == null || typeof payload !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(payload, 'pay_basis')) {
+    return payload.pay_basis;
+  }
+  const flags = payload.flags;
+  if (flags != null && typeof flags === 'object' && !Array.isArray(flags)) {
+    if (Object.prototype.hasOwnProperty.call(flags, 'pay_basis')) {
+      return flags.pay_basis;
+    }
+  }
+  return undefined;
+}
+
+function payloadHasPayBasisKey(payload) {
+  return resolvePayBasisFromPayload(payload) !== undefined;
+}
+
+function payloadHasAmortizableKey(payload) {
+  if (payload == null || typeof payload !== 'object') return false;
+  if (Object.prototype.hasOwnProperty.call(payload, 'amortizable_flag')) return true;
+  const f = payload.flags;
+  return (
+    f != null &&
+    typeof f === 'object' &&
+    !Array.isArray(f) &&
+    Object.prototype.hasOwnProperty.call(f, 'amortizable_flag')
+  );
+}
+
+/** Trim + uppercase for Oracle PAY_BASIS bind. */
+function optPayBasisFromPayload(payload) {
+  const raw = resolvePayBasisFromPayload(payload);
+  const s = optStr(raw);
+  return s == null ? null : s.toUpperCase();
+}
+
 /**
  * Run in transaction (COMP schema, commit on success).
  * @param {Function} fn - async (connection) => result
@@ -190,8 +228,8 @@ function buildCreateBinds(payload) {
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
     P_CREATED_BY: optStr(payload.created_by),
-    P_PAY_BASIS: optStr(payload.pay_basis),
-    P_AMORTIZABLE_FLAG: normalizeYn(flags.amortizable_flag, 'N')
+    P_PAY_BASIS: optPayBasisFromPayload(payload),
+    P_AMORTIZABLE_FLAG: normalizeYn(payload.amortizable_flag ?? flags.amortizable_flag, 'N')
   };
 }
 
@@ -231,8 +269,8 @@ function buildUpdateBinds(componentGuidBuffer, payload) {
     P_EFFECTIVE_START_DATE: optDate(payload.effective_start_date),
     P_EFFECTIVE_END_DATE: optDate(payload.effective_end_date),
     P_UPDATED_BY: optStr(payload.updated_by),
-    P_PAY_BASIS: optStr(payload.pay_basis),
-    P_AMORTIZABLE_FLAG: normalizeYn(flags.amortizable_flag, 'N')
+    P_PAY_BASIS: optPayBasisFromPayload(payload),
+    P_AMORTIZABLE_FLAG: normalizeYn(payload.amortizable_flag ?? flags.amortizable_flag, 'N')
   };
 }
 
@@ -404,14 +442,8 @@ export async function updateComponent(componentGuid, payload) {
       payloadForUpdate = { ...payload, description: existingDesc };
     }
 
-    const needsPayBasisDefault = !Object.prototype.hasOwnProperty.call(
-      payload,
-      'pay_basis'
-    );
-    const needsAmortizableDefault = !Object.prototype.hasOwnProperty.call(
-      payload.flags || {},
-      'amortizable_flag'
-    );
+    const needsPayBasisDefault = !payloadHasPayBasisKey(payload);
+    const needsAmortizableDefault = !payloadHasAmortizableKey(payload);
     if (needsPayBasisDefault || needsAmortizableDefault) {
       const advCurSql = `
         SELECT s.PAY_BASIS, s.AMORTIZABLE_FLAG
@@ -557,21 +589,6 @@ export async function getComponentByGuid(componentGuid) {
 
     const componentId = headerRow.COMPONENT_ID;
     let locationCodes = [];
-    let advanced = { pay_basis: null, amortizable_flag: 'N' };
-
-    try {
-      const advSql = `
-        SELECT PAY_BASIS, AMORTIZABLE_FLAG
-        FROM COMP.COMP_COMPONENTS_ADVANCED_SETTINGS
-        WHERE COMPONENT_ID = :id
-      `;
-      const advResult = await connection.execute(
-        advSql,
-        { id: componentId },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      advanced = shapeAdvancedSettingsRow(advResult.rows?.[0]);
-    } catch (_) {}
 
     try {
       const locSql = `
@@ -615,14 +632,12 @@ export async function getComponentByGuid(componentGuid) {
         statutory_flag: h.statutory_flag ?? 'N',
         include_in_ctc_flag: h.include_in_ctc_flag ?? 'N',
         prorated_flag: h.prorated_flag ?? 'N',
-        taxable_flag: h.taxable_flag ?? 'N',
-        amortizable_flag: advanced.amortizable_flag
+        taxable_flag: h.taxable_flag ?? 'N'
       },
       eligibility: {
         all_employees_flag: h.all_employees_flag ?? 'N',
         location_codes: locationCodes
-      },
-      pay_basis: advanced.pay_basis
+      }
     });
   } catch (err) {
     if (err instanceof NotFoundError) throw err;

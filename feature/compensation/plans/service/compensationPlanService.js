@@ -815,9 +815,7 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
                'max_value' VALUE c.max_value,
                'display_sequence' VALUE pc.display_sequence,
                'mandatory_flag' VALUE pc.mandatory_flag,
-               'active_flag' VALUE pc.active_flag,
-               'amortizable_flag' VALUE NVL(adv.amortizable_flag, 'N'),
-               'pay_basis' VALUE adv.pay_basis
+               'active_flag' VALUE pc.active_flag
              )
              ORDER BY NVL(pc.display_sequence, 999999), pc.plan_component_id
              RETURNING CLOB

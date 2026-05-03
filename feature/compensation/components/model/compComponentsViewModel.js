@@ -82,27 +82,6 @@ function normalizeJsonStringArray(v) {
 }
 
 /**
- * Parse ADVANCED_SETTINGS_JSON (CLOB/VARCHAR2/object) into a plain object, or null.
- */
-function parseAdvancedSettingsJson(val) {
-  if (val == null || val === '') return null;
-  if (typeof val === 'object' && !Buffer.isBuffer(val) && !Array.isArray(val)) return val;
-  const s = String(val).trim();
-  if (!s) return null;
-  try {
-    const o = JSON.parse(s);
-    return o != null && typeof o === 'object' && !Array.isArray(o) ? o : null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeYnList(v, defaultVal = 'N') {
-  if (v == null || String(v).trim() === '') return defaultVal;
-  return String(v).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
-}
-
-/**
  * Maps DB row to API shape. Dates → ISO-8601; RAW(16) GUIDs via Buffer from driver.
  */
 export function mapComponentsViewRow(row) {
@@ -131,23 +110,6 @@ export function mapComponentsViewRow(row) {
     g('COMPONENT_ACTIVE_FLAG') != null ? g('COMPONENT_ACTIVE_FLAG') : g('ACTIVE_FLAG');
 
   const descRaw = g('DESCRIPTION') ?? g('COMPONENT_DESCRIPTION');
-
-  const advancedSettings =
-    parseAdvancedSettingsJson(g('ADVANCED_SETTINGS_JSON') ?? g('advanced_settings_json')) ?? null;
-
-  const advPay =
-    advancedSettings?.pay_basis ??
-    advancedSettings?.PAY_BASIS ??
-    g('PAY_BASIS');
-  const pay_basis =
-    advPay != null && String(advPay).trim() !== '' ? String(advPay).trim() : null;
-
-  const amortizable_flag = normalizeYnList(
-    advancedSettings?.amortizable_flag ??
-      advancedSettings?.AMORTIZABLE_FLAG ??
-      g('AMORTIZABLE_FLAG'),
-    'N'
-  );
 
   return normalizeComponentForGetResponse({
     component_id: toNumberOrNull(g('COMPONENT_ID')),
@@ -187,9 +149,6 @@ export function mapComponentsViewRow(row) {
     prorated_flag: g('PRORATED_FLAG') != null ? String(g('PRORATED_FLAG')) : null,
     taxable_flag: g('TAXABLE_FLAG') != null ? String(g('TAXABLE_FLAG')) : null,
     adv_active_flag: g('ADV_ACTIVE_FLAG') != null ? String(g('ADV_ACTIVE_FLAG')) : null,
-    advanced_settings: advancedSettings,
-    pay_basis,
-    amortizable_flag,
     created_by: g('CREATED_BY') != null ? String(g('CREATED_BY')) : null,
     creation_date: toIso(g('CREATION_DATE')),
     last_updated_by: g('LAST_UPDATED_BY') != null ? String(g('LAST_UPDATED_BY')) : null,

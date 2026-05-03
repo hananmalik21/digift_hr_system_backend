@@ -1,15 +1,16 @@
 /**
  * Compensation Component Controller
  * REST APIs:
- * - GET /comp/components — list from COMP.COMPONENTS_VIEW (tenant_id + search, category, status, calculation; pagination/sort). Rows include advanced_settings (from ADVANCED_SETTINGS_JSON), pay_basis, and amortizable_flag when the view exposes them.
+ * - GET /comp/components — list from COMP.COMPONENTS_VIEW (tenant_id + search, category, status, calculation; pagination/sort).
  * - GET /comp/components/:componentId — single row by numeric id (view)
  * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
  * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
  *
- * Optional body field: description (maps to COMP.COMP_COMPONENTS.DESCRIPTION, trimmed; max length from env COMP_COMPONENT_DESCRIPTION_MAX, default 4000). Create/update success responses return only component_id + component_guid (create) or component_guid (update); use GET for full row.
- * Optional: pay_basis; flags.amortizable_flag (Y|N). Create defaults amortizable_flag to N when omitted under flags.
- *   Update: omit pay_basis or omit flags.amortizable_flag to keep current advanced-settings values.
- *   Passed only to create/update packages, not the header table. Top-level amortizable_flag is rejected.
+ * Optional body field: description (maps to COMP.COMP_COMPONENTS.DESCRIPTION, trimmed; max length from env COMP_COMPONENT_DESCRIPTION_MAX, default 4000).
+ * Advanced settings (COMP.COMP_COMPONENTS_ADVANCED_SETTINGS only): pay_basis, amortizable_flag — may be sent at request root
+ *   (merged into flags for package header flags) and/or under flags.*; root wins on conflict. pay_basis is trimmed + uppercased for storage.
+ *   amortizable_flag Y|N, default N when omitted.
+ * Create/update success responses: component_id + component_guid (create), component_guid (update); pay_basis and amortizable_flag are not included in API responses.
  */
 
 import express from 'express';
@@ -215,6 +216,22 @@ const FLAG_KEYS = [
   'amortizable_flag'
 ];
 
+/** Merge root-level flag keys into flags (root overrides flags). Supports flat create/update bodies. */
+function normalizeComponentRequestBody(raw) {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const body = { ...raw };
+  const existing =
+    body.flags != null && typeof body.flags === 'object' && !Array.isArray(body.flags) ? { ...body.flags } : {};
+  const merged = { ...existing };
+  for (const key of FLAG_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      merged[key] = body[key];
+    }
+  }
+  body.flags = merged;
+  return body;
+}
+
 /**
  * Validate Y/N flags (active_flag, flags.*, eligibility.all_employees_flag)
  */
@@ -340,19 +357,22 @@ function validateDescription(data) {
 }
 
 /**
- * Optional pay_basis; reject legacy top-level amortizable_flag (use flags.amortizable_flag).
+ * Optional pay_basis (root or flags.pay_basis): type and max length when non-empty.
  */
 function validatePayBasis(data) {
   const errors = [];
-  if (data.amortizable_flag !== undefined) {
-    errors.push('amortizable_flag must be sent under flags (flags.amortizable_flag)');
-  }
-  if (data.pay_basis !== undefined && data.pay_basis !== null) {
-    if (typeof data.pay_basis !== 'string') {
-      errors.push('pay_basis must be a string');
-    } else if (data.pay_basis.trim().length > COMP_COMPONENT_PAY_BASIS_MAX) {
-      errors.push(`pay_basis must be at most ${COMP_COMPONENT_PAY_BASIS_MAX} characters`);
+  const checkPay = (val, label) => {
+    if (val === undefined || val === null) return;
+    if (typeof val !== 'string') {
+      errors.push(`${label} must be a string`);
+    } else if (val.trim().length > COMP_COMPONENT_PAY_BASIS_MAX) {
+      errors.push(`${label} must be at most ${COMP_COMPONENT_PAY_BASIS_MAX} characters`);
     }
+  };
+  checkPay(data.pay_basis, 'pay_basis');
+  const flags = data.flags;
+  if (flags != null && typeof flags === 'object' && !Array.isArray(flags)) {
+    checkPay(flags.pay_basis, 'flags.pay_basis');
   }
   return errors;
 }
@@ -462,7 +482,7 @@ router.get('/', asyncHandler(async (req, res) => {
  * Create compensation component
  */
 router.post('/', asyncHandler(async (req, res) => {
-  const body = req.body || {};
+  const body = normalizeComponentRequestBody(req.body || {});
   const validationErrors = validateComponentPayload(body, false);
   if (validationErrors.length > 0) {
     return sendError(res, 400, ERROR_TITLE.CREATE, validationErrors[0] || 'Validation failed');
@@ -499,7 +519,7 @@ router.put('/:componentGuid', asyncHandler(async (req, res) => {
   const guidError = validateComponentGuid(componentGuid);
   if (guidError) return sendError(res, 400, ERROR_TITLE.UPDATE, guidError);
 
-  const body = req.body || {};
+  const body = normalizeComponentRequestBody(req.body || {});
   const validationErrors = validateComponentPayload(body, true);
   if (validationErrors.length > 0) {
     return sendError(res, 400, ERROR_TITLE.UPDATE, validationErrors[0] || 'Validation failed');
