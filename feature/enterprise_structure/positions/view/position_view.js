@@ -1,10 +1,14 @@
-// features/positions/view/position_view.js
+/**
+ * HTTP responses for the positions router (shape, status codes, meta envelope).
+ * @module feature/enterprise_structure/positions/view/position_view
+ */
 const API_VERSION = '1.0.0';
 
 function meta(req, extra = {}) {
   return { api_version: API_VERSION, ...extra };
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendPositionList(res, req, data, m = {}) {
   const rows = Array.isArray(data) ? data : [];
   res.json({
@@ -14,6 +18,7 @@ export function sendPositionList(res, req, data, m = {}) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendPosition(res, req, data) {
   if (!data) {
     return res.status(404).json({
@@ -25,6 +30,7 @@ export function sendPosition(res, req, data) {
   res.json({ success: true, meta: meta(req), data });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendCreated(res, req, data) {
   res.status(201).json({
     success: true,
@@ -34,6 +40,7 @@ export function sendCreated(res, req, data) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendUpdated(res, req, data) {
   res.json({
     success: true,
@@ -43,6 +50,7 @@ export function sendUpdated(res, req, data) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendDeleted(res, req, message, id) {
   res.json({
     success: true,
@@ -51,6 +59,7 @@ export function sendDeleted(res, req, message, id) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendBadRequest(res, req, errors) {
   const arr = Array.isArray(errors) ? errors : [errors];
   const firstError = arr.length > 0 ? arr[0] : 'Validation failed';
@@ -66,7 +75,14 @@ export function sendBadRequest(res, req, errors) {
   });
 }
 
-export function sendConflict(res, req, message) {
+/**
+ * @param {import('express').Response} res
+ * @param {import('express').Request} req
+ * @param {string} message
+ * @param {unknown} [_cause] Optional; reserved for server-side logging (not exposed in JSON).
+ */
+export function sendConflict(res, req, message, _cause) {
+  void _cause;
   res.status(409).json({
     success: false,
     error: message,
@@ -78,6 +94,7 @@ export function sendConflict(res, req, message) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendServerError(res, req, message, error = null) {
   // IMPORTANT: log the real error server-side
   console.error('API ERROR:', message, error?.message || error, error?.stack);
@@ -95,6 +112,7 @@ export function sendServerError(res, req, message, error = null) {
   });
 }
 
+/** @param {import('express').Response} res @param {import('express').Request} req */
 export function sendReportingRelationships(res, req, data) {
   const relationships = Array.isArray(data) ? data : [];
   res.json({

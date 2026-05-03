@@ -1,3 +1,8 @@
+/**
+ * Shared literals for positions API validation (controller) and normalization (model).
+ * @module feature/enterprise_structure/positions/constants/positions_constants
+ */
+
 export const POSITION_ALLOWED_STATUS = Object.freeze(['ACTIVE', 'INACTIVE']);
 export const POSITION_ALLOWED_EMPLOYMENT_TYPES = Object.freeze([
   'FULL_TIME',

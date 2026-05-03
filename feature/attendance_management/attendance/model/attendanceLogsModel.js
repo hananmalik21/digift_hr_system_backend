@@ -26,10 +26,11 @@ function convertRowToSnakeCase(row) {
 }
 
 const JSON_OBJECT_FIELDS = ['schedule_obj', 'actual_obj'];
-const JSON_ARRAY_FIELDS = ['org_structure_list_json'];
+const JSON_ARRAY_FIELDS = ['org_structure_list_json', 'org_structure_list'];
 
 /**
- * Parse JSON string fields in a row: schedule_obj/actual_obj -> object, org_structure_list_json -> array.
+ * Parse JSON string fields in a row: schedule_obj/actual_obj -> object;
+ * org_structure_list / org_structure_list_json -> array (V_ATTENDANCE_FULL exposes ORG_STRUCTURE_LIST as CLOB/string JSON).
  */
 function parseJsonFields(row) {
   if (row === null || row === undefined) return row;

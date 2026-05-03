@@ -1,4 +1,7 @@
-// features/positions/controller/positions_controller.js
+/**
+ * Positions REST router: list, get, create, update, delete, reporting tree.
+ * @module feature/enterprise_structure/positions/controller/positions_controller
+ */
 import express from 'express';
 import PositionsModel from '../model/positions_model.js';
 import {
@@ -25,18 +28,27 @@ import {
 
 const router = express.Router();
 
+/** Normalized GUID (no hyphens, uppercase) must match this pattern. */
+const HEX32_GUID_RE = /^[0-9A-F]{32}$/;
+
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-// GUID helpers (client input): accepts UUID or 32-hex
+/** @param {unknown} v @returns {string} uppercase 32-hex, no hyphens (empty string if missing) */
 function normalizeGuidString(v) {
   if (v === undefined || v === null) return '';
   return String(v).trim().replace(/-/g, '').toUpperCase();
 }
+
 function isHex32Guid(v) {
-  return /^[0-9A-F]{32}$/.test(normalizeGuidString(v));
+  return HEX32_GUID_RE.test(normalizeGuidString(v));
+}
+
+/** @param {string} normalizedUpper already normalized via {@link normalizeGuidString} */
+function isNormalizedHex32Guid(normalizedUpper) {
+  return HEX32_GUID_RE.test(normalizedUpper);
 }
 
 function validatePosition(data, isUpdate = false) {
@@ -148,7 +160,7 @@ async function handleUpdate(req, res) {
   try {
     const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
-    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+    if (!isNormalizedHex32Guid(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const data = toUpperCaseKeys(req.body);
     const errors = validatePosition(data, true);
@@ -181,7 +193,7 @@ router.get('/', async (req, res) => {
     for (const k of ['org_structure_id', 'org_unit_id']) {
       if (req.query[k] !== undefined && req.query[k] !== null && String(req.query[k]).trim() !== '') {
         const v = normalizeGuidString(req.query[k]);
-        if (!/^[0-9A-F]{32}$/.test(v)) return sendBadRequest(res, req, `${k} must be a valid GUID (32-hex or UUID)`);
+        if (!isNormalizedHex32Guid(v)) return sendBadRequest(res, req, `${k} must be a valid GUID (32-hex or UUID)`);
         filters[k] = v;
       }
     }
@@ -235,7 +247,7 @@ router.get('/reporting-relationships', async (req, res) => {
       const v = String(req.query.position_id || '').trim();
       if (v) {
         const norm = normalizeGuidString(v);
-        if (!/^[0-9A-F]{32}$/.test(norm)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+        if (!isNormalizedHex32Guid(norm)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
         positionId = norm;
       }
     }
@@ -257,7 +269,7 @@ router.get('/:id', async (req, res) => {
   try {
     const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
-    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+    if (!isNormalizedHex32Guid(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const position = await PositionsModel.findById(id, tenantId);
     return sendPosition(res, req, position);
@@ -309,7 +321,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const tenantId = getTenantId(req);
     const id = normalizeGuidString(req.params.id);
-    if (!/^[0-9A-F]{32}$/.test(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
+    if (!isNormalizedHex32Guid(id)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
 
     const hard = req.query.hard === 'true' || req.query.hard === '1';
 

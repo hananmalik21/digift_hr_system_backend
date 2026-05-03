@@ -1,5 +1,10 @@
--- Adds support for multiple grade steps per position while keeping STEP_NO for backward compatibility.
--- Safe to run multiple times.
+-- =============================================================================
+-- ENT.POSITIONS: STEP_NOS_JSON (multi-step grades) + IS JSON constraint
+-- Adds support for multiple grade steps per position while keeping STEP_NO
+-- for backward compatibility. Idempotent: safe to run multiple times.
+-- =============================================================================
+
+-- 1) Column (skip if already present)
 DECLARE
   v_column_exists NUMBER := 0;
 BEGIN
@@ -16,6 +21,7 @@ BEGIN
 END;
 /
 
+-- 2) Backfill from legacy STEP_NO when JSON column is null
 BEGIN
   UPDATE ENT.POSITIONS
      SET STEP_NOS_JSON = CASE
@@ -27,6 +33,7 @@ BEGIN
 END;
 /
 
+-- 3) Optional CHECK: valid JSON only (skip if constraint already exists)
 DECLARE
   v_constraint_exists NUMBER := 0;
 BEGIN

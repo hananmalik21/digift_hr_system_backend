@@ -1,7 +1,18 @@
-// features/positions/model/positions_model.js
+/**
+ * Positions persistence: ENT.POSITIONS CRUD, org path enrichment, reporting tree.
+ * @module feature/enterprise_structure/positions/model/positions_model
+ */
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { POSITION_ALLOWED_EMPLOYMENT_TYPES, POSITION_ALLOWED_STATUS } from '../constants/positions_constants.js';
+
+/** @returns {Error & { code: string, statusCode: number }} */
+function validationError(message) {
+  const err = new Error(message);
+  err.code = 'VALIDATION_ERROR';
+  err.statusCode = 400;
+  return err;
+}
 
 class PositionsModel {
   static TABLE_NAME = 'ENT.POSITIONS';
@@ -35,31 +46,16 @@ class PositionsModel {
   }
 
   static raw16Required(v, field) {
-    if (this.isMissing(v)) {
-      const err = new Error(`${field} is required`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (this.isMissing(v)) throw validationError(`${field} is required`);
     const hex = this.normalizeGuidHex32(v);
-    if (!this.isHex32(hex)) {
-      const err = new Error(`${field} must be a valid GUID (32-hex or UUID)`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (!this.isHex32(hex)) throw validationError(`${field} must be a valid GUID (32-hex or UUID)`);
     return Buffer.from(hex, 'hex'); // RAW(16)
   }
 
   static raw16Optional(v, field) {
     if (this.isMissing(v)) return null;
     const hex = this.normalizeGuidHex32(v);
-    if (!this.isHex32(hex)) {
-      const err = new Error(`${field} must be a valid GUID (32-hex or UUID)`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (!this.isHex32(hex)) throw validationError(`${field} must be a valid GUID (32-hex or UUID)`);
     return Buffer.from(hex, 'hex');
   }
 
@@ -72,12 +68,7 @@ class PositionsModel {
   }
 
   static strRequired(v, field) {
-    if (this.isMissing(v) || String(v).trim() === '') {
-      const err = new Error(`${field} is required`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (this.isMissing(v) || String(v).trim() === '') throw validationError(`${field} is required`);
     return String(v).trim();
   }
 
@@ -87,19 +78,9 @@ class PositionsModel {
   }
 
   static numRequired(v, field) {
-    if (this.isMissing(v)) {
-      const err = new Error(`${field} is required and must be a valid number`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (this.isMissing(v)) throw validationError(`${field} is required and must be a valid number`);
     const n = Number(v);
-    if (Number.isNaN(n)) {
-      const err = new Error(`${field} must be a valid number`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (Number.isNaN(n)) throw validationError(`${field} must be a valid number`);
     return n;
   }
 
@@ -112,44 +93,21 @@ class PositionsModel {
   static intOptional(v, field, { min = null, max = null } = {}) {
     if (this.isMissing(v)) return null;
     const n = Number(v);
-    if (!Number.isInteger(n)) {
-      const err = new Error(`${field} must be an integer`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    if (min !== null && n < min) {
-      const err = new Error(`${field} must be >= ${min}`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    if (max !== null && n > max) {
-      const err = new Error(`${field} must be <= ${max}`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (!Number.isInteger(n)) throw validationError(`${field} must be an integer`);
+    if (min !== null && n < min) throw validationError(`${field} must be >= ${min}`);
+    if (max !== null && n > max) throw validationError(`${field} must be <= ${max}`);
     return n;
   }
 
   static normalizeStepNumbers(v, field = 'step_no') {
     if (this.isMissing(v)) return null;
     const values = Array.isArray(v) ? v : [v];
-    if (!values.length) {
-      const err = new Error(`${field} must contain at least one step value`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (!values.length) throw validationError(`${field} must contain at least one step value`);
 
     const out = values.map((item) => {
       const n = Number(item);
       if (!Number.isInteger(n) || n < 1) {
-        const err = new Error(`${field} values must be positive integers (>= 1)`);
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
+        throw validationError(`${field} values must be positive integers (>= 1)`);
       }
       return n;
     });
@@ -158,44 +116,41 @@ class PositionsModel {
 
   static normalizeStatus(v, { required = false, defaultValue = null } = {}) {
     if (this.isMissing(v)) {
-      if (required && defaultValue === null) {
-        const err = new Error('status is required');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
-      }
+      if (required && defaultValue === null) throw validationError('status is required');
       return defaultValue;
     }
     const normalized = String(v).trim().toUpperCase();
     if (!this.ALLOWED_STATUS.has(normalized)) {
-      const err = new Error(`status must be one of: ${Array.from(this.ALLOWED_STATUS).join(', ')}`);
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
+      throw validationError(`status must be one of: ${Array.from(this.ALLOWED_STATUS).join(', ')}`);
     }
     return normalized;
   }
 
   static normalizeEmploymentType(v, { required = false } = {}) {
     if (this.isMissing(v)) {
-      if (required) {
-        const err = new Error('employment_type is required');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
-      }
+      if (required) throw validationError('employment_type is required');
       return null;
     }
     const normalized = String(v).trim().toUpperCase();
     if (!this.ALLOWED_EMPLOYMENT_TYPES.has(normalized)) {
-      const err = new Error(
+      throw validationError(
         `employment_type must be one of: ${Array.from(this.ALLOWED_EMPLOYMENT_TYPES).join(', ')}`
       );
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
     }
     return normalized;
+  }
+
+  /**
+   * @param {unknown} raw tenant id from query/body
+   * @param {{ requiredMessage?: string }} [opts] override first error message when null/undefined
+   * @returns {number}
+   */
+  static assertPositiveTenantId(raw, opts = {}) {
+    const { requiredMessage = 'tenant_id is required' } = opts;
+    if (raw === undefined || raw === null) throw validationError(requiredMessage);
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) throw validationError('tenant_id must be a valid positive number');
+    return n;
   }
 
   static async executeQuery(sql, bindParams = [], options = {}) {
@@ -210,7 +165,6 @@ class PositionsModel {
       }
       return result;
     } catch (error) {
-      // helpful debug
       console.error('SQL Query Error:', error.message);
       console.error('SQL (first 300):', String(sql).slice(0, 300));
       console.error('Binds:', bindParams?.map((b) => (Buffer.isBuffer(b) ? b.toString('hex').toUpperCase() : b)));
@@ -422,20 +376,7 @@ class PositionsModel {
   // GET ALL (paginated)
   // ----------------------------
   static async findAll(filters = {}) {
-    const tenantId = filters.tenant_id ?? filters.tenantId;
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(filters.tenant_id ?? filters.tenantId);
 
     const page = Number(filters?.pagination?.page || 1);
     const pageSize = Math.min(100, Number(filters?.pagination?.pageSize || 10));
@@ -516,19 +457,7 @@ class PositionsModel {
   // GET BY ID
   // ----------------------------
   static async findById(positionIdHex32, tenantId) {
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(tenantId);
     const id = this.raw16Required(positionIdHex32, 'position_id');
     const sql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
     const r = await this.executeQuery(sql, [id, tenantIdNum]);
@@ -544,20 +473,9 @@ class PositionsModel {
   // ----------------------------
   static async create(data, userId = 'SYSTEM') {
     const payload = this.toLowerCaseKeys(data);
-    const tenantId = payload.tenant_id;
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required in request body');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(payload.tenant_id, {
+      requiredMessage: 'tenant_id is required in request body',
+    });
 
     const requestedStepsInput = payload.step_nos !== undefined ? payload.step_nos : payload.step_no;
     const normalizedSteps = this.normalizeStepNumbers(requestedStepsInput, 'step_no');
@@ -566,34 +484,14 @@ class PositionsModel {
 
     const minKd = this.numRequired(payload.budgeted_min_kd, 'budgeted_min_kd');
     const maxKd = this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd');
-    if (minKd > maxKd) {
-      const err = new Error('budgeted_min_kd must be <= budgeted_max_kd');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (minKd > maxKd) throw validationError('budgeted_min_kd must be <= budgeted_max_kd');
 
     const totalPos = this.numOptional(payload.number_of_positions) ?? 1;
     const filled = this.numOptional(payload.filled_positions) ?? 0;
 
-    if (totalPos < 1) {
-      const err = new Error('number_of_positions must be >= 1');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    if (filled < 0) {
-      const err = new Error('filled_positions must be >= 0');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    if (filled > totalPos) {
-      const err = new Error('filled_positions must be <= number_of_positions');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    if (totalPos < 1) throw validationError('number_of_positions must be >= 1');
+    if (filled < 0) throw validationError('filled_positions must be >= 0');
+    if (filled > totalPos) throw validationError('filled_positions must be <= number_of_positions');
 
     return await this.executeWithTransaction(async (connection) => {
       try {
@@ -677,8 +575,8 @@ class PositionsModel {
         };
 
         const ins = await connection.execute(insertSql, bindVars, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-        const newIdBuf = Array.isArray(ins.outBinds.returnPositionId) 
-          ? ins.outBinds.returnPositionId[0] 
+        const newIdBuf = Array.isArray(ins.outBinds.returnPositionId)
+          ? ins.outBinds.returnPositionId[0]
           : ins.outBinds.returnPositionId;
 
         const selectSql = this.selectBase() + ` WHERE p.POSITION_ID = :1 AND p.TENANT_ID = :2`;
@@ -733,19 +631,7 @@ class PositionsModel {
   // UPDATE
   // ----------------------------
   static async update(positionIdHex32, data, userId = 'SYSTEM', tenantId) {
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(tenantId);
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     const payload = this.toLowerCaseKeys(data);
     delete payload.tenant_id;
@@ -783,29 +669,13 @@ class PositionsModel {
           ? this.numRequired(payload.budgeted_max_kd, 'budgeted_max_kd')
           : Number(currentRow.budgeted_max_kd ?? 0);
 
-      if (nextNumberOfPositions < 1) {
-        const err = new Error('number_of_positions must be >= 1');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
-      }
-      if (nextFilledPositions < 0) {
-        const err = new Error('filled_positions must be >= 0');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
-      }
+      if (nextNumberOfPositions < 1) throw validationError('number_of_positions must be >= 1');
+      if (nextFilledPositions < 0) throw validationError('filled_positions must be >= 0');
       if (nextFilledPositions > nextNumberOfPositions) {
-        const err = new Error('filled_positions must be <= number_of_positions');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
+        throw validationError('filled_positions must be <= number_of_positions');
       }
       if (nextBudgetedMinKd > nextBudgetedMaxKd) {
-        const err = new Error('budgeted_min_kd must be <= budgeted_max_kd');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
+        throw validationError('budgeted_min_kd must be <= budgeted_max_kd');
       }
 
       const sets = [];
@@ -854,12 +724,7 @@ class PositionsModel {
       if (payload.reports_to_position_id !== undefined) add('REPORTS_TO_POSITION_ID', this.raw16Optional(payload.reports_to_position_id, 'reports_to_position_id'));
       if (payload.last_update_login !== undefined) add('LAST_UPDATE_LOGIN', payload.last_update_login ?? null);
 
-      if (!sets.length) {
-        const err = new Error('No fields to update');
-        err.code = 'VALIDATION_ERROR';
-        err.statusCode = 400;
-        throw err;
-      }
+      if (!sets.length) throw validationError('No fields to update');
 
       add('LAST_UPDATED_BY', userId);
       add('LAST_UPDATED_DATE', new Date());
@@ -882,19 +747,7 @@ class PositionsModel {
   // SOFT DELETE
   // ----------------------------
   static async softDelete(positionIdHex32, userId = 'SYSTEM', tenantId) {
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(tenantId);
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
       const sql = `
@@ -920,19 +773,7 @@ class PositionsModel {
   // HARD DELETE
   // ----------------------------
   static async hardDelete(positionIdHex32, tenantId) {
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(tenantId);
     const idBuf = this.raw16Required(positionIdHex32, 'position_id');
     return await this.executeWithTransaction(async (connection) => {
       const r = await connection.execute(`DELETE FROM ${this.TABLE_NAME} WHERE POSITION_ID = :1 AND TENANT_ID = :2`, [idBuf, tenantIdNum], {
@@ -947,19 +788,7 @@ class PositionsModel {
   // REPORTING RELATIONSHIPS TREE
   // ----------------------------
   static async findReportingRelationships(tenantId, positionIdHex32 = null, includeHierarchy = true) {
-    if (tenantId === undefined || tenantId === null) {
-      const err = new Error('tenant_id is required');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
-    const tenantIdNum = Number(tenantId);
-    if (!Number.isFinite(tenantIdNum) || tenantIdNum < 1) {
-      const err = new Error('tenant_id must be a valid positive number');
-      err.code = 'VALIDATION_ERROR';
-      err.statusCode = 400;
-      throw err;
-    }
+    const tenantIdNum = this.assertPositiveTenantId(tenantId);
     let rootHex = null;
     if (positionIdHex32) {
       const norm = this.normalizeGuidHex32(positionIdHex32);
