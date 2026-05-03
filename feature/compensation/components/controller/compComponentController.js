@@ -1,7 +1,7 @@
 /**
  * Compensation Component Controller
  * REST APIs:
- * - GET /comp/components — list from COMP.COMPONENTS_VIEW (tenant_id + search, category, status, calculation; pagination/sort)
+ * - GET /comp/components — list from COMP.COMPONENTS_VIEW (tenant_id + search, category, status, calculation; pagination/sort). Rows include advanced_settings (from ADVANCED_SETTINGS_JSON), pay_basis, and amortizable_flag when the view exposes them.
  * - GET /comp/components/:componentId — single row by numeric id (view)
  * - GET /comp/components/:componentGuid — legacy get by 32-char hex (COMP_COMPONENTS + locations)
  * - POST /comp/components (create), PUT /comp/components/:componentGuid (update), DELETE …
