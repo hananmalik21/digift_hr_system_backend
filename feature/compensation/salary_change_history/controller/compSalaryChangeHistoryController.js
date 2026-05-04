@@ -1,6 +1,7 @@
 /**
  * Salary change history — GET list from COMP.COMP_SALARY_CHANGE_HISTORY_V.
- * Rows are ordered oldest → latest (change_effective_date ASC, change_created_date ASC).
+ * Rows are oldest → latest: change_effective_date ASC, change_created_date ASC NULLS FIRST.
+ * Salaries and impacts are taken from the view as-is (no Node-side salary math).
  *
  * Endpoint (mounted in index.js):
  * GET /api/compensation/salary-change-history
@@ -35,6 +36,7 @@ function paginationBody(page, limit, total) {
 
 /**
  * GET /api/compensation/salary-change-history
+ * Response: success, data, pagination (total row count is pagination.total).
  * Query Parameters:
  * - enterprise_id (required)
  * - employee_id?, employee_guid?, search?, org_unit_id?, level_code?, status?, change_type?, reason_code?, from_date?, to_date?
@@ -49,19 +51,11 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
   }
 
   try {
-    const { summary, total, rows } = await fetchSalaryChangeHistory(parsed);
-
-    const safeSummary = {
-      employee_count: Number(summary?.employee_count ?? 0) || 0,
-      total_impact: Number(summary?.total_impact ?? 0) || 0,
-      currency_code: summary?.currency_code ?? null
-    };
+    const { total, rows } = await fetchSalaryChangeHistory(parsed);
 
     return res.status(HTTP.OK).json({
       success: true,
-      summary: total > 0 ? safeSummary : { employee_count: 0, total_impact: 0, currency_code: null },
-      count: total,
-      data: rows || [],
+      data: rows,
       pagination: paginationBody(parsed.page, parsed.page_size, total)
     });
   } catch (err) {
