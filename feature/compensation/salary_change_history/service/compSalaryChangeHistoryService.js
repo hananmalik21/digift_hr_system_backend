@@ -104,7 +104,11 @@ WHERE enterprise_id = :enterprise_id
   )
 `;
 
-const ORDER_BY = `ORDER BY change_effective_date DESC, submission_date DESC`;
+/** List rows oldest → latest; ties on same effective date use creation time (not returned in API). */
+const ORDER_BY_LIST = `ORDER BY change_effective_date ASC, change_created_date ASC`;
+
+/** KEEP picks currency from the latest change row; independent of list sort direction. */
+const ORDER_BY_SUMMARY_KEEP = `ORDER BY change_effective_date DESC, change_created_date DESC, submission_date DESC`;
 
 const SQL_LIST = `
 SELECT
@@ -138,7 +142,7 @@ SELECT
   components_json
 FROM COMP.COMP_SALARY_CHANGE_HISTORY_V
 ${BASE_WHERE}
-${ORDER_BY}
+${ORDER_BY_LIST}
 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
 `;
 
@@ -152,7 +156,7 @@ const SQL_SUMMARY = `
 SELECT
   COUNT(DISTINCT employee_id) AS employee_count,
   NVL(SUM(impact_amount), 0) AS total_impact,
-  MIN(currency_code) KEEP (DENSE_RANK FIRST ${ORDER_BY}) AS currency_code
+  MIN(currency_code) KEEP (DENSE_RANK FIRST ${ORDER_BY_SUMMARY_KEEP}) AS currency_code
 FROM COMP.COMP_SALARY_CHANGE_HISTORY_V
 ${BASE_WHERE}
 `;

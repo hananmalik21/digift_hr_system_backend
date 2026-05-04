@@ -1,5 +1,6 @@
 /**
  * Salary change history — GET list from COMP.COMP_SALARY_CHANGE_HISTORY_V.
+ * Rows are ordered oldest → latest (change_effective_date ASC, change_created_date ASC).
  *
  * Endpoint (mounted in index.js):
  * GET /api/compensation/salary-change-history
