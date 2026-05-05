@@ -13,6 +13,7 @@ import {
   validateUpdateUserBody
 } from '../service/fndsecUsersService.js';
 import { listUsersFromView } from '../service/fndsecUsersViewService.js';
+import { getUserCompleteInfoByGuid } from '../service/fndsecUserCompleteInfoService.js';
 
 const router = express.Router();
 
@@ -122,6 +123,29 @@ router.get(
       data: items,
       meta: buildUsersListMeta(total, page, pageSize)
     });
+  })
+);
+
+/**
+ * GET /api/security/users/:userGuid
+ * Single user 360 profile from FNDSEC.V_USER_COMPLETE_INFO by USER_GUID.
+ */
+router.get(
+  '/:userGuid',
+  asyncHandler(async (req, res) => {
+    try {
+      const data = await getUserCompleteInfoByGuid(req.params.userGuid);
+      if (!data) {
+        return res.status(404).json({ success: false, message: 'User was not found.' });
+      }
+      return res.status(200).json({ success: true, data });
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return res.status(400).json({ success: false, message: 'Invalid user guid.' });
+      }
+      console.error('[fndsecUsersController] get user complete info failed', err?.errorNum != null ? `ORA-${err.errorNum}` : '', err?.message || err);
+      return res.status(500).json({ success: false, message: 'Unable to fetch user details.' });
+    }
   })
 );
 
