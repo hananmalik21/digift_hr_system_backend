@@ -13,6 +13,12 @@
 import oracledb from 'oracledb';
 import { ValidationError } from './errors/index.js';
 
+/** 32 hexadecimal characters after optional hyphen removal */
+const REGEX_HEX_32 = /^[0-9A-Fa-f]{32}$/;
+
+/** Oracle/JSON occasionally exposes GUIDs as 64 hex digits encoding ASCII hex */
+const REGEX_HEX_64 = /^[0-9A-Fa-f]{64}$/;
+
 /**
  * Check if a string is a valid 32-character hex string (GUID format)
  * @param {string} value - Value to check
@@ -24,7 +30,7 @@ export function isHex32(value) {
     // Buffer is valid if it's 16 bytes (32 hex chars)
     return value.length === 16;
   }
-  return typeof value === 'string' && /^[0-9A-F]{32}$/i.test(value);
+  return typeof value === 'string' && REGEX_HEX_32.test(value.replace(/-/g, ''));
 }
 
 /**
@@ -47,6 +53,53 @@ export function normalizeHex32(value) {
 }
 
 /**
+ * Normalize GUID values from Oracle/API JSON: RAW(16), 32-char hex, optional dashes,
+ * or 64-char "double hex" (each pair is ASCII for one character of the real 32-char hex).
+ *
+ * @param {string|Buffer|null|undefined} value
+ * @param {{ uppercase?: boolean }} [options] - defaults to uppercase true for API payloads
+ * @returns {string|null}
+ */
+export function normalizeApiGuidString(value, options = {}) {
+  const uppercase = options.uppercase !== false;
+
+  const applyCase = (hex) => (uppercase ? String(hex).toUpperCase() : String(hex));
+
+  if (value == null || value === '') return null;
+  if (Buffer.isBuffer(value)) {
+    if (value.length === 16) {
+      return applyCase(value.toString('hex'));
+    }
+    if (value.length === 32) {
+      const asLatin1 = value.toString('latin1');
+      if (REGEX_HEX_32.test(asLatin1)) {
+        return applyCase(asLatin1);
+      }
+    }
+    return applyCase(value.toString('hex'));
+  }
+
+  const s = String(value).trim();
+  if (!s) return null;
+
+  const noDash = s.replace(/-/g, '');
+  if (REGEX_HEX_32.test(noDash)) {
+    return applyCase(noDash);
+  }
+  if (REGEX_HEX_64.test(noDash)) {
+    try {
+      const inner = Buffer.from(noDash, 'hex').toString('latin1');
+      if (REGEX_HEX_32.test(inner)) {
+        return applyCase(inner);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return s;
+}
+
+/**
  * Validate and ensure a value is a valid 32-character hex GUID
  * Normalizes the input and validates the format
  * 
@@ -56,8 +109,13 @@ export function normalizeHex32(value) {
  * @throws {ValidationError} If value is not a valid hex32 GUID
  */
 export function ensureHex32(value, fieldName = 'guid') {
-  const hex = normalizeHex32(value);
-  if (!/^[0-9A-F]{32}$/.test(hex)) {
+  if (value === null || value === undefined || value === '') {
+    throw new ValidationError(`${fieldName} must be a 32-character hex GUID`);
+  }
+  const viaApi = normalizeApiGuidString(value);
+  const compact = viaApi != null ? String(viaApi).replace(/-/g, '') : '';
+  const hex = REGEX_HEX_32.test(compact) ? compact.toUpperCase() : normalizeHex32(value);
+  if (!REGEX_HEX_32.test(hex)) {
     throw new ValidationError(`${fieldName} must be a 32-character hex GUID`);
   }
   return hex;
@@ -85,9 +143,11 @@ export function hexToRawBuffer(value) {
     return hexToRawBuffer(value.toString('hex'));
   }
 
-  // Normalize hex string
-  const hex = normalizeHex32(value);
-  
+  // Prefer unwrapping double-encoded Oracle JSON GUIDs before plain hex normalization
+  const unwrapped = normalizeApiGuidString(value);
+  const core = unwrapped != null ? String(unwrapped).replace(/-/g, '') : '';
+  const hex = REGEX_HEX_32.test(core) ? core.toUpperCase() : normalizeHex32(value);
+
   // Validate hex format
   if (!/^[0-9A-F]+$/.test(hex)) {
     throw new ValidationError(`Invalid hex string format: ${value}`);
@@ -131,7 +191,11 @@ export function bufferToHex(buffer) {
     return buffer.toString('hex').toUpperCase();
   }
   if (typeof buffer === 'string') {
-    // If already a hex string, normalize and return
+    const fromApi = normalizeApiGuidString(buffer);
+    const compact = String(fromApi ?? '').replace(/-/g, '');
+    if (REGEX_HEX_32.test(compact)) {
+      return compact.toUpperCase();
+    }
     const normalized = normalizeHex32(buffer);
     if (isHex32(normalized)) {
       return normalized;

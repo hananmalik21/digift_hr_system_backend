@@ -1,5 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
+import { isHex32, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 import { NotFoundError, ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 // NOTE: We validate GUIDs locally; packages may compare GUID strings case-sensitively.
 
@@ -19,12 +20,13 @@ function rethrowKnownOrWrapDb(err, context) {
 }
 
 function parseGuidHexOrThrow(fieldName, guid) {
-  const raw = String(guid ?? '').trim();
-  const cleaned = raw.replace(/-/g, '');
-  if (!/^[0-9A-Fa-f]{32}$/.test(cleaned)) {
-    const len = cleaned.length;
+  const normalized = normalizeApiGuidString(guid, { uppercase: false });
+  const cleaned = normalized != null ? String(normalized).trim().replace(/-/g, '') : '';
+  if (!isHex32(cleaned)) {
+    const rawLen = String(guid ?? '').trim().replace(/-/g, '').length;
+    const len = cleaned.length || rawLen;
     throw new ValidationError('Validation failed', [
-      len === 0
+      len === 0 || !cleaned
         ? `${fieldName} is required`
         : `${fieldName} must be exactly 32 hexadecimal characters (no dashes); received ${len} character(s)`
     ]);
@@ -117,20 +119,44 @@ function requireNonEmptyString(fieldName, v) {
   return String(v).trim();
 }
 
+const FUNCTION_JSON_GUID_KEYS = new Set(['function_guid', 'module_guid']);
+
+/**
+ * Rewrite known GUID keys in package/view JSON trees (handles Oracle double-encoded hex).
+ * @param {unknown} value
+ */
+function normalizeFunctionJsonGuidsDeep(value) {
+  if (value == null) return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map((item) => normalizeFunctionJsonGuidsDeep(item));
+  if (typeof value !== 'object') return value;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    const keyLower = k.toLowerCase();
+    if (FUNCTION_JSON_GUID_KEYS.has(keyLower)) {
+      const n = normalizeApiGuidString(v);
+      out[k] = n != null ? n : v;
+    } else if (v !== null && typeof v === 'object') {
+      out[k] = normalizeFunctionJsonGuidsDeep(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 async function execPackageJson(connection, { context, plsql, binds }) {
   const result = await connection.execute(plsql, binds, { autoCommit: true });
   const out = result?.outBinds || {};
-  const parsed = await parseJsonClobOrThrow(out.o_function_json, context);
+  let parsed = await parseJsonClobOrThrow(out.o_function_json, context);
+  parsed = normalizeFunctionJsonGuidsDeep(parsed);
   return { out, parsed };
 }
 
-function toIso(val) {
-  if (val == null) return null;
-  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString();
-  const s = String(val).trim();
-  if (!s) return null;
-  const d = new Date(s);
-  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+/** Prefer normalized API GUID hex; keep raw if normalization did not yield hex32 */
+function mergeGuidSlot(raw, normalized) {
+  return normalized != null ? normalized : raw;
 }
 
 function safeJsonParseOrNull(v) {
@@ -147,19 +173,24 @@ function safeJsonParseOrNull(v) {
 
 function mapViewRow(row) {
   const moduleObj = safeJsonParseOrNull(row.MODULE_OBJ);
+  const moduleGuidRaw = moduleObj?.module_guid ?? null;
+  const moduleGuidNorm = normalizeApiGuidString(moduleGuidRaw);
   const module =
     moduleObj == null
       ? null
       : {
           module_id: moduleObj.module_id != null ? Number(moduleObj.module_id) : (row.MODULE_ID != null ? Number(row.MODULE_ID) : null),
-          module_guid: moduleObj.module_guid ?? null,
+          module_guid: mergeGuidSlot(moduleGuidRaw, moduleGuidNorm),
           module_code: moduleObj.module_code ?? null,
           module_name: moduleObj.module_name ?? null
         };
 
+  const functionGuidRaw = row.FUNCTION_GUID ?? null;
+  const functionGuidNorm = normalizeApiGuidString(functionGuidRaw);
+
   return {
     function_id: row.FUNCTION_ID != null ? Number(row.FUNCTION_ID) : null,
-    function_guid: row.FUNCTION_GUID ?? null,
+    function_guid: mergeGuidSlot(functionGuidRaw, functionGuidNorm),
     module_id: row.MODULE_ID != null ? Number(row.MODULE_ID) : (module?.module_id ?? null),
     function_code: row.FUNCTION_CODE ?? null,
     function_name: row.FUNCTION_NAME ?? null,
@@ -326,7 +357,8 @@ END;`;
       });
 
       return {
-        function_guid: out.o_function_guid != null ? String(out.o_function_guid).trim().replace(/-/g, '') : null,
+        function_guid:
+          out.o_function_guid != null ? mergeGuidSlot(out.o_function_guid, normalizeApiGuidString(out.o_function_guid)) : null,
         function_id: out.o_function_id != null ? Number(out.o_function_id) : null,
         function_json: parsed
       };
