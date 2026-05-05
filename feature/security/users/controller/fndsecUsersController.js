@@ -1,6 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import {
   buildCreatePayloadWithPasswordHash,
   buildUpdatePayloadWithOptionalPasswordHash,
@@ -11,8 +12,63 @@ import {
   validateDeleteUserParams,
   validateUpdateUserBody
 } from '../service/fndsecUsersService.js';
+import { listUsersFromView } from '../service/fndsecUsersViewService.js';
 
 const router = express.Router();
+
+function firstValidationMessage(err) {
+  const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
+  return details[0] || err?.userMessage || err.message || 'Validation failed';
+}
+
+function sendRead(res, { success, message, data, meta }, httpStatus = 200) {
+  const payload = { success: Boolean(success) };
+  if (message != null) payload.message = message;
+  if (data !== undefined) payload.data = data;
+  if (meta !== undefined) payload.meta = meta;
+  return res.status(httpStatus).json(payload);
+}
+
+function sendReadError(res, err) {
+  const statusCode =
+    err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+
+  if (err instanceof ValidationError) {
+    return sendRead(res, { success: false, message: firstValidationMessage(err) }, 400);
+  }
+
+  if (err instanceof DatabaseError) {
+    return sendRead(res, { success: false, message: err.userMessage || err.message || 'Database error' }, statusCode);
+  }
+
+  const msg = err?.userMessage || err?.message || 'Unexpected server error';
+  return sendRead(res, { success: false, message: msg }, 500);
+}
+
+function routeRead(handler) {
+  return asyncHandler(async (req, res) => {
+    try {
+      return await handler(req, res);
+    } catch (err) {
+      return sendReadError(res, err);
+    }
+  });
+}
+
+function buildUsersListMeta(total, page, pageSize) {
+  const p = buildPaginationMeta(page, pageSize, total);
+  return {
+    total,
+    pagination: {
+      page: p.page,
+      page_size: p.pageSize,
+      total: p.total,
+      total_pages: p.totalPages,
+      has_next: p.hasNext,
+      has_previous: p.hasPrevious
+    }
+  };
+}
 
 function firstLine(msg) {
   return String(msg ?? '')
@@ -40,9 +96,7 @@ function resolveDeletedBy(req) {
 }
 
 function sendValidation(res, err) {
-  const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
-  const message = details[0] || err.userMessage || err.message || 'Validation failed';
-  return json(res, 400, { success: false, message });
+  return json(res, 400, { success: false, message: firstValidationMessage(err) });
 }
 
 function mapOracleHttp(err) {
@@ -52,6 +106,24 @@ function mapOracleHttp(err) {
   if (/ORA-20\d{3}/i.test(line)) return { status: 400, message: line };
   return { status: 500, message: 'Unexpected server error' };
 }
+
+/**
+ * GET /api/security/users
+ * List from FNDSEC.V_USERS_FULL_DETAILS (query: enterprise_id required; page, page_size or limit; filters).
+ * Response shape matches other FNDSEC list APIs: data = array, meta.total, meta.pagination.
+ */
+router.get(
+  '/',
+  routeRead(async (req, res) => {
+    const { items, total, page, pageSize } = await listUsersFromView(req.query || {});
+    return sendRead(res, {
+      success: true,
+      message: 'Users fetched successfully',
+      data: items,
+      meta: buildUsersListMeta(total, page, pageSize)
+    });
+  })
+);
 
 router.post(
   '/create',
