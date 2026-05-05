@@ -134,7 +134,8 @@ router.get(
   '/:userGuid',
   asyncHandler(async (req, res) => {
     try {
-      const data = await getUserCompleteInfoByGuid(req.params.userGuid);
+      const enterpriseId = req.query?.enterprise_id ?? req.user?.enterprise_id ?? req.headers['x-enterprise-id'] ?? null;
+      const data = await getUserCompleteInfoByGuid(req.params.userGuid, enterpriseId);
       if (!data) {
         return res.status(404).json({ success: false, message: 'User was not found.' });
       }

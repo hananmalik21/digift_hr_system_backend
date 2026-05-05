@@ -69,12 +69,18 @@ function normalizeUserGuid(val) {
  * @param {string} userGuidRaw
  * @returns {Promise<null|{user_guid:string|null,user_info:object,contact_info:object,employee:object,department:object,position:object,reporting_manager:object,work_location:object,employment:object,roles:any[],preferences:object,security:object}>}
  */
-export async function getUserCompleteInfoByGuid(userGuidRaw) {
+export async function getUserCompleteInfoByGuid(userGuidRaw, enterpriseIdRaw = null) {
   if (isBlank(userGuidRaw)) throw invalidGuidError();
   const buf = guidToBuffer(String(userGuidRaw).trim());
   if (!buf) throw invalidGuidError();
 
-  const row = await fetchUserCompleteInfoRowByGuid(buf);
+  const ent =
+    enterpriseIdRaw === undefined || enterpriseIdRaw === null || String(enterpriseIdRaw).trim() === ''
+      ? null
+      : Number(enterpriseIdRaw);
+  const enterpriseId = Number.isFinite(ent) && ent > 0 ? ent : null;
+
+  const row = await fetchUserCompleteInfoRowByGuid(buf, enterpriseId);
   if (!row) return null;
 
   const [
