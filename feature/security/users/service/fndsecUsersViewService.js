@@ -1,11 +1,7 @@
-import { bufferToGuidHex, guidToBuffer } from '../../../../src/utils/oracleGuid.js';
+import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
 import { parsePagination } from '../../../../utils/paginationUtils.js';
-import { NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
-import {
-  buildOptionalLikeInner,
-  queryUserByGuid,
-  queryUsersList
-} from '../repository/fndsecUsersViewRepository.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
+import { buildOptionalLikeInner, queryUsersList } from '../repository/fndsecUsersViewRepository.js';
 
 /** Raw JSON columns replaced by parsed `roles` / `org_structure_list` on output. */
 const SKIP_RAW_JSON_COLUMNS = new Set(['roles_json', 'org_structure_list']);
@@ -40,25 +36,6 @@ function parseUsersListPagination(query) {
     const msg = String(e?.message || 'Invalid pagination').trim();
     throw new ValidationError('Validation failed', [msg || 'Invalid pagination']);
   }
-}
-
-/**
- * Path / query GUID: 32 hex chars or standard UUID (dashes optional).
- * @returns {Buffer}
- */
-export function parseUserGuidOrThrow(fieldName, guid) {
-  const buf = guidToBuffer(String(guid ?? '').trim());
-  if (!buf) {
-    const raw = String(guid ?? '').trim();
-    const cleaned = raw.replace(/-/g, '');
-    const len = cleaned.length;
-    throw new ValidationError('Validation failed', [
-      len === 0
-        ? `${fieldName} is required`
-        : `${fieldName} must be a valid UUID (32-character hex or standard UUID format)`
-    ]);
-  }
-  return buf;
 }
 
 function rowKeyMap(row) {
@@ -200,19 +177,4 @@ export async function listUsersFromView(query) {
   const { rows, total } = await queryUsersList(filters, { page, pageSize });
   const items = await Promise.all(rows.map((row) => mapUserViewRowToOutput(row)));
   return { items, total, page, pageSize };
-}
-
-/**
- * @param {string} userGuidRaw
- * @param {unknown} enterpriseIdRaw
- */
-export async function getUserFromViewByGuid(userGuidRaw, enterpriseIdRaw) {
-  const user_guid_buf = parseUserGuidOrThrow('user_guid', userGuidRaw);
-  const enterprise_id = parseEnterpriseId(enterpriseIdRaw);
-
-  const row = await queryUserByGuid(user_guid_buf, enterprise_id);
-  if (!row) {
-    throw new NotFoundError('User was not found.');
-  }
-  return mapUserViewRowToOutput(row);
 }

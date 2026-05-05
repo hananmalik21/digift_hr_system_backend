@@ -126,30 +126,3 @@ export function buildOptionalLikeInner(raw) {
   if (!isNonEmptyTrimmed(raw)) return null;
   return escapeLikePattern(String(raw).trim());
 }
-
-/**
- * Single user by USER_GUID + ENTERPRISE_ID.
- * @param {Buffer} userGuidBuf
- * @param {number} enterprise_id
- */
-export async function queryUserByGuid(userGuidBuf, enterprise_id) {
-  const sql = `
-SELECT v.*
-FROM ${VIEW} v
-WHERE v.USER_GUID = :user_guid
-  AND v.ENTERPRISE_ID = :enterprise_id`;
-
-  const binds = {
-    user_guid: { val: userGuidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 },
-    enterprise_id: { val: enterprise_id, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
-  };
-
-  try {
-    return await withConnection(async (connection) => {
-      const result = await connection.execute(sql, binds, ROW_OPTS);
-      return result.rows?.[0] ?? null;
-    });
-  } catch (err) {
-    rethrowUnlessOperational(err, 'queryUserByGuid');
-  }
-}

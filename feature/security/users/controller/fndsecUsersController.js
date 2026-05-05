@@ -1,7 +1,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
+import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import {
   buildCreatePayloadWithPasswordHash,
   buildUpdatePayloadWithOptionalPasswordHash,
@@ -12,7 +12,7 @@ import {
   validateDeleteUserParams,
   validateUpdateUserBody
 } from '../service/fndsecUsersService.js';
-import { getUserFromViewByGuid, listUsersFromView } from '../service/fndsecUsersViewService.js';
+import { listUsersFromView } from '../service/fndsecUsersViewService.js';
 
 const router = express.Router();
 
@@ -35,10 +35,6 @@ function sendReadError(res, err) {
 
   if (err instanceof ValidationError) {
     return sendRead(res, { success: false, message: firstValidationMessage(err) }, 400);
-  }
-
-  if (err instanceof NotFoundError) {
-    return sendRead(res, { success: false, message: err.userMessage || err.message || 'Not found' }, 404);
   }
 
   if (err instanceof DatabaseError) {
@@ -126,18 +122,6 @@ router.get(
       data: items,
       meta: buildUsersListMeta(total, page, pageSize)
     });
-  })
-);
-
-/**
- * GET /api/security/users/:user_guid
- * Single user from FNDSEC.V_USERS_FULL_DETAILS (query: enterprise_id required).
- */
-router.get(
-  '/:user_guid',
-  routeRead(async (req, res) => {
-    const data = await getUserFromViewByGuid(req.params.user_guid, req.query?.enterprise_id);
-    return sendRead(res, { success: true, data });
   })
 );
 
