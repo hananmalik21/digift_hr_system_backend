@@ -94,20 +94,22 @@ const registerUploadFields = upload.fields([
 ]);
 
 const registerUserHandler = asyncHandler(async (req, res) => {
-  const email = String(req.body?.email || '').trim();
   const tenantId = req.body?.tenantId == null || req.body.tenantId === '' ? null : Number(req.body.tenantId);
   const userGuid = req.body?.userGuid ? String(req.body.userGuid).trim() : null;
   const profileImageFile = req.files?.profileImage?.[0] || req.files?.profilelmage?.[0];
   const faceImageFile = req.files?.faceImage?.[0] || req.files?.facelmage?.[0];
 
-  if (!email) {
-    throw new ValidationError('email is required');
-  }
   if (!profileImageFile || !faceImageFile) {
     throw new ValidationError('profileImage and faceImage are required');
   }
   if (tenantId != null && !Number.isFinite(tenantId)) {
     throw new ValidationError('tenantId must be numeric when provided');
+  }
+  if (!tenantId) {
+    throw new ValidationError('tenantId is required');
+  }
+  if (!userGuid) {
+    throw new ValidationError('userGuid is required');
   }
 
   const descriptorPromise = getFaceDescriptor(faceImageFile.buffer);
@@ -121,7 +123,6 @@ const registerUserHandler = asyncHandler(async (req, res) => {
   const capturedImageData = toBase64(faceBuf);
 
   const registered = await FaceAttendanceRepository.registerUserFaceViaPackage({
-    email,
     tenantId,
     userGuid,
     profileImageData,

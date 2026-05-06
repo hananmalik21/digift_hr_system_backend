@@ -26,7 +26,7 @@ function mapFaceDbError(error, fallbackMessage) {
   }
   if (error?.errorNum === 12899 || msg.includes('ORA-12899') || error?.errorNum === 1461 || msg.includes('ORA-01461')) {
     return new DatabaseError(
-      'Image payload exceeds current DB column size. Run image column migration to CLOB for SEC.USER_FACE_PROFILE.PROFILE_IMAGE and CAPTURED_IMAGE.',
+      'Image payload exceeds current DB column size. Run image column migration to CLOB for FNDSEC.FNDSEC_USER_FACE_PROFILE.PROFILE_IMAGE and CAPTURED_IMAGE.',
       error,
       'Image storage column is too small. Please apply the DB migration for CLOB image fields.'
     );
@@ -36,7 +36,6 @@ function mapFaceDbError(error, fallbackMessage) {
 
 class FaceAttendanceRepository {
   static async registerUserFaceViaPackage({
-    email,
     tenantId,
     userGuid,
     profileImageData,
@@ -47,8 +46,7 @@ class FaceAttendanceRepository {
     try {
       const plsql = `
         BEGIN
-          SEC.SEC_FACE_ATTENDANCE_PKG.REGISTER_USER_FACE(
-            p_email           => :p_email,
+          FNDSEC.FNDSEC_FACE_ATTENDANCE_PKG.REGISTER_USER_FACE(
             p_tenant_id       => :p_tenant_id,
             p_user_guid       => :p_user_guid,
             p_profile_image   => :p_profile_image,
@@ -65,7 +63,6 @@ class FaceAttendanceRepository {
       `;
 
       const binds = {
-        p_email: email,
         p_tenant_id: tenantId ?? null,
         p_user_guid: userGuid || null,
         p_profile_image: { dir: oracledb.BIND_IN, type: oracledb.CLOB, val: profileImageData || null },
@@ -112,7 +109,7 @@ class FaceAttendanceRepository {
     try {
       const plsql = `
         BEGIN
-          SEC.SEC_FACE_ATTENDANCE_PKG.MARK_FACE_ATTENDANCE(
+          FNDSEC.FNDSEC_FACE_ATTENDANCE_PKG.MARK_FACE_ATTENDANCE(
             p_email                => :p_email,
             p_tenant_id            => :p_tenant_id,
             p_user_guid            => :p_user_guid,
@@ -182,7 +179,7 @@ class FaceAttendanceRepository {
     try {
       const result = await connection.execute(
         `SELECT USER_ID, EMPLOYEE_ID, TENANT_ID, EMAIL_ADDRESS
-           FROM SEC.USERS
+           FROM FNDSEC.FNDSEC_USERS
           WHERE USER_ID = :userId
           FETCH FIRST 1 ROWS ONLY`,
         { userId: Number(userId) },
@@ -190,7 +187,7 @@ class FaceAttendanceRepository {
       );
       return result.rows?.[0] || null;
     } catch (error) {
-      throw mapFaceDbError(error, 'Failed to query SEC.USERS by user_id.');
+      throw mapFaceDbError(error, 'Failed to query FNDSEC.FNDSEC_USERS by user_id.');
     } finally {
       await connection.close();
     }
@@ -207,7 +204,7 @@ class FaceAttendanceRepository {
           EMAIL_ADDRESS,
           ACCOUNT_STATUS,
           TIMEZONE_CODE
-        FROM SEC.USERS
+        FROM FNDSEC.FNDSEC_USERS
         WHERE LOWER(EMAIL_ADDRESS) = LOWER(:email)
           AND (:tenantId IS NULL OR TENANT_ID = :tenantId)
         FETCH FIRST 1 ROWS ONLY
@@ -221,7 +218,7 @@ class FaceAttendanceRepository {
 
       return result.rows?.[0] || null;
     } catch (error) {
-      throw mapFaceDbError(error, 'Failed to query SEC.USERS by email.');
+      throw mapFaceDbError(error, 'Failed to query FNDSEC.FNDSEC_USERS by email.');
     } finally {
       await connection.close();
     }
@@ -239,7 +236,7 @@ class FaceAttendanceRepository {
           CAPTURED_IMAGE,
           DBMS_LOB.SUBSTR(FACE_ARRAY, 4000, 1) AS FACE_ARRAY,
           IS_ACTIVE
-        FROM SEC.USER_FACE_PROFILE
+        FROM FNDSEC.FNDSEC_USER_FACE_PROFILE
         WHERE USER_ID = :userId
           AND IS_ACTIVE = 1
         FETCH FIRST 1 ROWS ONLY
@@ -269,7 +266,7 @@ class FaceAttendanceRepository {
     const connection = await getFaceOracleConnection();
     try {
       const sql = `
-        MERGE INTO SEC.USER_FACE_PROFILE tgt
+        MERGE INTO FNDSEC.FNDSEC_USER_FACE_PROFILE tgt
         USING (
           SELECT
             :userId AS USER_ID,
@@ -343,7 +340,7 @@ class FaceAttendanceRepository {
     const connection = await getFaceOracleConnection();
     try {
       const sql = `
-        INSERT INTO SEC.FACE_ATTENDANCE (
+        INSERT INTO FNDSEC.FNDSEC_FACE_ATTENDANCE (
           USER_ID,
           USER_GUID,
           USER_EMAIL,
@@ -411,7 +408,7 @@ class FaceAttendanceRepository {
           MATCHED,
           ATTENDANCE_AT,
           CREATED_AT
-        FROM SEC.FACE_ATTENDANCE
+        FROM FNDSEC.FNDSEC_FACE_ATTENDANCE
         WHERE USER_ID = :userId
           AND ATTENDANCE_AT >= :startDate
           AND ATTENDANCE_AT < :endDate
