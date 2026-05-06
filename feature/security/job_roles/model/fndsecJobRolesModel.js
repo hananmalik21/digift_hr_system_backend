@@ -392,6 +392,120 @@ function parseViewJsonArray(value) {
   return [];
 }
 
+// Cache parsed JSON strings to avoid repeated JSON.parse under pagination/list loads.
+const _jsonCache = new Map();
+const _JSON_CACHE_MAX = 800;
+
+function parseJsonStringCached(str) {
+  const s = String(str ?? '').trim();
+  if (!s) return null;
+  const hit = _jsonCache.get(s);
+  if (hit !== undefined) return hit;
+  try {
+    const parsed = JSON.parse(s);
+    if (_jsonCache.size >= _JSON_CACHE_MAX) _jsonCache.clear();
+    _jsonCache.set(s, parsed);
+    return parsed;
+  } catch {
+    if (_jsonCache.size >= _JSON_CACHE_MAX) _jsonCache.clear();
+    _jsonCache.set(s, null);
+    return null;
+  }
+}
+
+function asObject(v) {
+  if (v == null) return null;
+  if (typeof v === 'string') {
+    const parsed = parseJsonStringCached(v);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  }
+  if (typeof v === 'object' && !Array.isArray(v)) return v;
+  return null;
+}
+
+function asArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v == null) return [];
+  if (typeof v === 'string') {
+    const parsed = parseJsonStringCached(v);
+    return Array.isArray(parsed) ? parsed : [];
+  }
+  // Backward compat: single object -> wrap.
+  if (typeof v === 'object') return [v];
+  return [];
+}
+
+function normalizeFunctions(functionsRaw) {
+  const items = asArray(functionsRaw).map(asObject).filter(Boolean);
+
+  // Dedupe by (function_id, route_url) while preserving order + display_order sort.
+  const seen = new Set();
+  const deduped = [];
+  for (const f of items) {
+    const id = f.function_id ?? f.functionId ?? null;
+    const route = f.route_url ?? f.routeUrl ?? null;
+    const key = `${id ?? ''}::${route ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(f);
+  }
+
+  const withIndex = deduped.map((it, idx) => ({ it, idx }));
+  withIndex.sort((a, b) => {
+    const ao = Number(a.it.display_order ?? a.it.displayOrder);
+    const bo = Number(b.it.display_order ?? b.it.displayOrder);
+    const aOk = Number.isFinite(ao);
+    const bOk = Number.isFinite(bo);
+    if (aOk && bOk) return ao - bo;
+    if (aOk) return -1;
+    if (bOk) return 1;
+    return a.idx - b.idx;
+  });
+  return withIndex.map((x) => x.it);
+}
+
+function normalizeFunctionRoles(functionRolesRaw) {
+  return asArray(functionRolesRaw)
+    .map(asObject)
+    .filter(Boolean)
+    .map((fr) => {
+      // Functions may arrive as functions_json, functions, or a JSON-encoded string; always expose functions_json.
+      const functionsRaw = fr.functions_json ?? fr.functions ?? fr.functionsJson ?? null;
+      return {
+        ...fr,
+        functions_json: normalizeFunctions(functionsRaw)
+      };
+    });
+}
+
+function normalizeDutyRoles(dutyRolesRaw) {
+  return asArray(dutyRolesRaw)
+    .map(asObject)
+    .filter(Boolean)
+    .map((dr) => {
+      const functionRolesRaw = dr.function_roles_json ?? dr.function_roles ?? dr.functionRolesJson ?? null;
+      return {
+        ...dr,
+        function_roles_json: normalizeFunctionRoles(functionRolesRaw)
+      };
+    });
+}
+
+function normalizeInheritedJobRoles(inheritedRaw) {
+  return asArray(inheritedRaw)
+    .map(asObject)
+    .filter(Boolean)
+    .map((jr) => {
+      const dutyRolesRaw = jr.duty_roles_json ?? jr.duty_roles ?? jr.dutyRolesJson ?? null;
+      const functionRolesRaw = jr.function_roles_json ?? jr.function_roles ?? jr.functionRolesJson ?? null;
+      return {
+        ...jr,
+        duty_roles_json: normalizeDutyRoles(dutyRolesRaw),
+        function_roles_json: normalizeFunctionRoles(functionRolesRaw)
+      };
+    });
+}
+
 /**
  * @param {object} row Oracle row (any key casing)
  */
@@ -399,6 +513,12 @@ function mapJobRolesJsonViewRow(row) {
   const m = rowKeyMap(row);
   const guidHex = normalizeHex32(m.job_role_guid);
   const job_role_guid = /^[0-9A-F]{32}$/i.test(guidHex) ? guidHex : null;
+
+  const inherited_job_roles_json = parseViewJsonArray(m.inherited_job_roles_json);
+  const inherited_from_json = parseViewJsonArray(m.inherited_from_json);
+  const duty_roles_json = parseViewJsonArray(m.duty_roles_json);
+  const function_roles_json = parseViewJsonArray(m.function_roles_json);
+  const data_roles_json = parseViewJsonArray(m.data_roles_json);
 
   return {
     job_role_id: m.job_role_id,
@@ -409,11 +529,11 @@ function mapJobRolesJsonViewRow(row) {
     job_title: m.job_title,
     description: m.description ?? null,
     status: m.status,
-    inherited_job_roles_json: parseViewJsonArray(m.inherited_job_roles_json),
-    inherited_from_json: parseViewJsonArray(m.inherited_from_json),
-    duty_roles_json: parseViewJsonArray(m.duty_roles_json),
-    function_roles_json: parseViewJsonArray(m.function_roles_json),
-    data_roles_json: parseViewJsonArray(m.data_roles_json)
+    inherited_job_roles_json: normalizeInheritedJobRoles(inherited_job_roles_json),
+    inherited_from_json,
+    duty_roles_json: normalizeDutyRoles(duty_roles_json),
+    function_roles_json: normalizeFunctionRoles(function_roles_json),
+    data_roles_json
   };
 }
 
