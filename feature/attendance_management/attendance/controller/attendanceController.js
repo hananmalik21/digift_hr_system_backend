@@ -393,11 +393,11 @@ router.put('/', asyncHandler(async (req, res) => {
  *
  * Identity rules:
  *   employee_id  — authoritative for attendance ownership; must match TM.TM_ATTENDANCE_DAYS.EMPLOYEE_ID.
- *   user_id      — authoritative for face verification; resolved to SEC.USERS; EMPLOYEE_ID on that row
+ *   user_id      — authoritative for face verification; resolved to FNDSEC.FNDSEC_USERS; EMPLOYEE_ID on that row
  *                  must match employee_id to prevent identity mixing.
  *
  * Face matching (when mark_attendance_by_face=true):
- *   Server computes face match from uploaded faceImage using user_id → SEC.USERS → email.
+ *   Server computes face match from uploaded faceImage using user_id → FNDSEC.FNDSEC_USERS → email.
  *   p_face_matched is set internally; client never decides it.
  */
 router.post('/punch', punchUpload.fields([
@@ -459,9 +459,9 @@ router.post('/punch', punchUpload.fields([
       throw new ValidationError('geoRadius must be numeric when provided');
     }
 
-    // SEC.USERS resolved in parallel with attendance day lookup.
+    // FNDSEC.FNDSEC_USERS resolved in parallel with attendance day lookup.
     if (!secUser) {
-      throw new ForbiddenError('user_id not found in SEC.USERS');
+      throw new ForbiddenError('user_id not found in FNDSEC.FNDSEC_USERS');
     }
 
     // --- 3. Cross-check: user's linked employee must match attendance day employee ---
@@ -469,7 +469,7 @@ router.post('/punch', punchUpload.fields([
       throw new ForbiddenError('user_id is not linked to the same employee as the attendance day record');
     }
 
-    // Run face match using email + tenant resolved from SEC.USERS
+    // Run face match using email + tenant resolved from FNDSEC.FNDSEC_USERS
     const liveDescriptor = await getFaceDescriptor(faceImageFile.buffer);
     const statusForFacePackage = String(body.punch_type).trim().toUpperCase() === 'IN' ? 'checkIn' : 'checkOut';
     const faceResult = await FaceAttendanceRepository.markFaceAttendanceViaPackage({
