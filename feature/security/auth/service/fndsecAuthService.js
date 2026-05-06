@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import argon2 from 'argon2';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import db from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { authDebugEnabled } from '../utils/authDebug.js';
@@ -9,6 +10,29 @@ const AUTH_PKG = 'FNDSEC.FNDSEC_AUTH_PKG.LOGIN_USER';
 const INVALID_CREDS_MSG = 'Invalid username or password.';
 const HASH_PREFIX_ARGON2 = '$argon2';
 const HASH_PREFIX_BCRYPT = '$2';
+const LOGIN_ID_REQUIRED_MSG = 'Username or email is required.';
+const LOCKED_ACCOUNT_MSG = 'Your account is locked.';
+
+function normalizeLoginId(raw) {
+  return String(raw ?? '').trim().toLowerCase();
+}
+
+function sanitizePkgMessage(message) {
+  const msg = String(message ?? '').trim();
+  if (!msg) return '';
+  // Never leak Oracle details.
+  if (/ORA-\d+/i.test(msg)) return '';
+  return msg;
+}
+
+function resolveAuthFailureMessage(pkgMessage) {
+  const msg = sanitizePkgMessage(pkgMessage);
+  if (!msg) return INVALID_CREDS_MSG;
+  if (/locked/i.test(msg)) return LOCKED_ACCOUNT_MSG;
+  // Keep other business-safe messages from the package (status/expiry/password-expired).
+  if (/invalid username or password/i.test(msg)) return INVALID_CREDS_MSG;
+  return msg;
+}
 
 function toHashStringMaybe(val) {
   if (val == null) return '';
@@ -90,39 +114,70 @@ async function verifyUserPassword(plainPassword, passwordHash) {
   return false;
 }
 
+function resolveJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || String(secret).trim().length < 16) return null;
+  return String(secret);
+}
+
+function jwtExpiresIn() {
+  return process.env.JWT_EXPIRES_IN || '1d';
+}
+
 export function validateLoginBody(body) {
   const b = asPlainObject(body);
   const errors = [];
-  const username = isBlank(b.username) ? '' : String(b.username).trim();
+  const effectiveLoginId =
+    (isBlank(b.login_id) ? '' : String(b.login_id)) ||
+    // Backward compatible fallback: accept legacy username/email if login_id is absent.
+    (isBlank(b.username) ? '' : String(b.username)) ||
+    (isBlank(b.email) ? '' : String(b.email));
+
   const password = isBlank(b.password) ? '' : String(b.password);
 
-  if (isBlank(b.enterprise_id)) errors.push('enterprise_id is required');
-  if (!username) errors.push('username is required');
+  if (!String(effectiveLoginId ?? '').trim()) errors.push(LOGIN_ID_REQUIRED_MSG);
   if (!password) errors.push('password is required');
-  if (!isBlank(b.enterprise_id) && !toPositiveNumberOrNull(b.enterprise_id)) {
-    errors.push('enterprise_id must be a positive number');
-  }
   if (errors.length) throw new ValidationError('Validation failed', errors);
 }
 
-async function fetchUserForLogin(connection, enterpriseId, username) {
-  const ent = toPositiveNumberOrNull(enterpriseId);
-  if (!ent) return null;
+async function fetchUserForLoginByUsername(connection, usernameLower) {
   const sql = `
 SELECT USER_ID, USER_GUID, PASSWORD_HASH
 FROM FNDSEC.FNDSEC_USERS
-WHERE ENTERPRISE_ID = :enterprise_id
-  AND LOWER(USERNAME) = LOWER(:username)`;
+WHERE LOWER(USERNAME) = :username`;
 
   const result = await connection.execute(
     sql,
     {
-      enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-      username: { val: String(username ?? ''), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 300 }
+      username: { val: String(usernameLower ?? ''), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 300 }
     },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
   return result?.rows?.[0] || null;
+}
+
+async function fetchUserForLoginByEmail(connection, emailLower) {
+  const sql = `
+SELECT USER_ID, USER_GUID, PASSWORD_HASH
+FROM FNDSEC.FNDSEC_USERS
+WHERE LOWER(PRIMARY_EMAIL) = :email`;
+
+  const result = await connection.execute(
+    sql,
+    {
+      email: { val: String(emailLower ?? ''), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 320 }
+    },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+  return result?.rows?.[0] || null;
+}
+
+async function fetchUserForLoginByLoginId(connection, loginIdLower) {
+  if (!loginIdLower) return null;
+  // Try username first (preferred), then email.
+  const byUsername = await fetchUserForLoginByUsername(connection, loginIdLower);
+  if (byUsername) return byUsername;
+  return await fetchUserForLoginByEmail(connection, loginIdLower);
 }
 
 async function callLoginPkg(connection, inputObj) {
@@ -168,21 +223,13 @@ function parseUserJsonOrEmpty(userJsonStr) {
 
 export async function loginUserService(body) {
   const input = asPlainObject(body);
-  const enterprise_id = input.enterprise_id;
-  const usernameRaw = input.username;
+  const loginIdRaw = input.login_id ?? input.username ?? input.email;
   const passwordRaw = input.password;
-  const username = String(usernameRaw ?? '').trim();
-  const usernameLower = username.toLowerCase();
+  const login_id_lower = normalizeLoginId(loginIdRaw);
   const password = String(passwordRaw ?? '');
 
   return await withConnection(async (connection) => {
-    const ent = toPositiveNumberOrNull(enterprise_id);
-    if (!ent) {
-      // Should already be caught by validateLoginBody, but keep it defensive.
-      throw new ValidationError('Validation failed', ['enterprise_id must be a positive number']);
-    }
-
-    const row = await fetchUserForLogin(connection, ent, usernameLower);
+    const row = await fetchUserForLoginByLoginId(connection, login_id_lower);
     const password_hash_raw = row?.PASSWORD_HASH ?? row?.password_hash ?? null;
     const password_hash = await readPasswordHashMaybeClob(password_hash_raw);
 
@@ -207,9 +254,8 @@ export async function loginUserService(body) {
               : 'missing';
       // eslint-disable-next-line no-console
       console.log(
-        '[auth/login] enterprise_id=%s username=%s user_found=%s hash_type=%s hash_len=%s password_valid=%s',
-        ent,
-        usernameLower,
+        '[auth/login] login_id=%s user_found=%s hash_type=%s hash_len=%s password_valid=%s',
+        login_id_lower,
         !!row,
         hashType,
         password_hash ? String(password_hash.length) : '0',
@@ -219,9 +265,7 @@ export async function loginUserService(body) {
 
     // Call package for both valid and invalid passwords (it handles attempts/locks/audit).
     const { p_success, p_message, userJsonStr } = await callLoginPkg(connection, {
-      enterprise_id: ent,
-      // Package does: lower(trim(json_value(...))) so send the normalized value to match.
-      username: usernameLower,
+      login_id: login_id_lower,
       password_valid
     });
 
@@ -230,21 +274,53 @@ export async function loginUserService(body) {
         // eslint-disable-next-line no-console
         console.log('[auth/login] pkg_success=N msg=%s', String(p_message ?? '').slice(0, 200));
       }
+
       return {
         httpStatus: 401,
-        payload: { success: false, message: p_message || INVALID_CREDS_MSG, data: null }
+        payload: { success: false, message: resolveAuthFailureMessage(p_message), data: null }
       };
     }
 
     const userObj = parseUserJsonOrEmpty(userJsonStr);
-    const data = userObj && Object.keys(userObj).length ? userObj : null;
+    const secret = resolveJwtSecret();
+    if (!secret) {
+      return { httpStatus: 500, payload: { success: false, message: 'Unexpected server error', data: null } };
+    }
+
+    const responseUserId = row?.USER_ID ?? row?.user_id ?? userObj.user_id ?? userObj.userId ?? null;
+    const responseUserGuid = userObj.user_guid ?? userObj.userGuid ?? null;
+    const responseEnterpriseId = userObj.enterprise_id ?? userObj.enterpriseId ?? null;
+    const responseUsername = userObj.username ?? userObj.user_name ?? userObj.userName ?? null;
+
+    const token = jwt.sign(
+      {
+        user_id: responseUserId,
+        user_guid: responseUserGuid,
+        enterprise_id: responseEnterpriseId,
+        username: responseUsername != null ? String(responseUsername) : login_id_lower
+      },
+      secret,
+      { expiresIn: jwtExpiresIn() }
+    );
 
     return {
       httpStatus: 200,
       payload: {
         success: true,
         message: p_message || 'Login successful.',
-        data
+        access_token: token,
+        data: {
+          user_id: responseUserId,
+          user_guid: responseUserGuid,
+          enterprise_id: responseEnterpriseId,
+          user_code: userObj.user_code ?? userObj.userCode ?? null,
+          username: responseUsername,
+          first_name: userObj.first_name ?? userObj.firstName ?? null,
+          last_name: userObj.last_name ?? userObj.lastName ?? null,
+          primary_email:
+            userObj.primary_email ?? userObj.primaryEmail ?? userObj.email ?? userObj.primaryEmailAddress ?? null,
+          password_expired: userObj.password_expired ?? userObj.passwordExpired ?? null
+        }
       }
     };
   });
