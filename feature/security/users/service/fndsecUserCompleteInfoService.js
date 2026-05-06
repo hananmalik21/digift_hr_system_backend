@@ -160,24 +160,35 @@ function normalizeRolesHierarchy(rolesRaw) {
 }
 
 function normalizePermissionKeys(permissionKeysRaw) {
-  const arr = asArray(permissionKeysRaw)
-    .map((x) => asObject(x))
-    .filter(Boolean)
-    .map((x) => {
-      const k = x.permission_key ?? x.permissionKey ?? x.key ?? null;
-      return k != null && String(k).trim() !== '' ? { permission_key: String(k).trim() } : null;
-    })
-    .filter(Boolean);
+  // View may return:
+  // - string[] (new model)
+  // - [{ permission_key }] (older model)
+  // - JSON-encoded string for either of the above
+  const rawArr = asArray(permissionKeysRaw);
+
+  const keys = [];
+  for (const item of rawArr) {
+    if (item == null) continue;
+    if (typeof item === 'string') {
+      const k = item.trim();
+      if (k) keys.push(k);
+      continue;
+    }
+    const obj = asObject(item);
+    if (!obj) continue;
+    const k = obj.permission_key ?? obj.permissionKey ?? obj.key ?? null;
+    if (k != null && String(k).trim() !== '') keys.push(String(k).trim());
+  }
 
   const seen = new Set();
   const out = [];
-  for (const it of arr) {
-    const k = it.permission_key;
+  for (const k of keys) {
     if (seen.has(k)) continue;
     seen.add(k);
-    out.push(it);
+    out.push(k);
   }
-  out.sort((a, b) => a.permission_key.localeCompare(b.permission_key));
+  // Stable deterministic ordering for caching (safe even if Oracle already DISTINCTs).
+  out.sort((a, b) => a.localeCompare(b));
   return out;
 }
 
@@ -221,8 +232,7 @@ function aggregatePermissionKeysFromRoles(roles) {
 
   return Array.from(keys)
     .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b))
-    .map((k) => ({ permission_key: k }));
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeUserGuid(val) {
@@ -285,10 +295,9 @@ export async function getUserCompleteInfoByGuid(userGuidRaw, enterpriseIdRaw = n
   ]);
 
   const normalizedRoles = normalizeRolesHierarchy(roles);
-  const normalizedPermissionKeys =
-    normalizePermissionKeys(permission_keys).length > 0
-      ? normalizePermissionKeys(permission_keys)
-      : aggregatePermissionKeysFromRoles(normalizedRoles);
+  const normalizedPermissionKeys = normalizePermissionKeys(permission_keys);
+  const permission_keys_out =
+    normalizedPermissionKeys.length > 0 ? normalizedPermissionKeys : aggregatePermissionKeysFromRoles(normalizedRoles);
 
   return {
     user_guid: normalizeUserGuid(row.USER_GUID ?? row.user_guid),
@@ -301,7 +310,7 @@ export async function getUserCompleteInfoByGuid(userGuidRaw, enterpriseIdRaw = n
     work_location,
     employment,
     roles: normalizedRoles,
-    permission_keys: normalizedPermissionKeys,
+    permission_keys: permission_keys_out,
     preferences,
     security
   };
