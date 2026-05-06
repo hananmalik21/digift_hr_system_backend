@@ -178,7 +178,14 @@ class FaceAttendanceRepository {
     const connection = await getFaceOracleConnection();
     try {
       const result = await connection.execute(
-        `SELECT USER_ID, EMPLOYEE_ID, TENANT_ID, EMAIL_ADDRESS
+        `SELECT
+           USER_ID,
+           USER_GUID,
+           USERNAME,
+           EMPLOYEE_ID,
+           PRIMARY_EMAIL AS EMAIL_ADDRESS,
+           ENTERPRISE_ID AS TENANT_ID,
+           ACCOUNT_STATUS
            FROM FNDSEC.FNDSEC_USERS
           WHERE USER_ID = :userId
           FETCH FIRST 1 ROWS ONLY`,
@@ -198,15 +205,16 @@ class FaceAttendanceRepository {
     try {
       const sql = `
         SELECT
-          TENANT_ID,
+          ENTERPRISE_ID AS TENANT_ID,
           USER_ID,
+          USER_GUID,
           USERNAME,
-          EMAIL_ADDRESS,
+          PRIMARY_EMAIL AS EMAIL_ADDRESS,
           ACCOUNT_STATUS,
           TIMEZONE_CODE
         FROM FNDSEC.FNDSEC_USERS
-        WHERE LOWER(EMAIL_ADDRESS) = LOWER(:email)
-          AND (:tenantId IS NULL OR TENANT_ID = :tenantId)
+        WHERE LOWER(PRIMARY_EMAIL) = LOWER(:email)
+          AND (:tenantId IS NULL OR ENTERPRISE_ID = :tenantId)
         FETCH FIRST 1 ROWS ONLY
       `;
 
