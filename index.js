@@ -91,6 +91,7 @@ import fndsecJobRolesController from './feature/security/job_roles/controller/fn
 import fndsecWorkLocationsController from './feature/security/work_locations/controller/fndsecWorkLocationsController.js';
 import fndsecUsersController from './feature/security/users/controller/fndsecUsersController.js';
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
+import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -237,6 +238,7 @@ app.use('/api/comp', compPlansFullViewController);
 app.use('/api/compensation/plans', compensationPlanController);
 app.use('/api/compensation', compSalaryChangeHistoryRoutes);
 app.use('/api/abs', leavePolicyController);
+app.use('/api/compensation', compensationProcessController);
 
 // Employee Leave Balances routes
 app.use('/api/abs', employeeLeaveBalanceController);
