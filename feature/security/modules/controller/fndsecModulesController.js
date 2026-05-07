@@ -200,8 +200,8 @@ router.get(
     const pageSize = Number(result?.pageSize ?? (rows.length || 0)) || 0;
     const p = buildPaginationMeta(page, pageSize || 1, total);
 
-    return sendSuccess(res, {
-      message: 'Sub-modules fetched successfully',
+    return res.status(200).json({
+      success: true,
       data: Array.isArray(rows) ? rows.map((sm) => withSubModuleIconUrlNoIcon(req, sm)) : rows,
       pagination: {
         page: p.page,
