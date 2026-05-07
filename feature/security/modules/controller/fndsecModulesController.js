@@ -12,7 +12,7 @@ import {
   getModuleByGuidOrId,
   getModuleIconBufferByGuidOrId
 } from '../model/fndsecModulesModel.js';
-import { listActiveSubModulesByModuleId } from '../../sub_modules/model/fndsecSubModulesModel.js';
+import { listActiveSubModulesByModuleId, listActiveSubModulesByModuleIdPaginated } from '../../sub_modules/model/fndsecSubModulesModel.js';
 import {
   resolveActor,
   parseModuleListQuery,
@@ -188,10 +188,29 @@ router.get(
 router.get(
   '/:moduleIdOrGuid/sub-modules',
   asyncHandler(async (req, res) => {
-    const rows = await listActiveSubModulesByModuleId(req.params.moduleIdOrGuid);
+    const paginationRequested = req.query?.page !== undefined || req.query?.page_size !== undefined;
+
+    const result = paginationRequested
+      ? await listActiveSubModulesByModuleIdPaginated(req.params.moduleIdOrGuid, parseListPagination(req.query))
+      : { rows: await listActiveSubModulesByModuleId(req.params.moduleIdOrGuid) };
+
+    const rows = result?.rows || [];
+    const total = Number(result?.total ?? rows.length) || 0;
+    const page = Number(result?.page ?? 1) || 1;
+    const pageSize = Number(result?.pageSize ?? (rows.length || 0)) || 0;
+    const p = buildPaginationMeta(page, pageSize || 1, total);
+
     return sendSuccess(res, {
       message: 'Sub-modules fetched successfully',
-      data: Array.isArray(rows) ? rows.map((sm) => withSubModuleIconUrlNoIcon(req, sm)) : rows
+      data: Array.isArray(rows) ? rows.map((sm) => withSubModuleIconUrlNoIcon(req, sm)) : rows,
+      pagination: {
+        page: p.page,
+        page_size: p.pageSize === 1 && pageSize === 0 ? 0 : p.pageSize,
+        total: p.total,
+        total_pages: pageSize === 0 ? 0 : p.totalPages,
+        has_next: pageSize === 0 ? false : p.hasNext,
+        has_previous: pageSize === 0 ? false : p.hasPrevious
+      }
     });
   })
 );

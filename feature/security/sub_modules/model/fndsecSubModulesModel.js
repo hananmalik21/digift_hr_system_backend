@@ -378,6 +378,56 @@ ORDER BY DISPLAY_ORDER NULLS LAST
   });
 }
 
+export async function listActiveSubModulesByModuleIdPaginated(moduleId, pagination) {
+  const page = Number(pagination?.page || 1);
+  const pageSize = Number(pagination?.pageSize || 10);
+  const offset = (page - 1) * pageSize;
+
+  const whereSql = `WHERE ACTIVE_FLAG = 'Y' AND MODULE_ID = :module_id`;
+
+  const countSql = `
+SELECT COUNT(*) AS CNT
+FROM ${TABLE}
+${whereSql}
+`.trim();
+
+  const dataSql = `
+SELECT ${SUB_MODULE_SELECT_COLUMNS_NO_ICON}
+FROM ${TABLE}
+${whereSql}
+ORDER BY DISPLAY_ORDER NULLS LAST
+OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
+`.trim();
+
+  return withConnection(async (connection) => {
+    try {
+      const mid = await resolveModuleId(connection, moduleId);
+
+      const binds = {
+        module_id: { val: mid, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
+      };
+
+      const countRes = await connection.execute(countSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const total = Number(countRes.rows?.[0]?.CNT ?? 0) || 0;
+
+      const dataRes = await connection.execute(
+        dataSql,
+        {
+          ...binds,
+          row_offset: { val: offset, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
+          fetch_size: { val: pageSize, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
+        },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      const rows = (dataRes.rows || []).map(mapRowNoIcon);
+      return { rows, total, page, pageSize };
+    } catch (err) {
+      rethrowKnownOrWrapDb(err, 'listActiveSubModulesByModuleIdPaginated');
+    }
+  });
+}
+
 export async function createSubModule(input, actor) {
   const required = ['module_id', 'sub_module_code', 'sub_module_name', 'category_code', 'status_code', 'active_flag'];
   const errors = [];
