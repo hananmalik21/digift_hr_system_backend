@@ -1,5 +1,6 @@
 import db from '../../config/db.js';
 import oracledb from 'oracledb';
+import { safeJson } from '../../services/emplEmployeeListService.js';
 import { DatabaseError, NotFoundError } from '../../utils/errors/index.js';
 import { guidToBuffer, bufferToGuidHex } from '../utils/oracleGuid.js';
 
@@ -176,7 +177,11 @@ function mapViewRequestRow(row) {
   out.HR_VALIDATED_DATE = formatDate(out.HR_VALIDATED_DATE);
   if (out.ATTENDANCE_DATE != null) out.ATTENDANCE_DATE = formatDate(out.ATTENDANCE_DATE);
   const lowered = keysToLower(out);
-  return parseJsonFields(lowered, ['ot_rate_type_obj', 'ot_config_obj']);
+  const parsed = parseJsonFields(lowered, ['ot_rate_type_obj', 'ot_config_obj']);
+  let org_structure_list = safeJson(parsed.org_structure_list);
+  if (!Array.isArray(org_structure_list)) org_structure_list = [];
+  parsed.org_structure_list = org_structure_list;
+  return parsed;
 }
 
 /**
