@@ -8,6 +8,7 @@ import {
   updateFunction,
   hardDeleteFunction
 } from '../model/fndsecFunctionsModel.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { parseEnterpriseIdFrom, parseFunctionListQuery, parseListPagination, resolveActor } from '../utils/requestParsers.js';
 
 const router = express.Router();
@@ -102,6 +103,7 @@ router.delete(
 /**
  * GET /api/security/functions?enterprise_id=&page=&page_size=&search=&module_guid=&active_flag=
  * List from FNDSEC_FUNCTIONS_V (includes module_obj).
+ * Response: { success, data, pagination } (pagination matches other FNDSEC list APIs).
  */
 router.get(
   '/',
@@ -110,10 +112,19 @@ router.get(
       const filters = parseFunctionListQuery(req);
       const pagination = parseListPagination(req.query);
       const { rows, total } = await listFunctions(filters, pagination);
-      // New contract for functions fetch: { success: true, data: [...] }
-      // Ignore legacy enterprise_id if provided by old clients.
-      void total;
-      return res.status(200).json({ success: true, data: rows });
+      const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
+      return res.status(200).json({
+        success: true,
+        data: rows,
+        pagination: {
+          page: p.page,
+          page_size: p.pageSize,
+          total: p.total,
+          total_pages: p.totalPages,
+          has_next: p.hasNext,
+          has_previous: p.hasPrevious
+        }
+      });
     } catch (err) {
       return sendError(res, err);
     }
