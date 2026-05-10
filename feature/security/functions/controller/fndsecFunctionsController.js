@@ -6,10 +6,10 @@ import {
   listFunctions,
   getFunctionByGuid,
   updateFunction,
-  hardDeleteFunction
+  deleteFunction
 } from '../model/fndsecFunctionsModel.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { parseEnterpriseIdFrom, parseFunctionListQuery, parseListPagination, resolveActor } from '../utils/requestParsers.js';
+import { parseFunctionListQuery, parseListPagination, resolveActor } from '../utils/requestParsers.js';
 
 const router = express.Router();
 
@@ -48,7 +48,6 @@ function sendDbJson(res, { message, data, httpStatus = 200 }) {
 /**
  * POST /api/security/functions
  * Create function via FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION
- * enterprise_id must be in body.
  */
 router.post(
   '/',
@@ -67,15 +66,13 @@ router.post(
 /**
  * PUT /api/security/functions/:functionGuid
  * Update function via FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION
- * enterprise_id must be in body.
  */
 router.put(
   '/:functionGuid',
   asyncHandler(async (req, res) => {
     try {
       const actor = resolveActor(req);
-      const enterpriseId = parseEnterpriseIdFrom(req, { fromBody: true });
-      const result = await updateFunction(req.params.functionGuid, enterpriseId, req.body || {}, actor);
+      const result = await updateFunction(req.params.functionGuid, req.body || {}, actor);
       return sendDbJson(res, { message: 'Function updated successfully', data: result?.function_json });
     } catch (err) {
       return sendError(res, err);
@@ -84,15 +81,15 @@ router.put(
 );
 
 /**
- * DELETE /api/security/functions/:functionGuid?enterprise_id=
- * Delete via FNDSEC.FNDSEC_FUNCTIONS_PKG.HARD_DELETE_FUNCTION (package changed)
+ * DELETE /api/security/functions/:functionGuid
+ * Delete via FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION
  */
 router.delete(
   '/:functionGuid',
   asyncHandler(async (req, res) => {
     try {
-      const enterpriseId = parseEnterpriseIdFrom(req);
-      const result = await hardDeleteFunction(req.params.functionGuid, enterpriseId);
+      const actor = resolveActor(req);
+      const result = await deleteFunction(req.params.functionGuid, actor);
       return sendDbJson(res, { message: 'Function deleted successfully', data: result?.function_json });
     } catch (err) {
       return sendError(res, err);
@@ -101,7 +98,7 @@ router.delete(
 );
 
 /**
- * GET /api/security/functions?enterprise_id=&page=&page_size=&search=&module_guid=&active_flag=
+ * GET /api/security/functions?page=&page_size=&function_id=&module_id=&function_code=&active_flag=
  * List from FNDSEC_FUNCTIONS_V (includes module_obj).
  * Response: { success, data, pagination } (pagination matches other FNDSEC list APIs).
  */
@@ -132,14 +129,13 @@ router.get(
 );
 
 /**
- * GET /api/security/functions/:functionGuid?enterprise_id=
+ * GET /api/security/functions/:functionGuid
  * Get single from FNDSEC_FUNCTIONS_V.
  */
 router.get(
   '/:functionGuid',
   asyncHandler(async (req, res) => {
     try {
-      // Ignore legacy enterprise_id if provided by old clients.
       const data = await getFunctionByGuid(req.params.functionGuid);
       return res.status(200).json({ success: true, data: [data] });
     } catch (err) {

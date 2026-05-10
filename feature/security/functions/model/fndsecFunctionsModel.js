@@ -8,9 +8,11 @@ const LOG_TAG = 'fndsecFunctionsModel';
 
 const CREATE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION';
 const UPDATE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION';
-const HARD_DELETE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.HARD_DELETE_FUNCTION';
+const DELETE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION';
 
 const FUNCTIONS_VIEW = 'FNDSEC.FNDSEC_FUNCTIONS_V';
+const FUNCTIONS_TABLE = 'FNDSEC.FNDSEC_FUNCTIONS';
+const MODULES_TABLE = 'FNDSEC.FNDSEC_MODULES';
 
 function rethrowKnownOrWrapDb(err, context) {
   if (err instanceof NotFoundError || err instanceof ValidationError) throw err;
@@ -33,14 +35,6 @@ function parseGuidHexOrThrow(fieldName, guid) {
   }
   // Preserve caller casing (some packages compare string GUIDs case-sensitively).
   return cleaned;
-}
-
-function parsePositiveEnterpriseId(raw) {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ValidationError('Validation failed', ['enterprise_id must be a valid positive number']);
-  }
-  return n;
 }
 
 function validateYn(fieldName, v) {
@@ -119,6 +113,38 @@ function requireNonEmptyString(fieldName, v) {
   return String(v).trim();
 }
 
+/**
+ * Resolve numeric FUNCTION_ID for a 32-char hex FUNCTION_GUID.
+ * Queries the base table with HEXTORAW so the comparison is binary
+ * (case-insensitive on hex chars) regardless of how the view exposes the column.
+ * Throws NotFoundError when the GUID does not exist.
+ */
+async function resolveFunctionIdByGuid(connection, functionGuidHex) {
+  const r = await connection.execute(
+    `SELECT FUNCTION_ID FROM ${FUNCTIONS_TABLE} WHERE FUNCTION_GUID = HEXTORAW(:function_guid_hex)`,
+    { function_guid_hex: { val: functionGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 } },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+  const id = r.rows?.[0]?.FUNCTION_ID;
+  if (id == null) throw new NotFoundError('function_guid not found');
+  return Number(id);
+}
+
+/**
+ * Resolve numeric MODULE_ID for a 32-char hex MODULE_GUID using FNDSEC_MODULES.
+ * Throws ValidationError when the GUID does not exist.
+ */
+async function resolveModuleIdByGuid(connection, moduleGuidHex) {
+  const r = await connection.execute(
+    `SELECT MODULE_ID FROM ${MODULES_TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`,
+    { module_guid_hex: { val: moduleGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 } },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+  const id = r.rows?.[0]?.MODULE_ID;
+  if (id == null) throw new ValidationError('Validation failed', ['module_guid not found']);
+  return Number(id);
+}
+
 const FUNCTION_JSON_GUID_KEYS = new Set(['function_guid', 'module_guid']);
 
 /**
@@ -149,7 +175,7 @@ function normalizeFunctionJsonGuidsDeep(value) {
 async function execPackageJson(connection, { context, plsql, binds }) {
   const result = await connection.execute(plsql, binds, { autoCommit: true });
   const out = result?.outBinds || {};
-  let parsed = await parseJsonClobOrThrow(out.o_function_json, context);
+  let parsed = await parseJsonClobOrThrow(out.o_response, context);
   parsed = normalizeFunctionJsonGuidsDeep(parsed);
   return { out, parsed };
 }
@@ -291,7 +317,6 @@ export async function getFunctionByGuid(functionGuid) {
 }
 
 export async function createFunction(input, actor) {
-  const ent = parsePositiveEnterpriseId(input?.enterprise_id);
   const moduleGuidHex = parseGuidHexOrThrow('module_guid', input?.module_guid);
   requireNonEmptyString('function_code', input?.function_code);
   requireNonEmptyString('function_name', input?.function_name);
@@ -303,8 +328,7 @@ export async function createFunction(input, actor) {
   const plsql = `
 BEGIN
   ${CREATE_PKG}(
-    P_ENTERPRISE_ID   => :p_enterprise_id,
-    P_MODULE_GUID     => :p_module_guid,
+    P_MODULE_ID       => :p_module_id,
     P_FUNCTION_CODE   => :p_function_code,
     P_FUNCTION_NAME   => :p_function_name,
     P_DESCRIPTION     => :p_description,
@@ -315,21 +339,18 @@ BEGIN
     P_ACTIVE_FLAG     => :p_active_flag,
     P_IS_SYSTEM_FLAG  => :p_is_system_flag,
     P_CREATED_BY      => :p_created_by,
-    P_FUNCTION_ID     => :o_function_id,
-    P_FUNCTION_GUID   => :o_function_guid,
-    P_FUNCTION_JSON   => :o_function_json
+    P_RESPONSE        => :o_response
   );
 END;`;
 
   try {
     return await withConnection(async (connection) => {
-      const { out, parsed } = await execPackageJson(connection, {
+      const moduleId = await resolveModuleIdByGuid(connection, moduleGuidHex);
+      const { parsed } = await execPackageJson(connection, {
         context: 'CREATE_FUNCTION',
         plsql,
         binds: {
-          p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          // Match SQL Developer usage: GUID passed as 32-hex string.
-          p_module_guid: { val: moduleGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
+          p_module_id: { val: moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
           p_function_code: {
             val: input?.function_code != null && String(input.function_code).trim() !== '' ? String(input.function_code).trim() : null,
             dir: oracledb.BIND_IN,
@@ -350,44 +371,35 @@ END;`;
           p_active_flag: { val: input?.active_flag != null ? String(input.active_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
           p_is_system_flag: { val: input?.is_system_flag != null ? String(input.is_system_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
           p_created_by: { val: String(input?.created_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          o_function_guid: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 32 },
-          o_function_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-          o_function_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+          o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
         }
       });
 
-      return {
-        function_guid:
-          out.o_function_guid != null ? mergeGuidSlot(out.o_function_guid, normalizeApiGuidString(out.o_function_guid)) : null,
-        function_id: out.o_function_id != null ? Number(out.o_function_id) : null,
-        function_json: parsed
-      };
+      return { function_json: parsed };
     });
   } catch (err) {
     if (isOraNoDataFound(err)) {
-      throw new ValidationError('Validation failed', ['module_guid not found for enterprise_id']);
+      throw new ValidationError('Validation failed', ['module_guid not found']);
     }
     rethrowKnownOrWrapDb(err, 'createFunction');
   }
 }
 
-export async function updateFunction(functionGuid, enterpriseId, patch, actor) {
-  const ent = parsePositiveEnterpriseId(enterpriseId);
+export async function updateFunction(functionGuid, patch, actor) {
   const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
 
   const moduleGuidHex =
     patch?.module_guid === undefined ? undefined : (patch.module_guid == null ? null : parseGuidHexOrThrow('module_guid', patch.module_guid));
   validateYn('active_flag', patch?.active_flag);
   validateYn('is_system_flag', patch?.is_system_flag);
-  requireNonEmptyString('last_updated_by', patch?.last_updated_by ?? actor);
+  requireNonEmptyString('updated_by', patch?.updated_by ?? patch?.last_updated_by ?? actor);
   const displayOrder = optNumberOrNull('display_order', patch?.display_order);
 
   const plsql = `
 BEGIN
   ${UPDATE_PKG}(
-    P_FUNCTION_GUID   => :p_function_guid,
-    P_ENTERPRISE_ID   => :p_enterprise_id,
-    P_MODULE_GUID     => :p_module_guid,
+    P_FUNCTION_ID     => :p_function_id,
+    P_MODULE_ID       => :p_module_id,
     P_FUNCTION_CODE   => :p_function_code,
     P_FUNCTION_NAME   => :p_function_name,
     P_DESCRIPTION     => :p_description,
@@ -397,25 +409,23 @@ BEGIN
     P_DISPLAY_ORDER   => :p_display_order,
     P_ACTIVE_FLAG     => :p_active_flag,
     P_IS_SYSTEM_FLAG  => :p_is_system_flag,
-    P_LAST_UPDATED_BY => :p_last_updated_by,
-    P_FUNCTION_JSON   => :o_function_json
+    P_UPDATED_BY      => :p_updated_by,
+    P_RESPONSE        => :o_response
   );
 END;`;
 
   try {
     return await withConnection(async (connection) => {
+      const functionId = await resolveFunctionIdByGuid(connection, functionGuidHex);
+      const moduleId =
+        moduleGuidHex == null ? null : await resolveModuleIdByGuid(connection, moduleGuidHex);
+
       const { parsed } = await execPackageJson(connection, {
         context: 'UPDATE_FUNCTION',
         plsql,
         binds: {
-          p_function_guid: { val: functionGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
-          p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_module_guid: {
-            val: moduleGuidHex === undefined ? null : moduleGuidHex,
-            dir: oracledb.BIND_IN,
-            type: oracledb.STRING,
-            maxSize: 32
-          },
+          p_function_id: { val: functionId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+          p_module_id: { val: moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
           p_function_code: { val: patch?.function_code === undefined ? null : (patch.function_code == null ? null : String(patch.function_code).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
           p_function_name: { val: patch?.function_name === undefined ? null : (patch.function_name == null ? null : String(patch.function_name).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
           p_description: { val: patch?.description === undefined ? null : (patch.description == null ? null : String(patch.description)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
@@ -425,44 +435,44 @@ END;`;
           p_display_order: { val: displayOrder === undefined ? null : displayOrder, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
           p_active_flag: { val: patch?.active_flag === undefined ? null : (patch.active_flag == null ? null : String(patch.active_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
           p_is_system_flag: { val: patch?.is_system_flag === undefined ? null : (patch.is_system_flag == null ? null : String(patch.is_system_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_last_updated_by: { val: String(patch?.last_updated_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          o_function_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+          p_updated_by: { val: String(patch?.updated_by ?? patch?.last_updated_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+          o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
         }
       });
       return { function_json: parsed };
     });
   } catch (err) {
     if (isOraNoDataFound(err)) {
-      throw new NotFoundError('function_guid not found for enterprise_id');
+      throw new NotFoundError('function_guid not found');
     }
     rethrowKnownOrWrapDb(err, 'updateFunction');
   }
 }
 
-export async function hardDeleteFunction(functionGuid, enterpriseId) {
-  const ent = parsePositiveEnterpriseId(enterpriseId);
+export async function deleteFunction(functionGuid, actor) {
   const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
+  const deletedBy = requireNonEmptyString('deleted_by', actor);
 
   const plsql = `
 BEGIN
-  ${HARD_DELETE_PKG}(
-    P_FUNCTION_GUID => :p_function_guid,
-    P_ENTERPRISE_ID => :p_enterprise_id,
-    P_FUNCTION_JSON => :o_function_json
+  ${DELETE_PKG}(
+    P_FUNCTION_ID => :p_function_id,
+    P_DELETED_BY  => :p_deleted_by,
+    P_RESPONSE    => :o_response
   );
 END;`;
 
   try {
     return await withConnection(async (connection) => {
+      const functionId = await resolveFunctionIdByGuid(connection, functionGuidHex);
       const binds = {
-        // Match SQL Developer usage: GUID passed as 32-hex string.
-        p_function_guid: { val: functionGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
-        p_enterprise_id: { val: ent, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-        o_function_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+        p_function_id: { val: functionId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+        p_deleted_by: { val: deletedBy, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+        o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
       };
 
       const { parsed } = await execPackageJson(connection, {
-        context: 'HARD_DELETE_FUNCTION',
+        context: 'DELETE_FUNCTION',
         plsql,
         binds
       });
@@ -470,9 +480,9 @@ END;`;
     });
   } catch (err) {
     if (isOraNoDataFound(err)) {
-      throw new NotFoundError('function_guid not found for enterprise_id');
+      throw new NotFoundError('function_guid not found');
     }
-    rethrowKnownOrWrapDb(err, 'hardDeleteFunction');
+    rethrowKnownOrWrapDb(err, 'deleteFunction');
   }
 }
 

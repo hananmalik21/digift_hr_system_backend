@@ -60,7 +60,6 @@ export function parseListPagination(query) {
 
 /**
  * GET /api/security/functions?function_id=&module_id=&function_code=&active_flag=
- * Note: `enterprise_id` may still be sent by old clients; it is ignored.
  */
 export function parseFunctionListQuery(req) {
   const q = req.query || {};

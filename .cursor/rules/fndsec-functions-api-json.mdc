@@ -9,17 +9,21 @@ alwaysApply: false
 ## GUIDs
 - Use **only** `function_guid` and `module_guid` in the API layer (no numeric IDs in request/response).
 - Accept GUIDs as **32-char hex strings** (optionally with dashes) and validate them.
-- When calling Oracle packages, bind GUIDs using the type required by the package:
-  - Prefer `RAW(16)` (`Buffer`) when package expects RAW
-  - Use `VARCHAR2(32)` hex string when package expects string GUID
-  - If uncertain, align using `ALL_ARGUMENTS` signature queries.
+- The package now takes numeric IDs (`P_FUNCTION_ID`, `P_MODULE_ID`). Resolve GUID → ID inside the model:
+  - `function_guid` → `FUNCTION_ID` via `FNDSEC.FNDSEC_FUNCTIONS_V`
+  - `module_guid` → `MODULE_ID` via `FNDSEC.FNDSEC_MODULES` (`MODULE_GUID = HEXTORAW(:hex)`)
+- Treat a missing `module_guid` as a `ValidationError` and a missing `function_guid` as a `NotFoundError`.
+
+## No enterprise scoping
+- The package and underlying table no longer carry `ENTERPRISE_ID`. Do not accept `enterprise_id` in any Functions API (body, query, headers) and do not bind it in the PL/SQL call.
 
 ## Package JSON OUT contract
-- For `CREATE_FUNCTION`, `UPDATE_FUNCTION`, `HARD_DELETE_FUNCTION`, the database returns the full object as **CLOB JSON** (`P_FUNCTION_JSON`).
+- For `CREATE_FUNCTION`, `UPDATE_FUNCTION`, `DELETE_FUNCTION`, the database returns the full object as **CLOB JSON** (`P_RESPONSE`).
 - Node must:
-  - Bind `P_FUNCTION_JSON` as `oracledb.CLOB` **OUT**
+  - Bind `P_RESPONSE` as `oracledb.CLOB` **OUT** (placeholder name `:o_response`)
   - Read the CLOB value and `JSON.parse()` it
   - Return the parsed object **directly** as API `data` (do not re-map/reshape it)
+- `DELETE_FUNCTION` requires `P_DELETED_BY`; resolve it from the request actor (`resolveActor(req)`).
 
 ## Responses
 - Response shape:
