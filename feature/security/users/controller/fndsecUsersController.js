@@ -134,8 +134,10 @@ router.get(
   '/:userGuid',
   asyncHandler(async (req, res) => {
     try {
-      const enterpriseId = req.query?.enterprise_id ?? req.user?.enterprise_id ?? req.headers['x-enterprise-id'] ?? null;
-      const data = await getUserCompleteInfoByGuid(req.params.userGuid, enterpriseId);
+      // `enterprise_id` query param is accepted (legacy clients) but ignored here:
+      // FNDSEC.FNDSEC_FUNCTIONS no longer has ENTERPRISE_ID and V_USER_COMPLETE_INFO
+      // is scoped by USER_GUID alone.
+      const data = await getUserCompleteInfoByGuid(req.params.userGuid);
       if (!data) {
         return res.status(404).json({ success: false, message: 'User was not found.' });
       }

@@ -25,28 +25,22 @@ function wrapDb(err, context) {
 
 /**
  * @param {Buffer} userGuidBuf Oracle RAW(16) buffer
- * @param {number|null} enterpriseId Optional filter for ENTERPRISE_ID
  * @returns {Promise<object|null>}
+ *
+ * Note: `ENTERPRISE_ID` is no longer part of `FNDSEC.FNDSEC_FUNCTIONS` and is not
+ * applied as a filter against `V_USER_COMPLETE_INFO` here. The view scopes the
+ * row by `USER_GUID`, which is unique across enterprises.
  */
-export async function fetchUserCompleteInfoRowByGuid(userGuidBuf, enterpriseId = null) {
-  const hasEnterprise = Number.isFinite(Number(enterpriseId)) && Number(enterpriseId) > 0;
+export async function fetchUserCompleteInfoRowByGuid(userGuidBuf) {
   const sql = `
 SELECT v.*
 FROM ${VIEW} v
 WHERE v.USER_GUID = :user_guid
-${hasEnterprise ? '  AND v.ENTERPRISE_ID = :enterprise_id' : ''}
 FETCH FIRST 1 ROWS ONLY`;
 
   const binds = {
     user_guid: { val: userGuidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 }
   };
-  if (hasEnterprise) {
-    binds.enterprise_id = {
-      val: Number(enterpriseId),
-      dir: oracledb.BIND_IN,
-      type: oracledb.NUMBER
-    };
-  }
 
   try {
     return await withConnection(async (connection) => {

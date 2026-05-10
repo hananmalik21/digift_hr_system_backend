@@ -249,21 +249,20 @@ function normalizeUserGuid(val) {
 
 /**
  * Fetch complete user 360 profile from FNDSEC.V_USER_COMPLETE_INFO.
+ *
+ * `ENTERPRISE_ID` was removed from `FNDSEC.FNDSEC_FUNCTIONS`, and the view no
+ * longer exposes (or filters by) a top-level enterprise scope here. The user
+ * is uniquely identified by `user_guid`.
+ *
  * @param {string} userGuidRaw
- * @returns {Promise<null|{user_guid:string|null,user_info:object,contact_info:object,employee:object,department:object,position:object,reporting_manager:object,work_location:object,employment:object,roles:any[],preferences:object,security:object}>}
+ * @returns {Promise<null|{user_guid:string|null,user_info:object,contact_info:object,employee:object,department:object,position:object,reporting_manager:object,work_location:object,employment:object,roles:any[],permission_keys:string[],preferences:object,security:object}>}
  */
-export async function getUserCompleteInfoByGuid(userGuidRaw, enterpriseIdRaw = null) {
+export async function getUserCompleteInfoByGuid(userGuidRaw) {
   if (isBlank(userGuidRaw)) throw invalidGuidError();
   const buf = guidToBuffer(String(userGuidRaw).trim());
   if (!buf) throw invalidGuidError();
 
-  const ent =
-    enterpriseIdRaw === undefined || enterpriseIdRaw === null || String(enterpriseIdRaw).trim() === ''
-      ? null
-      : Number(enterpriseIdRaw);
-  const enterpriseId = Number.isFinite(ent) && ent > 0 ? ent : null;
-
-  const row = await fetchUserCompleteInfoRowByGuid(buf, enterpriseId);
+  const row = await fetchUserCompleteInfoRowByGuid(buf);
   if (!row) return null;
 
   const [
