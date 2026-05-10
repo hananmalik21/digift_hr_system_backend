@@ -98,8 +98,10 @@ router.delete(
 );
 
 /**
- * GET /api/security/functions?page=&page_size=&function_id=&module_id=&function_code=&active_flag=
+ * GET /api/security/functions?page=&page_size=&search=&function_id=&module_id=&function_code=&active_flag=
  * List from FNDSEC_FUNCTIONS_V (includes module_obj).
+ * `search` is a case-insensitive partial match across function_name, function_code,
+ * permission_key, description, and route_url.
  * Response: { success, data, pagination } (pagination matches other FNDSEC list APIs).
  */
 router.get(

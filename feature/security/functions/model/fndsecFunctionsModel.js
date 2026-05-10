@@ -233,12 +233,17 @@ function mapViewRow(row) {
 
 export async function listFunctions(filters, pagination) {
   // DB view already handles joins; do not join in API.
-  // Support only optional filters: function_id, module_id, function_code, active_flag
+  // Optional filters: function_id, module_id, function_code, active_flag, search
   const page = Number(pagination?.page || 1);
   const pageSize = Number(pagination?.pageSize || 20);
   const offset = (page - 1) * pageSize;
 
   validateYn('active_flag', filters?.active_flag);
+
+  const searchVal =
+    filters?.search != null && String(filters.search).trim() !== ''
+      ? String(filters.search).trim()
+      : null;
 
   const binds = {
     function_id: { val: filters?.function_id ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
@@ -254,13 +259,29 @@ export async function listFunctions(filters, pagination) {
       dir: oracledb.BIND_IN,
       type: oracledb.STRING,
       maxSize: 1
+    },
+    search: {
+      val: searchVal,
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 4000
     }
   };
 
+  // INSTR avoids needing LIKE escaping for `%` / `_` in user input.
   const whereSql = `WHERE (:function_id IS NULL OR FUNCTION_ID = :function_id)
     AND (:module_id IS NULL OR MODULE_ID = :module_id)
     AND (:function_code IS NULL OR FUNCTION_CODE = :function_code)
-    AND (:active_flag IS NULL OR ACTIVE_FLAG = :active_flag)`;
+    AND (:active_flag IS NULL OR ACTIVE_FLAG = :active_flag)
+    AND (
+      :search IS NULL OR (
+        INSTR(UPPER(FUNCTION_NAME),   UPPER(:search)) > 0
+        OR INSTR(UPPER(FUNCTION_CODE),   UPPER(:search)) > 0
+        OR INSTR(UPPER(PERMISSION_KEY),  UPPER(:search)) > 0
+        OR INSTR(UPPER(DESCRIPTION),     UPPER(:search)) > 0
+        OR INSTR(UPPER(ROUTE_URL),       UPPER(:search)) > 0
+      )
+    )`;
 
   const countSql = `SELECT COUNT(*) AS CNT FROM ${FUNCTIONS_VIEW} ${whereSql}`;
 
