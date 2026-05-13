@@ -1,10 +1,18 @@
 import { executeQuery } from '../../../../config/db.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import {
   formatOracleDateToIsoDay,
   oracleTextToString,
   oracleRawToHexOrValue,
   parseOrgStructureListFromOracle
 } from '../../employee_compensation/utils/oracleCompensationRead.js';
+
+const EMPLOYEE_ACCESS_PREDICATE = employeeAccessFunctionPredicate(
+  'enterprise_id',
+  'employee_id',
+  ':user_id'
+);
 
 function formatOracleDateTimeToIsoSeconds(value) {
   if (value == null) return null;
@@ -75,6 +83,10 @@ async function mapViewRowToSalaryChangeHistoryRow(r) {
 
 function buildBindsFromParams(params) {
   const enterpriseId = params.enterprise_id;
+  const userIdNum = Number(params.user_id);
+  if (!Number.isFinite(userIdNum) || userIdNum < 1) {
+    throw new ValidationError('user_id is required and must be a positive number');
+  }
   const employeeId = params.employee_id ?? null;
   const employeeGuidHex = params.employee_guid ?? null;
   const orgUnitIdHex = params.org_unit_id_hex ?? null;
@@ -91,6 +103,7 @@ function buildBindsFromParams(params) {
 
   return {
     enterprise_id: enterpriseId,
+    user_id: userIdNum,
     employee_id: employeeId,
     employee_guid: employeeGuidHex,
     org_unit_id_hex: orgUnitIdHex,
@@ -106,8 +119,13 @@ function buildBindsFromParams(params) {
   };
 }
 
+/**
+ * Security: only rows whose EMPLOYEE_ID the caller can access are returned.
+ * Applied to both COUNT and LIST queries via the shared BASE_WHERE.
+ */
 const BASE_WHERE = `
 WHERE enterprise_id = :enterprise_id
+  AND ${EMPLOYEE_ACCESS_PREDICATE}
   AND (:employee_id IS NULL OR employee_id = :employee_id)
   AND (:employee_guid IS NULL OR employee_guid = HEXTORAW(:employee_guid))
   AND (
@@ -192,7 +210,8 @@ ${BASE_WHERE}
 export async function fetchSalaryChangeHistory(params) {
   const binds = buildBindsFromParams(params);
   // Oracle throws ORA-01036 if we pass binds not present in the SQL text.
-  // COUNT does not include pagination binds.
+  // COUNT does not include pagination binds. user_id is included in both
+  // (BASE_WHERE references it via FNDSEC.CAN_ACCESS_EMPLOYEE).
   const { limit, offset, ...filterBinds } = binds;
   const listBinds = { ...filterBinds, limit, offset };
 

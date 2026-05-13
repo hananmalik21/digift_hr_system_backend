@@ -19,6 +19,10 @@ import {
 } from '../view/leaveRequestView.js';
 import { parseGuid } from '../../../../utils/guidUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
+import { requireActingUserId, logSecuredAccess } from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
+
+const ROUTE_TAG_LIST = 'GET /api/abs/leave-requests';
 
 // -----------------------------------------------------------------------------
 // Constants
@@ -325,8 +329,14 @@ function validateLeaveRequestData(data, isUpdate = false) {
  * @query   page_size - Page size (default: 10, max: 100)
  */
 router.get('/', async (req, res) => {
+  // FNDSEC: the acting user_id comes strictly from the verified JWT. Any
+  // ?user_id= query / header value is ignored so a caller cannot impersonate
+  // another user for data-access purposes.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   try {
-    const filters = {};
+    const filters = { userId: actingUserId };
 
     // TENANT_ID should be included for multi-tenant filtering (better performance and security)
     // Check both query param and header, prefer query param if provided
@@ -337,18 +347,15 @@ router.get('/', async (req, res) => {
         return sendBadRequest(res, req, 'Invalid tenantId parameter');
       }
     } else if (tenantIdFromHeader && !isNaN(tenantIdFromHeader)) {
-      // Auto-add tenant_id from header if not in query (for performance optimization)
       filters.tenantId = tenantIdFromHeader;
     }
 
-    // Filter by employee_guid (resolve to employeeId)
     if (req.query.employee_guid) {
       try {
         const tenantId = filters.tenantId || tenantIdFromHeader;
         if (!tenantId || isNaN(tenantId)) {
           return sendBadRequest(res, req, 'x-tenant-id header is required when filtering by employee_guid');
         }
-        // Resolve employee_guid to employee_id
         const employeeId = await LeaveRequestModel.resolveEmployeeIdByGuidStatic(
           tenantId,
           req.query.employee_guid
@@ -363,7 +370,6 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Filter by EMPLOYEE_ID
     if (req.query.employeeId) {
       filters.employeeId = parseInt(req.query.employeeId);
       if (isNaN(filters.employeeId)) {
@@ -371,7 +377,6 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // Common query filters (leaveTypeId, dates, pagination)
     const parsedQuery = parseListQueryFilters(req);
     if (parsedQuery.error) {
       return sendBadRequest(res, req, parsedQuery.error);
@@ -381,20 +386,33 @@ router.get('/', async (req, res) => {
     const result = await LeaveRequestModel.findAll(filters);
     const { leaveRequests, total } = result;
 
-    // Build pagination metadata
     const paginationMeta = buildPaginationMeta(
       filters.pagination.page,
       filters.pagination.pageSize,
       total
     );
 
-    // Return only leave details (no contacts/documents) for list endpoint
+    logSecuredAccess(ROUTE_TAG_LIST, {
+      user_id: actingUserId,
+      tenant_id: filters.tenantId ?? null,
+      returned: Array.isArray(leaveRequests) ? leaveRequests.length : 0,
+      total
+    });
+
     sendLeaveRequestList(res, req, leaveRequests, {
       total,
       pagination: paginationMeta
     });
   } catch (error) {
-    sendServerError(res, req, 'Failed to fetch leave requests', error);
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s error=%s',
+        ROUTE_TAG_LIST, actingUserId, error?.message ?? String(error));
+    }
+    // Hide raw Oracle / library errors behind a friendly message.
+    sendServerError(res, req, 'Failed to fetch leave requests');
   }
 });
 

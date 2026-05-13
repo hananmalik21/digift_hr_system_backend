@@ -20,6 +20,15 @@ import { ensureHex32 } from '../../../../utils/guidUtils.js';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
 import { getTenantId } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
+import {
+  requireActingUserId,
+  canAccessEmployee,
+  logSecuredAccess
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
+
+const ROUTE_TAG_EMP_BALANCES = 'GET /api/abs/employees/:employeeGuid/leave-balances';
+const ROUTE_TAG_BALANCES_LIST = 'GET /api/abs/leave-balances';
 
 const router = express.Router();
 
@@ -225,10 +234,14 @@ router.get('/leave-balance-transactions', async (req, res) => {
  * curl -X GET "http://localhost:3000/api/abs/employees/A1B2C3D4E5F6789012345678901234567890ABCD/leave-balances?tenant_id=1"
  */
 router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
+  // FNDSEC: acting user_id comes strictly from the verified JWT — any
+  // ?user_id= query or x-user-id header is ignored for the access decision.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   try {
     const tenantId = req.tenantId;
 
-    // Extract and normalize employee GUID
     let employeeGuid;
     try {
       employeeGuid = ensureHex32(req.params.employeeGuid, 'employeeGuid');
@@ -239,14 +252,27 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
       throw error;
     }
 
-    // Resolve employee GUID to employee ID (tenant-safe)
     const employeeId = await EmployeeLeaveBalanceModel.resolveEmployeeIdByGuid(tenantId, employeeGuid);
-    
     if (!employeeId) {
       return sendNotFound(res, req, 'Employee not found');
     }
 
-    // Extract optional leave_type_id filter
+    // FNDSEC DB-level data access: only return balances when the acting user
+    // is authorized for this employee. We return 404 instead of 403 so the
+    // existence of the employee is not leaked to callers who cannot see them.
+    const allowed = await canAccessEmployee({
+      userId: actingUserId,
+      enterpriseId: tenantId,
+      employeeId
+    });
+    if (!allowed) {
+      if (IS_DEV_MODE) {
+        console.log('[%s][FNDSEC] user_id=%s tenant_id=%s employee_id=%s allowed=N -> 404',
+          ROUTE_TAG_EMP_BALANCES, actingUserId, tenantId, employeeId);
+      }
+      return sendNotFound(res, req, 'Employee not found');
+    }
+
     let optionalLeaveTypeId = null;
     if (req.query.leave_type_id !== undefined) {
       const leaveTypeId = parseInt(req.query.leave_type_id);
@@ -256,23 +282,25 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
       optionalLeaveTypeId = leaveTypeId;
     }
 
-    // Fetch leave balances
     const balances = await EmployeeLeaveBalanceModel.getBalancesByEmployeeId(
       tenantId,
       employeeId,
       optionalLeaveTypeId
     );
 
-    // Build filters for meta
-    const appliedFilters = {
-      employee_guid: employeeGuid
-    };
+    const appliedFilters = { employee_guid: employeeGuid };
     if (optionalLeaveTypeId !== null && optionalLeaveTypeId !== undefined) {
       appliedFilters.leave_type_id = optionalLeaveTypeId;
     }
 
-    // Return response with employee GUID and items (always 200, even if empty)
-    sendLeaveBalanceList(res, req, employeeGuid, balances, { 
+    logSecuredAccess(ROUTE_TAG_EMP_BALANCES, {
+      user_id: actingUserId,
+      tenant_id: tenantId,
+      employee_id: employeeId,
+      returned: Array.isArray(balances) ? balances.length : 0
+    });
+
+    sendLeaveBalanceList(res, req, employeeGuid, balances, {
       total: balances.length,
       filters: appliedFilters
     });
@@ -280,7 +308,12 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
     if (error instanceof ValidationError) {
       return sendBadRequest(res, req, error.message);
     }
-    sendServerError(res, req, 'Failed to fetch leave balances', error);
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s error=%s',
+        ROUTE_TAG_EMP_BALANCES, actingUserId, error?.message ?? String(error));
+    }
+    // Hide raw Oracle / library errors behind a friendly message.
+    sendServerError(res, req, 'Failed to fetch leave balances');
   }
 });
 
@@ -440,6 +473,11 @@ router.get('/leave-balances/list', async (req, res) => {
  * GET /api/abs/leave-balances?tenant_id=1&name=john&employeeNumber=EMP001
  */
 router.get('/leave-balances', async (req, res) => {
+  // FNDSEC: acting user_id comes strictly from the verified JWT — any
+  // ?user_id= query / header value is ignored for the access decision.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   try {
     const tenantId = req.tenantId;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -450,6 +488,7 @@ router.get('/leave-balances', async (req, res) => {
 
     const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
       tenantId,
+      userId: actingUserId,
       page,
       pageSize,
       search: req.query.search ?? null,
@@ -457,12 +496,24 @@ router.get('/leave-balances', async (req, res) => {
       employeeNumber: req.query.employeeNumber ?? null
     });
 
+    logSecuredAccess(ROUTE_TAG_BALANCES_LIST, {
+      user_id: actingUserId,
+      tenant_id: tenantId,
+      returned: Array.isArray(result?.rows) ? result.rows.length : 0,
+      total: result?.total ?? 0
+    });
+
     sendLeaveBalanceSummaryPaginated(res, req, result.rows, result.total, result.page, result.pageSize);
   } catch (error) {
     if (error instanceof ValidationError) {
       return sendBadRequest(res, req, error.message);
     }
-    sendServerError(res, req, 'Failed to fetch leave balance summary', error);
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s error=%s',
+        ROUTE_TAG_BALANCES_LIST, actingUserId, error?.message ?? String(error));
+    }
+    // Hide raw Oracle / library errors behind a friendly message.
+    sendServerError(res, req, 'Failed to fetch leave balance summary');
   }
 });
 

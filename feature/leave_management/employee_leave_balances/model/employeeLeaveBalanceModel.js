@@ -2,6 +2,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import { ensureHex32, generateSysGuid, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 
 /**
  * Employee Leave Balance Model
@@ -3442,7 +3443,15 @@ END;`;
    * Schema-aligned with ABS.ABS_EMP_LEAVE_BALANCES-style row: ENTERPRISE_ID, EMPLOYEE_ID,
    * EMPLOYEE_NUMBER, EMPLOYEE_NAME, SEARCH_NAME, SEARCH_EMP_NUMBER, ANNUAL_LEAVE, SICK_LEAVE,
    * TOTAL_AVAILABLE, etc. No TENANT_ID/LEAVE_CODE on this view—use ENTERPRISE_ID for tenant.
-   * @param {Object} options - { enterpriseId/tenantId, page, pageSize, search?, name?, employeeNumber? }
+   *
+   * Security:
+   *   When `options.userId` is provided (positive number), the WHERE clause is
+   *   augmented with FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE so rows
+   *   for employees the acting user cannot access are filtered out at the
+   *   database level. Both the COUNT and DATA queries receive the same
+   *   predicate so the total reflects only accessible rows.
+   *
+   * @param {Object} options - { enterpriseId/tenantId, userId?, page, pageSize, search?, name?, employeeNumber? }
    * @returns {Promise<{ rows: Array, total: number, page: number, pageSize: number }>}
    */
   static async getLeaveBalanceSummaryPaginated(options = {}) {
@@ -3461,10 +3470,26 @@ END;`;
     const namePattern = name ? `%${name.toUpperCase()}%` : null;
     const empNumPattern = employeeNumber ? `%${employeeNumber}%` : null;
 
+    // FNDSEC DB-level data access: restrict rows to employees the acting user
+    // is authorized to see (CAN_ACCESS_EMPLOYEE = 'Y'). The same `:user_id`
+    // named bind is reused by both the COUNT and DATA queries so totals
+    // exclude inaccessible rows.
+    let acting = null;
+    if (options.userId !== undefined && options.userId !== null && options.userId !== '') {
+      acting = Number(options.userId);
+      if (!Number.isFinite(acting) || acting < 1) {
+        throw new ValidationError('userId must be a positive number');
+      }
+    }
+
     const viewName = this.VW_EMPLOYEE_LEAVE_BALANCES;
     const v = 'v';
 
     // View uses ENTERPRISE_ID (not TENANT_ID). API tenant_id maps to enterprise.
+    const securityPredicate = acting != null
+      ? `\n        AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}`
+      : '';
+
     const baseWhere = `WHERE v.ENTERPRISE_ID = :enterprise_id
         AND (
           :search IS NULL
@@ -3472,13 +3497,14 @@ END;`;
           OR v.SEARCH_EMP_NUMBER LIKE '%' || LOWER(:search) || '%'
         )
         AND (:name_pat IS NULL OR UPPER(v.EMPLOYEE_NAME) LIKE :name_pat)
-        AND (:emp_num_pat IS NULL OR v.EMPLOYEE_NUMBER LIKE :emp_num_pat)`;
+        AND (:emp_num_pat IS NULL OR v.EMPLOYEE_NUMBER LIKE :emp_num_pat)${securityPredicate}`;
 
     const binds = {
       enterprise_id: parsed,
       search: search || null,
       name_pat: namePattern,
-      emp_num_pat: empNumPattern
+      emp_num_pat: empNumPattern,
+      ...(acting != null && { user_id: acting })
     };
 
     const countSql = `SELECT COUNT(1) AS total

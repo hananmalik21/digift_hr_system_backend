@@ -2,6 +2,7 @@ import db from '../../config/db.js';
 import oracledb from 'oracledb';
 import { safeJson } from '../../services/emplEmployeeListService.js';
 import { DatabaseError, NotFoundError } from '../../utils/errors/index.js';
+import { employeeAccessFunctionPredicate } from '../../utils/userContext.js';
 import { guidToBuffer, bufferToGuidHex } from '../utils/oracleGuid.js';
 
 const SCHEMA = 'TM';
@@ -216,6 +217,7 @@ JOIN (
 WHERE  1=1
   AND (:p_enterprise_id IS NULL OR v.enterprise_id = :p_enterprise_id)
   AND (:p_status IS NULL OR v.status = :p_status)
+  AND ${employeeAccessFunctionPredicate('v.enterprise_id', 'v.employee_id', ':p_user_id')}
   AND (:p_date_from IS NULL
        OR TRUNC(v.attendance_date) >= TRUNC(TO_DATE(:p_date_from,'YYYY-MM-DD')))
   AND (:p_date_to IS NULL
@@ -253,11 +255,16 @@ WHERE  1=1
  * List overtime requests from TM.V_OT_REQUEST_DETAILS with optional filters and pagination.
  * Tenant isolation via enterprise_id from tenant_id mapping.
  * @param {number} tenantId - Required tenant id (mapped to enterprise_id)
- * @param {object} filters - { status, date_from, date_to, search, org_unit_id, level_code, page, page_size }
+ * @param {object} filters - { user_id, status, date_from, date_to, search, org_unit_id, level_code, page, page_size }
  * @returns {Promise<{ rows: object[], total: number }>}
  */
 export async function listRequests(tenantId, filters = {}) {
   const enterpriseId = getEnterpriseIdFromTenantId(tenantId);
+  const userId = Number(filters.user_id ?? filters.userId);
+  if (!Number.isFinite(userId) || userId < 1) {
+    throw new DatabaseError('Authentication token does not contain a valid user_id.');
+  }
+
   const page = Math.max(1, Math.floor(Number(filters.page)) || 1);
   const pageSize = Math.min(100, Math.max(1, Math.floor(Number(filters.page_size)) || 20));
   const offset = (page - 1) * pageSize;
@@ -271,6 +278,7 @@ export async function listRequests(tenantId, filters = {}) {
 
   const baseBinds = {
     p_enterprise_id: enterpriseId,
+    p_user_id: userId,
     p_status: status,
     p_date_from: dateFrom,
     p_date_to: dateTo,

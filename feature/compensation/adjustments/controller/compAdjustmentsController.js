@@ -9,6 +9,12 @@ import { DatabaseError } from '../../../../utils/errors/index.js';
 import { parseAdjustmentListQuery } from '../utils/parseAdjustmentListQuery.js';
 import { listAdjustmentDetailsFullViewPaged } from '../model/compAdjustmentDetailsFullViewModel.js';
 import { AdjustmentListValidationError } from '../utils/adjustmentListErrors.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  EMPLOYEE_ACCESS_SECURITY_LABEL
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
 
@@ -16,6 +22,8 @@ const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
 const ERROR_CODE_VALIDATION = 'VALIDATION';
 const MSG_LIST_SUCCESS = 'Adjustments fetched successfully';
 const LIST_ERROR_TITLE = 'Failed to list adjustments';
+
+const ROUTE_TAG_LIST = 'GET /api/comp/adjustments';
 
 function sendFail(res, statusCode, error, errorCode) {
   const body = { success: false, error };
@@ -40,6 +48,9 @@ function stripOracleHelpUrl(text) {
 }
 
 function sendListDatabaseError(res, err) {
+  if (!IS_DEV_MODE) {
+    return sendFail(res, HTTP.SERVER_ERROR, LIST_ERROR_TITLE, 'INTERNAL_ERROR');
+  }
   if (err instanceof DatabaseError) {
     return sendFail(res, HTTP.SERVER_ERROR, err.message || LIST_ERROR_TITLE, err.code ?? err.errorNum);
   }
@@ -52,6 +63,9 @@ function sendListDatabaseError(res, err) {
  * Query: enterprise_id (required), adjustment_id?, employee_id?, plan_id?, status?, page?, limit?
  */
 export const getAdjustmentsList = asyncHandler(async (req, res) => {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return undefined;
+
   let parsed;
   try {
     parsed = parseAdjustmentListQuery(req.query);
@@ -62,7 +76,19 @@ export const getAdjustmentsList = asyncHandler(async (req, res) => {
   }
 
   try {
-    const { rows, total } = await listAdjustmentDetailsFullViewPaged(parsed);
+    const { rows, total } = await listAdjustmentDetailsFullViewPaged({
+      ...parsed,
+      user_id: actingUserId
+    });
+
+    logSecuredAccess(ROUTE_TAG_LIST, {
+      user_id: actingUserId,
+      enterprise_id: parsed.enterprise_id,
+      returned: rows.length,
+      total,
+      security: EMPLOYEE_ACCESS_SECURITY_LABEL
+    });
+
     return res.status(HTTP.OK).json({
       success: true,
       message: MSG_LIST_SUCCESS,
@@ -72,6 +98,9 @@ export const getAdjustmentsList = asyncHandler(async (req, res) => {
   } catch (err) {
     if (err instanceof AdjustmentListValidationError) {
       return sendFail(res, HTTP.BAD_REQUEST, err.message || 'Invalid data', ERROR_CODE_VALIDATION);
+    }
+    if (IS_DEV_MODE) {
+      console.error(`[${ROUTE_TAG_LIST}] error:`, err);
     }
     return sendListDatabaseError(res, err);
   }

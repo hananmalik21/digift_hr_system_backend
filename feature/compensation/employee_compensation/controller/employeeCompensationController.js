@@ -10,10 +10,18 @@ import {
 } from '../service/employeeCompensationService.js';
 import { getEmployeePlanFullDetails } from '../service/employeePlanFullDetailsService.js';
 import { parsePlanFullDetailsQuery } from '../validation/employeePlanFullDetailsQuery.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  EMPLOYEE_ACCESS_SECURITY_LABEL
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
 
 const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
+
+const ROUTE_TAG_LIST = 'GET /api/comp/employee-compensation';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -512,6 +520,9 @@ function validateEditMultipart(req) {
 router.get(
   '/',
   asyncHandler(async (req, res) => {
+    const actingUserId = requireActingUserId(req, res);
+    if (actingUserId == null) return undefined;
+
     const parsed = parsePlanFullDetailsQuery(req.query);
     if (!parsed.ok) {
       return res.status(HTTP.BAD_REQUEST).json({
@@ -525,10 +536,26 @@ router.get(
       const { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex, page, limit } =
         parsed.data;
       const { rows, total } = await getEmployeePlanFullDetails(
-        { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex },
+        {
+          enterprise_id,
+          user_id: actingUserId,
+          employee_id,
+          plan_id,
+          employee_guid_hex,
+          plan_guid_hex
+        },
         { page, limit }
       );
       const totalPages = limit > 0 ? Math.max(1, Math.ceil(total / limit)) : 1;
+
+      logSecuredAccess(ROUTE_TAG_LIST, {
+        user_id: actingUserId,
+        enterprise_id,
+        returned: rows.length,
+        total,
+        security: EMPLOYEE_ACCESS_SECURITY_LABEL
+      });
+
       return sendSuccess(res, {
         message: 'Fetched successfully',
         data: rows,
@@ -544,7 +571,15 @@ router.get(
         },
         statusCode: HTTP.OK
       });
-    } catch {
+    } catch (error) {
+      if (IS_DEV_MODE) {
+        console.error(`[${ROUTE_TAG_LIST}] error:`, error);
+        return res.status(HTTP.SERVER_ERROR).json({
+          status: false,
+          message: error?.message || 'Failed to fetch employee plan full details',
+          data: null
+        });
+      }
       return res.status(HTTP.SERVER_ERROR).json({
         status: false,
         message: 'Failed to fetch employee plan full details',

@@ -13,10 +13,18 @@ import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { fetchSalaryChangeHistory } from '../service/compSalaryChangeHistoryService.js';
 import { parseSalaryChangeHistoryQuery } from '../utils/parseSalaryChangeHistoryQuery.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  EMPLOYEE_ACCESS_SECURITY_LABEL
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
 
 const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
+
+const ROUTE_TAG_LIST = 'GET /api/compensation/salary-change-history';
 
 function sendFail(res, statusCode, message) {
   return res.status(statusCode).json({ success: false, message: String(message || 'Request failed') });
@@ -43,6 +51,9 @@ function paginationBody(page, limit, total) {
  * - Pagination: page?, page_size? (preferred) or limit?, offset?
  */
 export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return undefined;
+
   let parsed;
   try {
     parsed = parseSalaryChangeHistoryQuery(req.query || {});
@@ -51,7 +62,18 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
   }
 
   try {
-    const { total, rows } = await fetchSalaryChangeHistory(parsed);
+    const { total, rows } = await fetchSalaryChangeHistory({
+      ...parsed,
+      user_id: actingUserId
+    });
+
+    logSecuredAccess(ROUTE_TAG_LIST, {
+      user_id: actingUserId,
+      enterprise_id: parsed.enterprise_id,
+      returned: rows.length,
+      total,
+      security: EMPLOYEE_ACCESS_SECURITY_LABEL
+    });
 
     return res.status(HTTP.OK).json({
       success: true,
@@ -59,7 +81,9 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
       pagination: paginationBody(parsed.page, parsed.page_size, total)
     });
   } catch (err) {
-    // Never leak Oracle details.
+    if (IS_DEV_MODE) {
+      console.error(`[${ROUTE_TAG_LIST}] error:`, err);
+    }
     return sendFail(res, HTTP.SERVER_ERROR, safeDatabaseMessageForApi(err, 'Unable to fetch salary change history.'));
   }
 });

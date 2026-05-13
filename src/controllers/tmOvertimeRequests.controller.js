@@ -19,6 +19,13 @@ import {
 import { sendSuccess, sendCreated, sendList } from '../../utils/response.js';
 import { ValidationError } from '../../utils/errors/index.js';
 import { asyncHandler } from '../../middleware/asyncHandler.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  handleSecuredQueryError
+} from '../../utils/userContext.js';
+
+const ROUTE_TAG_LIST = 'GET /api/tm/overtime/requests';
 
 function parseBody(req) {
   const body = req.body || {};
@@ -41,22 +48,48 @@ function validate(schema, data) {
 
 /** GET /api/tm/overtime/requests - list (query: tenant_id required; status?, date_from?, date_to?, search?, org_unit_id?, level_code?, page?, page_size?) */
 export const list = asyncHandler(async (req, res) => {
+  // FNDSEC: acting user_id comes strictly from the verified JWT. Query/header
+  // user_id values are ignored for data access to prevent impersonation.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   const query = { ...req.query };
   if (query.tenant_id !== undefined) query.tenant_id = Number(query.tenant_id);
   const data = validate(listQuerySchema, query);
-  const { rows, total, page, pageSize } = await listRequests(data.tenant_id, {
-    status: data.status,
-    date_from: data.date_from,
-    date_to: data.date_to,
-    search: data.search,
-    org_unit_id: data.org_unit_id,
-    level_code: data.level_code,
-    page: data.page,
-    page_size: data.page_size,
-  });
+
+  let result;
+  try {
+    result = await listRequests(data.tenant_id, {
+      user_id: actingUserId,
+      status: data.status,
+      date_from: data.date_from,
+      date_to: data.date_to,
+      search: data.search,
+      org_unit_id: data.org_unit_id,
+      level_code: data.level_code,
+      page: data.page,
+      page_size: data.page_size,
+    });
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_LIST,
+      friendlyMessage: 'Failed to fetch overtime requests. Please try again later.',
+      context: { user_id: actingUserId, tenant_id: data.tenant_id }
+    });
+  }
+
+  const { rows, total, page, pageSize } = result;
   const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
   const hasNext = page < totalPages;
   const hasPrevious = page > 1;
+
+  logSecuredAccess(ROUTE_TAG_LIST, {
+    user_id: actingUserId,
+    tenant_id: data.tenant_id,
+    returned: Array.isArray(rows) ? rows.length : 0,
+    total
+  });
+
   sendList(res, {
     message: 'Fetched successfully',
     data: rows,

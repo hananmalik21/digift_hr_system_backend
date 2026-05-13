@@ -5,6 +5,7 @@
 
 import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
+import { employeeAccessJoin } from '../utils/userContext.js';
 
 const VIEW = 'EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST';
 
@@ -191,6 +192,7 @@ function normalizeRow(row) {
 /**
  * Build WHERE conditions and bind object for list query.
  * - enterprise_id required
+ * - user_id required (used for FNDSEC data-access JOIN)
  * - Optional: org_unit_id (JSON_EXISTS on ORG_STRUCTURE_LIST_JSON), position_id (HEXTORAW), job_family_id, job_level_id, grade_id, employment_status, employee_status (ACTIVE/PROBATION/INACTIVE), contract_type_code, work_location_id, search (LIKE on multiple text cols)
  * @param {Object} params
  * @returns {{ whereParts: string[], binds: Object }}
@@ -198,6 +200,7 @@ function normalizeRow(row) {
 function buildWhereAndBinds(params) {
   const whereParts = ['v.ENTERPRISE_ID = :enterprise_id', 'v.RN = 1'];
   const binds = {
+    user_id: params.user_id,
     enterprise_id: params.enterprise_id,
     limit_plus_one: (params.limit || DEFAULT_LIMIT) + 1
   };
@@ -318,24 +321,36 @@ function buildCursorAndOrder(cursor, binds) {
 
 /**
  * Fetch one page of employees with cursor-based pagination.
- * @param {Object} params - enterprise_id (required), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, employee_status, contract_type_code, work_location_id, search)
+ * @param {Object} params - enterprise_id (required), user_id (required - FNDSEC data access), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, employee_status, contract_type_code, work_location_id, search)
  * @returns {Promise<{ data: Object[], next_cursor: string|null, has_next: boolean }>}
  */
 export async function getEmplEmployeesList(params) {
   const enterpriseId = params.enterprise_id != null ? Number(params.enterprise_id) : NaN;
   if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
-    throw new Error('enterprise_id is required and must be a positive number');
+    const err = new Error('enterprise_id is required and must be a positive number');
+    err.code = 'VALIDATION_ERROR';
+    throw err;
+  }
+
+  const userId = params.user_id != null && params.user_id !== '' ? Number(params.user_id) : NaN;
+  if (!Number.isFinite(userId) || userId < 1) {
+    const err = new Error('user_id is required and must be a positive number');
+    err.code = 'VALIDATION_ERROR';
+    throw err;
   }
 
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(params.limit, 10) || DEFAULT_LIMIT));
   const cursor = decodeCursor(params.cursor) || { sort_by: params.sort_by || DEFAULT_SORT_BY, sort_dir: params.sort_dir || DEFAULT_SORT_DIR };
 
-  const { whereParts, binds } = buildWhereAndBinds({ ...params, enterprise_id: enterpriseId, limit });
+  const { whereParts, binds } = buildWhereAndBinds({ ...params, enterprise_id: enterpriseId, user_id: userId, limit });
   const { cursorCondition, orderBy, binds: cursorBinds } = buildCursorAndOrder(cursor, binds);
   Object.assign(binds, cursorBinds);
 
   const whereClause = whereParts.join(' AND ');
+  // FNDSEC DB-level data access: JOIN ensures only employees the acting user is
+  // authorized to access (per FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE) are returned.
   const sql = `SELECT v.* FROM ${VIEW} v
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
   WHERE ${whereClause}
   ${cursorCondition}
   ORDER BY ${orderBy}

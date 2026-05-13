@@ -25,6 +25,13 @@ import {
 } from '../view/employeeView.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import {
+  requireActingUserId,
+  getActingUsername,
+  employeeAccessJoin,
+  logSecuredAccess
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
 
@@ -74,8 +81,13 @@ function getEnterpriseIdForEmployee(req) {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Resolve the audit actor (string username) for CREATED_BY / LAST_UPDATED_BY.
+ * Sourced from the verified JWT (no header / body fallback) and falls back to
+ * 'SYSTEM' for unauthenticated internal flows.
+ */
 function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+  return getActingUsername(req) ?? 'SYSTEM';
 }
 
 function parsePagination(query) {
@@ -114,98 +126,78 @@ function buildPaginationMeta(page, pageSize, totalCount) {
 }
 
 function buildEmployeeListWhereAndBinds(filters) {
-  const baseConditions = [
-    'v.ENTERPRISE_ID = :1',
-    '(:2 IS NULL OR v.POSITION_ID = :2)',
-    '(:3 IS NULL OR v.JOB_FAMILY_ID = :3)',
-    '(:4 IS NULL OR v.JOB_LEVEL_ID = :4)',
-    '(:5 IS NULL OR v.GRADE_ID = :5)'
-  ];
-
-  const p = filters.positionId ?? null;
-  const jf = filters.jobFamilyId ?? null;
-  const jl = filters.jobLevelId ?? null;
-  const g = filters.gradeId ?? null;
   const hasJsonFilter = filters.org_unit_id_hex != null && filters.org_unit_id_hex !== '';
   const hasLevelCode = hasJsonFilter && filters.level_code != null && filters.level_code !== '';
   const employeeStatusTrimmed = filters.employee_status != null && String(filters.employee_status).trim() !== ''
     ? String(filters.employee_status).trim().toUpperCase()
     : null;
+  const searchTrimmed = filters.search != null && String(filters.search).trim() !== ''
+    ? String(filters.search).trim()
+    : null;
 
-  const countConditions = [...baseConditions];
-  const dataConditions = [...baseConditions];
+  const conditions = [
+    'v.ENTERPRISE_ID = :enterprise_id',
+    '(:position_id IS NULL OR v.POSITION_ID = :position_id)',
+    '(:job_family_id IS NULL OR v.JOB_FAMILY_ID = :job_family_id)',
+    '(:job_level_id IS NULL OR v.JOB_LEVEL_ID = :job_level_id)',
+    '(:grade_id IS NULL OR v.GRADE_ID = :grade_id)'
+  ];
+
+  const sharedBinds = {
+    user_id: filters.userId,
+    enterprise_id: filters.enterpriseId,
+    // position_id is a RAW(16) column; bind explicitly so a null value does not
+    // default to STRING and trigger an ORA-00932 (inconsistent datatypes).
+    position_id: {
+      val: filters.positionId ?? null,
+      dir: oracledb.BIND_IN,
+      type: oracledb.DB_TYPE_RAW,
+      maxSize: 16
+    },
+    job_family_id: filters.jobFamilyId ?? null,
+    job_level_id: filters.jobLevelId ?? null,
+    grade_id: filters.gradeId ?? null
+  };
+
   if (hasJsonFilter) {
     if (hasLevelCode) {
-      countConditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :10 AS "oid", :11 AS "lvl")`
+      conditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :org_unit_id_hex AS "oid", :level_code AS "lvl")`
       );
-      dataConditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :12 AS "oid", :13 AS "lvl")`
-      );
+      sharedBinds.org_unit_id_hex = filters.org_unit_id_hex;
+      sharedBinds.level_code = filters.level_code;
     } else {
-      countConditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :10 AS "oid")`
+      conditions.push(
+        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :org_unit_id_hex AS "oid")`
       );
-      dataConditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :12 AS "oid")`
-      );
+      sharedBinds.org_unit_id_hex = filters.org_unit_id_hex;
     }
   }
 
-  const searchTrimmed = filters.search != null && String(filters.search).trim() !== '' ? String(filters.search).trim() : null;
-
-  const countBinds = [
-    filters.enterpriseId,
-    p, p,
-    jf, jf,
-    jl, jl,
-    g, g
-  ];
-  if (hasJsonFilter) {
-    countBinds.push(filters.org_unit_id_hex);
-    if (hasLevelCode) countBinds.push(filters.level_code);
-  }
   if (employeeStatusTrimmed) {
-    countConditions.push('v.EMPLOYEE_STATUS = :' + (countBinds.length + 1));
-    countBinds.push(employeeStatusTrimmed);
+    conditions.push('v.EMPLOYEE_STATUS = :employee_status');
+    sharedBinds.employee_status = employeeStatusTrimmed;
   }
+
   if (searchTrimmed) {
-    countConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + (countBinds.length + 1) + ") || '%'");
-    countBinds.push(searchTrimmed);
+    conditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:search_key) || '%'");
+    sharedBinds.search_key = searchTrimmed;
   }
 
-  const countWhere = countConditions.join(' AND ');
-  const countSql = `SELECT COUNT(*) AS total_records FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${countWhere}`;
+  // FNDSEC DB-level data access: only rows the acting user is authorized to see
+  // are returned (see FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE).
+  const baseFrom = `EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
+    ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}`;
 
-  const dataBinds = [
-    filters.enterpriseId,
-    p, p,
-    jf, jf,
-    jl, jl,
-    g, g
-  ];
-  if (hasJsonFilter) {
-    dataBinds.push(filters.org_unit_id_hex);
-    if (hasLevelCode) dataBinds.push(filters.level_code);
-  }
-  if (searchTrimmed) {
-    const dataSearchPlaceholder = 12 + (hasJsonFilter ? (hasLevelCode ? 2 : 1) : 0);
-    dataConditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:" + dataSearchPlaceholder + ") || '%'");
-    dataBinds.push(searchTrimmed);
-  }
-  if (employeeStatusTrimmed) {
-    const dataStatusPlaceholder = 12 + (hasJsonFilter ? (hasLevelCode ? 2 : 1) : 0) + (searchTrimmed ? 1 : 0);
-    dataConditions.push('v.EMPLOYEE_STATUS = :' + dataStatusPlaceholder);
-    dataBinds.push(employeeStatusTrimmed);
-  }
-  dataBinds.push(filters.offset, filters.pageSize);
+  const whereClause = conditions.join(' AND ');
+  const countSql = `SELECT COUNT(*) AS total_records FROM ${baseFrom} WHERE ${whereClause}`;
 
-  const dataWhere = dataConditions.join(' AND ');
-  const dataSql = `SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v WHERE ${dataWhere}
+  const dataBinds = { ...sharedBinds, offset: filters.offset, page_size: filters.pageSize };
+  const dataSql = `SELECT v.* FROM ${baseFrom} WHERE ${whereClause}
   ORDER BY v.EMPLOYEE_ID NULLS LAST
-  OFFSET :10 ROWS FETCH NEXT :11 ROWS ONLY`;
+  OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY`;
 
-  return { countSql, dataSql, countBinds, dataBinds };
+  return { countSql, dataSql, countBinds: sharedBinds, dataBinds };
 }
 
 function hexToBuffer(hex) {
@@ -657,46 +649,15 @@ export function mapRowToFullDetailsShape(row) {
 const SQL_FULL_DETAILS_BY_ID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
 `;
 
 const SQL_FULL_DETAILS_BY_GUID = `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)
-`;
-
-const SQL_FULL_DETAILS_PAGINATED = `
-  SELECT
-    v.ENTERPRISE_ID, v.EMPLOYEE_ID, v.EMPLOYEE_GUID,
-    v.FIRST_NAME_EN, v.MIDDLE_NAME_EN, v.LAST_NAME_EN,
-    v.FIRST_NAME_AR, v.MIDDLE_NAME_AR, v.LAST_NAME_AR, v.FAMILY_NAME_AR,
-    v.EMAIL, v.PHONE_NUMBER, v.MOBILE_NUMBER, v.DATE_OF_BIRTH,
-    v.EMPLOYEE_STATUS, v.EMPLOYEE_IS_ACTIVE, v.CREATION_DATE, v.LAST_UPDATE_DATE,
-    v.ASSIGNMENT_ID, v.ASSIGNMENT_GUID, v.EMPLOYEE_NUMBER, v.ORG_UNIT_ID, v.ORG_STRUCTURE_LIST,
-    v.WORK_LOCATION_ID, v.WORK_LOCATION_OBJ, v.POSITION_ID, v.POSITION_CODE, v.POSITION_NAME_EN, v.POSITION_NAME_AR, v.POSITION_STATUS,
-    v.JOB_FAMILY_ID, v.JOB_FAMILY_CODE, v.JOB_FAMILY_NAME_EN, v.JOB_FAMILY_NAME_AR, v.JOB_FAMILY_STATUS,
-    v.JOB_LEVEL_ID, v.JOB_LEVEL_CODE, v.JOB_LEVEL_NAME_EN, v.JOB_LEVEL_MIN_GRADE_ID, v.JOB_LEVEL_MAX_GRADE_ID, v.JOB_LEVEL_STATUS,
-    v.GRADE_ID, v.GRADE_NUMBER, v.GRADE_CATEGORY, v.GRADE_CURRENCY_CODE, v.GRADE_STEP_1_SALARY, v.GRADE_STEP_2_SALARY, v.GRADE_STEP_3_SALARY, v.GRADE_STEP_4_SALARY, v.GRADE_STEP_5_SALARY, v.GRADE_STATUS,
-    v.ENTERPRISE_HIRE_DATE, v.CONTRACT_TYPE_CODE, v.PROBATION_DAYS,
-    v.REPORTING_TO_EMP_ID, v.EMPLOYMENT_STATUS, v.EFFECTIVE_START_DATE, v.EFFECTIVE_END_DATE,
-    v.ASSIGNMENT_STATUS, v.ASSIGNMENT_IS_ACTIVE,
-    v.DEMO_ID, v.DEMO_GUID, v.GENDER_CODE, v.NATIONALITY_CODE, v.MARITAL_STATUS_CODE, v.RELIGION_CODE,
-    v.CIVIL_ID_NUMBER, v.PASSPORT_NUMBER,
-    v.EMP_SCH_ID, v.EMP_SCH_GUID, v.WORK_SCHEDULE_ID, v.WS_START, v.WS_END, v.WS_STATUS, v.WS_IS_ACTIVE,
-    v.COMP_ID, v.COMP_GUID, v.BASIC_SALARY_KWD, v.COMP_START, v.COMP_END, v.COMP_STATUS, v.COMP_IS_ACTIVE,
-    v.ALLOW_ID, v.ALLOW_GUID, v.HOUSING_KWD, v.TRANSPORT_KWD, v.FOOD_KWD, v.MOBILE_KWD, v.OTHER_KWD,
-    v.ALLOW_START, v.ALLOW_END, v.ALLOW_STATUS, v.ALLOW_IS_ACTIVE,
-    v.DOC_COMP_ID, v.DOC_COMP_GUID, v.CIVIL_ID_EXPIRY, v.PASSPORT_EXPIRY, v.VISA_NUMBER, v.VISA_EXPIRY,
-    v.WORK_PERMIT_NUMBER, v.WORK_PERMIT_EXPIRY, v.DOCC_STATUS, v.DOCC_IS_ACTIVE,
-    v.DOCUMENTS_JSON, v.EMERGENCY_CONTACTS_JSON, v.BANK_ACCOUNTS_JSON, v.ADDRESSES_JSON,
-    v.WORK_SCHEDULES_JSON, v.COMPENSATION_JSON, v.ALLOWANCES_JSON, v.DOCUMENT_COMPLIANCE_JSON
-  FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
-  WHERE v.ENTERPRISE_ID = :enterprise_id
-    AND (:employee_id IS NULL OR v.EMPLOYEE_ID = :employee_id)
-    AND (:employee_guid_hex IS NULL OR v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex))
-  ORDER BY v.EMPLOYEE_ID
-  OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
 `;
 
 export async function getEmployeeById(req, res) {
@@ -714,9 +675,12 @@ export async function getEmployeeById(req, res) {
     return sendBadRequest(res, req, 'enterprise_id is required (x-enterprise-id header or req.user.enterprise_id)');
   }
 
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   const binds = isGuid
-    ? { enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }
-    : { enterprise_id: enterpriseId, employee_id: parseInt(param, 10) };
+    ? { user_id: actingUserId, enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }
+    : { user_id: actingUserId, enterprise_id: enterpriseId, employee_id: parseInt(param, 10) };
 
   let connection;
   try {
@@ -728,13 +692,22 @@ export async function getEmployeeById(req, res) {
     if (!row) return sendNotFound(res, req, 'Employee not found');
 
     const data = mapRowToFullDetailsShape(rowRawToHex(row));
+
+    logSecuredAccess('GET /api/employees/:guid', {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      employee: isGuid ? normalizedGuid : param,
+      allowed: 'Y'
+    });
+
     res.json({ success: true, message: 'Employee fetched successfully', data });
   } catch (err) {
-    sendServerError(res, req, 'Failed to fetch employee full details', {
-      message: err?.message ?? String(err),
-      ...(err?.errorNum != null && { errorNum: err.errorNum }),
-      ...(err?.oraError != null && { oraCode: err.oraError?.code, oraMessage: err.oraError?.message })
-    });
+    if (IS_DEV_MODE) {
+      console.error('[GET /api/employees/:guid][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        actingUserId, enterpriseId, err?.message ?? String(err));
+    }
+    // Do not expose raw Oracle errors to frontend.
+    sendServerError(res, req, 'Failed to fetch employee full details');
   } finally {
     if (connection) try { await connection.close(); } catch (_) {}
   }
@@ -801,6 +774,9 @@ export async function getEmployees(req, res) {
     return sendBadRequest(res, req, 'enterpriseId (or enterprise_id) is required and must be a positive number');
   }
 
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   const orgUnitIdHexRaw = (q.org_unit_id ?? q.orgUnitId) != null && String(q.org_unit_id ?? q.orgUnitId).trim() !== '' ? String(q.org_unit_id ?? q.orgUnitId).trim() : null;
   const levelCodeRaw = (q.level_code ?? q.levelCode) != null && String(q.level_code ?? q.levelCode).trim() !== '' ? String(q.level_code ?? q.levelCode).trim() : null;
   if (levelCodeRaw != null && (orgUnitIdHexRaw == null || orgUnitIdHexRaw === '')) {
@@ -830,6 +806,7 @@ export async function getEmployees(req, res) {
     ? String(q.employee_status ?? q.employeeStatus).trim()
     : null;
   const filters = {
+    userId: actingUserId,
     enterpriseId,
     org_unit_id_hex: orgUnitIdHexForJson,
     level_code: levelCodeRaw ?? null,
@@ -858,12 +835,24 @@ export async function getEmployees(req, res) {
     const rows = dataResult.rows || [];
     const data = rows.map(row => normalizeEmployeeListRow(row));
 
+    logSecuredAccess('GET /api/employees', {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      returned: data.length,
+      total: totalRecords
+    });
+
     sendEmployeeList(res, req, data, {
       total: totalRecords,
       pagination: paginationMeta
     });
   } catch (err) {
-    sendServerError(res, req, 'Failed to fetch employees', err);
+    if (IS_DEV_MODE) {
+      console.error('[GET /api/employees][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        actingUserId, enterpriseId, err?.message ?? String(err));
+    }
+    // Do not expose raw Oracle errors to frontend.
+    sendServerError(res, req, 'Failed to fetch employees');
   } finally {
     if (connection) {
       try {
@@ -1078,7 +1067,6 @@ async function createEmployeeAllInOneHandler(req, res) {
     });
   }
 
-  const enterpriseId = Number(body.enterprise_id ?? body.ENTERPRISE_ID ?? getEnterprise(req));
   const { plainPassword, passwordHash } = await generatePasswordWithHash();
   body.password_hash = passwordHash;
 
@@ -1243,7 +1231,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
       }
     }
 
-    const result = await EmployeeModel.remove(enterpriseId, employeeId);
+    await EmployeeModel.remove(enterpriseId, employeeId);
     sendDeleted(res, req, 'Employee deleted successfully', employeeToDelete);
   } catch (error) {
     sendServerError(res, req, 'Failed to delete employee', error);

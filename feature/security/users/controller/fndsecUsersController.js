@@ -14,8 +14,16 @@ import {
 } from '../service/fndsecUsersService.js';
 import { listUsersFromView } from '../service/fndsecUsersViewService.js';
 import { getUserCompleteInfoByGuid } from '../service/fndsecUserCompleteInfoService.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  EMPLOYEE_ACCESS_SECURITY_LABEL
+} from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
+
+const ROUTE_TAG_USERS_LIST = 'GET /api/security/users';
 
 function firstValidationMessage(err) {
   const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
@@ -39,21 +47,16 @@ function sendReadError(res, err) {
   }
 
   if (err instanceof DatabaseError) {
-    return sendRead(res, { success: false, message: err.userMessage || err.message || 'Database error' }, statusCode);
+    const message = IS_DEV_MODE
+      ? err.userMessage || err.message || 'Database error'
+      : 'Unable to fetch users.';
+    return sendRead(res, { success: false, message }, statusCode);
   }
 
-  const msg = err?.userMessage || err?.message || 'Unexpected server error';
+  const msg = IS_DEV_MODE
+    ? err?.userMessage || err?.message || 'Unexpected server error'
+    : 'Unexpected server error';
   return sendRead(res, { success: false, message: msg }, 500);
-}
-
-function routeRead(handler) {
-  return asyncHandler(async (req, res) => {
-    try {
-      return await handler(req, res);
-    } catch (err) {
-      return sendReadError(res, err);
-    }
-  });
 }
 
 function buildUsersListMeta(total, page, pageSize) {
@@ -112,17 +115,44 @@ function mapOracleHttp(err) {
  * GET /api/security/users
  * List from FNDSEC.V_USERS_FULL_DETAILS (query: enterprise_id required; page, page_size or limit; filters).
  * Response shape matches other FNDSEC list APIs: data = array, meta.total, meta.pagination.
+ *
+ * Security: acting user_id is taken from the verified JWT (never from the
+ * query/body/header). Rows linked to an employee are filtered through
+ * FNDSEC.CAN_ACCESS_EMPLOYEE; rows without an EMPLOYEE_ID (system/admin users)
+ * pass through.
  */
 router.get(
   '/',
-  routeRead(async (req, res) => {
-    const { items, total, page, pageSize } = await listUsersFromView(req.query || {});
-    return sendRead(res, {
-      success: true,
-      message: 'Users fetched successfully',
-      data: items,
-      meta: buildUsersListMeta(total, page, pageSize)
-    });
+  asyncHandler(async (req, res) => {
+    const actingUserId = requireActingUserId(req, res);
+    if (actingUserId == null) return undefined;
+
+    try {
+      const { items, total, page, pageSize } = await listUsersFromView(
+        req.query || {},
+        { acting_user_id: actingUserId }
+      );
+
+      logSecuredAccess(ROUTE_TAG_USERS_LIST, {
+        user_id: actingUserId,
+        enterprise_id: req.query?.enterprise_id ?? null,
+        returned: items.length,
+        total,
+        security: EMPLOYEE_ACCESS_SECURITY_LABEL
+      });
+
+      return sendRead(res, {
+        success: true,
+        message: 'Users fetched successfully',
+        data: items,
+        meta: buildUsersListMeta(total, page, pageSize)
+      });
+    } catch (err) {
+      if (IS_DEV_MODE && !(err instanceof ValidationError)) {
+        console.error(`[${ROUTE_TAG_USERS_LIST}] error:`, err);
+      }
+      return sendReadError(res, err);
+    }
   })
 );
 

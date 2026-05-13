@@ -1,6 +1,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 
 const SCHEMA = 'TM';
 const STATUS_CODES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN'];
@@ -915,11 +916,13 @@ function mapViewRowForList(row) {
 
 /**
  * List timesheets from TM.V_TIMESHEETS_WITH_LINES_JSON with filters, sort, pagination.
+ * When userId is provided, rows are restricted through FNDSEC.CAN_ACCESS_EMPLOYEE.
  * Optional: search, status, isActive, employeeId, weekStartFrom/To, submittedFrom/To, levelCode, orgUnitId.
  * Default sort: creation_date DESC. sortBy: creation_date | week_start_date | status_code; sortOrder: asc | desc.
  */
 export async function listTimesheetsFromView(filters) {
   const enterpriseId = optNum(filters.enterpriseId ?? filters.enterprise_id);
+  const userId = optNum(filters.userId ?? filters.user_id);
   const search = optStr(filters.search);
   const status = optStr(filters.status ?? filters.status_code);
   const isActive = optStr(filters.isActive ?? filters.is_active);
@@ -939,8 +942,16 @@ export async function listTimesheetsFromView(filters) {
   const rawSortOrder = String(filters.sortOrder ?? filters.sort_order ?? filters.sortDir ?? 'desc').toLowerCase();
   const sortOrder = rawSortOrder === 'asc' ? 'ASC' : 'DESC';
 
+  if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
+    throw new ValidationError('enterpriseId is required');
+  }
+  if (!Number.isFinite(userId) || userId < 1) {
+    throw new ValidationError('userId is required');
+  }
+
   const binds = {
     enterpriseId,
+    userId,
     search: search || null,
     status: status || null,
     isActive: isActive || null,
@@ -967,6 +978,7 @@ export async function listTimesheetsFromView(filters) {
     AND (:weekStartTo IS NULL OR v.WEEK_START_DATE <= TO_DATE(:weekStartTo,'YYYY-MM-DD'))
     AND (:submittedFrom IS NULL OR v.SUBMITTED_DATE >= TO_DATE(:submittedFrom,'YYYY-MM-DD'))
     AND (:submittedTo IS NULL OR v.SUBMITTED_DATE <= TO_DATE(:submittedTo,'YYYY-MM-DD'))
+    AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId')}
     AND (
       :levelCode IS NULL
       OR :orgUnitId IS NULL
