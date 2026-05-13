@@ -3,6 +3,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import HrOrgStructureModel from '../../../enterprise_structure/hr_org_structures/model/hrOrgStructureModel.js';
+import { employeeAccessPredicate } from '../../../../utils/userContext.js';
 
 /**
  * Schedule Assignment Model
@@ -985,9 +986,28 @@ class ScheduleAssignmentModel {
       if (filters.tenantId === null || filters.tenantId === undefined) {
         throw new ValidationError('tenant_id is required');
       }
+      if (filters.userId === null || filters.userId === undefined) {
+        throw new ValidationError('user_id is required for data-access filtering');
+      }
 
       const includeEnrichment = filters.includeEnrichment !== false;
       const pagination = filters.pagination;
+
+      // FNDSEC DB-level data access. Employee rows use CAN_ACCESS_EMPLOYEE;
+      // department/org rows use CAN_ACCESS_ORG_UNIT against DEPARTMENT_ID
+      // (the org-unit RAW column on ENT.TM_SCHEDULE_ASSIGNMENTS).
+      //
+      // Named binds (object) are required here because the security predicate
+      // references :user_id more than once. With oracledb positional/array
+      // binds, each :N occurrence counts as a separate position and causes
+      // ORA-01008.
+      const fromClause = `${this.TABLE_NAME} sa`;
+      const securityCondition = employeeAccessPredicate(
+        'sa.TENANT_ID',
+        'sa.EMPLOYEE_ID',
+        'RAWTOHEX(sa.DEPARTMENT_ID)',
+        ':user_id'
+      );
 
       let dataSql = `
         SELECT
@@ -1011,21 +1031,28 @@ class ScheduleAssignmentModel {
           COUNT(*) OVER() AS total`;
       }
       dataSql += `
-        FROM ${this.TABLE_NAME} sa`;
+        FROM ${fromClause}`;
 
       const conditions = [];
-      const binds = [];
-      let p = 1;
+      const binds = {
+        user_id: filters.userId,
+        tenant_id: filters.tenantId
+      };
 
-      conditions.push(`sa.TENANT_ID = :${p}`); binds.push(filters.tenantId); p++;
+      conditions.push(`sa.TENANT_ID = :tenant_id`);
+
+      // Security filter must always apply, regardless of filters/search/page.
+      conditions.push(securityCondition);
 
       if (filters.assignmentLevel) {
-        conditions.push(`UPPER(sa.ASSIGNMENT_LEVEL) = :${p}`); binds.push(String(filters.assignmentLevel).toUpperCase()); p++;
+        conditions.push(`UPPER(sa.ASSIGNMENT_LEVEL) = :assignment_level`);
+        binds.assignment_level = String(filters.assignmentLevel).toUpperCase();
       }
 
       if (filters.orgUnitId !== undefined && filters.orgUnitId !== null) {
         const depHex = this.ensureHex32(filters.orgUnitId, 'org_unit_id');
-        conditions.push(`sa.DEPARTMENT_ID = HEXTORAW(:${p})`); binds.push(depHex); p++;
+        conditions.push(`sa.DEPARTMENT_ID = HEXTORAW(:org_unit_id_hex)`);
+        binds.org_unit_id_hex = depHex;
       }
 
       if (filters.orgStructureId !== undefined && filters.orgStructureId !== null) {
@@ -1036,24 +1063,26 @@ class ScheduleAssignmentModel {
             FROM ENT.ORG_UNITS ou
             WHERE ou.ORG_UNIT_ID = sa.DEPARTMENT_ID
               AND sa.DEPARTMENT_ID IS NOT NULL
-              AND ou.ORG_STRUCTURE_ID = HEXTORAW(:${p})
+              AND ou.ORG_STRUCTURE_ID = HEXTORAW(:org_structure_id_hex)
           )
         `);
-        binds.push(structHex); p++;
+        binds.org_structure_id_hex = structHex;
       }
 
       if (filters.employeeId !== undefined && filters.employeeId !== null) {
-        conditions.push(`sa.EMPLOYEE_ID = :${p}`); binds.push(filters.employeeId); p++;
+        conditions.push(`sa.EMPLOYEE_ID = :employee_id`);
+        binds.employee_id = filters.employeeId;
       }
 
       if (filters.status) {
-        conditions.push(`UPPER(sa.STATUS) = :${p}`); binds.push(String(filters.status).toUpperCase()); p++;
+        conditions.push(`UPPER(sa.STATUS) = :status_filter`);
+        binds.status_filter = String(filters.status).toUpperCase();
       }
 
       if (filters.effectiveOn) {
         const d = (filters.effectiveOn instanceof Date) ? filters.effectiveOn : new Date(filters.effectiveOn);
-        conditions.push(`sa.EFFECTIVE_START_DATE <= :${p} AND (sa.EFFECTIVE_END_DATE IS NULL OR sa.EFFECTIVE_END_DATE >= :${p})`);
-        binds.push(d); p++;
+        conditions.push(`sa.EFFECTIVE_START_DATE <= :effective_on AND (sa.EFFECTIVE_END_DATE IS NULL OR sa.EFFECTIVE_END_DATE >= :effective_on)`);
+        binds.effective_on = d;
       }
 
       const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
@@ -1061,12 +1090,13 @@ class ScheduleAssignmentModel {
       dataSql += ` ORDER BY sa.SCHEDULE_ASSIGNMENT_ID DESC`;
 
       let total = 0;
-      const dataBinds = [...binds];
+      const dataBinds = { ...binds };
 
       if (pagination?.page && pagination?.pageSize) {
         const offset = (pagination.page - 1) * pagination.pageSize;
-        dataSql += ` OFFSET :${p} ROWS FETCH NEXT :${p + 1} ROWS ONLY`;
-        dataBinds.push(offset, pagination.pageSize);
+        dataSql += ` OFFSET :row_offset ROWS FETCH NEXT :row_limit ROWS ONLY`;
+        dataBinds.row_offset = offset;
+        dataBinds.row_limit = pagination.pageSize;
       }
 
       const result = await db.executeQuery(dataSql, dataBinds);
@@ -1085,11 +1115,14 @@ class ScheduleAssignmentModel {
 
       if (pagination?.page && pagination?.pageSize) {
         if (assignments.length > 0) {
-          total = Number(assignments[0].total) ?? 0;
+          const totalFromRow = Number(assignments[0].total);
+          total = Number.isFinite(totalFromRow) ? totalFromRow : 0;
           assignments.forEach(a => { delete a.total; });
         } else {
-          const countSql = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} sa${where}`;
-          const countResult = await db.executeQuery(countSql, binds);
+          // Count fallback must use the same FROM/WHERE so the total
+          // reflects only rows the acting user is authorized to see.
+          const countSql = `SELECT COUNT(*) AS total FROM ${fromClause}${where}`;
+          const countResult = await db.executeQuery(countSql, { ...binds });
           total = countResult.rows?.[0]?.TOTAL ?? countResult.rows?.[0]?.total ?? 0;
         }
       }
@@ -1120,32 +1153,74 @@ class ScheduleAssignmentModel {
     }
   }
 
-  static async findById(scheduleAssignmentId, tenantId) {
+  /**
+   * @param {number} scheduleAssignmentId
+   * @param {number} tenantId   - enterprise_id
+   * @param {number|null} [userId] - When provided, enforces FNDSEC data access:
+   *   EMPLOYEE rows use CAN_ACCESS_EMPLOYEE; DEPARTMENT rows use
+   *   CAN_ACCESS_ORG_UNIT against DEPARTMENT_ID. Passing null/undefined keeps
+   *   legacy behavior (used by create/update/delete flows).
+   */
+  static async findById(scheduleAssignmentId, tenantId, userId = null) {
     try {
       if (tenantId === null || tenantId === undefined) throw new ValidationError('tenant_id is required');
 
-      const sql = `
-        SELECT
-          SCHEDULE_ASSIGNMENT_ID,
-          TENANT_ID,
-          ASSIGNMENT_LEVEL,
-          DEPARTMENT_ID,
-          EMPLOYEE_ID,
-          WORK_SCHEDULE_ID,
-          EFFECTIVE_START_DATE,
-          EFFECTIVE_END_DATE,
-          STATUS,
-          NOTES,
-          CREATION_DATE,
-          CREATED_BY,
-          LAST_UPDATE_DATE,
-          LAST_UPDATED_BY
-        FROM ${this.TABLE_NAME}
-        WHERE SCHEDULE_ASSIGNMENT_ID = :1
-          AND TENANT_ID = :2
-      `;
+      const applySecurity = userId !== null && userId !== undefined;
+      // Use named binds: the security predicate references :user_id twice.
+      const securityCondition = employeeAccessPredicate(
+        'sa.TENANT_ID',
+        'sa.EMPLOYEE_ID',
+        'RAWTOHEX(sa.DEPARTMENT_ID)',
+        ':user_id'
+      );
+      const sql = applySecurity
+        ? `
+          SELECT
+            sa.SCHEDULE_ASSIGNMENT_ID,
+            sa.TENANT_ID,
+            sa.ASSIGNMENT_LEVEL,
+            sa.DEPARTMENT_ID,
+            sa.EMPLOYEE_ID,
+            sa.WORK_SCHEDULE_ID,
+            sa.EFFECTIVE_START_DATE,
+            sa.EFFECTIVE_END_DATE,
+            sa.STATUS,
+            sa.NOTES,
+            sa.CREATION_DATE,
+            sa.CREATED_BY,
+            sa.LAST_UPDATE_DATE,
+            sa.LAST_UPDATED_BY
+          FROM ${this.TABLE_NAME} sa
+          WHERE sa.SCHEDULE_ASSIGNMENT_ID = :schedule_assignment_id
+            AND sa.TENANT_ID = :tenant_id
+            AND ${securityCondition}
+        `
+        : `
+          SELECT
+            SCHEDULE_ASSIGNMENT_ID,
+            TENANT_ID,
+            ASSIGNMENT_LEVEL,
+            DEPARTMENT_ID,
+            EMPLOYEE_ID,
+            WORK_SCHEDULE_ID,
+            EFFECTIVE_START_DATE,
+            EFFECTIVE_END_DATE,
+            STATUS,
+            NOTES,
+            CREATION_DATE,
+            CREATED_BY,
+            LAST_UPDATE_DATE,
+            LAST_UPDATED_BY
+          FROM ${this.TABLE_NAME}
+          WHERE SCHEDULE_ASSIGNMENT_ID = :schedule_assignment_id
+            AND TENANT_ID = :tenant_id
+        `;
 
-      const result = await db.executeQuery(sql, [scheduleAssignmentId, tenantId]);
+      const binds = applySecurity
+        ? { user_id: userId, schedule_assignment_id: scheduleAssignmentId, tenant_id: tenantId }
+        : { schedule_assignment_id: scheduleAssignmentId, tenant_id: tenantId };
+
+      const result = await db.executeQuery(sql, binds);
       if (!result.rows?.length) return null;
 
       const assignment = this.toSnake(result.rows[0]);

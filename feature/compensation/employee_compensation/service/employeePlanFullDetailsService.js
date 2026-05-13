@@ -1,6 +1,14 @@
 import { executeQuery } from '../../../../config/db.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead.js';
+
+const EMPLOYEE_ACCESS_PREDICATE = employeeAccessFunctionPredicate(
+  'v.ENTERPRISE_ID',
+  'v.EMPLOYEE_ID',
+  ':p_user_id'
+);
 
 /**
  * Plan full details list:
@@ -11,6 +19,12 @@ import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead
  * take precedence over numeric `employee_id` / `plan_id`. Totals use `filtered_keys` so GUID-only filters
  * stay correct without requiring GUID columns on V_EMP_ASSIGNED_COMPONENTS_FULL.
  *
+ * Security:
+ *   The FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE predicate is applied
+ *   in both the `filtered_keys` CTE (so totals are limited to accessible rows)
+ *   and the outer SELECT (so the data rows + COUNT(*) OVER () total exclude
+ *   inaccessible employees).
+ *
  * This ensures ALLOWANCE totals never leak into TOTAL_BASE_SALARY.
  */
 const PLAN_FULL_DETAILS_PAGED_SQL = `
@@ -18,6 +32,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
     SELECT DISTINCT v.enterprise_id, v.employee_id, v.plan_id
       FROM COMP.V_EMPLOYEE_PLAN_FULL_DETAILS v
      WHERE v.ENTERPRISE_ID = :p_enterprise_id
+       AND ${EMPLOYEE_ACCESS_PREDICATE}
        AND (
              (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
           OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
@@ -72,6 +87,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
    AND t.employee_id = v.employee_id
    AND t.plan_id = v.plan_id
   WHERE v.ENTERPRISE_ID = :p_enterprise_id
+    AND ${EMPLOYEE_ACCESS_PREDICATE}
     AND (
           (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
        OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
@@ -119,6 +135,7 @@ async function mapRowWithParsedOrgStructure(row) {
 /**
  * @param {{
  *   enterprise_id: number;
+ *   user_id: number;
  *   employee_id?: number;
  *   plan_id?: number;
  *   employee_guid_hex?: string | null;
@@ -128,12 +145,17 @@ async function mapRowWithParsedOrgStructure(row) {
  * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
  */
 export async function getEmployeePlanFullDetails(filters, pagination = { page: 1, limit: 25 }) {
-  const { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex } = filters;
+  const { enterprise_id, user_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex } = filters;
+  const userIdNum = Number(user_id);
+  if (!Number.isFinite(userIdNum) || userIdNum < 1) {
+    throw new ValidationError('user_id is required and must be a positive number');
+  }
   const page = Number(pagination?.page ?? 1);
   const limit = Number(pagination?.limit ?? 25);
   const offset = Math.max(0, (Math.max(1, page) - 1) * Math.max(1, limit));
   const binds = {
     p_enterprise_id: enterprise_id,
+    p_user_id: userIdNum,
     p_employee_id: employee_id ?? null,
     p_plan_id: plan_id ?? null,
     p_employee_guid_hex: employee_guid_hex ?? null,

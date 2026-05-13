@@ -5,6 +5,15 @@ import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '..
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import {
+  requireActingUserId,
+  getActingUsername,
+  handleSecuredQueryError,
+  logSecuredAccess
+} from '../../../../utils/userContext.js';
+
+const ROUTE_TAG_LIST = 'GET /api/tm/schedule-assignments';
+const ROUTE_TAG_DETAIL = 'GET /api/tm/schedule-assignments/:id';
 
 const router = express.Router();
 
@@ -25,8 +34,13 @@ function convertToUpperCase(data) {
   return converted;
 }
 
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+/**
+ * Resolve the audit actor (string username) for CREATED_BY / LAST_UPDATED_BY.
+ * Always sourced from the verified JWT (no header / body fallback) and falls
+ * back to 'SYSTEM' for unauthenticated internal flows.
+ */
+function getAuditActor(req) {
+  return getActingUsername(req) ?? 'SYSTEM';
 }
 
 async function validateEnterpriseExists(tenantId) {
@@ -156,10 +170,9 @@ router.post('/', asyncHandler(async (req, res) => {
   if (isNaN(workScheduleId)) throw new ValidationError('Invalid work_schedule_id format');
   await ScheduleAssignmentModel.validateWorkScheduleExists(workScheduleId, tenantId);
 
-  const userId = getUserId(req);
+  const userId = getAuditActor(req);
   const upper = convertToUpperCase(data);
 
-  // Map org_unit_id -> DEPARTMENT_ID
   if (upper.ORG_UNIT_ID !== undefined) {
     upper.DEPARTMENT_ID = upper.ORG_UNIT_ID;
     delete upper.ORG_UNIT_ID;
@@ -188,7 +201,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const tenantId = parseInt(req.query.tenant_id, 10);
   if (isNaN(tenantId)) throw new ValidationError('Invalid tenant_id format');
 
-  const filters = { tenantId };
+  // FNDSEC data-access user_id comes strictly from the verified JWT.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
+  const filters = { tenantId, userId: actingUserId };
   const appliedFilters = { tenant_id: tenantId };
 
   if (req.query.assignment_level) {
@@ -264,7 +281,16 @@ router.get('/', asyncHandler(async (req, res) => {
 
   filters.pagination = { page, pageSize };
 
-  const result = await ScheduleAssignmentModel.findAll(filters);
+  let result;
+  try {
+    result = await ScheduleAssignmentModel.findAll(filters);
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_LIST,
+      friendlyMessage: 'Failed to fetch schedule assignments. Please try again later.',
+      context: { user_id: actingUserId, tenant_id: tenantId }
+    });
+  }
 
   const total = result.total || 0;
   const totalPages = Math.ceil(total / pageSize);
@@ -274,6 +300,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const assignments = (result.assignments || []).map((a) => {
     if (a.department_id !== undefined && a.department_id !== null) a.org_unit_id = a.department_id;
     return a;
+  });
+
+  logSecuredAccess(ROUTE_TAG_LIST, {
+    user_id: actingUserId,
+    tenant_id: tenantId,
+    returned: assignments.length,
+    total
   });
 
   sendList(res, {
@@ -294,12 +327,32 @@ router.get('/:schedule_assignment_id', asyncHandler(async (req, res) => {
   const tenantId = parseInt(req.query.tenant_id, 10);
   if (isNaN(tenantId)) throw new ValidationError('Invalid tenant_id format');
 
-  const assignment = await ScheduleAssignmentModel.findById(id, tenantId);
+  // FNDSEC data-access user_id comes strictly from the verified JWT.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
+  let assignment;
+  try {
+    assignment = await ScheduleAssignmentModel.findById(id, tenantId, actingUserId);
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_DETAIL,
+      friendlyMessage: 'Failed to fetch schedule assignment. Please try again later.',
+      context: { user_id: actingUserId, tenant_id: tenantId, schedule_assignment_id: id }
+    });
+  }
   if (!assignment) throw new NotFoundError('Schedule assignment not found');
 
   if (assignment.department_id !== undefined && assignment.department_id !== null) {
     assignment.org_unit_id = assignment.department_id;
   }
+
+  logSecuredAccess(ROUTE_TAG_DETAIL, {
+    user_id: actingUserId,
+    tenant_id: tenantId,
+    schedule_assignment_id: id,
+    allowed: 'Y'
+  });
 
   sendSuccess(res, {
     message: 'Schedule assignment fetched successfully',
@@ -360,10 +413,9 @@ router.patch('/:schedule_assignment_id', asyncHandler(async (req, res) => {
     throw new ValidationError('effective_end_date must be >= effective_start_date');
   }
 
-  const userId = getUserId(req);
+  const userId = getAuditActor(req);
   const upper = convertToUpperCase(data);
 
-  // Map org_unit_id -> DEPARTMENT_ID
   if (upper.ORG_UNIT_ID !== undefined) {
     upper.DEPARTMENT_ID = upper.ORG_UNIT_ID;
     delete upper.ORG_UNIT_ID;

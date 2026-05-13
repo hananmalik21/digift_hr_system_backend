@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
+import { nullableEmployeeAccessPredicate } from '../../../../utils/userContext.js';
 import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
 
 const VIEW = process.env.FNDSEC_USERS_FULL_V || 'FNDSEC.V_USERS_FULL_DETAILS';
@@ -43,6 +44,7 @@ function countFromRow(row) {
 /**
  * @typedef {Object} UsersListFilters
  * @property {number} enterprise_id
+ * @property {number} acting_user_id - JWT-resolved acting user_id for FNDSEC checks (required)
  * @property {string|null} username_inner - LIKE middle (already escaped for LIKE), or null
  * @property {string|null} primary_email_inner
  * @property {string|null} account_status
@@ -52,18 +54,40 @@ function countFromRow(row) {
 
 /**
  * List users from FNDSEC.V_USERS_FULL_DETAILS with filters and pagination.
+ *
+ * Security:
+ *   Rows linked to an employee (v.EMPLOYEE_ID IS NOT NULL) are filtered through
+ *   FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE so the caller only sees
+ *   users whose employee they may access. Pure system / admin users that have
+ *   no EMPLOYEE_ID are returned (they are not subject to employee-level data
+ *   security). The same predicate is applied to COUNT and LIST so pagination
+ *   totals match the visible rows.
+ *
  * @param {UsersListFilters} filters
  * @param {{ page: number, pageSize: number }} pagination
  * @returns {Promise<{ rows: object[], total: number }>}
  */
 export async function queryUsersList(filters, pagination) {
-  const { enterprise_id, username_inner, primary_email_inner, account_status, employee_number, search_inner } =
-    filters;
+  const {
+    enterprise_id,
+    acting_user_id,
+    username_inner,
+    primary_email_inner,
+    account_status,
+    employee_number,
+    search_inner
+  } = filters;
   const { page, pageSize } = pagination;
   const offset = (page - 1) * pageSize;
 
+  const actingUserIdNum = Number(acting_user_id);
+  if (!Number.isFinite(actingUserIdNum) || actingUserIdNum < 1) {
+    throw new ValidationError('Validation failed', ['acting user_id is required']);
+  }
+
   const binds = {
     enterprise_id: { val: enterprise_id, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    acting_user_id: { val: actingUserIdNum, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
     username_inner: bindStr(username_inner, 4000),
     primary_email_inner: bindStr(primary_email_inner, 4000),
     account_status: bindStr(account_status, 200),
@@ -73,6 +97,7 @@ export async function queryUsersList(filters, pagination) {
 
   const whereParts = [
     'v.ENTERPRISE_ID = :enterprise_id',
+    nullableEmployeeAccessPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':acting_user_id'),
     `(:username_inner IS NULL OR LOWER(v.USERNAME) LIKE LOWER('%' || :username_inner || '%') ESCAPE '\\')`,
     `(:primary_email_inner IS NULL OR LOWER(v.PRIMARY_EMAIL) LIKE LOWER('%' || :primary_email_inner || '%') ESCAPE '\\')`,
     '(:account_status IS NULL OR v.ACCOUNT_STATUS = :account_status)',

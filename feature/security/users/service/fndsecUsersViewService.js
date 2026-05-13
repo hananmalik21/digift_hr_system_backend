@@ -140,7 +140,7 @@ export async function mapUserViewRowToOutput(row) {
   return out;
 }
 
-function buildListFiltersFromQuery(query) {
+function buildListFiltersFromQuery(query, actingUserId) {
   const enterprise_id = parseEnterpriseId(query?.enterprise_id);
 
   const username_inner = buildOptionalLikeInner(query?.username);
@@ -159,6 +159,7 @@ function buildListFiltersFromQuery(query) {
 
   return {
     enterprise_id,
+    acting_user_id: actingUserId,
     username_inner,
     primary_email_inner,
     account_status,
@@ -168,11 +169,17 @@ function buildListFiltersFromQuery(query) {
 }
 
 /**
+ * @param {object} query - raw request query
+ * @param {{ acting_user_id: number }} security - JWT-resolved acting user_id
  * @returns {Promise<{ items: object[], total: number, page: number, pageSize: number }>}
  */
-export async function listUsersFromView(query) {
+export async function listUsersFromView(query, security) {
   const q = query || {};
-  const filters = buildListFiltersFromQuery(q);
+  const actingUserId = Number(security?.acting_user_id);
+  if (!Number.isFinite(actingUserId) || actingUserId < 1) {
+    throw new ValidationError('Validation failed', ['acting user_id is required']);
+  }
+  const filters = buildListFiltersFromQuery(q, actingUserId);
   const { page, pageSize } = parseUsersListPagination(q);
   const { rows, total } = await queryUsersList(filters, { page, pageSize });
   const items = await Promise.all(rows.map((row) => mapUserViewRowToOutput(row)));

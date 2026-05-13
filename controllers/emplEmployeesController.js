@@ -10,8 +10,11 @@ import { getConnection } from '../config/db.js';
 import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
 import { getEmployeeListRowByEmployeeId } from '../feature/employee_management/employees/controller/employeeController.js';
 import EmployeeModel from '../feature/employee_management/employees/model/employeeModel.js';
+import { requireActingUserId, logSecuredAccess } from '../utils/userContext.js';
+import { IS_DEV_MODE } from '../utils/env.js';
 
 const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
+const ROUTE_TAG_LIST = 'GET /api/empl/employees';
 
 function extractOracleFriendlyMessage(err) {
   const raw = String(err?.message ?? err ?? '').trim();
@@ -56,9 +59,14 @@ export async function getEmplEmployeesListHandler(req, res) {
       code: 'VALIDATION_ERROR'
     });
   }
+
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   try {
     const { data, next_cursor, has_next } = await getEmplEmployeesList({
       enterprise_id: enterpriseId,
+      user_id: actingUserId,
       limit: q.limit,
       cursor: q.cursor,
       sort_by: q.sort_by,
@@ -75,6 +83,14 @@ export async function getEmplEmployeesListHandler(req, res) {
       search: q.search
     });
     const limit = Math.min(100, Math.max(1, parseInt(q.limit, 10) || 10));
+
+    logSecuredAccess(ROUTE_TAG_LIST, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      returned: Array.isArray(data) ? data.length : 0,
+      has_next
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Employees fetched successfully',
@@ -89,10 +105,14 @@ export async function getEmplEmployeesListHandler(req, res) {
     });
   } catch (err) {
     const msg = err?.message ?? String(err);
-    const isValidation = msg.includes('enterprise_id') || err.code === 'VALIDATION_ERROR';
+    const isValidation = err?.code === 'VALIDATION_ERROR' || msg.includes('enterprise_id') || msg.includes('user_id');
+    if (IS_DEV_MODE && !isValidation) {
+      console.error('[%s][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        ROUTE_TAG_LIST, actingUserId, enterpriseId, msg);
+    }
     return res.status(isValidation ? 400 : 500).json({
       success: false,
-      message: msg,
+      message: isValidation ? msg : 'Failed to fetch employees',
       code: isValidation ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR'
     });
   }

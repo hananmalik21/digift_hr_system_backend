@@ -7,6 +7,7 @@ import oracledb from 'oracledb';
 import { withCompSchemaConnection } from '../../db/withCompSchemaConnection.js';
 import { readScalarCount } from '../../salary_structures/utils/oracleListHelpers.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import { AdjustmentListValidationError } from '../utils/adjustmentListErrors.js';
 import { strOrNull, firstStrOrNull } from '../utils/adjustmentRowMappers.js';
 
@@ -152,10 +153,22 @@ function parseJsonArrayField(raw, field) {
  * @param {object} filters
  * @param {string} entCol
  * @returns {{ whereSql: string, binds: Record<string, unknown> }}
+ *
+ * Security: applies FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE to every
+ * row using v.EMPLOYEE_ID and the enterprise column. Caller must pass
+ * `filters.user_id` (positive integer); the controller takes it from the JWT.
  */
 function buildWhereClause(filters, entCol) {
-  const whereParts = [`v.${entCol} = :enterprise_id`];
-  const binds = { enterprise_id: filters.enterprise_id };
+  const userIdNum = Number(filters.user_id);
+  if (!Number.isFinite(userIdNum) || userIdNum < 1) {
+    throw new AdjustmentListValidationError('user_id is required');
+  }
+
+  const whereParts = [
+    `v.${entCol} = :enterprise_id`,
+    employeeAccessFunctionPredicate(`v.${entCol}`, 'v.EMPLOYEE_ID', ':user_id')
+  ];
+  const binds = { enterprise_id: filters.enterprise_id, user_id: userIdNum };
 
   if (filters.adjustment_id != null) {
     whereParts.push('v.ADJUSTMENT_ID = :adjustment_id');
@@ -252,6 +265,7 @@ export function mapAdjustmentFullViewRow(row) {
 /**
  * @param {{
  *   enterprise_id: number,
+ *   user_id: number,
  *   adjustment_id?: number,
  *   employee_id?: number,
  *   plan_id?: number,

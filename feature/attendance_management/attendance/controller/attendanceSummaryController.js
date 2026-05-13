@@ -7,8 +7,11 @@ import { getAttendanceSummary } from '../model/attendanceSummaryModel.js';
 import { sendValidationError, sendDatabaseError, sendError } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { requireActingUserId, logSecuredAccess } from '../../../../utils/userContext.js';
+import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
+const ROUTE_TAG_SUMMARY = 'GET /api/tm/attendance-summary';
 
 function optNum(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -27,8 +30,14 @@ router.get('/', asyncHandler(async (req, res) => {
     return sendValidationError(res, req, new ValidationError('Validation failed', ['enterprise_id is required and must be a positive number']));
   }
 
+  // FNDSEC: acting user_id comes strictly from the verified JWT. Query / header
+  // user_id values are not trusted for the data-access decision.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   const filters = {
     enterprise_id: enterpriseId,
+    user_id: actingUserId,
     from_date: req.query.from_date ?? req.query.date_from ?? null,
     to_date: req.query.to_date ?? req.query.date_to ?? null,
     attendance_date: req.query.attendance_date ?? null,
@@ -43,6 +52,13 @@ router.get('/', asyncHandler(async (req, res) => {
   try {
     const { rows, total, page, pageSize } = await getAttendanceSummary(filters);
     const totalPages = total > 0 ? Math.ceil(total / pageSize) : 0;
+
+    logSecuredAccess(ROUTE_TAG_SUMMARY, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      returned: Array.isArray(rows) ? rows.length : 0,
+      total
+    });
 
     const payload = {
       success: true,
@@ -62,11 +78,15 @@ router.get('/', asyncHandler(async (req, res) => {
     res.status(200).json(payload);
   } catch (error) {
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
-    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
-    if (error.errorNum || error.message?.includes('ORA-')) {
-      return sendDatabaseError(res, req, new DatabaseError(error.message || 'Failed to fetch attendance summary', error));
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        ROUTE_TAG_SUMMARY, actingUserId, enterpriseId, error?.message ?? String(error));
     }
-    return sendError(res, req, error);
+    if (error instanceof DatabaseError) return sendDatabaseError(res, req, new DatabaseError('Failed to fetch attendance summary'));
+    if (error.errorNum || error.message?.includes('ORA-')) {
+      return sendDatabaseError(res, req, new DatabaseError('Failed to fetch attendance summary'));
+    }
+    return sendError(res, req, new Error('Failed to fetch attendance summary'));
   }
 }));
 

@@ -7,6 +7,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 
 const VIEW = 'TM.V_ATTENDANCE_ACTUALS_EMP';
 
@@ -74,6 +75,7 @@ function parseJsonFields(row, jsonFields = ['org_structure_list']) {
 /**
  * Build a single SELECT from TM.V_ATTENDANCE_ACTUALS_EMP with bind parameters.
  * - enterprise_id: required, always applied.
+ * - user_id: required, always applied as FNDSEC.CAN_ACCESS_EMPLOYEE predicate.
  * - from_date, to_date: optional; attendance_date >= :from_date AND attendance_date < :to_date + 1.
  *   If only from_date: single day (to_date = from_date). If both: date range. If neither: no date filter.
  * - employee_id, attendance_status: optional equality filters.
@@ -84,10 +86,15 @@ function parseJsonFields(row, jsonFields = ['org_structure_list']) {
 function buildSummaryQuery(filters) {
   const whereParts = ['v.ENTERPRISE_ID = :enterpriseId'];
 
-  // Date filter: attendance_date >= :from_date AND attendance_date < :to_date + 1
-  // Only from_date -> single day (effective to_date = from_date); both -> range; neither -> no filter
+  // FNDSEC DB-level data access: restrict rows to employees the acting user
+  // is authorized to see (CAN_ACCESS_EMPLOYEE = 'Y'). Applied inside the
+  // single inner SELECT, so both the COUNT(*) OVER () total and the returned
+  // rows reflect only accessible employees.
+  whereParts.push(
+    employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId')
+  );
+
   if (filters.fromDate != null) {
-    const toDate = filters.toDate != null ? filters.toDate : filters.fromDate;
     whereParts.push('v.ATTENDANCE_DATE >= TO_DATE(:fromDate, \'YYYY-MM-DD\')');
     whereParts.push('v.ATTENDANCE_DATE < TO_DATE(:toDate, \'YYYY-MM-DD\') + 1');
   }
@@ -99,7 +106,6 @@ function buildSummaryQuery(filters) {
     whereParts.push('UPPER(v.ATTENDANCE_STATUS) = UPPER(:attendanceStatus)');
   }
 
-  // Org tree: membership in ORG_STRUCTURE_LIST (view column; use only ORG_STRUCTURE_LIST per spec)
   const orgListCol = 'v.ORG_STRUCTURE_LIST';
   if (filters.orgUnitId != null) {
     whereParts.push(
@@ -115,7 +121,6 @@ function buildSummaryQuery(filters) {
   const whereClause = whereParts.join(' AND ');
   const orderDir = 'DESC';
 
-  // Single query: total via COUNT(*) OVER (), paginate with OFFSET/FETCH (one round-trip)
   const sql = `
     SELECT sub.* FROM (
       SELECT v.*, COUNT(*) OVER () AS total_count
@@ -127,7 +132,12 @@ function buildSummaryQuery(filters) {
     FETCH NEXT :pageSize ROWS ONLY
   `;
 
-  const binds = { enterpriseId: filters.enterpriseId, page: filters.page, pageSize: filters.pageSize };
+  const binds = {
+    enterpriseId: filters.enterpriseId,
+    userId: filters.userId,
+    page: filters.page,
+    pageSize: filters.pageSize
+  };
   if (filters.fromDate != null) {
     binds.fromDate = filters.fromDate;
     binds.toDate = filters.toDate != null ? filters.toDate : filters.fromDate;
@@ -155,6 +165,11 @@ export async function getAttendanceSummary(filters) {
     throw new DatabaseError('enterprise_id is required');
   }
 
+  const userId = optNum(filters.user_id ?? filters.userId);
+  if (userId == null || userId < 1) {
+    throw new ValidationError('Validation failed', ['user_id is required and must be a positive number']);
+  }
+
   const fromDateRaw = optStr(filters.from_date ?? filters.fromDate ?? filters.date_from ?? filters.dateFrom ?? filters.attendance_date ?? filters.attendanceDate);
   const toDateRaw = optStr(filters.to_date ?? filters.toDate ?? filters.date_to ?? filters.dateTo);
   const fromDate = fromDateRaw ? parseDateOnly(fromDateRaw) : null;
@@ -176,6 +191,7 @@ export async function getAttendanceSummary(filters) {
 
   const normalizedFilters = {
     enterpriseId,
+    userId,
     fromDate,
     toDate,
     employeeId,

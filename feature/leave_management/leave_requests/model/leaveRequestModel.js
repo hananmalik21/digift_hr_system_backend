@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../utils/guidUtils.js';
 import { safeJson } from '../../../../services/emplEmployeeListService.js';
+import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 
 /** Status used when normalizing legacy PENDING to SUBMITTED */
 const REQUEST_STATUS_SUBMITTED = 'SUBMITTED';
@@ -180,10 +181,16 @@ class LeaveRequestModel {
   /**
    * Get all leave requests with optional filters + pagination
    * Optimized for performance with proper indexing and query structure
+   *
+   * Security:
+   *   When `filters.userId` is provided (positive number), the WHERE clause is
+   *   augmented with a FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE check
+   *   so rows for employees the acting user cannot access are filtered out at
+   *   the database level. Both the COUNT and the DATA query receive the same
+   *   predicate so the total reflects only accessible rows.
    */
   static async findAll(filters = {}) {
     try {
-      // Build WHERE conditions with bind parameters
       const conditions = [];
       const bindParams = [];
       let paramIndex = 1;
@@ -195,28 +202,24 @@ class LeaveRequestModel {
         paramIndex++;
       }
 
-      // EMPLOYEE_ID filter (high selectivity)
       if (filters.employeeId) {
         conditions.push(`a.EMPLOYEE_ID = :${paramIndex}`);
         bindParams.push(parseInt(filters.employeeId));
         paramIndex++;
       }
 
-      // REQUEST_STATUS filter
       if (filters.status) {
         conditions.push(`a.REQUEST_STATUS = :${paramIndex}`);
         bindParams.push(filters.status);
         paramIndex++;
       }
 
-      // LEAVE_TYPE_ID filter
       if (filters.leaveTypeId) {
         conditions.push(`a.LEAVE_TYPE_ID = :${paramIndex}`);
         bindParams.push(parseInt(filters.leaveTypeId));
         paramIndex++;
       }
 
-      // Date range filters (optimized for START_DATE index)
       if (filters.startDateFrom) {
         conditions.push(`a.START_DATE >= :${paramIndex}`);
         bindParams.push(filters.startDateFrom);
@@ -226,6 +229,19 @@ class LeaveRequestModel {
       if (filters.startDateTo) {
         conditions.push(`a.START_DATE <= :${paramIndex}`);
         bindParams.push(filters.startDateTo);
+        paramIndex++;
+      }
+
+      // FNDSEC DB-level data access: restrict rows to employees the acting
+      // user is authorized to see (CAN_ACCESS_EMPLOYEE = 'Y'). Applied to both
+      // the COUNT and DATA queries below so totals exclude inaccessible rows.
+      if (filters.userId !== undefined && filters.userId !== null && filters.userId !== '') {
+        const acting = Number(filters.userId);
+        if (!Number.isFinite(acting) || acting < 1) {
+          throw new ValidationError('userId must be a positive number');
+        }
+        conditions.push(employeeAccessFunctionPredicate('a.TENANT_ID', 'a.EMPLOYEE_ID', `:${paramIndex}`));
+        bindParams.push(acting);
         paramIndex++;
       }
 

@@ -74,6 +74,7 @@ import enterpriseStatsController from './feature/enterprise_structure/enterprise
 import activeStructureStatsController from './feature/enterprise_structure/active_structure_stats/controller/activeStructureStatsController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
+import { requireAuth } from './middleware/authMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
@@ -104,6 +105,15 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/documents', documentsDownloadRouter);
+
+// ==========================================
+// JWT AUTHENTICATION MIDDLEWARE (must run before any protected route)
+// All requests require a valid `Authorization: Bearer <token>` header except
+// the public endpoints declared inside the middleware (login, health,
+// document download). The middleware populates `req.user` with the decoded
+// payload (user_id, user_guid, enterprise_id, username).
+// ==========================================
+app.use(requireAuth);
 
 // Company routes
 app.use('/api/companies', companyController);

@@ -19,17 +19,23 @@ import {
 import { sendSuccess, sendCreated, sendUpdated, sendDeleted, sendList } from '../../../../utils/response.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import {
+  requireActingUserId,
+  logSecuredAccess,
+  handleSecuredQueryError
+} from '../../../../utils/userContext.js';
 
 const router = express.Router();
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ROUTE_TAG_LIST = 'GET /api/tm/timesheets';
 
 // In-memory cache for list endpoint (short TTL to improve response time on repeated requests)
 const LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const listCache = new Map();
 
 function listCacheKey(filters) {
-  return `list:${filters.enterpriseId}:${filters.page}:${filters.limit}:${filters.sortBy}:${filters.sortOrder}:${filters.search ?? ''}:${filters.status ?? ''}:${filters.isActive ?? ''}:${filters.employeeId ?? ''}:${filters.weekStartFrom ?? ''}:${filters.weekStartTo ?? ''}:${filters.submittedFrom ?? ''}:${filters.submittedTo ?? ''}:${filters.levelCode ?? ''}:${filters.orgUnitId ?? ''}`;
+  return `list:${filters.enterpriseId}:${filters.userId}:${filters.page}:${filters.limit}:${filters.sortBy}:${filters.sortOrder}:${filters.search ?? ''}:${filters.status ?? ''}:${filters.isActive ?? ''}:${filters.employeeId ?? ''}:${filters.weekStartFrom ?? ''}:${filters.weekStartTo ?? ''}:${filters.submittedFrom ?? ''}:${filters.submittedTo ?? ''}:${filters.levelCode ?? ''}:${filters.orgUnitId ?? ''}`;
 }
 
 function invalidateTimesheetsListCache() {
@@ -360,8 +366,14 @@ router.get('/', asyncHandler(async (req, res) => {
     throw new ValidationError('enterpriseId is required');
   }
 
+  // FNDSEC: acting user_id comes strictly from the verified JWT. Query/header
+  // user_id values are ignored for data access to prevent impersonation.
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return; // 401 already sent
+
   const filters = {
     enterpriseId,
+    userId: actingUserId,
     page: req.query.page ?? 1,
     limit: req.query.limit ?? 10,
     search: req.query.search,
@@ -381,6 +393,13 @@ router.get('/', asyncHandler(async (req, res) => {
   const key = listCacheKey(filters);
   const cached = listCache.get(key);
   if (cached && Date.now() - cached.at < LIST_CACHE_TTL_MS) {
+    logSecuredAccess(ROUTE_TAG_LIST, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      returned: Array.isArray(cached.result.data) ? cached.result.data.length : 0,
+      total: cached.result.total_count ?? 0,
+      cache: 'HIT'
+    });
     return sendList(res, {
       message: 'Fetched successfully',
       data: cached.result.data,
@@ -388,7 +407,25 @@ router.get('/', asyncHandler(async (req, res) => {
     });
   }
 
-  const result = await listTimesheetsFromView(filters);
+  let result;
+  try {
+    result = await listTimesheetsFromView(filters);
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_LIST,
+      friendlyMessage: 'Failed to fetch timesheets. Please try again later.',
+      context: { user_id: actingUserId, enterprise_id: enterpriseId }
+    });
+  }
+
+  logSecuredAccess(ROUTE_TAG_LIST, {
+    user_id: actingUserId,
+    enterprise_id: enterpriseId,
+    returned: Array.isArray(result.data) ? result.data.length : 0,
+    total: result.total_count ?? 0,
+    cache: 'MISS'
+  });
+
   if (listCache.size >= 500) listCache.clear();
   listCache.set(key, { result, at: Date.now() });
   sendList(res, {
