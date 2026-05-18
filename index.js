@@ -92,6 +92,7 @@ import fndsecJobRolesController from './feature/security/job_roles/controller/fn
 import fndsecWorkLocationsController from './feature/security/work_locations/controller/fndsecWorkLocationsController.js';
 import fndsecUsersController from './feature/security/users/controller/fndsecUsersController.js';
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
+import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -290,6 +291,9 @@ app.use('/api/security/users', fndsecUsersController);
 
 // Security - Auth (FNDSEC.FNDSEC_AUTH_PKG)
 app.use('/api/security/auth', fndsecAuthController);
+
+// Recruitment — requisitions (REC.CREATE_REQUISITION_PKG)
+app.use('/api/rec/requisitions', recRequisitionsController);
 
 // Initialize database pool on startup
 await createPool();
