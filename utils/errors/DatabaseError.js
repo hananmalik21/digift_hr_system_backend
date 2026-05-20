@@ -210,6 +210,12 @@ export class DatabaseError extends AppError {
     // ORA-04088: error during trigger — keep message friendly when FNDSEC lookup triggers wrap ORA-01403
     if (errorNum === 4088 || message.includes('ORA-04088')) {
       const upper = message.toUpperCase();
+      // If the trigger failure wraps an application error (ORA-20001 / ORA-20xxx), prefer the real message.
+      const appErrMatch = message.match(/ORA-(20\d{3}):\s*([^\n\r]+)/i);
+      if (appErrMatch) {
+        const extracted = String(appErrMatch[2] ?? '').trim();
+        if (extracted) return extracted;
+      }
       if (upper.includes('FNDSEC_LKP_VAL') || upper.includes('FNDSEC_LOOKUP_VALUES')) {
         return 'This lookup value cannot be saved: the database validation trigger failed. Usually lookup_type_id is wrong or missing, or enterprise_id does not match a global/enterprise lookup type. Verify the type exists and include enterprise_id if required.';
       }
@@ -232,7 +238,14 @@ export class DatabaseError extends AppError {
         const extracted = message.replace(/ORA-20001:\s*/i, '').split(/\n/)[0].trim();
         return extracted || 'Attendance Day does not exist for the given enterprise, employee, and date.';
       }
-      return 'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.';
+      // Prefer the actual application error message raised by trigger/package.
+      // Keep only the first line and strip Oracle stack traces.
+      // First try to pull the explicit "ORA-20001: ..." line if present anywhere.
+      const m = message.match(/ORA-20001:\s*([^\n\r]+)/i);
+      let extracted = m ? String(m[1] ?? '').trim() : message.replace(/ORA-20001:\s*/i, '');
+      extracted = extracted.split(/\nORA-\d{5}:/)[0].trim();
+      extracted = extracted.split('\n')[0].trim();
+      return extracted || 'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.';
     }
 
     // Mutating table error (trigger reading from same table being modified)
