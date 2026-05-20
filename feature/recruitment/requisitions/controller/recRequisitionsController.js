@@ -11,6 +11,7 @@ import {
   holdRequisitionViaPackage,
   openRequisitionViaPackage,
   reopenRequisitionViaPackage,
+  rejectRequisitionViaPackage,
   packageStatusIsSuccess,
   updateRequisitionViaPackage
 } from '../model/recRequisitionsModel.js';
@@ -25,6 +26,7 @@ import {
   parseRequisitionGuidParam,
   parseRequisitionAction,
   validateGuidEnterpriseParams,
+  validateRejectParams,
   validateRequisitionBody
 } from '../utils/recRequisitionValidators.js';
 import { normalizeListQuery } from '../utils/recRequisitionListFilters.js';
@@ -52,24 +54,39 @@ function sendPackageResponse(res, httpStatus, payload) {
 
 function packageResultToHttp(res, pkg, successData, failData = successData) {
   const success = packageStatusIsSuccess(pkg.status);
-  const message = pkg.message || (success ? 'Operation completed successfully.' : 'Operation failed.');
-  if (!success) {
-    return sendPackageResponse(res, 400, { success: false, message, data: failData ?? null });
-  }
-  return sendPackageResponse(res, 200, { success: true, message, data: successData });
-}
-
-function sendCreateRequisitionResponse(res, pkg) {
-  const success = packageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message || (success ? 'Operation completed successfully.' : 'Operation failed.');
+  const message = pkg.message ?? '';
   if (!success) {
-    return sendPackageResponse(res, 400, { success: false, status, message });
+    return sendPackageResponse(res, 400, {
+      success: false,
+      status,
+      message,
+      data: failData ?? null
+    });
   }
   return sendPackageResponse(res, 200, {
     success: true,
     status,
     message,
+    data: successData
+  });
+}
+
+/** Standard package action response: success, status, message from PL/SQL out binds. */
+function sendPackageActionResponse(res, pkg, extra = {}) {
+  const success = packageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message ?? '';
+  return sendPackageResponse(res, success ? 200 : 400, {
+    success,
+    status,
+    message,
+    ...extra
+  });
+}
+
+function sendCreateRequisitionResponse(res, pkg) {
+  return sendPackageActionResponse(res, pkg, {
     requisition_id: pkg.requisition_id ?? null,
     requisition_guid: pkg.requisition_guid ?? null,
     requisition_number: pkg.requisition_number ?? null
@@ -77,13 +94,15 @@ function sendCreateRequisitionResponse(res, pkg) {
 }
 
 function sendUpdateRequisitionResponse(res, pkg) {
-  const success = packageStatusIsSuccess(pkg.status);
-  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message || (success ? 'Operation completed successfully.' : 'Operation failed.');
-  if (!success) {
-    return sendPackageResponse(res, 400, { success: false, status, message });
-  }
-  return sendPackageResponse(res, 200, { success: true, status, message });
+  return sendPackageActionResponse(res, pkg);
+}
+
+function sendValidationError(res, err) {
+  return sendPackageResponse(res, 400, {
+    success: false,
+    status: 'ERROR',
+    message: firstValidationMessage(err)
+  });
 }
 
 function buildListPaginationMeta(page, pageSize, total) {
@@ -180,10 +199,11 @@ router.post(
       return sendCreateRequisitionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -243,13 +263,14 @@ router.post(
       );
       const approved_by = resolveAuditActor(req, req.body, 'approved_by');
       const pkg = await approveRequisitionViaPackage(requisition_guid, enterprise_id, approved_by);
-      return packageResultToHttp(res, pkg, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -269,13 +290,14 @@ router.post(
       );
       const opened_by = resolveAuditActor(req, req.body, 'opened_by');
       const pkg = await openRequisitionViaPackage(requisition_guid, enterprise_id, opened_by);
-      return packageResultToHttp(res, pkg, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -295,13 +317,14 @@ router.post(
       );
       const closed_by = resolveAuditActor(req, req.body, 'closed_by');
       const pkg = await closeRequisitionViaPackage(requisition_guid, enterprise_id, closed_by);
-      return packageResultToHttp(res, pkg, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -321,13 +344,14 @@ router.post(
       );
       const held_by = resolveAuditActor(req, req.body, 'held_by');
       const pkg = await holdRequisitionViaPackage(requisition_guid, enterprise_id, held_by);
-      return packageResultToHttp(res, pkg, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -347,13 +371,50 @@ router.post(
       );
       const reopened_by = resolveAuditActor(req, req.body, 'reopened_by');
       const pkg = await reopenRequisitionViaPackage(requisition_guid, enterprise_id, reopened_by);
-      return packageResultToHttp(res, pkg, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
+        message: 'Unable to process requisition. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * POST /api/rec/requisitions/:requisition_guid/reject?enterprise_id=1
+ * Body: rejected_by (required), rejection_reason (optional)
+ */
+router.post(
+  '/:requisition_guid/reject',
+  asyncHandler(async (req, res) => {
+    try {
+      const body = { ...(req.body || {}) };
+      body.rejected_by = resolveAuditActor(req, body, 'rejected_by');
+      const { requisition_guid, enterprise_id } = validateRejectParams(
+        req.params.requisition_guid,
+        req.query?.enterprise_id ?? body.enterprise_id,
+        body
+      );
+      const rejection_reason = body.rejection_reason ?? body.rejectionReason ?? null;
+      const pkg = await rejectRequisitionViaPackage(
+        requisition_guid,
+        enterprise_id,
+        body.rejected_by,
+        rejection_reason
+      );
+      return sendPackageActionResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -414,10 +475,11 @@ router.put(
       return sendUpdateRequisitionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }
@@ -426,6 +488,7 @@ router.put(
 
 /**
  * DELETE /api/rec/requisitions/:requisition_guid?enterprise_id=1
+ * Draft: physical delete. PENDING_APPROVAL: withdrawn (package message).
  */
 router.delete(
   '/:requisition_guid',
@@ -437,13 +500,14 @@ router.delete(
       );
 
       const pkg = await deleteRequisitionViaPackage(requisition_guid, enterprise_id);
-      return packageResultToHttp(res, pkg, { requisition_guid }, { requisition_guid });
+      return sendPackageActionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
-        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+        return sendValidationError(res, err);
       }
       return sendPackageResponse(res, 500, {
         success: false,
+        status: 'ERROR',
         message: 'Unable to process requisition. Please try again.'
       });
     }

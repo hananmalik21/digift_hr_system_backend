@@ -107,6 +107,8 @@ function resolveDisplayStatus(approvalCode, openCode) {
   const o = String(openCode ?? '').trim().toUpperCase();
   if (a === 'DRAFT') return 'Draft';
   if (a === 'PENDING_APPROVAL') return 'Pending Approval';
+  if (a === 'REJECTED') return 'Rejected';
+  if (a === 'WITHDRAWN') return 'Withdrawn';
   if (a === 'APPROVED') {
     if (o === 'OPEN') return 'Open';
     if (o === 'ON_HOLD') return 'On Hold';
@@ -217,7 +219,10 @@ function buildStatusScalars(m, statusObj) {
     opened_by: pickScalar(m, statusObj, 'opened_by'),
     opened_date: pickScalar(m, statusObj, 'opened_date'),
     closed_by: pickScalar(m, statusObj, 'closed_by'),
-    closed_date: pickScalar(m, statusObj, 'closed_date')
+    closed_date: pickScalar(m, statusObj, 'closed_date'),
+    rejected_by: pickScalar(m, statusObj, 'rejected_by'),
+    rejected_date: pickScalar(m, statusObj, 'rejected_date'),
+    rejection_reason: pickScalar(m, statusObj, 'rejection_reason')
   };
 }
 
@@ -238,6 +243,9 @@ function shapeStatus(statusObj, scalars) {
     opened_date: formatDateString(scalars.opened_date),
     closed_by: strOrNull(scalars.closed_by),
     closed_date: formatDateString(scalars.closed_date),
+    rejected_by: strOrNull(scalars.rejected_by),
+    rejected_date: formatDateString(scalars.rejected_date),
+    rejection_reason: strOrNull(scalars.rejection_reason),
     display_status:
       displayFromObj ||
       resolveDisplayStatus(approval_status_code, open_status_code) ||
@@ -308,6 +316,9 @@ export async function mapViewRowToListItem(row) {
     opened_date: status.opened_date,
     closed_by: status.closed_by,
     closed_date: status.closed_date,
+    rejected_by: status.rejected_by,
+    rejected_date: status.rejected_date,
+    rejection_reason: status.rejection_reason,
     position: shapeGenericParsedObject(positionRaw),
     org_unit: shapeOrgUnit(orgUnitRaw),
     org_hierarchy: shapeOrgHierarchy(orgHierarchyRaw),

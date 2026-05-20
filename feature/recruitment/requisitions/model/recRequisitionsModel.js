@@ -12,6 +12,7 @@ const OPEN_PROC = `${PKG}.open_requisition`;
 const CLOSE_PROC = `${PKG}.close_requisition`;
 const HOLD_PROC = `${PKG}.hold_requisition`;
 const REOPEN_PROC = `${PKG}.reopen_requisition`;
+const REJECT_PROC = `${PKG}.reject_requisition`;
 
 const GENERIC_ERROR_MESSAGE = 'Unable to process requisition. Please try again.';
 
@@ -606,6 +607,18 @@ BEGIN
   );
 END;`;
 
+const REJECT_PLSQL = `
+BEGIN
+  ${REJECT_PROC}(
+    p_requisition_guid => :p_requisition_guid,
+    p_enterprise_id    => :p_enterprise_id,
+    p_rejected_by      => :p_rejected_by,
+    p_rejection_reason => :p_rejection_reason,
+    p_status           => :o_status,
+    p_message          => :o_message
+  );
+END;`;
+
 /**
  * @param {Record<string, unknown>} body
  * @returns {Promise<{ requisition_id: number|null, requisition_number: string|null, status: string, message: string }>}
@@ -768,4 +781,32 @@ export async function deleteRequisitionViaPackage(requisitionGuidHex, enterprise
     console.error('[recRequisitionsModel] delete_requisition failed:', err?.errorNum ?? '', '[redacted]');
     return { status: 'ERROR', message: GENERIC_ERROR_MESSAGE };
   }
+}
+
+/**
+ * @param {string} requisitionGuidHex
+ * @param {number} enterpriseId
+ * @param {string} rejectedBy
+ * @param {string|null|undefined} rejectionReason
+ * @returns {Promise<{ status: string, message: string }>}
+ */
+export async function rejectRequisitionViaPackage(
+  requisitionGuidHex,
+  enterpriseId,
+  rejectedBy,
+  rejectionReason
+) {
+  return executeLifecycle(REJECT_PLSQL, {
+    p_requisition_guid: guidInBind(requisitionGuidHex),
+    p_enterprise_id: { val: enterpriseId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    p_rejected_by: { val: strOrNull(rejectedBy), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    p_rejection_reason: {
+      val: strOrNull(rejectionReason),
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 4000
+    },
+    o_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    o_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  });
 }

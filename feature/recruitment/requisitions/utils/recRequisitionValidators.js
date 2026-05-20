@@ -226,5 +226,26 @@ export function parseRequisitionGuidParam(requisitionGuidParam) {
   return ensureHex32(requisitionGuidParam, 'requisition_guid');
 }
 
+/**
+ * @param {string} requisitionGuidParam
+ * @param {string|undefined} enterpriseIdQuery
+ * @param {Record<string, unknown>|undefined} body
+ */
+export function validateRejectParams(requisitionGuidParam, enterpriseIdQuery, body) {
+  const { requisition_guid, enterprise_id } = validateGuidEnterpriseParams(
+    requisitionGuidParam,
+    enterpriseIdQuery
+  );
+  const errors = [];
+  const b = asObject(body);
+  if (isBlank(b.rejected_by)) {
+    errors.push('rejected_by is required');
+  }
+  if (errors.length) {
+    throw new ValidationError('Validation failed', errors);
+  }
+  return { requisition_guid, enterprise_id };
+}
+
 /** @deprecated Use validateGuidEnterpriseParams */
 export const validateDeleteParams = validateGuidEnterpriseParams;
