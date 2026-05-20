@@ -60,6 +60,7 @@ import compComponentController from './feature/compensation/components/controlle
 import compSalaryStructureRoutes from './feature/compensation/salary_structures/routes/compSalaryStructures.routes.js';
 import compAdjustmentsRoutes from './feature/compensation/adjustments/routes/compAdjustments.routes.js';
 import compEmployeeAssignedComponentsRoutes from './feature/compensation/employee_assigned_components/routes/compEmployeeAssignedComponents.routes.js';
+import compEligiblePlansByCriteriaRoutes from './feature/compensation/eligible_plans_by_criteria/routes/compEligiblePlansByCriteria.routes.js';
 import compensationPlanController from './feature/compensation/plans/controller/compensationPlanController.js';
 import compPlansFullViewController from './feature/compensation/plans/controller/compPlansFullViewController.js';
 import employeeCompensationController from './feature/compensation/employee_compensation/controller/employeeCompensationController.js';
@@ -247,6 +248,7 @@ app.use('/api/comp/employee-compensation', employeeCompensationController);
 app.use('/api/comp', compSalaryStructureRoutes);
 app.use('/api/comp', compAdjustmentsRoutes);
 app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
+app.use('/api/comp', compEligiblePlansByCriteriaRoutes);
 app.use('/api/comp', compPlansFullViewController);
 app.use('/api/compensation/plans', compensationPlanController);
 app.use('/api/compensation', compSalaryChangeHistoryRoutes);
