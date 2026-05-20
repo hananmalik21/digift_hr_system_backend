@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { applyRequisitionDefaults } from '../utils/recRequisitionValidators.js';
 
 const PKG = 'REC.CREATE_REQUISITION_PKG';
 const CREATE_PROC = `${PKG}.create_requisition`;
@@ -73,12 +74,19 @@ function requiredRawBuffer(v) {
  */
 function jsonArrayToClobString(value) {
   if (value == null || value === '') return null;
-  if (!Array.isArray(value)) return null;
-  return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return null;
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'object') {
+    if (Object.keys(value).length === 0) return null;
+    return JSON.stringify(value);
+  }
+  return null;
 }
 
 function parseFileContent(body) {
-  const raw = body.file_content ?? body.fileContent;
+  const raw = body.file_content ?? body.fileContent ?? body.file;
   if (raw == null || raw === '') return null;
   if (Buffer.isBuffer(raw)) return raw;
   let s = String(raw).trim();
@@ -119,19 +127,18 @@ export function packageStatusIsSuccess(status) {
 }
 
 /** @param {unknown} value @returns {'DRAFT'|'SUBMIT'} */
-export function resolveCreateAction(value) {
+export function resolveRequisitionAction(value) {
   if (value === undefined || value === null || value === '') return 'DRAFT';
   const a = String(value).trim().toUpperCase();
-  return a === 'SUBMIT' ? 'SUBMIT' : 'DRAFT';
+  if (a === 'DRAFT' || a === 'SUBMIT') return a;
+  return 'DRAFT';
 }
 
-/** @param {unknown} value @returns {'DRAFT'|'SUBMIT'|null} */
-export function resolveUpdateAction(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const a = String(value).trim().toUpperCase();
-  if (a === 'DRAFT' || a === 'SUBMIT') return a;
-  return null;
-}
+/** @deprecated Use resolveRequisitionAction after API validation */
+export const resolveCreateAction = resolveRequisitionAction;
+
+/** @deprecated Use resolveRequisitionAction after API validation */
+export const resolveUpdateAction = resolveRequisitionAction;
 
 function actionBind(val) {
   return { val, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 20 };
@@ -170,7 +177,7 @@ function buildSharedInBinds(b) {
       maxSize: 500
     },
     p_position_id: {
-      val: requiredRawBuffer(b.position_id),
+      val: optionalRawBuffer(b.position_id),
       dir: oracledb.BIND_IN,
       type: oracledb.BUFFER,
       maxSize: 16
@@ -604,10 +611,10 @@ END;`;
  * @returns {Promise<{ requisition_id: number|null, requisition_number: string|null, status: string, message: string }>}
  */
 export async function createRequisitionViaPackage(body) {
-  const b = body || {};
+  const b = applyRequisitionDefaults({ ...(body || {}) });
   const binds = {
     ...buildSharedInBinds(b),
-    p_action: actionBind(resolveCreateAction(b.action)),
+    p_action: actionBind(resolveRequisitionAction(b.action)),
     p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
     o_requisition_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
     o_requisition_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },
@@ -632,7 +639,7 @@ export async function createRequisitionViaPackage(body) {
  * @returns {Promise<{ requisition_id: number|null, requisition_number: string|null, status: string, message: string }>}
  */
 export async function updateRequisitionViaPackage(body) {
-  const b = body || {};
+  const b = applyRequisitionDefaults({ ...(body || {}) });
   const binds = {
     p_requisition_guid: {
       val: requiredRawBuffer(b.requisition_guid),
@@ -641,7 +648,7 @@ export async function updateRequisitionViaPackage(body) {
       maxSize: 16
     },
     ...buildSharedInBinds(b),
-    p_action: actionBind(resolveUpdateAction(b.action)),
+    p_action: actionBind(resolveRequisitionAction(b.action)),
     p_last_updated_by: {
       val: strOrNull(b.last_updated_by),
       dir: oracledb.BIND_IN,

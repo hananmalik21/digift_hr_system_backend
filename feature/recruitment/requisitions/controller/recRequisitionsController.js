@@ -12,7 +12,6 @@ import {
   openRequisitionViaPackage,
   reopenRequisitionViaPackage,
   packageStatusIsSuccess,
-  resolveCreateAction,
   updateRequisitionViaPackage
 } from '../model/recRequisitionsModel.js';
 import { getRequisitionAttachment } from '../model/recRequisitionQueryModel.js';
@@ -22,11 +21,17 @@ import {
   listRequisitionsFromView
 } from '../model/recRequisitionViewModel.js';
 import {
+  applyRequisitionDefaults,
   parseRequisitionGuidParam,
+  parseRequisitionAction,
   validateGuidEnterpriseParams,
   validateRequisitionBody
 } from '../utils/recRequisitionValidators.js';
 import { normalizeListQuery } from '../utils/recRequisitionListFilters.js';
+import {
+  buildRequisitionBodyFromRequest,
+  maybeMulterRequisition
+} from '../utils/recRequisitionMultipart.js';
 
 const router = express.Router();
 
@@ -52,6 +57,33 @@ function packageResultToHttp(res, pkg, successData, failData = successData) {
     return sendPackageResponse(res, 400, { success: false, message, data: failData ?? null });
   }
   return sendPackageResponse(res, 200, { success: true, message, data: successData });
+}
+
+function sendCreateRequisitionResponse(res, pkg) {
+  const success = packageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message || (success ? 'Operation completed successfully.' : 'Operation failed.');
+  if (!success) {
+    return sendPackageResponse(res, 400, { success: false, status, message });
+  }
+  return sendPackageResponse(res, 200, {
+    success: true,
+    status,
+    message,
+    requisition_id: pkg.requisition_id ?? null,
+    requisition_guid: pkg.requisition_guid ?? null,
+    requisition_number: pkg.requisition_number ?? null
+  });
+}
+
+function sendUpdateRequisitionResponse(res, pkg) {
+  const success = packageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message || (success ? 'Operation completed successfully.' : 'Operation failed.');
+  if (!success) {
+    return sendPackageResponse(res, 400, { success: false, status, message });
+  }
+  return sendPackageResponse(res, 200, { success: true, status, message });
 }
 
 function buildListPaginationMeta(page, pageSize, total) {
@@ -129,27 +161,23 @@ router.get(
 
 /**
  * POST /api/rec/requisitions
+ * Body: application/json or multipart/form-data.
+ * action: DRAFT (default) | SUBMIT — DRAFT allows partial data; SUBMIT requires full fields.
+ * File optional: field "file", "attachment", or "document"; or file_content (base64).
  */
 router.post(
   '/',
+  maybeMulterRequisition,
   asyncHandler(async (req, res) => {
     try {
-      const body = { ...(req.body || {}) };
+      const body = buildRequisitionBodyFromRequest(req);
       body.created_by = resolveAuditActor(req, body, 'created_by');
-      body.action = resolveCreateAction(body.action);
-      validateRequisitionBody(body);
+      body.action = parseRequisitionAction(body.action);
+      applyRequisitionDefaults(body);
+      validateRequisitionBody(body, { isUpdate: false });
 
       const pkg = await createRequisitionViaPackage(body);
-      return packageResultToHttp(
-        res,
-        pkg,
-        {
-          requisition_id: pkg.requisition_id ?? null,
-          requisition_guid: pkg.requisition_guid ?? null,
-          requisition_number: pkg.requisition_number ?? null
-        },
-        null
-      );
+      return sendCreateRequisitionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
         return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
@@ -366,18 +394,24 @@ router.get(
 
 /**
  * PUT /api/rec/requisitions/:requisition_guid
+ * Body: application/json or multipart/form-data.
+ * action: DRAFT (default) | SUBMIT — missing action treated as DRAFT partial update.
+ * File optional: field "file", "attachment", or "document"; or file_content (base64).
  */
 router.put(
   '/:requisition_guid',
+  maybeMulterRequisition,
   asyncHandler(async (req, res) => {
     try {
       const requisition_guid = parseRequisitionGuidParam(req.params.requisition_guid);
-      const body = { ...(req.body || {}), requisition_guid };
+      const body = buildRequisitionBodyFromRequest(req, { requisition_guid });
       body.last_updated_by = resolveAuditActor(req, body, 'last_updated_by');
-      validateRequisitionBody(body, { requisitionGuid: requisition_guid });
+      body.action = parseRequisitionAction(body.action);
+      applyRequisitionDefaults(body);
+      validateRequisitionBody(body, { isUpdate: true, requisitionGuid: requisition_guid });
 
       const pkg = await updateRequisitionViaPackage(body);
-      return packageResultToHttp(res, pkg, { requisition_guid }, { requisition_guid });
+      return sendUpdateRequisitionResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
         return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
