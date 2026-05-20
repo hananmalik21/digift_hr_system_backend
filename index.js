@@ -94,6 +94,8 @@ import fndsecUsersController from './feature/security/users/controller/fndsecUse
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
+import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
+import recLookupValueController from './feature/look_ups/rec/rec_lookup_values/controller/recLookupValueController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -294,6 +296,10 @@ app.use('/api/security/auth', fndsecAuthController);
 
 // Recruitment — requisitions (REC.CREATE_REQUISITION_PKG)
 app.use('/api/rec/requisitions', recRequisitionsController);
+
+// Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
+app.use('/api/rec/lookup-types', recLookupTypeController);
+app.use('/api/rec/lookup-values', recLookupValueController);
 
 // Initialize database pool on startup
 await createPool();
