@@ -66,17 +66,18 @@ export function hasRequisitionFile(body) {
 }
 
 function parseJsonArrayField(value, fieldName) {
-  if (value == null || value === '') return value;
-  if (Array.isArray(value)) return value;
+  if (value == null || value === '') return null;
+  if (Array.isArray(value)) return value.length === 0 ? null : value;
   if (typeof value !== 'string') return value;
   const trimmed = value.trim();
   if (!trimmed) return null;
   try {
     const parsed = JSON.parse(trimmed);
-    if (!Array.isArray(parsed)) {
-      throw new ValidationError('Validation failed', [`${fieldName} must be a JSON array`]);
+    if (Array.isArray(parsed)) return parsed.length === 0 ? null : parsed;
+    if (parsed && typeof parsed === 'object') {
+      return Object.keys(parsed).length === 0 ? null : parsed;
     }
-    return parsed;
+    throw new ValidationError('Validation failed', [`${fieldName} must be a JSON array`]);
   } catch (e) {
     if (e instanceof ValidationError) throw e;
     throw new ValidationError('Validation failed', [`${fieldName} must be valid JSON`]);
