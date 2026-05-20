@@ -1,5 +1,6 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { hasRequisitionFile } from './recRequisitionMultipart.js';
 
 function isBlank(v) {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -38,11 +39,13 @@ function requireNonNegativeSalary(errors, body, field, label = field) {
 /**
  * API validation before calling REC.CREATE_REQUISITION_PKG (create / update).
  * @param {Record<string, unknown>} body
- * @param {{ requisitionGuid?: string }} [options]
+ * @param {{ requisitionGuid?: string, requireFile?: boolean }} [options]
  */
 export function validateRequisitionBody(body, options = {}) {
   const errors = [];
   const b = asObject(body);
+  const isUpdate = !isBlank(options.requisitionGuid);
+  const requireFile = options.requireFile ?? !isUpdate;
 
   requireField(errors, b, 'enterprise_id');
 
@@ -118,6 +121,12 @@ export function validateRequisitionBody(body, options = {}) {
     if (a !== 'DRAFT' && a !== 'SUBMIT') {
       errors.push('action must be DRAFT or SUBMIT');
     }
+  }
+
+  if (requireFile && !hasRequisitionFile(b)) {
+    errors.push(
+      'file is required (multipart field "file", "attachment", or "document", or body file_content as base64)'
+    );
   }
 
   if (errors.length) {

@@ -78,7 +78,7 @@ function jsonArrayToClobString(value) {
 }
 
 function parseFileContent(body) {
-  const raw = body.file_content ?? body.fileContent;
+  const raw = body.file_content ?? body.fileContent ?? body.file;
   if (raw == null || raw === '') return null;
   if (Buffer.isBuffer(raw)) return raw;
   let s = String(raw).trim();

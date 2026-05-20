@@ -27,6 +27,10 @@ import {
   validateRequisitionBody
 } from '../utils/recRequisitionValidators.js';
 import { normalizeListQuery } from '../utils/recRequisitionListFilters.js';
+import {
+  buildRequisitionBodyFromRequest,
+  maybeMulterRequisition
+} from '../utils/recRequisitionMultipart.js';
 
 const router = express.Router();
 
@@ -129,12 +133,15 @@ router.get(
 
 /**
  * POST /api/rec/requisitions
+ * Body: application/json or multipart/form-data.
+ * File (required on create): field "file", "attachment", or "document"; or file_content (base64).
  */
 router.post(
   '/',
+  maybeMulterRequisition,
   asyncHandler(async (req, res) => {
     try {
-      const body = { ...(req.body || {}) };
+      const body = buildRequisitionBodyFromRequest(req);
       body.created_by = resolveAuditActor(req, body, 'created_by');
       body.action = resolveCreateAction(body.action);
       validateRequisitionBody(body);
@@ -366,15 +373,18 @@ router.get(
 
 /**
  * PUT /api/rec/requisitions/:requisition_guid
+ * Body: application/json or multipart/form-data.
+ * File (optional on update): field "file", "attachment", or "document"; or file_content (base64).
  */
 router.put(
   '/:requisition_guid',
+  maybeMulterRequisition,
   asyncHandler(async (req, res) => {
     try {
       const requisition_guid = parseRequisitionGuidParam(req.params.requisition_guid);
-      const body = { ...(req.body || {}), requisition_guid };
+      const body = buildRequisitionBodyFromRequest(req, { requisition_guid });
       body.last_updated_by = resolveAuditActor(req, body, 'last_updated_by');
-      validateRequisitionBody(body, { requisitionGuid: requisition_guid });
+      validateRequisitionBody(body, { requisitionGuid: requisition_guid, requireFile: false });
 
       const pkg = await updateRequisitionViaPackage(body);
       return packageResultToHttp(res, pkg, { requisition_guid }, { requisition_guid });
