@@ -22,7 +22,129 @@ export const REQUIRED_FIELDS = [
 ];
 
 const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
-const EMPLOYEE_IS_ACTIVE_VALUES = ['Y', 'N'];
+
+/** Oracle binds when no employee compensation payload is sent (matches DEFAULT NULL in PL/SQL). */
+const EMP_COMP_BINDS_EMPTY = Object.freeze({
+  p_emp_comp_plan_id: null,
+  p_emp_comp_component_id: null,
+  p_emp_comp_amount: null,
+  p_emp_comp_currency_code: null,
+  p_emp_comp_start: null,
+  p_emp_comp_end: null,
+  p_emp_comp_active_flag: null,
+  p_emp_comp_components_json: null
+});
+
+/** Max length before using CLOB for p_emp_comp_components_json (aligns with compensation JSON pattern). */
+const COMPENSATION_COMPONENTS_JSON_MAX = (() => {
+  const raw = process.env.DB_EMP_CREATE_COMP_COMPONENTS_JSON_MAX;
+  if (raw === undefined || raw === '') return 30000;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) return 30000;
+  return n;
+})();
+
+const ISO_DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * @typedef {{ ok: true, value: undefined | unknown[] }} ParseCompensationOk
+ * @typedef {{ ok: false, message: string }} ParseCompensationErr
+ * @typedef {ParseCompensationOk | ParseCompensationErr} ParseCompensationResult
+ */
+
+/**
+ * Normalize optional `compensation_components` from JSON (array) or multipart/form-data (JSON string).
+ * @param {object | null | undefined} body
+ * @returns {ParseCompensationResult}
+ */
+function parseCompensationComponentsField(body) {
+  if (body == null || typeof body !== 'object') {
+    return { ok: true, value: undefined };
+  }
+  const v =
+    body.compensation_components ?? body.compensationComponents ?? body.COMPENSATION_COMPONENTS;
+  if (v === undefined || v === null) {
+    return { ok: true, value: undefined };
+  }
+  if (Array.isArray(v)) {
+    return { ok: true, value: v };
+  }
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (s === '' || s.toLowerCase() === 'null') {
+      return { ok: true, value: undefined };
+    }
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) {
+        return { ok: true, value: parsed };
+      }
+      return {
+        ok: false,
+        message: 'compensation_components must be an array (or a JSON string of an array)'
+      };
+    } catch {
+      return { ok: false, message: 'compensation_components must be valid JSON' };
+    }
+  }
+  return { ok: false, message: 'compensation_components must be an array' };
+}
+
+function empCompComponentsJsonBind(jsonString) {
+  const useString =
+    COMPENSATION_COMPONENTS_JSON_MAX > 0 && jsonString.length <= COMPENSATION_COMPONENTS_JSON_MAX;
+  return {
+    val: jsonString,
+    dir: oracledb.BIND_IN,
+    type: useString ? oracledb.STRING : oracledb.CLOB
+  };
+}
+
+function normalizeCompensationRowForJson(row) {
+  const plan_id = Number(row.plan_id ?? row.planId ?? row.PLAN_ID);
+  const component_id = Number(row.component_id ?? row.componentId ?? row.COMPONENT_ID);
+  const amount = Number(row.amount ?? row.AMOUNT);
+  const currency_code = String(row.currency_code ?? row.currencyCode ?? row.CURRENCY_CODE).trim().toUpperCase();
+  const effective_start_date = String(row.effective_start_date ?? row.effectiveStartDate ?? row.EFFECTIVE_START_DATE)
+    .trim()
+    .slice(0, 10);
+  const endRaw = row.effective_end_date ?? row.effectiveEndDate ?? row.EFFECTIVE_END_DATE;
+  const effective_end_date =
+    endRaw == null || (typeof endRaw === 'string' && endRaw.trim() === '') || String(endRaw).toLowerCase() === 'null'
+      ? null
+      : String(endRaw).trim().slice(0, 10);
+  const afRaw = row.active_flag ?? row.activeFlag ?? row.ACTIVE_FLAG;
+  const active_flag =
+    afRaw == null || String(afRaw).trim() === ''
+      ? 'Y'
+      : String(afRaw).trim().toUpperCase();
+
+  return {
+    plan_id,
+    component_id,
+    amount,
+    currency_code,
+    effective_start_date,
+    effective_end_date,
+    active_flag
+  };
+}
+
+/** PL/SQL optional employee compensation: NULL json + NULL singles when absent/empty. */
+function buildEmpCompBinds(body) {
+  const parsed = parseCompensationComponentsField(body);
+  const rows = parsed.ok ? parsed.value : undefined;
+  if (!parsed.ok || rows == null || rows.length === 0) {
+    return { ...EMP_COMP_BINDS_EMPTY };
+  }
+  const jsonStr = JSON.stringify({
+    components: rows.map((row) => normalizeCompensationRowForJson(row))
+  });
+  return {
+    ...EMP_COMP_BINDS_EMPTY,
+    p_emp_comp_components_json: empCompComponentsJsonBind(jsonStr)
+  };
+}
 
 const CREATE_EMPLOYEE_ALL_IN_ONE_SQL = `
 BEGIN
@@ -100,6 +222,14 @@ BEGIN
     p_employee_status          => :p_employee_status,
     p_employee_is_active       => :p_employee_is_active,
     p_password_hash            => :p_password_hash,
+    p_emp_comp_plan_id         => :p_emp_comp_plan_id,
+    p_emp_comp_component_id    => :p_emp_comp_component_id,
+    p_emp_comp_amount          => :p_emp_comp_amount,
+    p_emp_comp_currency_code   => :p_emp_comp_currency_code,
+    p_emp_comp_start           => :p_emp_comp_start,
+    p_emp_comp_end             => :p_emp_comp_end,
+    p_emp_comp_active_flag     => :p_emp_comp_active_flag,
+    p_emp_comp_components_json => :p_emp_comp_components_json,
     o_employee_id              => :o_employee_id
   );
 END;
@@ -313,6 +443,7 @@ export function buildBinds(body) {
     p_employee_status: normalizeEmployeeStatus(body),
     p_employee_is_active: normalizeEmployeeIsActive(body),
     p_password_hash: strOrNull(body.password_hash, body.passwordHash, body.PASSWORD_HASH),
+    ...buildEmpCompBinds(body),
     o_employee_id: { type: oracledb.NUMBER, dir: oracledb.BIND_OUT }
   };
 }
@@ -374,6 +505,97 @@ export function validateRequired(body) {
   const lifecycle = validateLifecycleFields(body);
   if (!lifecycle.valid) {
     return { valid: false, missing: [lifecycle.message] };
+  }
+  const compStruct = validateCompensationComponentsStructure(body);
+  if (!compStruct.valid) {
+    return { valid: false, missing: compStruct.missing };
+  }
+  return { valid: true, missing: [] };
+}
+
+/**
+ * Optional `compensation_components`: array of rows for EMPL.EMPL_EMPLOYEE_CREATE_API_PKG (JSON path).
+ * Deep business rules are enforced in PL/SQL only.
+ */
+export function validateCompensationComponentsStructure(body) {
+  const parsed = parseCompensationComponentsField(body);
+  if (!parsed.ok) {
+    return { valid: false, missing: [parsed.message] };
+  }
+  const raw = parsed.value;
+  if (raw === undefined) {
+    return { valid: true, missing: [] };
+  }
+  if (raw.length === 0) {
+    return { valid: true, missing: [] };
+  }
+
+  const missing = [];
+  raw.forEach((row, idx) => {
+    const p = `compensation_components[${idx}]`;
+    if (row == null || typeof row !== 'object' || Array.isArray(row)) {
+      missing.push(`${p} must be an object`);
+      return;
+    }
+
+    const planId = row.plan_id ?? row.planId ?? row.PLAN_ID;
+    const compId = row.component_id ?? row.componentId ?? row.COMPONENT_ID;
+    const amount = row.amount ?? row.AMOUNT;
+    const cur = row.currency_code ?? row.currencyCode ?? row.CURRENCY_CODE;
+    const start = row.effective_start_date ?? row.effectiveStartDate ?? row.EFFECTIVE_START_DATE;
+
+    if (planId == null || planId === '') {
+      missing.push(`${p}.plan_id is required`);
+    } else {
+      const n = Number(planId);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+        missing.push(`${p}.plan_id must be a positive integer`);
+      }
+    }
+
+    if (compId == null || compId === '') {
+      missing.push(`${p}.component_id is required`);
+    } else {
+      const n = Number(compId);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+        missing.push(`${p}.component_id must be a positive integer`);
+      }
+    }
+
+    if (amount == null || amount === '') {
+      missing.push(`${p}.amount is required`);
+    } else if (!Number.isFinite(Number(amount))) {
+      missing.push(`${p}.amount must be a number`);
+    }
+
+    if (cur == null || String(cur).trim() === '') {
+      missing.push(`${p}.currency_code is required`);
+    }
+
+    if (start == null || String(start).trim() === '') {
+      missing.push(`${p}.effective_start_date is required`);
+    } else if (!ISO_DATE_ONLY.test(String(start).trim().slice(0, 10))) {
+      missing.push(`${p}.effective_start_date must be YYYY-MM-DD`);
+    }
+
+    const endRaw = row.effective_end_date ?? row.effectiveEndDate ?? row.EFFECTIVE_END_DATE;
+    if (endRaw != null && String(endRaw).trim() !== '' && String(endRaw).toLowerCase() !== 'null') {
+      if (!ISO_DATE_ONLY.test(String(endRaw).trim().slice(0, 10))) {
+        missing.push(`${p}.effective_end_date must be YYYY-MM-DD when provided`);
+      }
+    }
+
+    const af = row.active_flag ?? row.activeFlag ?? row.ACTIVE_FLAG;
+    if (af != null && String(af).trim() !== '') {
+      const u = String(af).trim().toUpperCase();
+      if (u !== 'Y' && u !== 'N') {
+        missing.push(`${p}.active_flag must be Y or N`);
+      }
+    }
+  });
+
+  if (missing.length > 0) {
+    return { valid: false, missing };
   }
   return { valid: true, missing: [] };
 }
