@@ -4,6 +4,10 @@
 
 import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
+import {
+  LEGACY_CREATE_COMPENSATION_FIELDS,
+  stripLegacyCreateCompensationFields
+} from '../feature/employee_management/employees/services/employeeCreateAllInOneService.js';
 
 const EMPLOYEE_STATUS_VALUES = ['ACTIVE', 'INACTIVE', 'PROBATION'];
 
@@ -22,6 +26,8 @@ BEGIN
     p_phone_number             => :p_phone_number,
     p_mobile_number            => :p_mobile_number,
     p_date_of_birth            => :p_date_of_birth,
+    p_employee_status          => :p_employee_status,
+    p_employee_is_active       => :p_employee_is_active,
     p_gender_code              => :p_gender_code,
     p_nationality              => :p_nationality,
     p_marital_status_code      => :p_marital_status_code,
@@ -36,16 +42,6 @@ BEGIN
     p_work_schedule_id         => :p_work_schedule_id,
     p_ws_start                 => :p_ws_start,
     p_ws_end                   => :p_ws_end,
-    p_basic_salary_kwd         => :p_basic_salary_kwd,
-    p_comp_start               => :p_comp_start,
-    p_comp_end                 => :p_comp_end,
-    p_housing_kwd              => :p_housing_kwd,
-    p_transport_kwd            => :p_transport_kwd,
-    p_food_kwd                 => :p_food_kwd,
-    p_mobile_kwd               => :p_mobile_kwd,
-    p_other_kwd                => :p_other_kwd,
-    p_allow_start              => :p_allow_start,
-    p_allow_end                => :p_allow_end,
     p_civil_id_expiry          => :p_civil_id_expiry,
     p_passport_expiry          => :p_passport_expiry,
     p_visa_number              => :p_visa_number,
@@ -57,16 +53,16 @@ BEGIN
     p_account_number           => :p_account_number,
     p_iban                     => :p_iban,
     p_org_unit_id              => HEXTORAW(:p_org_unit_id_hex),
-    p_work_location_id       => :p_work_location_id,
+    p_work_location_id         => :p_work_location_id,
     p_position_id              => HEXTORAW(:p_position_id_hex),
     p_job_family_id            => :p_job_family_id,
     p_job_level_id             => :p_job_level_id,
     p_grade_id                 => :p_grade_id,
     p_enterprise_hire_date     => :p_enterprise_hire_date,
-    p_contract_type_code      => :p_contract_type_code,
+    p_contract_type_code       => :p_contract_type_code,
     p_probation_days           => :p_probation_days,
     p_reporting_to_emp_id      => :p_reporting_to_emp_id,
-    p_employment_status       => :p_employment_status,
+    p_employment_status        => :p_employment_status,
     p_asg_start                => :p_asg_start,
     p_asg_end                  => :p_asg_end,
     p_address_line1            => :p_address_line1,
@@ -83,8 +79,6 @@ BEGIN
     p_doc_action               => :p_doc_action,
     p_replace_document_id      => :p_replace_document_id,
     p_actor                    => :p_actor,
-    p_employee_status          => :p_employee_status,
-    p_employee_is_active       => :p_employee_is_active,
     o_document_id              => :o_document_id,
     o_document_guid            => :o_document_guid
   );
@@ -166,6 +160,8 @@ export function buildUpdateBinds(employeeId, body) {
     p_phone_number: strOrNull(b.phone_number, b.phoneNumber),
     p_mobile_number: strOrNull(b.mobile_number, b.mobileNumber),
     p_date_of_birth: parseDate(b.date_of_birth ?? b.dateOfBirth),
+    p_employee_status: normalizeEmployeeStatus(b),
+    p_employee_is_active: normalizeEmployeeIsActive(b),
     p_gender_code: strOrNull(b.gender_code, b.genderCode),
     p_nationality: strOrNull(b.nationality),
     p_marital_status_code: strOrNull(b.marital_status_code, b.maritalStatusCode),
@@ -180,16 +176,6 @@ export function buildUpdateBinds(employeeId, body) {
     p_work_schedule_id: toNum(b.work_schedule_id, b.workScheduleId),
     p_ws_start: parseDate(b.ws_start ?? b.wsStart),
     p_ws_end: parseDate(b.ws_end ?? b.wsEnd),
-    p_basic_salary_kwd: toNum(b.basic_salary_kwd, b.basicSalaryKwd),
-    p_comp_start: parseDate(b.comp_start ?? b.compStart),
-    p_comp_end: parseDate(b.comp_end ?? b.compEnd),
-    p_housing_kwd: toNum(b.housing_kwd, b.housingKwd),
-    p_transport_kwd: toNum(b.transport_kwd, b.transportKwd),
-    p_food_kwd: toNum(b.food_kwd, b.foodKwd),
-    p_mobile_kwd: toNum(b.mobile_kwd, b.mobileKwd),
-    p_other_kwd: toNum(b.other_kwd, b.otherKwd),
-    p_allow_start: parseDate(b.allow_start ?? b.allowStart),
-    p_allow_end: parseDate(b.allow_end ?? b.allowEnd),
     p_civil_id_expiry: parseDate(b.civil_id_expiry ?? b.civilIdExpiry),
     p_passport_expiry: parseDate(b.passport_expiry ?? b.passportExpiry),
     p_visa_number: strOrNull(b.visa_number, b.visaNumber),
@@ -225,10 +211,16 @@ export function buildUpdateBinds(employeeId, body) {
     p_doc_hash_sha256: strOrNull(b.doc_hash_sha256, b.docHashSha256),
     p_doc_action: normalizeDocAction(b.doc_action ?? b.docAction),
     p_replace_document_id: toNum(b.replace_document_id, b.replaceDocumentId),
-    p_actor: strOrNull(b.actor),
-    p_employee_status: normalizeEmployeeStatus(b),
-    p_employee_is_active: normalizeEmployeeIsActive(b)
+    p_actor: strOrNull(b.actor)
   };
+}
+
+function findLegacyUpdateCompensationFields(body) {
+  const keys = new Set(LEGACY_CREATE_COMPENSATION_FIELDS);
+  return Object.keys(body ?? {}).filter((key) => {
+    const n = String(key).toLowerCase().replace(/[- ]/g, '_');
+    return keys.has(n);
+  });
 }
 
 /**
@@ -279,6 +271,14 @@ export function validateUpdateBody(body, employeeId) {
       return { valid: false, message: 'replace_document_id must be a non-negative number', code: 'VALIDATION_ERROR' };
     }
   }
+  const legacyFields = findLegacyUpdateCompensationFields(body);
+  if (legacyFields.length > 0) {
+    return {
+      valid: false,
+      message: `Legacy compensation fields are not supported (${legacyFields.join(', ')}). Use employee compensation APIs instead.`,
+      code: 'VALIDATION_ERROR'
+    };
+  }
   return { valid: true };
 }
 
@@ -294,7 +294,7 @@ export async function updateEmployeeAllInOne(connection, employeeId, body, fileO
   const ownConnection = connection == null;
   const conn = connection ?? await getConnection();
   try {
-    const binds = buildUpdateBinds(employeeId, body);
+    const binds = buildUpdateBinds(employeeId, stripLegacyCreateCompensationFields(body));
     if (fileOpts.fileContent != null) {
       binds.p_doc_file_content = fileOpts.fileContent;
       binds.p_doc_access_url = null;

@@ -57,7 +57,7 @@ function findLegacyCreateCompensationFields(body) {
   return Object.keys(body ?? {}).filter(isLegacyCreateCompensationKey);
 }
 
-function stripLegacyCreateCompensationFields(body) {
+export function stripLegacyCreateCompensationFields(body) {
   if (body == null || typeof body !== 'object') return body;
   return Object.fromEntries(
     Object.entries(body).filter(([key]) => !isLegacyCreateCompensationKey(key))
