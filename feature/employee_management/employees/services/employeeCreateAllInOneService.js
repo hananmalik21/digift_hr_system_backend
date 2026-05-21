@@ -1,5 +1,84 @@
 import oracledb from 'oracledb';
 
+/**
+ * Create employee (POST /api/create-employee) via EMPL.EMPL_EMPLOYEE_CREATE_API_PKG.CREATE_EMPLOYEE_ALL_IN_ONE.
+ * Employee compensation is optional via `compensation_components` → p_emp_comp_components_json only.
+ * Legacy salary/allowance request fields (basic_salary_kwd, housing_kwd, etc.) are not supported.
+ */
+
+/** Removed from create-employee request; use compensation_components instead. */
+export const LEGACY_CREATE_COMPENSATION_FIELDS = [
+  'basic_salary_kwd',
+  'housing_kwd',
+  'food_kwd',
+  'transport_kwd',
+  'other_kwd',
+  'mobile_kwd',
+  'comp_start',
+  'comp_end',
+  'allow_start',
+  'allow_end'
+];
+
+const LEGACY_CREATE_COMPENSATION_FIELD_KEYS = new Set(LEGACY_CREATE_COMPENSATION_FIELDS);
+
+const LEGACY_COMPENSATION_REJECTED_HINT = 'Use compensation_components instead.';
+
+/** Per-row fields for compensation_components[] (API + frontend form). */
+export const COMPENSATION_COMPONENT_ROW_FIELDS = [
+  'plan_id',
+  'component_id',
+  'amount',
+  'currency_code',
+  'effective_start_date',
+  'effective_end_date',
+  'active_flag'
+];
+
+/**
+ * Frontend form → API: compensation rows only (replaces legacy salary/allowance inputs).
+ * Each UI row should map to one object in compensation_components[].
+ */
+export const CREATE_EMPLOYEE_COMPENSATION_FORM_MAP = {
+  compensation_components: Object.fromEntries(
+    COMPENSATION_COMPONENT_ROW_FIELDS.map((field) => [field, field])
+  )
+};
+
+function normalizeBodyKey(key) {
+  return String(key).toLowerCase().replace(/[- ]/g, '_');
+}
+
+function isLegacyCreateCompensationKey(key) {
+  return LEGACY_CREATE_COMPENSATION_FIELD_KEYS.has(normalizeBodyKey(key));
+}
+
+function findLegacyCreateCompensationFields(body) {
+  return Object.keys(body ?? {}).filter(isLegacyCreateCompensationKey);
+}
+
+function stripLegacyCreateCompensationFields(body) {
+  if (body == null || typeof body !== 'object') return body;
+  return Object.fromEntries(
+    Object.entries(body).filter(([key]) => !isLegacyCreateCompensationKey(key))
+  );
+}
+
+function validateNoLegacyCreateCompensationFields(body) {
+  const found = findLegacyCreateCompensationFields(body);
+  if (found.length === 0) return { valid: true };
+  return {
+    valid: false,
+    missing: [
+      `Legacy compensation fields are not supported (${found.join(', ')}). ${LEGACY_COMPENSATION_REJECTED_HINT}`
+    ]
+  };
+}
+
+function pickRowField(row, snake, camel, upper) {
+  return row[snake] ?? row[camel] ?? row[upper];
+}
+
 export const REQUIRED_FIELDS = [
   'enterprise_id',
   'first_name_en',
@@ -101,19 +180,19 @@ function empCompComponentsJsonBind(jsonString) {
 }
 
 function normalizeCompensationRowForJson(row) {
-  const plan_id = Number(row.plan_id ?? row.planId ?? row.PLAN_ID);
-  const component_id = Number(row.component_id ?? row.componentId ?? row.COMPONENT_ID);
-  const amount = Number(row.amount ?? row.AMOUNT);
-  const currency_code = String(row.currency_code ?? row.currencyCode ?? row.CURRENCY_CODE).trim().toUpperCase();
-  const effective_start_date = String(row.effective_start_date ?? row.effectiveStartDate ?? row.EFFECTIVE_START_DATE)
+  const plan_id = Number(pickRowField(row, 'plan_id', 'planId', 'PLAN_ID'));
+  const component_id = Number(pickRowField(row, 'component_id', 'componentId', 'COMPONENT_ID'));
+  const amount = Number(pickRowField(row, 'amount', 'amount', 'AMOUNT'));
+  const currency_code = String(pickRowField(row, 'currency_code', 'currencyCode', 'CURRENCY_CODE')).trim().toUpperCase();
+  const effective_start_date = String(pickRowField(row, 'effective_start_date', 'effectiveStartDate', 'EFFECTIVE_START_DATE'))
     .trim()
     .slice(0, 10);
-  const endRaw = row.effective_end_date ?? row.effectiveEndDate ?? row.EFFECTIVE_END_DATE;
+  const endRaw = pickRowField(row, 'effective_end_date', 'effectiveEndDate', 'EFFECTIVE_END_DATE');
   const effective_end_date =
     endRaw == null || (typeof endRaw === 'string' && endRaw.trim() === '') || String(endRaw).toLowerCase() === 'null'
       ? null
       : String(endRaw).trim().slice(0, 10);
-  const afRaw = row.active_flag ?? row.activeFlag ?? row.ACTIVE_FLAG;
+  const afRaw = pickRowField(row, 'active_flag', 'activeFlag', 'ACTIVE_FLAG');
   const active_flag =
     afRaw == null || String(afRaw).trim() === ''
       ? 'Y'
@@ -174,16 +253,6 @@ BEGIN
     p_work_schedule_id         => :p_work_schedule_id,
     p_ws_start                 => :p_ws_start,
     p_ws_end                   => :p_ws_end,
-    p_basic_salary_kwd         => :p_basic_salary_kwd,
-    p_comp_start               => :p_comp_start,
-    p_comp_end                 => :p_comp_end,
-    p_housing_kwd              => :p_housing_kwd,
-    p_transport_kwd            => :p_transport_kwd,
-    p_food_kwd                 => :p_food_kwd,
-    p_mobile_kwd               => :p_mobile_kwd,
-    p_other_kwd                => :p_other_kwd,
-    p_allow_start              => :p_allow_start,
-    p_allow_end                => :p_allow_end,
     p_civil_id_expiry          => :p_civil_id_expiry,
     p_passport_expiry          => :p_passport_expiry,
     p_visa_number              => :p_visa_number,
@@ -325,6 +394,38 @@ function normalizeEmployeeIsActive(body) {
   return s === 'Y' || s === 'N' ? s : null;
 }
 
+function buildDocumentBinds(body) {
+  const docFileName = strOrNull(
+    body.doc_file_name,
+    body.docFileName,
+    body.DOC_FILE_NAME,
+    body.file_name,
+    body.fileName,
+    body.document_file_name
+  );
+  const hasDocFile = docFileName != null && String(docFileName).trim() !== '';
+  if (!hasDocFile) {
+    return {
+      p_document_type_code: null,
+      p_doc_file_name: null,
+      p_doc_mime_type: null,
+      p_doc_access_url: null,
+      p_doc_hash_sha256: null
+    };
+  }
+  const docType = strOrNull(body.document_type_code, body.documentTypeCode, body.DOCUMENT_TYPE_CODE) ?? 'EMPLOYEE_DOC';
+  const docMime = strOrNull(body.doc_mime_type, body.docMimeType, body.DOC_MIME_TYPE);
+  const docUrl = strOrNull(body.doc_access_url, body.docAccessUrl, body.DOC_ACCESS_URL);
+  const docHash = strOrNull(body.doc_hash_sha256, body.docHashSha256, body.DOC_HASH_SHA256);
+  return {
+    p_document_type_code: docType,
+    p_doc_file_name: docFileName,
+    p_doc_mime_type: docMime,
+    p_doc_access_url: docUrl != null && String(docUrl).trim() !== '' ? docUrl : docFileName,
+    p_doc_hash_sha256: docHash
+  };
+}
+
 export function buildBinds(body) {
   const orgUnitIdRaw = hexToBuffer(body.org_unit_id_hex ?? body.org_unit_id);
   const positionIdRaw = (body.position_id_hex != null || body.position_id != null)
@@ -359,32 +460,15 @@ export function buildBinds(body) {
     p_work_schedule_id: toNum(body.work_schedule_id, body.workScheduleId, body.WORK_SCHEDULE_ID) ?? body.work_schedule_id ?? body.workScheduleId ?? body.WORK_SCHEDULE_ID,
     p_ws_start: parseDate(body.ws_start ?? body.wsStart ?? body.WS_START) ?? null,
     p_ws_end: parseDate(body.ws_end ?? body.wsEnd ?? body.WS_END) ?? null,
-    p_basic_salary_kwd: toNum(body.basic_salary_kwd, body.basicSalaryKwd, body.BASIC_SALARY_KWD),
-    p_comp_start: parseDate(body.comp_start ?? body.compStart ?? body.COMP_START) ?? null,
-    p_comp_end: parseDate(body.comp_end ?? body.compEnd ?? body.COMP_END) ?? null,
-    p_housing_kwd: toNum(body.housing_kwd, body.housingKwd, body.HOUSING_KWD),
-    p_transport_kwd: toNum(body.transport_kwd, body.transportKwd, body.TRANSPORT_KWD),
-    p_food_kwd: toNum(body.food_kwd, body.foodKwd, body.FOOD_KWD),
-    p_mobile_kwd: toNum(body.mobile_kwd, body.mobileKwd, body.MOBILE_KWD),
-    p_other_kwd: toNum(body.other_kwd, body.otherKwd, body.OTHER_KWD) ?? 0,
-    p_allow_start: (() => {
-      const d = parseDate(body.allow_start ?? body.allowStart ?? body.ALLOW_START);
-      if (d) return d;
-      const hasAllowance = [body.housing_kwd, body.transport_kwd, body.food_kwd, body.mobile_kwd].some(v => v != null && v !== '');
-      return hasAllowance ? parseDate(body.enterprise_hire_date ?? body.enterpriseHireDate ?? body.ENTERPRISE_HIRE_DATE) : null;
-    })(),
-    p_allow_end: (() => {
-      const d = parseDate(body.allow_end ?? body.allowEnd ?? body.ALLOW_END);
-      if (d) return d;
-      const hasAllowance = [body.housing_kwd, body.transport_kwd, body.food_kwd, body.mobile_kwd].some(v => v != null && v !== '');
-      return hasAllowance ? new Date('4712-12-31') : null;
-    })(),
     p_civil_id_expiry: parseDate(body.civil_id_expiry ?? body.civilIdExpiry ?? body.CIVIL_ID_EXPIRY) ?? null,
     p_passport_expiry: parseDate(body.passport_expiry ?? body.passportExpiry ?? body.PASSPORT_EXPIRY) ?? null,
     p_visa_number: strBind(fromBody(body, 'visa_number', 'visaNumber', 'VISA_NUMBER', 'visa_no', 'visaNo', 'VISA_NO')),
-    p_visa_expiry: (() => { const d = parseDate(body.visa_expiry ?? body.visaExpiry ?? body.VISA_EXPIRY); return d; })(),
+    p_visa_expiry: parseDate(body.visa_expiry ?? body.visaExpiry ?? body.VISA_EXPIRY),
     p_work_permit_number: strBind(fromBody(body, 'work_permit_number', 'workPermitNumber', 'WORK_PERMIT_NUMBER', 'work_permit_no', 'workPermitNo')),
-    p_work_permit_expiry: (() => { const d = parseDate(body.work_permit_expiry ?? body.workPermitExpiry ?? body.WORK_PERMIT_EXPIRY ?? body.work_permit_expiry_date ?? body.workPermitExpiryDate); return d; })(),
+    p_work_permit_expiry: parseDate(
+      body.work_permit_expiry ?? body.workPermitExpiry ?? body.WORK_PERMIT_EXPIRY
+        ?? body.work_permit_expiry_date ?? body.workPermitExpiryDate
+    ),
     p_bank_code: body.bank_code ?? body.bankCode ?? body.BANK_CODE,
     p_bank_name: strOrNull(body.bank_name, body.bankName, body.BANK_NAME),
     p_account_number: body.account_number ?? body.accountNumber ?? body.ACCOUNT_NUMBER,
@@ -408,37 +492,7 @@ export function buildBinds(body) {
     p_city: strOrNull(body.city, body.CITY),
     p_area: strOrNull(body.area, body.AREA),
     p_country_code: strOrNull(body.country_code, body.countryCode, body.COUNTRY_CODE),
-    ...(function () {
-      const docFileName = strOrNull(
-        body.doc_file_name,
-        body.docFileName,
-        body.DOC_FILE_NAME,
-        body.file_name,
-        body.fileName,
-        body.document_file_name
-      );
-      const hasDocFile = docFileName != null && String(docFileName).trim() !== '';
-      const docType = strOrNull(body.document_type_code, body.documentTypeCode, body.DOCUMENT_TYPE_CODE) ?? 'EMPLOYEE_DOC';
-      const docMime = strOrNull(body.doc_mime_type, body.docMimeType, body.DOC_MIME_TYPE);
-      const docUrl = strOrNull(body.doc_access_url, body.docAccessUrl, body.DOC_ACCESS_URL);
-      const docHash = strOrNull(body.doc_hash_sha256, body.docHashSha256, body.DOC_HASH_SHA256);
-      if (!hasDocFile) {
-        return {
-          p_document_type_code: null,
-          p_doc_file_name: null,
-          p_doc_mime_type: null,
-          p_doc_access_url: null,
-          p_doc_hash_sha256: null
-        };
-      }
-      return {
-        p_document_type_code: docType,
-        p_doc_file_name: docFileName,
-        p_doc_mime_type: docMime,
-        p_doc_access_url: docUrl != null && String(docUrl).trim() !== '' ? docUrl : docFileName,
-        p_doc_hash_sha256: docHash
-      };
-    })(),
+    ...buildDocumentBinds(body),
     p_actor: strOrNull(body.actor, body.ACTOR, body.p_actor),
     p_employee_status: normalizeEmployeeStatus(body),
     p_employee_is_active: normalizeEmployeeIsActive(body),
@@ -502,6 +556,10 @@ export function validateRequired(body) {
     missing.push('org_unit_id_hex (must be 32-character hex)');
     return { valid: false, missing };
   }
+  const legacyComp = validateNoLegacyCreateCompensationFields(body);
+  if (!legacyComp.valid) {
+    return { valid: false, missing: legacyComp.missing };
+  }
   const lifecycle = validateLifecycleFields(body);
   if (!lifecycle.valid) {
     return { valid: false, missing: [lifecycle.message] };
@@ -523,10 +581,7 @@ export function validateCompensationComponentsStructure(body) {
     return { valid: false, missing: [parsed.message] };
   }
   const raw = parsed.value;
-  if (raw === undefined) {
-    return { valid: true, missing: [] };
-  }
-  if (raw.length === 0) {
+  if (raw === undefined || raw.length === 0) {
     return { valid: true, missing: [] };
   }
 
@@ -538,11 +593,11 @@ export function validateCompensationComponentsStructure(body) {
       return;
     }
 
-    const planId = row.plan_id ?? row.planId ?? row.PLAN_ID;
-    const compId = row.component_id ?? row.componentId ?? row.COMPONENT_ID;
-    const amount = row.amount ?? row.AMOUNT;
-    const cur = row.currency_code ?? row.currencyCode ?? row.CURRENCY_CODE;
-    const start = row.effective_start_date ?? row.effectiveStartDate ?? row.EFFECTIVE_START_DATE;
+    const planId = pickRowField(row, 'plan_id', 'planId', 'PLAN_ID');
+    const compId = pickRowField(row, 'component_id', 'componentId', 'COMPONENT_ID');
+    const amount = pickRowField(row, 'amount', 'amount', 'AMOUNT');
+    const cur = pickRowField(row, 'currency_code', 'currencyCode', 'CURRENCY_CODE');
+    const start = pickRowField(row, 'effective_start_date', 'effectiveStartDate', 'EFFECTIVE_START_DATE');
 
     if (planId == null || planId === '') {
       missing.push(`${p}.plan_id is required`);
@@ -578,14 +633,14 @@ export function validateCompensationComponentsStructure(body) {
       missing.push(`${p}.effective_start_date must be YYYY-MM-DD`);
     }
 
-    const endRaw = row.effective_end_date ?? row.effectiveEndDate ?? row.EFFECTIVE_END_DATE;
+    const endRaw = pickRowField(row, 'effective_end_date', 'effectiveEndDate', 'EFFECTIVE_END_DATE');
     if (endRaw != null && String(endRaw).trim() !== '' && String(endRaw).toLowerCase() !== 'null') {
       if (!ISO_DATE_ONLY.test(String(endRaw).trim().slice(0, 10))) {
         missing.push(`${p}.effective_end_date must be YYYY-MM-DD when provided`);
       }
     }
 
-    const af = row.active_flag ?? row.activeFlag ?? row.ACTIVE_FLAG;
+    const af = pickRowField(row, 'active_flag', 'activeFlag', 'ACTIVE_FLAG');
     if (af != null && String(af).trim() !== '') {
       const u = String(af).trim().toUpperCase();
       if (u !== 'Y' && u !== 'N') {
@@ -601,7 +656,7 @@ export function validateCompensationComponentsStructure(body) {
 }
 
 export async function createEmployeeAllInOne(connection, body) {
-  const binds = buildBinds(body);
+  const binds = buildBinds(stripLegacyCreateCompensationFields(body));
   const result = await connection.execute(CREATE_EMPLOYEE_ALL_IN_ONE_SQL, binds, { autoCommit: true });
   const out = result.outBinds || {};
   const employeeId = Array.isArray(out.o_employee_id) ? out.o_employee_id[0] : out.o_employee_id;

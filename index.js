@@ -137,6 +137,7 @@ app.use('/api/enterprises', enterpriseController);
 // Employee routes
 app.use('/api/employees', employeeController);
 // Create employee (all-in-one): POST {{baseUrl}}/api/create-employee
+// Compensation: optional compensation_components only (not legacy salary/allowance fields).
 app.use('/api', createEmployeeRouter);
 // Update employee (all-in-one): PUT {{baseUrl}}/api/update-employee/:idOrGuid (id or 32-char guid)
 app.use('/api', emplEmployeesRouter);
