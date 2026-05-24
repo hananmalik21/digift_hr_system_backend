@@ -95,6 +95,7 @@ import fndsecUsersController from './feature/security/users/controller/fndsecUse
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
+import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
 import recLookupValueController from './feature/look_ups/rec/rec_lookup_values/controller/recLookupValueController.js';
 const app = express();
@@ -106,6 +107,8 @@ app.set('trust proxy', process.env.TRUST_PROXY === 'true' || process.env.TRUST_P
 
 // Middleware
 app.use(cors());
+const bulkAdjustJsonLimit = process.env.BULK_ADJUST_JSON_LIMIT || '10mb';
+app.use('/api/compensation/bulk-adjustments', express.json({ limit: bulkAdjustJsonLimit }));
 app.use(express.json());
 app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/documents', documentsDownloadRouter);
@@ -255,6 +258,7 @@ app.use('/api/compensation/plans', compensationPlanController);
 app.use('/api/compensation', compSalaryChangeHistoryRoutes);
 app.use('/api/abs', leavePolicyController);
 app.use('/api/compensation', compensationProcessController);
+app.use('/api/compensation', compBulkAdjustmentsRoutes);
 
 // Employee Leave Balances routes
 app.use('/api/abs', employeeLeaveBalanceController);

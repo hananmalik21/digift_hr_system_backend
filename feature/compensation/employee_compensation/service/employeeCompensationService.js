@@ -4,6 +4,11 @@ import { getOracleErrorMessage } from '../utils/oracleErrorMessage.js';
 import { withCompConnection } from '../utils/withCompConnection.js';
 import { shouldLogEmployeeCompEditComponents } from '../utils/envFlags.js';
 import { buildEditComponentsPlsql } from './editComponentsPlsql.js';
+import {
+  componentsJsonClobBind,
+  nullableTextClobBind,
+  textClobBind
+} from '../../utils/oracleClobBinds.js';
 
 /**
  * Employee compensation: create (JSON) + edit (multipart + PL/SQL).
@@ -68,22 +73,6 @@ BEGIN
 END;
 `;
 
-const JSON_STRING_MAX = (() => {
-  const raw = process.env.DB_COMP_COMPONENTS_JSON_MAX;
-  if (raw === undefined || raw === '') return 30000;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0) return 30000;
-  return n;
-})();
-
-const TEXT_CLOB_THRESHOLD = (() => {
-  const raw = process.env.DB_TEXT_CLOB_THRESHOLD;
-  if (raw === undefined || raw === '') return 32000;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) return 32000;
-  return n;
-})();
-
 export const EMP_COMP_MAX_EDIT_DOCUMENTS = (() => {
   const raw = process.env.EMP_COMP_MAX_EDIT_DOCUMENTS;
   if (raw === undefined || raw === '') return 25;
@@ -91,28 +80,6 @@ export const EMP_COMP_MAX_EDIT_DOCUMENTS = (() => {
   if (!Number.isFinite(n) || n < 0) return 25;
   return Math.min(n, 100);
 })();
-
-function componentsJsonBind(jsonString) {
-  if (JSON_STRING_MAX > 0 && jsonString.length <= JSON_STRING_MAX) {
-    return { val: jsonString, dir: oracledb.BIND_IN, type: oracledb.STRING };
-  }
-  return { val: jsonString, dir: oracledb.BIND_IN, type: oracledb.CLOB };
-}
-
-function textClobBind(value) {
-  const s = String(value);
-  if (s.length <= TEXT_CLOB_THRESHOLD) {
-    return { val: s, dir: oracledb.BIND_IN, type: oracledb.STRING };
-  }
-  return { val: s, dir: oracledb.BIND_IN, type: oracledb.CLOB };
-}
-
-function nullableTextClobBind(value) {
-  if (value == null || String(value).trim() === '') {
-    return { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING };
-  }
-  return textClobBind(String(value));
-}
 
 function parseIsoDateOnly(iso) {
   const [y, m, d] = String(iso)
@@ -264,7 +231,7 @@ export async function createEmployeeCompensationComponents(payload) {
         employee_id: payload.employee_id,
         plan_id: planIdBind,
         created_by: String(payload.created_by),
-        components_json: componentsJsonBind(JSON.stringify(payload.components))
+        components_json: componentsJsonClobBind(JSON.stringify(payload.components))
       },
       { autoCommit: false }
     );
@@ -304,7 +271,6 @@ export async function editEmployeeCompensationComponents(
   const planIdBind = resolveComponentsPlanBind(payload.components, payload.plan_id);
 
   if (shouldLogEmployeeCompEditComponents()) {
-    // eslint-disable-next-line no-console
     console.info(
       '[employee-compensation/edit] components snapshot (COMP_LOG_COMPONENT_FLAGS)',
       JSON.stringify({
@@ -336,7 +302,7 @@ export async function editEmployeeCompensationComponents(
       performance_rating: perf,
       internal_notes: nullableTextClobBind(payload.internal_notes),
       updated_by: String(payload.updated_by).trim(),
-      components_json: componentsJsonBind(JSON.stringify(payload.components))
+      components_json: componentsJsonClobBind(JSON.stringify(payload.components))
     };
     if (maxDocCount > 0) {
       appendDocumentBinds(binds, fileSlice, documentDescriptions);
