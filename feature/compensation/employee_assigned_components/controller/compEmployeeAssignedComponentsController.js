@@ -4,6 +4,8 @@ import { executeQuery } from '../../../../config/db.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { sendSuccess } from '../../../../utils/response.js';
 import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { parseBulkEmployeeAssignedComponentsQuery, parseBulkEmployeeAssignedComponentsBody } from '../validation/bulkEmployeeAssignedComponentsQuery.js';
+import { queryEmployeeAssignedComponents } from '../utils/buildEmployeeAssignedComponentsSql.js';
 
 const router = express.Router();
 
@@ -34,73 +36,36 @@ function firstIssueMessage(zodError, fallback) {
   return zodError?.issues?.[0]?.message || fallback;
 }
 
-function buildSql({ includeCompCategoryCode } = { includeCompCategoryCode: true }) {
-  const compCategorySelect = includeCompCategoryCode
-    ? 'a.comp_category_code AS comp_category_code'
-    : "CAST(NULL AS VARCHAR2(100)) AS comp_category_code";
+function logQueryError(tag, err) {
+  console.error(
+    tag,
+    err?.errorNum != null ? `ORA-${err.errorNum}` : '',
+    err?.message || err
+  );
+}
 
-  // Notes:
-  // - `COMP.COMP_EMP_ASSIGNED_COMPONENTS_V` is the sole assignment source (no manual base-table joins).
-  // - `frequency_code`: prefer latest `COMP_PLAN_COMPONENTS` row (any active_flag — inactive lines
-  //   still carry the configured pay frequency); fall back to `a.frequency_code` when the view exposes it.
-  return `
-    WITH latest_plan_component AS (
-      SELECT
-        plan_id,
-        component_id,
-        frequency_code
-      FROM (
-        SELECT
-          plan_id,
-          component_id,
-          frequency_code,
-          ROW_NUMBER() OVER (
-            PARTITION BY plan_id, component_id
-            ORDER BY plan_component_id DESC
-          ) AS rn
-        FROM COMP.COMP_PLAN_COMPONENTS
-      )
-      WHERE rn = 1
-    )
-    SELECT
-      a.assignment_detail_id,
-      a.assignment_detail_guid,
-      a.enterprise_id,
-      a.employee_id,
-      RAWTOHEX(a.employee_guid) AS employee_guid,
-      a.plan_id,
-      a.component_id,
-      a.component_code,
-      a.component_name,
-      ${compCategorySelect},
-      COALESCE(lpc.frequency_code, a.frequency_code) AS frequency_code,
-      a.process_status,
-      a.pay_run_id,
-      a.processed_date,
-      a.amount,
-      a.currency_code,
-      a.effective_start_date,
-      a.effective_end_date,
-      a.change_source,
-      a.adjustment_id,
-      a.active_flag
-    FROM COMP.COMP_EMP_ASSIGNED_COMPONENTS_V a
-    LEFT JOIN latest_plan_component lpc
-      ON lpc.plan_id = a.plan_id
-     AND lpc.component_id = a.component_id
-    WHERE a.employee_guid = HEXTORAW(:employee_guid)
-      AND a.active_flag = 'Y'
-      AND (a.effective_end_date IS NULL OR a.effective_end_date >= TRUNC(SYSDATE))
-    ORDER BY a.effective_start_date DESC, a.assignment_detail_id DESC
-  `;
+async function fetchEmployeesAssignedComponents(employee_guids) {
+  const result = await queryEmployeeAssignedComponents(
+    executeQuery,
+    { employee_guids_json: JSON.stringify(employee_guids) },
+    { employeeFilter: 'bulk' }
+  );
+  const rows = convertKeysToSnakeCase(result?.rows || []);
+
+  return {
+    rows,
+    meta: {
+      employee_count: employee_guids.length,
+      row_count: rows.length,
+      employee_guids
+    }
+  };
 }
 
 /**
  * GET /api/comp/employee-assigned-components?employee_guid=...
  *
  * Active assigned compensation component lines for one employee (from COMP.COMP_EMP_ASSIGNED_COMPONENTS_V).
- * Each row includes pay frequency (`frequency_code`), processing state (`process_status`, `pay_run_id`,
- * `processed_date`), and existing assignment fields.
  */
 router.get(
   '/employee-assigned-components',
@@ -111,41 +76,20 @@ router.get(
     }
 
     const { employee_guid } = parsed.data;
-    const sendOk = (rows) =>
-      sendSuccess(res, {
-        message: 'Fetched successfully',
-        data: rows,
-        statusCode: HTTP.OK
-      });
 
     try {
-      const result = await executeQuery(buildSql({ includeCompCategoryCode: true }), { employee_guid });
-      return sendOk(convertKeysToSnakeCase(result?.rows || []));
-    } catch (err) {
-      // Backward compatible fallback:
-      // If the view hasn't been deployed with COMP_CATEGORY_CODE yet, Oracle raises ORA-00904.
-      // In that case, retry with a NULL placeholder so the API doesn't fail and returns null.
-      if (err?.errorNum === 904) {
-        try {
-          const fallbackSql = buildSql({ includeCompCategoryCode: false });
-          const fallbackResult = await executeQuery(fallbackSql, { employee_guid });
-          return sendOk(convertKeysToSnakeCase(fallbackResult?.rows || []));
-        } catch (fallbackErr) {
-          console.error(
-            '[compEmployeeAssignedComponents] listEmployeeAssignedComponents (fallback failed)',
-            fallbackErr?.errorNum != null ? `ORA-${fallbackErr.errorNum}` : '',
-            fallbackErr?.message || fallbackErr
-          );
-          // Fall through to error response below (keep original failure behavior).
-        }
-      }
-
-      console.error(
-        '[compEmployeeAssignedComponents] listEmployeeAssignedComponents',
-        err?.errorNum != null ? `ORA-${err.errorNum}` : '',
-        err?.message || err
+      const result = await queryEmployeeAssignedComponents(
+        executeQuery,
+        { employee_guid },
+        { employeeFilter: 'single' }
       );
-
+      return sendSuccess(res, {
+        message: 'Fetched successfully',
+        data: convertKeysToSnakeCase(result?.rows || []),
+        statusCode: HTTP.OK
+      });
+    } catch (err) {
+      logQueryError('[compEmployeeAssignedComponents] listEmployeeAssignedComponents', err);
       return sendFailure(
         res,
         HTTP.SERVER_ERROR,
@@ -153,6 +97,56 @@ router.get(
       );
     }
   })
+);
+
+/**
+ * GET /api/comp/employees-assigned-components?employee_guids=HEX1,HEX2,...
+ * POST /api/comp/employees-assigned-components  body: { "employee_guids": ["HEX1", "HEX2"] }
+ *
+ * Prefer POST for multiple IDs — cleaner JSON array, no URL length limits.
+ */
+async function handleEmployeesAssignedComponents(req, res, parseInput) {
+  const parsed = parseInput();
+  if (!parsed.ok) {
+    return sendFailure(res, HTTP.BAD_REQUEST, parsed.message);
+  }
+
+  const { employee_guids } = parsed;
+
+  try {
+    const { rows, meta } = await fetchEmployeesAssignedComponents(employee_guids);
+    return sendSuccess(res, {
+      message: 'Fetched successfully',
+      data: rows,
+      meta,
+      statusCode: HTTP.OK
+    });
+  } catch (err) {
+    logQueryError('[compEmployeeAssignedComponents] listEmployeesAssignedComponents', err);
+    return sendFailure(
+      res,
+      HTTP.SERVER_ERROR,
+      'Failed to fetch employee assigned compensation components'
+    );
+  }
+}
+
+router.get(
+  '/employees-assigned-components',
+  asyncHandler((req, res) =>
+    handleEmployeesAssignedComponents(req, res, () =>
+      parseBulkEmployeeAssignedComponentsQuery(req.query)
+    )
+  )
+);
+
+router.post(
+  '/employees-assigned-components',
+  asyncHandler((req, res) =>
+    handleEmployeesAssignedComponents(req, res, () =>
+      parseBulkEmployeeAssignedComponentsBody(req.body)
+    )
+  )
 );
 
 export default router;

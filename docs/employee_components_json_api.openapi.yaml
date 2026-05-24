@@ -1,0 +1,212 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Employee Components JSON API
+  version: 1.0.0
+  description: |
+    Reads active employee compensation components from `COMP.COMP_EMP_COMPONENTS_JSON_V`.
+    Supports single employee GUID, multiple GUIDs, or all employees under an enterprise.
+servers:
+  - url: /
+    description: Application base URL (configure `{{baseUrl}}` in clients)
+tags:
+  - name: Compensation
+    description: Employee compensation components
+paths:
+  /api/comp/bulk-employee-components:
+    post:
+      tags:
+        - Compensation
+      summary: List active employee compensation components (bulk)
+      operationId: postBulkEmployeeComponents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkEmployeeComponentsRequest'
+            example:
+              enterprise_id: 1
+              employee_guids:
+                - 50FDBB885E1D190DE0633519000A3BAC
+                - 513788545D60BCCFE063BD19000AEECE
+              plan_id: 111
+              page: 1
+              page_size: 10
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeComponentsJsonSuccess'
+              examples:
+                multipleEmployees:
+                  summary: Two employees with components
+                  value:
+                    success: true
+                    count: 2
+                    employees:
+                      - enterprise_id: 1
+                        employee_guid: 50FDBB885E1D190DE0633519000A3BAC
+                        components:
+                          - assignment_detail_id: 1001
+                            plan_id: 111
+                            component_id: 85
+                            component_code: BASIC
+                            component_name: Basic Salary
+                            amount: 3000
+                            currency_code: KWD
+                            frequency_code: MONTHLY
+                            process_status: PENDING
+                      - enterprise_id: 1
+                        employee_guid: 513788545D60BCCFE063BD19000AEECE
+                        components: []
+                    pagination:
+                      page: 1
+                      pageSize: 10
+                      total: 2
+                      totalPages: 1
+                      hasNext: false
+                      hasPrevious: false
+                empty:
+                  summary: No matching data
+                  value:
+                    success: true
+                    count: 0
+                    employees: []
+                    pagination:
+                      page: 1
+                      pageSize: 10
+                      total: 0
+                      totalPages: 0
+                      hasNext: false
+                      hasPrevious: false
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeComponentsJsonError'
+              example:
+                success: false
+                message: enterprise_id is required
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeComponentsJsonError'
+              example:
+                success: false
+                message: Unable to fetch employee components. Please try again later.
+components:
+  schemas:
+    BulkEmployeeComponentsRequest:
+      type: object
+      required:
+        - enterprise_id
+      properties:
+        enterprise_id:
+          type: integer
+          minimum: 1
+        employee_guid:
+          type: string
+          description: Optional single employee GUID (32-char hex)
+        employee_guids:
+          type: array
+          items:
+            type: string
+          description: Optional array of employee GUIDs (32-char hex)
+        plan_id:
+          type: integer
+          minimum: 1
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+    EmployeeComponentsJsonError:
+      type: object
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+    EmployeeComponentItem:
+      type: object
+      properties:
+        assignment_detail_id:
+          type: integer
+        plan_id:
+          type: integer
+        component_id:
+          type: integer
+        component_code:
+          type: string
+        component_name:
+          type: string
+        amount:
+          type: number
+        currency_code:
+          type: string
+        frequency_code:
+          type: string
+        process_status:
+          type: string
+    EmployeeComponentsGroup:
+      type: object
+      required:
+        - enterprise_id
+        - employee_guid
+        - components
+      properties:
+        enterprise_id:
+          type: integer
+        employee_guid:
+          type: string
+          description: 32-character uppercase hex (from RAWTOHEX)
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeComponentItem'
+    EmployeeComponentsJsonSuccess:
+      type: object
+      required:
+        - success
+        - count
+        - employees
+        - pagination
+      properties:
+        success:
+          type: boolean
+          example: true
+        count:
+          type: integer
+          description: Number of employees returned on this page (after active/plan filters)
+        employees:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeComponentsGroup'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            pageSize:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+            hasNext:
+              type: boolean
+            hasPrevious:
+              type: boolean
