@@ -56,6 +56,31 @@ function buildPaginationMeta(page, pageSize, totalCount) {
   };
 }
 
+/**
+ * GET ?enterprise_id=1 => global (NULL) + enterprise 1 rows.
+ * GET ?enterprise_id=null => global rows only.
+ * Omit => all rows.
+ */
+function parseEnterpriseIdQuery(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '' || String(value).toLowerCase() === 'null') {
+    return null;
+  }
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 1) {
+    throw new Error('enterprise_id must be a valid positive number');
+  }
+  return n;
+}
+
+/** null / omitted / '' => global (ENTERPRISE_ID IS NULL in DB) */
+function normalizeEnterpriseId(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function normalizeRequestBody(data) {
   if (!data || typeof data !== 'object') return data;
   const normalized = {};
@@ -125,7 +150,11 @@ router.get('/', async (req, res) => {
   try {
     const filters = {};
     if (req.query.enterprise_id !== undefined) {
-      filters.enterpriseId = req.query.enterprise_id;
+      try {
+        filters.enterpriseId = parseEnterpriseIdQuery(req.query.enterprise_id);
+      } catch (e) {
+        return sendBadRequest(res, req, e.message);
+      }
     }
     if (req.query.lookup_type) {
       filters.lookupType = req.query.lookup_type;
@@ -194,7 +223,9 @@ router.post('/', async (req, res) => {
       return isNaN(d.getTime()) ? null : d;
     };
     const normalizedData = {
-      ENTERPRISE_ID: normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null,
+      ENTERPRISE_ID: normalizeEnterpriseId(
+        normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null
+      ),
       LOOKUP_TYPE: normalizedBody.LOOKUP_TYPE?.toString().trim(),
       LOOKUP_CODE: normalizedBody.LOOKUP_CODE?.toString().trim(),
       MEANING_EN: normalizedBody.MEANING_EN?.toString().trim(),
@@ -245,7 +276,9 @@ router.put('/:guid', async (req, res) => {
       return isNaN(d.getTime()) ? null : d;
     };
     const normalizedData = {};
-    if (normalizedBody.ENTERPRISE_ID !== undefined) normalizedData.ENTERPRISE_ID = normalizedBody.ENTERPRISE_ID;
+    if (normalizedBody.ENTERPRISE_ID !== undefined) {
+      normalizedData.ENTERPRISE_ID = normalizeEnterpriseId(normalizedBody.ENTERPRISE_ID);
+    }
     if (normalizedBody.LOOKUP_TYPE !== undefined) normalizedData.LOOKUP_TYPE = normalizedBody.LOOKUP_TYPE?.toString().trim();
     if (normalizedBody.LOOKUP_CODE !== undefined) normalizedData.LOOKUP_CODE = normalizedBody.LOOKUP_CODE?.toString().trim();
     if (normalizedBody.MEANING_EN !== undefined) normalizedData.MEANING_EN = normalizedBody.MEANING_EN?.toString().trim();

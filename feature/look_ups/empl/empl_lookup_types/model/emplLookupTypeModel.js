@@ -5,7 +5,8 @@ import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../uti
 
 /**
  * Empl Lookup Type Model
- * Handles all database operations for EMPL.EMPL_LOOKUP_TYPES table
+ * Handles all database operations for EMPL.EMPL_LOOKUP_TYPES table.
+ * ENTERPRISE_ID NULL = global; non-null = enterprise-specific.
  */
 class EmplLookupTypeModel {
   static TABLE_NAME = 'EMPL.EMPL_LOOKUP_TYPES';
@@ -46,6 +47,62 @@ class EmplLookupTypeModel {
       result.rows = this.convertKeysToSnakeCase(result.rows);
     }
     return result;
+  }
+
+  /**
+   * Global vs enterprise TYPE_CODE cannot coexist (case-insensitive).
+   */
+  static async assertNoCrossScopeTypeCodeConflict(connection, { enterpriseId, typeCode, excludeGuidBuffer = null }) {
+    const code = typeCode != null ? String(typeCode).trim() : '';
+    if (!code) return;
+
+    const bindParams = [code];
+    let excludeClause = '';
+    if (excludeGuidBuffer) {
+      excludeClause = ' AND t.LOOKUP_TYPE_GUID <> :2';
+      bindParams.push(excludeGuidBuffer);
+    }
+
+    if (enterpriseId != null) {
+      const query = `SELECT 1
+        FROM ${this.TABLE_NAME} t
+        WHERE t.ENTERPRISE_ID IS NULL
+          AND UPPER(TRIM(t.TYPE_CODE)) = UPPER(TRIM(:1))
+          ${excludeClause}
+        FETCH FIRST 1 ROWS ONLY`;
+      const result = await connection.execute(query, bindParams, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      if (result.rows?.length) {
+        const err = new DatabaseError(
+          `TYPE_CODE "${code}" already exists as a global lookup type and cannot be duplicated for a specific enterprise.`,
+          null,
+          `TYPE_CODE "${code}" already exists as a global lookup type.`
+        );
+        err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+        throw err;
+      }
+      return;
+    }
+
+    const query = `SELECT 1
+      FROM ${this.TABLE_NAME} t
+      WHERE t.ENTERPRISE_ID IS NOT NULL
+        AND UPPER(TRIM(t.TYPE_CODE)) = UPPER(TRIM(:1))
+        ${excludeClause}
+      FETCH FIRST 1 ROWS ONLY`;
+    const result = await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+    if (result.rows?.length) {
+      const err = new DatabaseError(
+        `TYPE_CODE "${code}" already exists for one or more enterprises and cannot be created as a global lookup type.`,
+        null,
+        `TYPE_CODE "${code}" already exists for an enterprise.`
+      );
+      err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+      throw err;
+    }
   }
 
   static async executeWithTransaction(callback) {
@@ -95,10 +152,15 @@ class EmplLookupTypeModel {
       const bindParams = [];
       let paramIndex = 1;
 
+      // GET: enterprise_id=N => global (NULL) + that enterprise; enterprise_id=null => global only
       if (filters.enterpriseId !== undefined) {
-        conditions.push(`a.ENTERPRISE_ID = :${paramIndex}`);
-        bindParams.push(filters.enterpriseId);
-        paramIndex++;
+        if (filters.enterpriseId === null) {
+          conditions.push('a.ENTERPRISE_ID IS NULL');
+        } else {
+          conditions.push(`(a.ENTERPRISE_ID = :${paramIndex} OR a.ENTERPRISE_ID IS NULL)`);
+          bindParams.push(filters.enterpriseId);
+          paramIndex++;
+        }
       }
       if (filters.isActive !== undefined) {
         const activeVal = filters.isActive === true || filters.isActive === 'Y' || filters.isActive === 1 ? 'Y' : 'N';
@@ -131,7 +193,7 @@ class EmplLookupTypeModel {
       const countResult = await this.executeQuery(countQuery, bindParams);
       const total = countResult.rows[0]?.total || 0;
 
-      dataQuery += ` ORDER BY a.TYPE_CODE`;
+      dataQuery += ` ORDER BY CASE WHEN a.ENTERPRISE_ID IS NULL THEN 0 ELSE 1 END, a.TYPE_CODE`;
       dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
       bindParams.push(offset);
       bindParams.push(pageSize);
@@ -208,6 +270,15 @@ class EmplLookupTypeModel {
           lookupTypeId = maxResult.rows[0].NEXT_ID;
         }
 
+        const enterpriseId =
+          data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null;
+        const typeCode = data.TYPE_CODE || null;
+
+        await this.assertNoCrossScopeTypeCodeConflict(connection, {
+          enterpriseId,
+          typeCode
+        });
+
         const { buffer: guidBuffer } = await generateSysGuid(connection);
         const now = new Date();
 
@@ -229,8 +300,8 @@ class EmplLookupTypeModel {
         const bindParams = [
           guidBuffer,
           lookupTypeId,
-          data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null,
-          data.TYPE_CODE || null,
+          enterpriseId,
+          typeCode,
           data.TYPE_NAME || null,
           data.IS_ACTIVE !== undefined && data.IS_ACTIVE !== null
             ? (data.IS_ACTIVE === true || data.IS_ACTIVE === 'Y' || data.IS_ACTIVE === 1 ? 'Y' : 'N')
@@ -320,28 +391,49 @@ class EmplLookupTypeModel {
           paramIndex++;
         }
 
-        if (updateFields.length === 0) {
-          const selectQuery = `SELECT
-            RAWTOHEX(a.LOOKUP_TYPE_GUID) AS LOOKUP_TYPE_GUID,
-            a.LOOKUP_TYPE_ID,
-            a.ENTERPRISE_ID,
-            a.TYPE_CODE,
-            a.TYPE_NAME,
-            a.IS_ACTIVE,
-            a.CREATED_AT,
-            a.CREATED_BY,
-            a.UPDATED_AT,
-            a.UPDATED_BY
-          FROM ${this.TABLE_NAME} a
-          WHERE a.LOOKUP_TYPE_GUID = :1`;
-          const selectResult = await connection.execute(selectQuery, [guidBuffer], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          if (selectResult.rows && selectResult.rows.length > 0) {
-            return this.convertKeysToSnakeCase(selectResult.rows[0]);
-          }
+        const existingResult = await connection.execute(
+          `SELECT ENTERPRISE_ID, TYPE_CODE FROM ${this.TABLE_NAME} WHERE LOOKUP_TYPE_GUID = :1`,
+          [guidBuffer],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (!existingResult.rows?.length) {
           throw new DatabaseError('Lookup type not found');
         }
+        const existing = existingResult.rows[0];
+
+        if (updateFields.length === 0) {
+          return this.convertKeysToSnakeCase(
+            (
+              await connection.execute(
+                `SELECT
+                  RAWTOHEX(a.LOOKUP_TYPE_GUID) AS LOOKUP_TYPE_GUID,
+                  a.LOOKUP_TYPE_ID,
+                  a.ENTERPRISE_ID,
+                  a.TYPE_CODE,
+                  a.TYPE_NAME,
+                  a.IS_ACTIVE,
+                  a.CREATED_AT,
+                  a.CREATED_BY,
+                  a.UPDATED_AT,
+                  a.UPDATED_BY
+                FROM ${this.TABLE_NAME} a
+                WHERE a.LOOKUP_TYPE_GUID = :1`,
+                [guidBuffer],
+                { outFormat: oracledb.OUT_FORMAT_OBJECT }
+              )
+            ).rows[0]
+          );
+        }
+
+        const effectiveEnterpriseId =
+          data.ENTERPRISE_ID !== undefined ? data.ENTERPRISE_ID : existing.ENTERPRISE_ID;
+        const effectiveTypeCode = data.TYPE_CODE !== undefined ? data.TYPE_CODE : existing.TYPE_CODE;
+
+        await this.assertNoCrossScopeTypeCodeConflict(connection, {
+          enterpriseId: effectiveEnterpriseId,
+          typeCode: effectiveTypeCode,
+          excludeGuidBuffer: guidBuffer
+        });
 
         updateFields.push(`UPDATED_BY = :${paramIndex}`);
         bindParams.push(userId || 'SYSTEM');

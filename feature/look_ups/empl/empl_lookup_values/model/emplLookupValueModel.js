@@ -75,12 +75,76 @@ class EmplLookupValueModel {
     }
   }
 
+  /**
+   * Global vs enterprise LOOKUP_CODE (per LOOKUP_TYPE) cannot coexist (case-insensitive).
+   */
+  static async assertNoCrossScopeValueCodeConflict(
+    connection,
+    { enterpriseId, lookupType, lookupCode, excludeGuidBuffer = null }
+  ) {
+    const typeCode = lookupType != null ? String(lookupType).trim() : '';
+    const code = lookupCode != null ? String(lookupCode).trim() : '';
+    if (!typeCode || !code) return;
+
+    const bindParams = [typeCode, code];
+    let excludeClause = '';
+    if (excludeGuidBuffer) {
+      excludeClause = ' AND v.LOOKUP_GUID <> :3';
+      bindParams.push(excludeGuidBuffer);
+    }
+
+    if (enterpriseId != null) {
+      const query = `SELECT 1
+        FROM ${this.TABLE_NAME} v
+        WHERE v.ENTERPRISE_ID IS NULL
+          AND UPPER(TRIM(v.LOOKUP_TYPE)) = UPPER(TRIM(:1))
+          AND UPPER(TRIM(v.LOOKUP_CODE)) = UPPER(TRIM(:2))
+          ${excludeClause}
+        FETCH FIRST 1 ROWS ONLY`;
+      const result = await connection.execute(query, bindParams, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      if (result.rows?.length) {
+        const err = new DatabaseError(
+          `LOOKUP_CODE "${code}" for type "${typeCode}" already exists as a global lookup value and cannot be duplicated for a specific enterprise.`,
+          null,
+          `LOOKUP_CODE "${code}" already exists as a global lookup value for this type.`
+        );
+        err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+        throw err;
+      }
+      return;
+    }
+
+    const query = `SELECT 1
+      FROM ${this.TABLE_NAME} v
+      WHERE v.ENTERPRISE_ID IS NOT NULL
+        AND UPPER(TRIM(v.LOOKUP_TYPE)) = UPPER(TRIM(:1))
+        AND UPPER(TRIM(v.LOOKUP_CODE)) = UPPER(TRIM(:2))
+        ${excludeClause}
+      FETCH FIRST 1 ROWS ONLY`;
+    const result = await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+    if (result.rows?.length) {
+      const err = new DatabaseError(
+        `LOOKUP_CODE "${code}" for type "${typeCode}" already exists for one or more enterprises and cannot be created as a global lookup value.`,
+        null,
+        `LOOKUP_CODE "${code}" already exists for an enterprise for this type.`
+      );
+      err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+      throw err;
+    }
+  }
+
   static async getNextDisplaySequence(connection, lookupType, enterpriseId = null) {
     let query = `SELECT NVL(MAX(DISPLAY_SEQUENCE), 0) + 1 AS NEXT_SEQ FROM ${this.TABLE_NAME} WHERE LOOKUP_TYPE = :1`;
     const bindParams = [lookupType];
     if (enterpriseId !== undefined && enterpriseId !== null) {
-      query += ` AND (ENTERPRISE_ID = :2 OR ENTERPRISE_ID IS NULL)`;
+      query += ` AND ENTERPRISE_ID = :2`;
       bindParams.push(enterpriseId);
+    } else {
+      query += ` AND ENTERPRISE_ID IS NULL`;
     }
     const result = await connection.execute(query, bindParams, {
       outFormat: oracledb.OUT_FORMAT_OBJECT
@@ -115,10 +179,15 @@ class EmplLookupValueModel {
       const bindParams = [];
       let paramIndex = 1;
 
+      // GET: enterprise_id=N => global (NULL) + that enterprise; enterprise_id=null => global only
       if (filters.enterpriseId !== undefined) {
-        conditions.push(`(a.ENTERPRISE_ID = :${paramIndex} OR a.ENTERPRISE_ID IS NULL)`);
-        bindParams.push(filters.enterpriseId);
-        paramIndex++;
+        if (filters.enterpriseId === null) {
+          conditions.push('a.ENTERPRISE_ID IS NULL');
+        } else {
+          conditions.push(`(a.ENTERPRISE_ID = :${paramIndex} OR a.ENTERPRISE_ID IS NULL)`);
+          bindParams.push(filters.enterpriseId);
+          paramIndex++;
+        }
       }
       if (filters.lookupType) {
         conditions.push(`a.LOOKUP_TYPE = :${paramIndex}`);
@@ -156,7 +225,7 @@ class EmplLookupValueModel {
       const countResult = await this.executeQuery(countQuery, bindParams);
       const total = countResult.rows[0]?.total || 0;
 
-      dataQuery += ` ORDER BY a.LOOKUP_TYPE, a.DISPLAY_SEQUENCE, a.LOOKUP_CODE`;
+      dataQuery += ` ORDER BY a.LOOKUP_TYPE, CASE WHEN a.ENTERPRISE_ID IS NULL THEN 0 ELSE 1 END, a.DISPLAY_SEQUENCE, a.LOOKUP_CODE`;
       dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
       bindParams.push(offset, pageSize);
 
@@ -241,6 +310,14 @@ class EmplLookupValueModel {
 
         const lookupType = data.LOOKUP_TYPE ?? null;
         const enterpriseId = data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null;
+        const lookupCode = data.LOOKUP_CODE ?? null;
+
+        await this.assertNoCrossScopeValueCodeConflict(connection, {
+          enterpriseId,
+          lookupType,
+          lookupCode
+        });
+
         const displaySequence = await this.getNextDisplaySequence(connection, lookupType, enterpriseId);
 
         const { buffer: guidBuffer } = await generateSysGuid(connection);
@@ -280,7 +357,7 @@ class EmplLookupValueModel {
           lookupId,
           enterpriseId,
           lookupType,
-          data.LOOKUP_CODE ?? null,
+          lookupCode,
           data.MEANING_EN ?? null,
           data.MEANING_AR ?? null,
           data.DESCRIPTION_EN ?? null,
@@ -425,6 +502,16 @@ class EmplLookupValueModel {
           paramIndex++;
         }
 
+        const existingResult = await connection.execute(
+          `SELECT ENTERPRISE_ID, LOOKUP_TYPE, LOOKUP_CODE FROM ${this.TABLE_NAME} WHERE LOOKUP_GUID = :1`,
+          [guidBuffer],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (!existingResult.rows?.length) {
+          throw new DatabaseError('Lookup value not found');
+        }
+        const existing = existingResult.rows[0];
+
         if (updateFields.length === 0) {
           const selectQuery = `SELECT
             RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
@@ -449,11 +536,20 @@ class EmplLookupValueModel {
           const selectResult = await connection.execute(selectQuery, [guidBuffer], {
             outFormat: oracledb.OUT_FORMAT_OBJECT
           });
-          if (selectResult.rows && selectResult.rows.length > 0) {
-            return this.convertKeysToSnakeCase(selectResult.rows[0]);
-          }
-          throw new DatabaseError('Lookup value not found');
+          return this.convertKeysToSnakeCase(selectResult.rows[0]);
         }
+
+        const effectiveEnterpriseId =
+          data.ENTERPRISE_ID !== undefined ? data.ENTERPRISE_ID : existing.ENTERPRISE_ID;
+        const effectiveLookupType = data.LOOKUP_TYPE !== undefined ? data.LOOKUP_TYPE : existing.LOOKUP_TYPE;
+        const effectiveLookupCode = data.LOOKUP_CODE !== undefined ? data.LOOKUP_CODE : existing.LOOKUP_CODE;
+
+        await this.assertNoCrossScopeValueCodeConflict(connection, {
+          enterpriseId: effectiveEnterpriseId,
+          lookupType: effectiveLookupType,
+          lookupCode: effectiveLookupCode,
+          excludeGuidBuffer: guidBuffer
+        });
 
         updateFields.push(`UPDATED_BY = :${paramIndex}`);
         bindParams.push(userId || 'SYSTEM');

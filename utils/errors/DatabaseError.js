@@ -231,6 +231,15 @@ export class DatabaseError extends AppError {
       return 'The database could not complete this action because a trigger reported an error. Verify your input or contact support.';
     }
 
+    // EMPL lookup cross-scope (global vs enterprise) trigger errors
+    if (
+      (errorNum >= 20010 && errorNum <= 20013) ||
+      /ORA-2001[0-3]/.test(message)
+    ) {
+      const m = message.match(/ORA-2001[0-3]:\s*([^\n\r]+)/i);
+      if (m?.[1]) return String(m[1]).trim();
+    }
+
     // ORA-20001: user-defined – use message for "Attendance Day does not exist", else schedule overlap
     if (errorNum === 20001 || message.includes('ORA-20001')) {
       const upper = message.toUpperCase();
