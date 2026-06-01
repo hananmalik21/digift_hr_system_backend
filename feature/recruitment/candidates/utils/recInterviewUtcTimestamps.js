@@ -65,6 +65,7 @@ export function validateInterviewUtcRange(errors, body) {
 }
 
 /**
+ * CamelCase aliases only; UTC strings are passed through to Oracle unchanged.
  * @param {Record<string, unknown>} body
  */
 export function applyInterviewUtcBodyAliases(body) {
@@ -76,44 +77,12 @@ export function applyInterviewUtcBodyAliases(body) {
     b.interview_end_utc = b.interviewEndUtc;
   }
   if (b.interview_start_utc != null) {
-    b.interview_start_utc = normalizeUtcIsoTimestamp(b.interview_start_utc);
+    b.interview_start_utc = String(b.interview_start_utc).trim();
   }
   if (b.interview_end_utc != null) {
-    b.interview_end_utc = normalizeUtcIsoTimestamp(b.interview_end_utc);
+    b.interview_end_utc = String(b.interview_end_utc).trim();
   }
   return b;
-}
-
-/**
- * Map UTC ISO instants to legacy SCHEDULE_INTERVIEW binds (DATE + VARCHAR2 times).
- * Used while REC.CANDIDATE_INTERVIEW_PKG still exposes P_INTERVIEW_DATE / P_START_TIME / P_END_TIME.
- * Times use UTC clock components (not local timezone).
- * @param {string} startUtcIso
- * @param {string} endUtcIso
- */
-export function utcIsoToLegacyInterviewFields(startUtcIso, endUtcIso) {
-  const startMs = Date.parse(startUtcIso);
-  const endMs = Date.parse(endUtcIso);
-  const start = new Date(startMs);
-  const end = new Date(endMs);
-
-  const interview_date = new Date(
-    Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate())
-  );
-
-  const formatUtcTime12 = (d) => {
-    let h = d.getUTCHours();
-    const m = d.getUTCMinutes();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    return `${h}:${String(m).padStart(2, '0')} ${ampm}`;
-  };
-
-  return {
-    interview_date,
-    start_time: formatUtcTime12(start),
-    end_time: formatUtcTime12(end)
-  };
 }
 
 /**
@@ -127,29 +96,3 @@ export function normalizeUtcIsoTimestampZ(value) {
   return offset.replace(/\+00:00$/i, 'Z');
 }
 
-function envFlagTrue(name) {
-  const v = String(process.env[name] ?? '').trim().toLowerCase();
-  return v === 'true' || v === '1' || v === 'yes';
-}
-
-function envFlagFalse(name) {
-  const v = String(process.env[name] ?? '').trim().toLowerCase();
-  return v === 'false' || v === '0' || v === 'no';
-}
-
-/** SCHEDULE_INTERVIEW: legacy date/time unless REC_INTERVIEW_PKG_USE_UTC=true. */
-export function interviewPackageUsesUtcParams() {
-  return envFlagTrue('REC_INTERVIEW_PKG_USE_UTC');
-}
-
-/**
- * UPDATE_INTERVIEW: UTC params (P_INTERVIEW_START_UTC / P_INTERVIEW_END_UTC) by default.
- * Set REC_INTERVIEW_UPDATE_USE_UTC=false to use legacy P_INTERVIEW_DATE binds.
- */
-export function interviewUpdateUsesUtcParams() {
-  if (envFlagFalse('REC_INTERVIEW_UPDATE_USE_UTC')) return false;
-  if (envFlagTrue('REC_INTERVIEW_UPDATE_USE_UTC') || envFlagTrue('REC_INTERVIEW_PKG_USE_UTC')) {
-    return true;
-  }
-  return true;
-}
