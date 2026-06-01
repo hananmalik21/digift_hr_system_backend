@@ -13,6 +13,11 @@ import {
   packageStatusIsSuccess as bgCheckPackageStatusIsSuccess
 } from '../model/recCandidateBgCheckModel.js';
 import {
+  packageStatusIsSuccess as interviewPackageStatusIsSuccess,
+  scheduleInterviewViaPackage,
+  updateInterviewViaPackage
+} from '../model/recCandidateInterviewModel.js';
+import {
   createCandidateViaPackage,
   deleteCandidateViaPackage,
   packageStatusIsSuccess,
@@ -26,6 +31,13 @@ import {
   normalizeBackgroundCheckBody,
   validateCreateBackgroundCheckBody
 } from '../utils/recCandidateBgCheckValidators.js';
+import {
+  normalizeScheduleInterviewBody,
+  normalizeUpdateInterviewBody,
+  parseInterviewGuidParam,
+  validateScheduleInterviewBody,
+  validateUpdateInterviewBody
+} from '../utils/recCandidateInterviewValidators.js';
 import {
   parseCandidateGuidParam,
   validateCandidateBody,
@@ -103,6 +115,34 @@ function sendCreateBackgroundCheckResponse(res, pkg) {
     success,
     background_check_id: pkg.background_check_id ?? null,
     background_check_guid: pkg.background_check_guid ?? null,
+    status,
+    message
+  });
+}
+
+function sendScheduleInterviewResponse(res, pkg) {
+  const success = interviewPackageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message ?? '';
+  const httpStatus = success ? 200 : 400;
+
+  return sendPackageResponse(res, httpStatus, {
+    success,
+    interview_id: pkg.interview_id ?? null,
+    interview_guid: pkg.interview_guid ?? null,
+    status,
+    message
+  });
+}
+
+function sendUpdateInterviewResponse(res, pkg) {
+  const success = interviewPackageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message ?? '';
+  const httpStatus = success ? 200 : 400;
+
+  return sendPackageResponse(res, httpStatus, {
+    success,
     status,
     message
   });
@@ -217,6 +257,61 @@ router.get(
       return sendPackageResponse(res, 200, { success: true, data });
     } catch (err) {
       return handleReadError(res, err, 'Unable to fetch candidate. Please try again.');
+    }
+  })
+);
+
+/**
+ * POST /api/rec/candidates/interviews
+ * Body: JSON — schedule interview (interview_start_utc / interview_end_utc as UTC ISO-8601).
+ */
+router.post(
+  '/interviews',
+  asyncHandler(async (req, res) => {
+    try {
+      const body = normalizeScheduleInterviewBody({ ...(req.body || {}) });
+      body.created_by = resolveAuditActor(req, body, 'created_by');
+      validateScheduleInterviewBody(body);
+
+      const pkg = await scheduleInterviewViaPackage(body);
+      return sendScheduleInterviewResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to schedule interview. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * PUT /api/rec/candidates/interviews/:interview_guid
+ * Body: JSON — update interview (optional interview_start_utc / interview_end_utc UTC ISO-8601).
+ */
+router.put(
+  '/interviews/:interview_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const interview_guid = parseInterviewGuidParam(req.params.interview_guid);
+      const body = normalizeUpdateInterviewBody({ ...(req.body || {}) }, interview_guid);
+      body.updated_by = resolveAuditActor(req, body, 'updated_by');
+      validateUpdateInterviewBody(body, interview_guid);
+
+      const pkg = await updateInterviewViaPackage(body);
+      return sendUpdateInterviewResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to update interview. Please try again.'
+      });
     }
   })
 );
