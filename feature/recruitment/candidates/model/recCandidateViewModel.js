@@ -17,6 +17,39 @@ const VIEW = process.env.REC_CANDIDATES_FULL_V || 'REC.CANDIDATES_FULL_V';
 const LOG_TAG = 'recCandidateViewModel';
 const ROW_OPTS = { outFormat: oracledb.OUT_FORMAT_OBJECT };
 
+/** List API omits BACKGROUND_CHECKS_JSON (detail-by-GUID returns it). */
+const LIST_SELECT_COLS = [
+  'CANDIDATE_ID',
+  'CANDIDATE_GUID',
+  'ENTERPRISE_ID',
+  'FIRST_NAME',
+  'MIDDLE_NAME',
+  'LAST_NAME',
+  'FULL_NAME',
+  'EMAIL',
+  'PHONE',
+  'CURRENT_TITLE',
+  'CURRENT_EMPLOYER',
+  'YEARS_EXPERIENCE',
+  'CURRENT_LOCATION',
+  'SOURCE',
+  'EXPECTED_SALARY',
+  'SALARY_CURRENCY',
+  'NOTICE_PERIOD',
+  'LINKEDIN_PROFILE',
+  'STATUS',
+  'ACTIVE_FLAG',
+  'EDUCATION_JSON',
+  'EXPERIENCE_JSON',
+  'RESUMES_JSON',
+  'CREATED_BY',
+  'CREATION_DATE',
+  'LAST_UPDATED_BY',
+  'LAST_UPDATE_DATE'
+]
+  .map((c) => `v.${c}`)
+  .join(', ');
+
 function isNonEmptyTrimmed(raw) {
   return raw !== undefined && raw !== null && String(raw).trim() !== '';
 }
@@ -164,7 +197,7 @@ export async function listCandidatesFromView(query) {
     const { whereSql, binds } = buildListFilters(query);
 
     const countSql = `SELECT COUNT(*) AS TOTAL_COUNT FROM ${VIEW} v ${whereSql}`;
-    const dataSql = `SELECT v.* FROM ${VIEW} v ${whereSql} ORDER BY v.CREATION_DATE DESC`;
+    const dataSql = `SELECT ${LIST_SELECT_COLS} FROM ${VIEW} v ${whereSql} ORDER BY v.CREATION_DATE DESC`;
 
     return await withConnection(async (connection) => {
       const countResult = await connection.execute(countSql, binds, ROW_OPTS);
@@ -184,7 +217,9 @@ export async function listCandidatesFromView(query) {
 
       const rows = [];
       for (const row of dataResult.rows || []) {
-        rows.push(await mapCandidateViewRow(row));
+        rows.push(
+          await mapCandidateViewRow(row, { omitColumns: ['background_checks_json'] })
+        );
       }
 
       return { rows, total, page, limit };

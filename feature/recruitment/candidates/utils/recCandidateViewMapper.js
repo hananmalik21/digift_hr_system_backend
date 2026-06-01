@@ -1,6 +1,11 @@
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 
-const JSON_ARRAY_COLUMNS = new Set(['education_json', 'experience_json', 'resumes_json']);
+const JSON_ARRAY_COLUMNS = new Set([
+  'education_json',
+  'experience_json',
+  'resumes_json',
+  'background_checks_json'
+]);
 
 async function readLobVal(v) {
   if (v == null) return null;
@@ -73,13 +78,17 @@ function normalizeScalar(key, v) {
 /**
  * Map one view row to API JSON (Oracle types only — no business rules).
  * @param {Record<string, unknown>} row
+ * @param {{ omitColumns?: string[] }} [options]
  */
-export async function mapCandidateViewRow(row) {
+export async function mapCandidateViewRow(row, options = {}) {
   if (!row || typeof row !== 'object') return null;
+
+  const omit = new Set((options.omitColumns ?? []).map((c) => String(c).toLowerCase()));
 
   const out = {};
   for (const [k, v] of Object.entries(row)) {
     const key = String(k).toLowerCase();
+    if (omit.has(key)) continue;
     if (JSON_ARRAY_COLUMNS.has(key)) {
       out[key] = await parseJsonColumn(v, true);
       continue;
