@@ -9,6 +9,8 @@ import {
 const INTERVIEW_MODES = new Set(['ONSITE', 'ONLINE', 'PHONE']);
 const STATUS_CODES = new Set(['SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED']);
 const RESULT_STATUSES = new Set(['PENDING', 'SELECTED', 'REJECTED', 'ON_HOLD']);
+const PRIMARY_INTERVIEWER = new Set(['Y', 'N']);
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isBlank(v) {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -44,19 +46,102 @@ function requirePositiveInteger(errors, body, field, label = field) {
   }
 }
 
-function requireEmail(errors, body, field, label = field) {
-  if (isBlank(body[field])) {
-    errors.push(`${label} is required`);
+function validateInterviewDate(errors, body, required = false) {
+  const raw = body.interview_date;
+  if (isBlank(raw)) {
+    if (required) errors.push('interview_date is required');
     return;
   }
-  validateEmailIfPresent(errors, body, field, label);
+  const s = String(raw).trim();
+  if (!DATE_ONLY_RE.test(s) && Number.isNaN(Date.parse(s))) {
+    errors.push('interview_date must be a valid date (YYYY-MM-DD)');
+  }
 }
 
-function validateEmailIfPresent(errors, body, field, label = field) {
-  if (isBlank(body[field])) return;
-  const s = String(body[field]).trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) {
-    errors.push(`${label} must be a valid email address`);
+/**
+ * @param {unknown} value
+ * @returns {unknown[]|null}
+ */
+function parseInterviewersArray(value) {
+  if (value == null || value === '') return null;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s) return null;
+    try {
+      const parsed = JSON.parse(s);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {boolean} [required]
+ */
+function validateInterviewers(errors, body, required = false) {
+  const raw = body.interviewers;
+  if (raw == null || raw === '') {
+    if (required) errors.push('interviewers is required');
+    return;
+  }
+
+  const list = parseInterviewersArray(raw);
+  if (!list || list.length === 0) {
+    errors.push('interviewers must be a non-empty JSON array');
+    return;
+  }
+
+  list.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      errors.push(`interviewers[${index}] must be an object`);
+      return;
+    }
+    const row = /** @type {Record<string, unknown>} */ (item);
+    if (isBlank(row.employee_id)) {
+      errors.push(`interviewers[${index}].employee_id is required`);
+    } else {
+      const n = Number(row.employee_id);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
+        errors.push(`interviewers[${index}].employee_id must be a positive integer`);
+      }
+    }
+    if (isBlank(row.primary_interviewer)) {
+      errors.push(`interviewers[${index}].primary_interviewer is required`);
+    } else {
+      const flag = String(row.primary_interviewer).trim().toUpperCase();
+      if (!PRIMARY_INTERVIEWER.has(flag)) {
+        errors.push(`interviewers[${index}].primary_interviewer must be Y or N`);
+      }
+    }
+  });
+}
+
+/**
+ * @param {unknown[]} list
+ * @returns {Array<{ employee_id: number, primary_interviewer: string }>}
+ */
+function normalizeInterviewersList(list) {
+  return list.map((item) => {
+    const row = /** @type {Record<string, unknown>} */ (item);
+    return {
+      employee_id: Number(row.employee_id),
+      primary_interviewer: String(row.primary_interviewer).trim().toUpperCase()
+    };
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+function applyInterviewersNormalization(body) {
+  const list = parseInterviewersArray(body.interviewers);
+  if (list) {
+    body.interviewers = normalizeInterviewersList(list);
   }
 }
 
@@ -87,11 +172,11 @@ export function validateScheduleInterviewBody(body) {
   requireField(errors, b, 'interview_title');
   requireField(errors, b, 'interview_type');
   requirePositiveInteger(errors, b, 'interview_round');
+  validateInterviewDate(errors, b, true);
   validateUtcTimestampField(errors, b, 'interview_start_utc', 'interview_start_utc', true);
   validateUtcTimestampField(errors, b, 'interview_end_utc', 'interview_end_utc', true);
   requireField(errors, b, 'interview_mode');
-  requireField(errors, b, 'interviewer_name');
-  requireEmail(errors, b, 'interviewer_email');
+  validateInterviewers(errors, b, true);
   requireField(errors, b, 'created_by');
 
   if (!isBlank(b.candidate_guid)) {
@@ -126,6 +211,11 @@ export function normalizeScheduleInterviewBody(body) {
   if (!isBlank(b.candidate_guid)) {
     b.candidate_guid = ensureHex32(normalizeHex32(b.candidate_guid));
   }
+  if (!isBlank(b.interview_date)) {
+    const s = String(b.interview_date).trim();
+    b.interview_date = DATE_ONLY_RE.test(s) ? s : s.slice(0, 10);
+  }
+  applyInterviewersNormalization(b);
   return b;
 }
 
@@ -172,9 +262,11 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
     }
   }
 
+  validateInterviewDate(errors, b, false);
   validateUtcTimestampField(errors, b, 'interview_start_utc', 'interview_start_utc', false);
   validateUtcTimestampField(errors, b, 'interview_end_utc', 'interview_end_utc', false);
   validateInterviewUtcRange(errors, b);
+  validateInterviewers(errors, b, false);
 
   if (!isBlank(b.interview_round)) {
     const n = Number(b.interview_round);
@@ -189,8 +281,6 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
       errors.push('rating must be a valid number');
     }
   }
-
-  validateEmailIfPresent(errors, b, 'interviewer_email');
 
   if (errors.length) {
     throw new ValidationError('Validation failed', errors);
@@ -211,5 +301,47 @@ export function normalizeUpdateInterviewBody(body, interviewGuid) {
   if (!isBlank(b.interview_guid) && !interviewGuid) {
     b.interview_guid = ensureHex32(normalizeHex32(b.interview_guid));
   }
+  if (!isBlank(b.interview_date)) {
+    const s = String(b.interview_date).trim();
+    b.interview_date = DATE_ONLY_RE.test(s) ? s : s.slice(0, 10);
+  }
+  applyInterviewersNormalization(b);
+  return b;
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} [interviewGuid]
+ */
+export function validateDeleteInterviewBody(body, interviewGuid) {
+  const b = asObject(body);
+  const errors = [];
+
+  requirePositiveEnterpriseId(errors, b);
+  requireField(errors, b, 'deleted_by');
+
+  const guid = interviewGuid ?? b.interview_guid;
+  if (isBlank(guid)) {
+    errors.push('interview_guid is required');
+  } else {
+    try {
+      ensureHex32(normalizeHex32(guid));
+    } catch {
+      errors.push('interview_guid must be a valid 32-character hex GUID');
+    }
+  }
+
+  if (errors.length) {
+    throw new ValidationError('Validation failed', errors);
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} [interviewGuid]
+ */
+export function normalizeDeleteInterviewBody(body, interviewGuid) {
+  const b = asObject(body);
+  if (interviewGuid) b.interview_guid = ensureHex32(normalizeHex32(interviewGuid));
   return b;
 }

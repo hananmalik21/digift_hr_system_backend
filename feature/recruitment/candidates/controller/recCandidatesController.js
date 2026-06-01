@@ -20,6 +20,7 @@ import {
 } from '../model/recCandidateBgCheckModel.js';
 import {
   packageStatusIsSuccess as interviewPackageStatusIsSuccess,
+  deleteInterviewViaPackage,
   scheduleInterviewViaPackage,
   updateInterviewViaPackage
 } from '../model/recCandidateInterviewModel.js';
@@ -47,9 +48,11 @@ import {
   validateCreateBackgroundCheckBody
 } from '../utils/recCandidateBgCheckValidators.js';
 import {
+  normalizeDeleteInterviewBody,
   normalizeScheduleInterviewBody,
   normalizeUpdateInterviewBody,
   parseInterviewGuidParam,
+  validateDeleteInterviewBody,
   validateScheduleInterviewBody,
   validateUpdateInterviewBody
 } from '../utils/recCandidateInterviewValidators.js';
@@ -135,13 +138,18 @@ function sendCreateBackgroundCheckResponse(res, pkg) {
   });
 }
 
+function interviewPackageHttpStatus(pkg) {
+  if (interviewPackageStatusIsSuccess(pkg.status)) return 200;
+  if (/not found/i.test(pkg.message ?? '')) return 404;
+  return 400;
+}
+
 function sendScheduleInterviewResponse(res, pkg) {
   const success = interviewPackageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
   const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
 
-  return sendPackageResponse(res, httpStatus, {
+  return sendPackageResponse(res, interviewPackageHttpStatus(pkg), {
     success,
     interview_id: pkg.interview_id ?? null,
     interview_guid: pkg.interview_guid ?? null,
@@ -154,14 +162,15 @@ function sendUpdateInterviewResponse(res, pkg) {
   const success = interviewPackageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
   const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
 
-  return sendPackageResponse(res, httpStatus, {
+  return sendPackageResponse(res, interviewPackageHttpStatus(pkg), {
     success,
     status,
     message
   });
 }
+
+const sendDeleteInterviewResponse = sendUpdateInterviewResponse;
 
 function sendCreateAssessmentResponse(res, pkg) {
   const success = assessmentPackageStatusIsSuccess(pkg.status);
@@ -296,7 +305,7 @@ router.get(
 
 /**
  * POST /api/rec/candidates/interviews
- * Body: JSON — schedule interview (interview_start_utc / interview_end_utc as UTC ISO-8601).
+ * Body: JSON — schedule interview via REC.CANDIDATE_INTERVIEW_PKG.SCHEDULE_INTERVIEW.
  */
 router.post(
   '/interviews',
@@ -323,7 +332,7 @@ router.post(
 
 /**
  * PUT /api/rec/candidates/interviews/:interview_guid
- * Body: JSON — update interview (optional interview_start_utc / interview_end_utc UTC ISO-8601).
+ * Body: JSON — update interview via REC.CANDIDATE_INTERVIEW_PKG.UPDATE_INTERVIEW.
  */
 router.put(
   '/interviews/:interview_guid',
@@ -344,6 +353,34 @@ router.put(
         success: false,
         status: 'ERROR',
         message: 'Unable to update interview. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * DELETE /api/rec/candidates/interviews/:interview_guid
+ * Body: { enterprise_id, deleted_by } — REC.CANDIDATE_INTERVIEW_PKG.DELETE_INTERVIEW.
+ */
+router.delete(
+  '/interviews/:interview_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const interview_guid = parseInterviewGuidParam(req.params.interview_guid);
+      const body = normalizeDeleteInterviewBody({ ...(req.body || {}) }, interview_guid);
+      body.deleted_by = resolveAuditActor(req, body, 'deleted_by');
+      validateDeleteInterviewBody(body, interview_guid);
+
+      const pkg = await deleteInterviewViaPackage(body);
+      return sendDeleteInterviewResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to delete interview. Please try again.'
       });
     }
   })
