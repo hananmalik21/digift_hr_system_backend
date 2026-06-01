@@ -217,7 +217,9 @@ export async function listCandidatesFromView(query) {
 
       const rows = [];
       for (const row of dataResult.rows || []) {
-        rows.push(await mapCandidateViewRow(row));
+        rows.push(
+          await mapCandidateViewRow(row, { omitColumns: ['background_checks_json'] })
+        );
       }
 
       return { rows, total, page, limit };
