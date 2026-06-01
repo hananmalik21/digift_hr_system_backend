@@ -9,6 +9,10 @@ import {
 } from '../model/recCandidateViewModel.js';
 import { getCandidateResumeByGuid } from '../model/recCandidateResumeModel.js';
 import {
+  createBackgroundCheckViaPackage,
+  packageStatusIsSuccess as bgCheckPackageStatusIsSuccess
+} from '../model/recCandidateBgCheckModel.js';
+import {
   createCandidateViaPackage,
   deleteCandidateViaPackage,
   packageStatusIsSuccess,
@@ -18,6 +22,10 @@ import {
   buildCandidateBodyFromRequest,
   maybeMulterCandidate
 } from '../utils/recCandidateMultipart.js';
+import {
+  normalizeBackgroundCheckBody,
+  validateCreateBackgroundCheckBody
+} from '../utils/recCandidateBgCheckValidators.js';
 import {
   parseCandidateGuidParam,
   validateCandidateBody,
@@ -84,6 +92,21 @@ function sendPackageActionResponse(res, pkg) {
 
 const sendUpdateCandidateResponse = sendPackageActionResponse;
 const sendDeleteCandidateResponse = sendPackageActionResponse;
+
+function sendCreateBackgroundCheckResponse(res, pkg) {
+  const success = bgCheckPackageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message ?? '';
+  const httpStatus = success ? 200 : 400;
+
+  return sendPackageResponse(res, httpStatus, {
+    success,
+    background_check_id: pkg.background_check_id ?? null,
+    background_check_guid: pkg.background_check_guid ?? null,
+    status,
+    message
+  });
+}
 
 function buildListPaginationMeta(page, pageSize, total) {
   const p = buildPaginationMeta(page, pageSize, total);
@@ -194,6 +217,33 @@ router.get(
       return sendPackageResponse(res, 200, { success: true, data });
     } catch (err) {
       return handleReadError(res, err, 'Unable to fetch candidate. Please try again.');
+    }
+  })
+);
+
+/**
+ * POST /api/rec/candidates/background-check
+ * Body: JSON — initiate candidate background check via REC.CANDIDATE_BG_CHECK_PKG.
+ */
+router.post(
+  '/background-check',
+  asyncHandler(async (req, res) => {
+    try {
+      const body = normalizeBackgroundCheckBody({ ...(req.body || {}) });
+      body.created_by = resolveAuditActor(req, body, 'created_by');
+      validateCreateBackgroundCheckBody(body);
+
+      const pkg = await createBackgroundCheckViaPackage(body);
+      return sendCreateBackgroundCheckResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to process background check. Please try again.'
+      });
     }
   })
 );
