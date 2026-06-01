@@ -63,3 +63,29 @@ export function validateCandidateBody(body, options = {}) {
     throw new ValidationError('Validation failed', errors);
   }
 }
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} [candidateGuid]
+ */
+export function validateCandidateDeleteBody(body, candidateGuid) {
+  const b = asObject(body);
+  const errors = [];
+
+  requirePositiveEnterpriseId(errors, b);
+
+  const guid = candidateGuid ?? b.candidate_guid;
+  if (isBlank(guid)) {
+    errors.push('candidate_guid is required');
+  } else {
+    try {
+      ensureHex32(normalizeHex32(guid));
+    } catch {
+      errors.push('candidate_guid must be a valid 32-character hex GUID');
+    }
+  }
+
+  if (errors.length) {
+    throw new ValidationError('Validation failed', errors);
+  }
+}

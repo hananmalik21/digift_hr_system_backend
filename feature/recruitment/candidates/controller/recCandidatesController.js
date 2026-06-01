@@ -4,6 +4,7 @@ import { ValidationError } from '../../../../utils/errors/index.js';
 import { getActingUsername } from '../../../../utils/userContext.js';
 import {
   createCandidateViaPackage,
+  deleteCandidateViaPackage,
   packageStatusIsSuccess,
   updateCandidateViaPackage
 } from '../model/recCandidatesModel.js';
@@ -13,7 +14,8 @@ import {
 } from '../utils/recCandidateMultipart.js';
 import {
   parseCandidateGuidParam,
-  validateCandidateBody
+  validateCandidateBody,
+  validateCandidateDeleteBody
 } from '../utils/recCandidateValidators.js';
 
 const router = express.Router();
@@ -56,7 +58,7 @@ function sendCreateCandidateResponse(res, pkg) {
   });
 }
 
-function sendUpdateCandidateResponse(res, pkg) {
+function sendPackageActionResponse(res, pkg) {
   const success = packageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
   const message = pkg.message ?? '';
@@ -68,6 +70,9 @@ function sendUpdateCandidateResponse(res, pkg) {
     message
   });
 }
+
+const sendUpdateCandidateResponse = sendPackageActionResponse;
+const sendDeleteCandidateResponse = sendPackageActionResponse;
 
 /**
  * POST /api/rec/candidates
@@ -116,6 +121,36 @@ router.put(
 
       const pkg = await updateCandidateViaPackage(body);
       return sendUpdateCandidateResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to process candidate. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * DELETE /api/rec/candidates/:candidate_guid
+ * Body: { enterprise_id, deleted_by } — candidate_guid may also be sent in body (path param used if both).
+ */
+router.delete(
+  '/:candidate_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const candidate_guid = parseCandidateGuidParam(
+        req.params.candidate_guid ?? req.body?.candidate_guid
+      );
+      const body = { ...(req.body || {}), candidate_guid };
+      body.deleted_by = resolveAuditActor(req, body, 'deleted_by');
+      validateCandidateDeleteBody(body, candidate_guid);
+
+      const pkg = await deleteCandidateViaPackage(body);
+      return sendDeleteCandidateResponse(res, pkg);
     } catch (err) {
       if (err instanceof ValidationError) {
         return sendValidationError(res, err);

@@ -5,6 +5,7 @@ import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
 const PKG = 'REC.CANDIDATE_PKG';
 const CREATE_PROC = `${PKG}.CREATE_CANDIDATE`;
 const UPDATE_PROC = `${PKG}.UPDATE_CANDIDATE`;
+const DELETE_PROC = `${PKG}.DELETE_CANDIDATE`;
 
 const GENERIC_ERROR_MESSAGE = 'Unable to process candidate. Please try again.';
 
@@ -184,6 +185,10 @@ function parseUpdateOut(outBinds) {
   };
 }
 
+function parseDeleteOut(outBinds) {
+  return parseUpdateOut(outBinds);
+}
+
 function packageErrorResult(message = GENERIC_ERROR_MESSAGE, extra = {}) {
   return {
     candidate_id: null,
@@ -258,6 +263,17 @@ BEGIN
   );
 END;`;
 
+const DELETE_PLSQL = `
+BEGIN
+  ${DELETE_PROC}(
+    p_enterprise_id  => :p_enterprise_id,
+    p_candidate_guid => :p_candidate_guid,
+    p_deleted_by     => :p_deleted_by,
+    p_status         => :p_status,
+    p_message        => :p_message
+  );
+END;`;
+
 /**
  * @param {Record<string, unknown>} body
  * @returns {Promise<{ candidate_id: number|null, candidate_guid: string|null, status: string, message: string }>}
@@ -306,6 +322,31 @@ export async function updateCandidateViaPackage(body) {
     return parseUpdateOut(result?.outBinds);
   } catch (err) {
     console.error('[recCandidatesModel] UPDATE_CANDIDATE failed:', err?.errorNum ?? '', '[redacted]');
+    return { status: 'ERROR', message: GENERIC_ERROR_MESSAGE };
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<{ status: string, message: string }>}
+ */
+export async function deleteCandidateViaPackage(body) {
+  const b = { ...(body || {}) };
+  const binds = {
+    p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    p_candidate_guid: guidInBind(b.candidate_guid),
+    p_deleted_by: { val: strOrNull(b.deleted_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  };
+
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(DELETE_PLSQL, binds, { autoCommit: true })
+    );
+    return parseDeleteOut(result?.outBinds);
+  } catch (err) {
+    console.error('[recCandidatesModel] DELETE_CANDIDATE failed:', err?.errorNum ?? '', '[redacted]');
     return { status: 'ERROR', message: GENERIC_ERROR_MESSAGE };
   }
 }
