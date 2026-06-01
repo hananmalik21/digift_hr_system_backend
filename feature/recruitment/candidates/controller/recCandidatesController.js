@@ -1,7 +1,13 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { getActingUsername } from '../../../../utils/userContext.js';
+import {
+  getCandidateByGuidFromView,
+  listCandidatesFromView
+} from '../model/recCandidateViewModel.js';
+import { getCandidateResumeByGuid } from '../model/recCandidateResumeModel.js';
 import {
   createCandidateViaPackage,
   deleteCandidateViaPackage,
@@ -17,6 +23,11 @@ import {
   validateCandidateBody,
   validateCandidateDeleteBody
 } from '../utils/recCandidateValidators.js';
+import { normalizeCandidateListQuery } from '../utils/recCandidateListFilters.js';
+import {
+  parseResumeGuidParam,
+  validateCandidateGuidEnterpriseParams
+} from '../utils/recCandidateViewValidators.js';
 
 const router = express.Router();
 
@@ -73,6 +84,119 @@ function sendPackageActionResponse(res, pkg) {
 
 const sendUpdateCandidateResponse = sendPackageActionResponse;
 const sendDeleteCandidateResponse = sendPackageActionResponse;
+
+function buildListPaginationMeta(page, pageSize, total) {
+  const p = buildPaginationMeta(page, pageSize, total);
+  return {
+    pagination: {
+      page: p.page,
+      page_size: p.pageSize,
+      total: p.total,
+      total_pages: p.totalPages,
+      has_next: p.hasNext,
+      has_previous: p.hasPrevious
+    }
+  };
+}
+
+function handleReadError(res, err, fallbackMessage) {
+  if (err instanceof ValidationError) {
+    return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+  }
+  if (err instanceof DatabaseError) {
+    return sendPackageResponse(res, 500, {
+      success: false,
+      message: err.userMessage || fallbackMessage
+    });
+  }
+  return sendPackageResponse(res, 500, { success: false, message: fallbackMessage });
+}
+
+/**
+ * GET /api/rec/candidates
+ * Query: enterprise_id (required), status, search, page, page_size|limit,
+ *   experience_code|experience, location|current_location, skill_code|skill,
+ *   years_experience_min, years_experience_max
+ * Omit filter params or send "all" for All Experience / All Locations / All Skills.
+ */
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    try {
+      const query = normalizeCandidateListQuery(req.query);
+      const { rows, total, page, limit } = await listCandidatesFromView(query);
+      return sendPackageResponse(res, 200, {
+        success: true,
+        message: 'Candidates fetched successfully',
+        meta: buildListPaginationMeta(page, limit, total),
+        data: rows
+      });
+    } catch (err) {
+      return handleReadError(res, err, 'Unable to fetch candidates. Please try again.');
+    }
+  })
+);
+
+/**
+ * GET /api/rec/candidates/resume/:resume_guid
+ */
+router.get(
+  '/resume/:resume_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const resume_guid = parseResumeGuidParam(req.params.resume_guid);
+      const file = await getCandidateResumeByGuid(resume_guid);
+      if (!file?.file_content) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: 'Resume not found.'
+        });
+      }
+
+      const fileName = file.file_name || 'resume';
+      const contentType = file.file_type || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+      res.setHeader('Content-Length', String(file.file_content.length));
+      return res.send(file.file_content);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        message: 'Unable to download resume. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * GET /api/rec/candidates/:candidate_guid?enterprise_id=1
+ */
+router.get(
+  '/:candidate_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const { candidate_guid, enterprise_id } = validateCandidateGuidEnterpriseParams(
+        req.params.candidate_guid,
+        req.query?.enterprise_id
+      );
+
+      const data = await getCandidateByGuidFromView(candidate_guid, enterprise_id);
+      if (!data) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: 'Candidate not found.'
+        });
+      }
+
+      return sendPackageResponse(res, 200, { success: true, data });
+    } catch (err) {
+      return handleReadError(res, err, 'Unable to fetch candidate. Please try again.');
+    }
+  })
+);
 
 /**
  * POST /api/rec/candidates
