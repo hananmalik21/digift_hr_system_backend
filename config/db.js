@@ -71,7 +71,7 @@ oracledb.fetchAsString = [oracledb.CLOB, oracledb.DB_TYPE_JSON];
  * Database configuration
  * Using full connection string to avoid TNS resolution wallet issues
  */
-const tnsName = process.env.DB_CONNECT_STRING || 'testdb_high';
+const tnsName = process.env.DB_CONNECT_STRING || 's2gxnim0ggbthcrt_high';
 // Full connection strings from tnsnames.ora (for TCPS/SSL connections)
 const connectionStrings = {
   'testdb_high': '(description= (retry_count=20)(retry_delay=3)(address=(protocol=tcps)(port=1522)(host=adb.eu-frankfurt-1.oraclecloud.com))(connect_data=(service_name=g3ef73baddaf774_testdb_high.adb.oraclecloud.com))(security=(ssl_server_dn_match=yes)))',
