@@ -1,0 +1,255 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — FNDSEC Security Modules API
+  version: 2.0.0
+  description: |
+    CRUD for `FNDSEC.FNDSEC_MODULES` via `FNDSEC.FNDSEC_MODULES_API_PKG`.
+
+    - **Identifiers:** `module_guid` (32-char hex, RAW(16) in Oracle) is used in URLs for get, update, and delete.
+    - **Create** returns both `module_id` (internal) and `module_guid` (client-facing).
+    - **List/get** responses expose `module_guid` only (not numeric `module_id`).
+servers:
+  - url: /
+    description: Application base URL
+tags:
+  - name: Security Modules
+    description: FNDSEC application modules
+paths:
+  /api/security/modules:
+    get:
+      tags: [Security Modules]
+      summary: List modules
+      operationId: listSecurityModules
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - name: search
+          in: query
+          schema: { type: string }
+          description: Filter by module_code or module_name (substring)
+        - name: status_code
+          in: query
+          schema: { type: string }
+        - name: category_code
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated module list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleListResponse'
+    post:
+      tags: [Security Modules]
+      summary: Create module
+      operationId: createSecurityModule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModuleCreateRequest'
+      responses:
+        '201':
+          description: Module created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleCreateResponse'
+        '400':
+          $ref: '#/components/responses/PackageError'
+        '409':
+          $ref: '#/components/responses/PackageError'
+  /api/security/modules/{moduleGuid}:
+    parameters:
+      - $ref: '#/components/parameters/ModuleGuidPath'
+    get:
+      tags: [Security Modules]
+      summary: Get module by GUID
+      operationId: getSecurityModuleByGuid
+      responses:
+        '200':
+          description: Module detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleDetailResponse'
+        '400':
+          $ref: '#/components/responses/PackageError'
+        '404':
+          $ref: '#/components/responses/PackageError'
+    put:
+      tags: [Security Modules]
+      summary: Update module by GUID
+      operationId: updateSecurityModuleByGuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModuleUpdateRequest'
+      responses:
+        '200':
+          description: Module updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleActionResponse'
+        '400':
+          $ref: '#/components/responses/PackageError'
+        '404':
+          $ref: '#/components/responses/PackageError'
+    delete:
+      tags: [Security Modules]
+      summary: Delete module by GUID
+      operationId: deleteSecurityModuleByGuid
+      responses:
+        '200':
+          description: Module deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleActionResponse'
+        '400':
+          $ref: '#/components/responses/PackageError'
+        '404':
+          $ref: '#/components/responses/PackageError'
+  /api/security/modules/{moduleGuid}/sub-modules:
+    parameters:
+      - $ref: '#/components/parameters/ModuleGuidPath'
+    get:
+      tags: [Security Modules]
+      summary: List active sub-modules for a module
+      operationId: listSubModulesByModuleGuid
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Sub-module list
+components:
+  parameters:
+    ModuleGuidPath:
+      name: moduleGuid
+      in: path
+      required: true
+      description: 32-character hexadecimal module GUID (dashes optional)
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f-]{32,36}$'
+        example: 50FDBB885E1D190DE0633519000A3BAC
+  responses:
+    PackageError:
+      description: Package or validation failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ModuleGuid:
+      type: string
+      description: 32-char uppercase hex (no dashes in responses)
+      pattern: '^[0-9A-F]{32}$'
+      example: 50FDBB885E1D190DE0633519000A3BAC
+    ModulePublic:
+      type: object
+      properties:
+        module_guid:
+          $ref: '#/components/schemas/ModuleGuid'
+        module_code: { type: string, example: CORE_HR }
+        module_name: { type: string, example: Core HR }
+        description: { type: string, nullable: true }
+        category_code: { type: string, example: HCM }
+        status_code: { type: string, example: ACTIVE }
+        icon: { type: string, example: users }
+        color_code: { type: string, example: '#2563EB' }
+        display_order: { type: integer, example: 10 }
+        active_flag: { type: string, enum: [Y, N] }
+        is_system_flag: { type: string, enum: [Y, N] }
+        start_date: { type: string, format: date-time, nullable: true }
+        end_date: { type: string, format: date-time, nullable: true }
+        created_by: { type: string, nullable: true }
+        creation_date: { type: string, format: date-time, nullable: true }
+        last_updated_by: { type: string, nullable: true }
+        last_update_date: { type: string, format: date-time, nullable: true }
+    ModuleCreateRequest:
+      type: object
+      required:
+        - module_code
+        - module_name
+        - category_code
+        - status_code
+        - active_flag
+        - is_system_flag
+      properties:
+        module_code: { type: string }
+        module_name: { type: string }
+        description: { type: string }
+        category_code: { type: string }
+        status_code: { type: string }
+        icon: { type: string }
+        color_code: { type: string }
+        display_order: { type: integer }
+        active_flag: { type: string, enum: [Y, N] }
+        is_system_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+    ModuleUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/ModuleCreateRequest'
+        - type: object
+          properties:
+            updated_by: { type: string }
+          required: []
+    ModuleCreateData:
+      type: object
+      properties:
+        module_id:
+          type: integer
+          description: Internal numeric id (returned on create only)
+        module_guid:
+          $ref: '#/components/schemas/ModuleGuid'
+    ModuleCreateResponse:
+      type: object
+      properties:
+        status: { type: boolean, example: true }
+        message: { type: string, example: Module created successfully. }
+        data:
+          $ref: '#/components/schemas/ModuleCreateData'
+    ModuleDetailResponse:
+      type: object
+      properties:
+        status: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          $ref: '#/components/schemas/ModulePublic'
+    ModuleActionResponse:
+      type: object
+      properties:
+        status: { type: boolean, example: true }
+        message: { type: string, example: Module updated successfully. }
+        data: { nullable: true }
+    ModuleListResponse:
+      type: object
+      properties:
+        status: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModulePublic'
+        meta:
+          type: object
+    ErrorResponse:
+      type: object
+      properties:
+        status: { type: boolean, example: false }
+        message: { type: string, example: Module code already exists. }

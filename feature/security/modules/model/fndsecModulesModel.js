@@ -1,115 +1,65 @@
 import oracledb from 'oracledb';
-import crypto from 'crypto';
 import db from '../../../../config/db.js';
-import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
-import { ConflictError, NotFoundError, ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 import { escapeLikePattern } from '../utils/escapeLikePattern.js';
+import {
+  moduleGuidFromDb,
+  normalizeOutGuidHex,
+  parseModuleGuidHexOrThrow
+} from '../utils/moduleGuid.js';
 
-const TABLE = 'FNDSEC.FNDSEC_MODULES';
+const PKG = 'FNDSEC.FNDSEC_MODULES_API_PKG';
+const CREATE_PROC = `${PKG}.CREATE_MODULE`;
+const UPDATE_PROC = `${PKG}.UPDATE_MODULE`;
+const DELETE_PROC = `${PKG}.DELETE_MODULE`;
+const GET_PROC = `${PKG}.GET_MODULE`;
+const GET_ALL_PROC = `${PKG}.GET_MODULES`;
+
 const LOG_TAG = 'fndsecModulesModel';
 const MODULE_LIST_SEARCH_MAX_LEN = 200;
+const GENERIC_ERROR_MESSAGE = 'Unable to process module request. Please try again.';
 
-const MODULE_SELECT_COLUMNS = [
-  'MODULE_ID',
-  'MODULE_GUID',
-  'MODULE_CODE',
-  'MODULE_NAME',
-  'DESCRIPTION',
-  'CATEGORY_CODE',
-  'STATUS_CODE',
-  'COLOR_CODE',
-  'DISPLAY_ORDER',
-  'ACTIVE_FLAG',
-  'IS_SYSTEM_FLAG',
-  'START_DATE',
-  'END_DATE',
-  'ICON',
-  'CREATED_BY',
-  'CREATION_DATE',
-  'LAST_UPDATED_BY',
-  'LAST_UPDATE_DATE'
-].join(', ');
-
-const MODULE_DETAIL_BY_GUID_SQL = `SELECT ${MODULE_SELECT_COLUMNS} FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`;
-const MODULE_DETAIL_BY_ID_SQL = `SELECT ${MODULE_SELECT_COLUMNS} FROM ${TABLE} WHERE MODULE_ID = :module_id`;
-
-/** @param {import('oracledb').Connection} connection */
-async function selectModuleByGuidMapped(connection, guidHex) {
-  const result = await connection.execute(MODULE_DETAIL_BY_GUID_SQL, {
-    module_guid_hex: { val: guidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 }
-  }, {
-    outFormat: oracledb.OUT_FORMAT_OBJECT
-  });
-  const row = result.rows?.[0];
-  return row ? mapModuleRow(row) : null;
+async function withConnection(fn) {
+  const connection = await db.getConnection();
+  try {
+    return await fn(connection);
+  } finally {
+    try {
+      await connection.close();
+    } catch (_) {}
+  }
 }
 
-/** @param {import('oracledb').Connection} connection */
-async function selectModuleByIdMapped(connection, moduleId) {
-  const result = await connection.execute(MODULE_DETAIL_BY_ID_SQL, {
-    module_id: { val: moduleId, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
-  }, {
-    outFormat: oracledb.OUT_FORMAT_OBJECT
-  });
-  const row = result.rows?.[0];
-  return row ? mapModuleRow(row) : null;
+function normalizeOutString(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return normalizeOutString(v[0]);
+  const s = String(v).trim();
+  return s.length ? s : null;
 }
 
-export async function getModuleIconBufferByGuidOrId(moduleGuidOrId) {
-  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
-  const sql =
-    ident.kind === 'id'
-      ? `SELECT ICON FROM ${TABLE} WHERE MODULE_ID = :module_id`
-      : `SELECT ICON FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`;
-  const binds =
-    ident.kind === 'id'
-      ? { module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
-      : { module_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } };
-
-  return withConnection(async (connection) => {
-    const result = await connection.execute(
-      sql,
-      binds,
-      {
-        outFormat: oracledb.OUT_FORMAT_OBJECT,
-        fetchInfo: { ICON: { type: oracledb.BUFFER } }
-      }
-    );
-    const row = result.rows?.[0];
-    if (!row) throw new NotFoundError('Module not found');
-    const buf = row.ICON ?? row.icon ?? null;
-    if (!buf || !(Buffer.isBuffer(buf) || buf instanceof Uint8Array)) {
-      throw new NotFoundError('Icon not found');
-    }
-    return Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
-  });
-}
-
-function readScalarCount(result) {
-  const row = result?.rows?.[0];
-  if (row == null || typeof row !== 'object' || Array.isArray(row)) return 0;
-  const v =
-    row.CNT ??
-    row.cnt ??
-    row.COUNT ??
-    row.count ??
-    Object.values(row).find((x) => x != null && (typeof x === 'number' || typeof x === 'string'));
+function normalizeOutNumber(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return normalizeOutNumber(v[0]);
   const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? n : null;
 }
 
-function rethrowKnownOrWrapDb(err, context) {
-  if (err instanceof NotFoundError || err instanceof ValidationError || err instanceof ConflictError) throw err;
-  if (err instanceof DatabaseError) throw err;
-  console.error(`[${LOG_TAG}] ${context}`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', err?.message || err);
-  throw new DatabaseError(err?.message || 'Database error', err, null);
+export function packageStatusIsSuccess(status) {
+  return String(status ?? '')
+    .trim()
+    .toUpperCase() === 'SUCCESS';
 }
 
-function isAffirmativeFlag(v) {
-  if (v === true) return true;
-  if (v === false || v == null) return false;
-  const s = String(v).trim().toLowerCase();
-  return s === 'true' || s === '1' || s === 'yes' || s === 'on';
+function numOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function strOrNull(v) {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
 }
 
 function toIso(val) {
@@ -148,242 +98,132 @@ function validateDateRange(startDate, endDate) {
   }
 }
 
-function normalizeGuidHexForApi(hex) {
-  if (!hex) return null;
-  return String(hex).toUpperCase();
-}
-
-/**
- * Normalize MODULE_GUID from Oracle for JSON (32-char hex, no dashes).
- * - RAW(16): driver returns Buffer → hex
- * - VARCHAR2/CHAR: 32 hex or standard GUID string
- * - If a layer used RAWTOHEX on a character GUID column, Oracle can return 64 hex chars (ASCII bytes of the 32-char string); decode that case.
- */
-function moduleGuidFromDb(val) {
+async function readClobOut(val) {
   if (val == null) return null;
-  if (Buffer.isBuffer(val) || val instanceof Uint8Array) {
-    const h = bufferToGuidHex(val);
-    return h ? normalizeGuidHexForApi(h) : null;
-  }
-  const s = String(val).trim();
-  if (!s) return null;
-  const noDashes = s.replace(/-/g, '');
-  if (/^[0-9A-Fa-f]{32}$/.test(noDashes)) {
-    return noDashes.toUpperCase();
-  }
-  if (/^[0-9A-Fa-f]{64}$/.test(s)) {
+  if (typeof val === 'string') return val;
+  const v = Array.isArray(val) ? val[0] : val;
+  if (v == null) return null;
+  if (typeof v.getData === 'function') {
     try {
-      const decoded = Buffer.from(s, 'hex').toString('ascii');
-      if (/^[0-9A-Fa-f]{32}$/i.test(decoded)) {
-        return decoded.toUpperCase();
-      }
+      const p = v.getData();
+      const data =
+        typeof p?.then === 'function'
+          ? await p
+          : await new Promise((res, rej) => v.getData((err, d) => (err ? rej(err) : res(d))));
+      return data != null ? String(data) : null;
     } catch (_) {
-      /* ignore */
+      return null;
     }
   }
-  return null;
+  return String(v);
 }
 
-/** 32-char uppercase hex for SQL (HEXTORAW). Works with RAW(16) and VARCHAR2 GUID columns. */
-function parseModuleGuidHexOrThrow(moduleGuid) {
-  const s = String(moduleGuid ?? '')
-    .trim()
-    .replace(/-/g, '');
-  if (!/^[0-9A-Fa-f]{32}$/.test(s)) {
-    throw new ValidationError('Validation failed', ['module_guid must be a 32-character hexadecimal string']);
-  }
-  return s.toUpperCase();
-}
-
-function stripDataUrlPrefix(b64) {
-  const s = String(b64).trim();
-  const m = s.match(/^data:.*?;base64,(.*)$/i);
-  return m ? m[1] : s;
-}
-
-function base64ToBufferOrThrow(b64) {
-  if (Buffer.isBuffer(b64)) return b64;
-  if (b64 instanceof Uint8Array) return Buffer.from(b64);
-  if (b64 == null || String(b64).trim() === '') return null;
-  const raw = stripDataUrlPrefix(b64);
+async function parseJsonClob(clobVal) {
+  const jsonStr = await readClobOut(Array.isArray(clobVal) ? clobVal[0] : clobVal);
+  if (!jsonStr || !String(jsonStr).trim()) return null;
   try {
-    const buf = Buffer.from(raw, 'base64');
-    // round-trip validation (catches many invalid strings)
-    if (buf.length === 0 && raw.length > 0) {
-      throw new Error('Empty decoded buffer');
-    }
-    return buf;
-  } catch {
-    throw new ValidationError('Validation failed', ['icon must be valid base64']);
+    return JSON.parse(String(jsonStr));
+  } catch (e) {
+    console.error(`[${LOG_TAG}] invalid JSON from package`, e?.message || e);
+    return null;
   }
 }
 
-function blobToBase64(val) {
-  if (val == null) return null;
-  if (Buffer.isBuffer(val)) return val.toString('base64');
-  if (val instanceof Uint8Array) return Buffer.from(val).toString('base64');
+function pick(obj, ...keys) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const k of keys) {
+    if (obj[k] !== undefined) return obj[k];
+    const upper = String(k).toUpperCase();
+    if (obj[upper] !== undefined) return obj[upper];
+    const lower = String(k).toLowerCase();
+    if (obj[lower] !== undefined) return obj[lower];
+  }
   return null;
 }
 
-function mapModuleRow(row) {
-  const module_guid =
-    moduleGuidFromDb(row.MODULE_GUID) ??
-    moduleGuidFromDb(row.MODULE_GUID_HEX);
+/** API-facing module shape (module_guid only; no numeric module_id). */
+function mapModuleForApi(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const module_guid = moduleGuidFromDb(pick(raw, 'module_guid', 'MODULE_GUID'));
   return {
-    module_id: row.MODULE_ID != null ? Number(row.MODULE_ID) : null,
     module_guid,
-    module_code: row.MODULE_CODE ?? null,
-    module_name: row.MODULE_NAME ?? null,
-    description: row.DESCRIPTION ?? null,
-    category_code: row.CATEGORY_CODE ?? null,
-    status_code: row.STATUS_CODE ?? null,
-    color_code: row.COLOR_CODE ?? null,
-    display_order: row.DISPLAY_ORDER != null ? Number(row.DISPLAY_ORDER) : null,
-    active_flag: row.ACTIVE_FLAG ?? null,
-    is_system_flag: row.IS_SYSTEM_FLAG ?? null,
-    start_date: toIso(row.START_DATE),
-    end_date: toIso(row.END_DATE),
-    icon: blobToBase64(row.ICON),
-    created_by: row.CREATED_BY ?? null,
-    creation_date: toIso(row.CREATION_DATE),
-    last_updated_by: row.LAST_UPDATED_BY ?? null,
-    last_update_date: toIso(row.LAST_UPDATE_DATE)
+    module_code: pick(raw, 'module_code') ?? null,
+    module_name: pick(raw, 'module_name') ?? null,
+    description: pick(raw, 'description') ?? null,
+    category_code: pick(raw, 'category_code') ?? null,
+    status_code: pick(raw, 'status_code') ?? null,
+    icon: pick(raw, 'icon') ?? null,
+    color_code: pick(raw, 'color_code') ?? null,
+    display_order: pick(raw, 'display_order') != null ? Number(pick(raw, 'display_order')) : null,
+    active_flag: pick(raw, 'active_flag') ?? null,
+    is_system_flag: pick(raw, 'is_system_flag') ?? null,
+    start_date: toIso(pick(raw, 'start_date')),
+    end_date: toIso(pick(raw, 'end_date')),
+    created_by: pick(raw, 'created_by') ?? null,
+    creation_date: toIso(pick(raw, 'creation_date')),
+    last_updated_by: pick(raw, 'last_updated_by') ?? null,
+    last_update_date: toIso(pick(raw, 'last_update_date'))
   };
 }
 
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
+function extractModulesArray(parsed) {
+  if (parsed == null) return [];
+  if (Array.isArray(parsed)) return parsed.map(mapModuleForApi).filter(Boolean);
+  const nested =
+    pick(parsed, 'modules') ??
+    pick(parsed, 'data') ??
+    pick(parsed, 'rows') ??
+    pick(parsed, 'items');
+  if (Array.isArray(nested)) return nested.map(mapModuleForApi).filter(Boolean);
+  const single = mapModuleForApi(parsed);
+  return single ? [single] : [];
 }
 
-async function ensureUniqueModuleCode(connection, moduleCode, excludeWhereSql, excludeBinds) {
-  if (moduleCode == null || String(moduleCode).trim() === '') return;
-  const sql = `
-      SELECT COUNT(*) AS CNT
-      FROM ${TABLE}
-      WHERE UPPER(TRIM(MODULE_CODE)) = UPPER(TRIM(:module_code))
-      ${excludeWhereSql || ''}
-    `;
-  const binds = {
-    module_code: { val: String(moduleCode), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 },
-    ...(excludeBinds || {})
+function extractSingleModule(parsed) {
+  if (parsed == null) return null;
+  if (Array.isArray(parsed)) return mapModuleForApi(parsed[0]);
+  const nested = pick(parsed, 'module') ?? pick(parsed, 'data');
+  if (nested && typeof nested === 'object') return mapModuleForApi(nested);
+  return mapModuleForApi(parsed);
+}
+
+function parsePackageOut(outBinds) {
+  const ob = outBinds || {};
+  return {
+    status: normalizeOutString(ob.p_status) ?? 'ERROR',
+    message: normalizeOutString(ob.p_message) ?? '',
+    module_id: normalizeOutNumber(ob.p_module_id),
+    module_guid: normalizeOutGuidHex(ob.p_module_guid)
   };
-  const r = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-  const cnt = Number(r.rows?.[0]?.CNT ?? 0);
-  if (cnt > 0) {
-    throw new ConflictError('Module code already exists');
-  }
 }
 
-function parseModuleIdOrNull(raw) {
-  if (raw == null) return null;
-  const s = String(raw).trim();
-  if (!/^\d+$/.test(s)) return null;
-  const n = Number(s);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ValidationError('Validation failed', ['module_id must be a valid positive number']);
-  }
-  return n;
+function packageFailure(message = GENERIC_ERROR_MESSAGE, extra = {}) {
+  return {
+    success: false,
+    status: 'ERROR',
+    message,
+    module_guid: null,
+    data: null,
+    ...extra
+  };
 }
 
-function parseModuleIdentifierOrThrow(idOrGuid) {
-  const id = parseModuleIdOrNull(idOrGuid);
-  if (id != null) return { kind: 'id', module_id: id };
-  const guidHex = parseModuleGuidHexOrThrow(idOrGuid);
-  return { kind: 'guid', module_guid_hex: guidHex };
+function buildSharedModuleInBinds(input) {
+  return {
+    p_module_code: { val: strOrNull(input.module_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    p_module_name: { val: strOrNull(input.module_name), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
+    p_description: { val: strOrNull(input.description), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
+    p_category_code: { val: strOrNull(input.category_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
+    p_status_code: { val: strOrNull(input.status_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
+    p_icon: { val: strOrNull(input.icon), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 500 },
+    p_color_code: { val: strOrNull(input.color_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
+    p_display_order: { val: numOrNull(input.display_order), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    p_active_flag: { val: strOrNull(input.active_flag), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
+    p_is_system_flag: { val: strOrNull(input.is_system_flag), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 }
+  };
 }
 
-export async function getModuleByGuidOrId(moduleGuidOrId) {
-  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
-  return withConnection(async (connection) => {
-    const mapped =
-      ident.kind === 'id'
-        ? await selectModuleByIdMapped(connection, ident.module_id)
-        : await selectModuleByGuidMapped(connection, ident.module_guid_hex);
-    if (!mapped) {
-      throw new NotFoundError('Module not found');
-    }
-    return mapped;
-  });
-}
-
-export async function listModules(filters, pagination) {
-  const where = [`ACTIVE_FLAG = 'Y'`];
-  const binds = {};
-
-  if (filters.search) {
-    const term = String(filters.search).trim().slice(0, MODULE_LIST_SEARCH_MAX_LEN);
-    const esc = escapeLikePattern(term);
-    where.push(`(
-      UPPER(MODULE_CODE) LIKE UPPER(:search) ESCAPE '\\'
-      OR UPPER(MODULE_NAME) LIKE UPPER(:search) ESCAPE '\\'
-    )`);
-    const pattern = `%${esc}%`;
-    binds.search = {
-      val: pattern,
-      type: oracledb.STRING,
-      dir: oracledb.BIND_IN,
-      maxSize: Math.min(4000, pattern.length + 64)
-    };
-  }
-  if (filters.status_code) {
-    where.push('STATUS_CODE = :status_code');
-    binds.status_code = { val: String(filters.status_code), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 };
-  }
-  if (filters.category_code) {
-    where.push('CATEGORY_CODE = :category_code');
-    binds.category_code = { val: String(filters.category_code), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 };
-  }
-
-  const whereSql = `WHERE ${where.join(' AND ')}`;
-  const offset = (pagination.page - 1) * pagination.pageSize;
-
-  const countSql = `SELECT COUNT(*) AS CNT FROM ${TABLE} ${whereSql}`;
-  const dataSql = `
-SELECT ${MODULE_SELECT_COLUMNS}
-FROM ${TABLE}
-${whereSql}
-ORDER BY DISPLAY_ORDER NULLS LAST
-OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY
-`.trim();
-
-  return withConnection(async (connection) => {
-    try {
-      const countRes = await connection.execute(
-        countSql,
-        binds,
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      const total = readScalarCount(countRes);
-
-      const dataRes = await connection.execute(
-        dataSql,
-        {
-          ...binds,
-          row_offset: { val: offset, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-          fetch_size: { val: pagination.pageSize, type: oracledb.NUMBER, dir: oracledb.BIND_IN }
-        },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT, fetchArraySize: Math.min(100, Math.max(10, pagination.pageSize)) }
-      );
-      const rows = (dataRes.rows || []).map(mapModuleRow);
-      return { rows, total };
-    } catch (err) {
-      rethrowKnownOrWrapDb(err, 'listModules');
-    }
-  });
-}
-
-/**
- * Returns active modules with their active sub-modules (global, no enterprise scoping).
- * Used by the combined hierarchy endpoint.
- */
-export async function createModule(input, actor) {
+function validateCreateInput(input) {
   const required = [
     'module_code',
     'module_name',
@@ -406,90 +246,123 @@ export async function createModule(input, actor) {
   const startDate = parseDateOrNull('start_date', input.start_date);
   const endDate = parseDateOrNull('end_date', input.end_date);
   validateDateRange(startDate ?? null, endDate ?? null);
-
-  const moduleGuidHex = crypto.randomUUID().replace(/-/g, '').toUpperCase();
-  const iconBuf = base64ToBufferOrThrow(input.icon_buffer ?? input.icon);
-
-  return withConnection(async (connection) => {
-    await ensureUniqueModuleCode(connection, input.module_code);
-
-    const sql = `
-      INSERT INTO ${TABLE} (
-        MODULE_GUID,
-        MODULE_CODE,
-        MODULE_NAME,
-        DESCRIPTION,
-        CATEGORY_CODE,
-        STATUS_CODE,
-        COLOR_CODE,
-        DISPLAY_ORDER,
-        ACTIVE_FLAG,
-        IS_SYSTEM_FLAG,
-        START_DATE,
-        END_DATE,
-        ICON,
-        CREATED_BY,
-        CREATION_DATE,
-        LAST_UPDATED_BY,
-        LAST_UPDATE_DATE
-      ) VALUES (
-        HEXTORAW(:module_guid_hex),
-        :module_code,
-        :module_name,
-        :description,
-        :category_code,
-        :status_code,
-        :color_code,
-        :display_order,
-        :active_flag,
-        :is_system_flag,
-        :start_date,
-        :end_date,
-        :icon,
-        :created_by,
-        SYSDATE,
-        :last_updated_by,
-        SYSDATE
-      )
-    `;
-
-    const binds = {
-      module_guid_hex: { val: moduleGuidHex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 },
-      module_code: { val: String(input.module_code).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 },
-      module_name: { val: String(input.module_name).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 400 },
-      description: { val: input.description != null ? String(input.description) : null, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 4000 },
-      category_code: { val: String(input.category_code).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 },
-      status_code: { val: String(input.status_code).trim(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 },
-      color_code: { val: input.color_code != null ? String(input.color_code).trim() : null, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 60 },
-      display_order: { val: input.display_order != null ? Number(input.display_order) : null, type: oracledb.NUMBER, dir: oracledb.BIND_IN },
-      active_flag: { val: String(input.active_flag).trim().toUpperCase(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 1 },
-      is_system_flag: { val: String(input.is_system_flag).trim().toUpperCase(), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 1 },
-      start_date: { val: startDate ?? null, type: oracledb.DATE, dir: oracledb.BIND_IN },
-      end_date: { val: endDate ?? null, type: oracledb.DATE, dir: oracledb.BIND_IN },
-      icon: { val: iconBuf, type: oracledb.BLOB, dir: oracledb.BIND_IN },
-      created_by: { val: String(actor || 'SYSTEM'), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 },
-      last_updated_by: { val: String(actor || 'SYSTEM'), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 }
-    };
-
-    try {
-      await connection.execute(sql, binds, { autoCommit: true });
-      const full = await selectModuleByGuidMapped(connection, moduleGuidHex);
-      if (!full) {
-        throw new DatabaseError(
-          'reload_after_insert_failed',
-          new Error('Empty row after INSERT'),
-          'Module was created but full details could not be loaded. Try GET by module_guid.'
-        );
-      }
-      return full;
-    } catch (err) {
-      rethrowKnownOrWrapDb(err, 'createModule');
-    }
-  });
 }
 
-export async function updateModule(moduleGuidOrId, patch, actor) {
-  const ident = parseModuleIdentifierOrThrow(moduleGuidOrId);
+const CREATE_PLSQL = `
+BEGIN
+  ${CREATE_PROC}(
+    p_module_code      => :p_module_code,
+    p_module_name      => :p_module_name,
+    p_description      => :p_description,
+    p_category_code    => :p_category_code,
+    p_status_code      => :p_status_code,
+    p_icon             => :p_icon,
+    p_color_code       => :p_color_code,
+    p_display_order    => :p_display_order,
+    p_active_flag      => :p_active_flag,
+    p_is_system_flag   => :p_is_system_flag,
+    p_created_by       => :p_created_by,
+    p_module_id        => :p_module_id,
+    p_module_guid      => :p_module_guid,
+    p_status           => :p_status,
+    p_message          => :p_message
+  );
+END;`;
+
+const UPDATE_PLSQL = `
+BEGIN
+  ${UPDATE_PROC}(
+    p_module_guid      => HEXTORAW(:p_module_guid),
+    p_module_code      => :p_module_code,
+    p_module_name      => :p_module_name,
+    p_description      => :p_description,
+    p_category_code    => :p_category_code,
+    p_status_code      => :p_status_code,
+    p_icon             => :p_icon,
+    p_color_code       => :p_color_code,
+    p_display_order    => :p_display_order,
+    p_active_flag      => :p_active_flag,
+    p_is_system_flag   => :p_is_system_flag,
+    p_updated_by       => :p_updated_by,
+    p_status           => :p_status,
+    p_message          => :p_message
+  );
+END;`;
+
+const DELETE_PLSQL = `
+BEGIN
+  ${DELETE_PROC}(
+    p_module_guid => HEXTORAW(:p_module_guid),
+    p_status      => :p_status,
+    p_message     => :p_message
+  );
+END;`;
+
+const GET_PLSQL = `
+BEGIN
+  ${GET_PROC}(
+    p_module_guid => HEXTORAW(:p_module_guid),
+    p_result      => :p_result
+  );
+END;`;
+
+const GET_ALL_PLSQL = `
+BEGIN
+  ${GET_ALL_PROC}(
+    p_result => :p_result
+  );
+END;`;
+
+/**
+ * @returns {Promise<{ success: boolean, status: string, message: string, module_id: number|null, data: object|null }>}
+ */
+export async function createModule(input, actor) {
+  validateCreateInput(input);
+
+  const createdBy = strOrNull(input.created_by) ?? strOrNull(actor) ?? 'SYSTEM';
+  const binds = {
+    ...buildSharedModuleInBinds(input),
+    p_created_by: { val: createdBy, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    p_module_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+    p_module_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },
+    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  };
+
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(CREATE_PLSQL, binds, { autoCommit: true })
+    );
+    const out = parsePackageOut(result?.outBinds);
+    const success = packageStatusIsSuccess(out.status);
+    const data =
+      success && out.module_guid
+        ? {
+            module_id: out.module_id,
+            module_guid: out.module_guid
+          }
+        : success && out.module_id != null
+          ? { module_id: out.module_id, module_guid: out.module_guid }
+          : null;
+    return {
+      success,
+      status: out.status,
+      message: out.message || (success ? 'Module created successfully.' : GENERIC_ERROR_MESSAGE),
+      module_id: out.module_id,
+      module_guid: out.module_guid,
+      data
+    };
+  } catch (err) {
+    console.error(`[${LOG_TAG}] createModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    return packageFailure();
+  }
+}
+
+/**
+ * @returns {Promise<{ success: boolean, status: string, message: string, module_id: number|null, data: object|null }>}
+ */
+export async function updateModule(moduleGuidRaw, patch, actor) {
+  const module_guid = parseModuleGuidHexOrThrow(moduleGuidRaw);
 
   if (patch.active_flag !== undefined) validateYnField('active_flag', patch.active_flag);
   if (patch.is_system_flag !== undefined) validateYnField('is_system_flag', patch.is_system_flag);
@@ -498,184 +371,172 @@ export async function updateModule(moduleGuidOrId, patch, actor) {
   const endDate = parseDateOrNull('end_date', patch.end_date);
   validateDateRange(startDate ?? null, endDate ?? null);
 
-  const replaceIcon = isAffirmativeFlag(patch.replace_icon);
-  const iconRaw = patch.icon_buffer ?? patch.icon;
-  const iconBuf = iconRaw !== undefined ? base64ToBufferOrThrow(iconRaw) : undefined;
+  const updatedBy = strOrNull(patch.updated_by) ?? strOrNull(actor) ?? 'SYSTEM';
+  const binds = {
+    p_module_guid: { val: module_guid, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
+    ...buildSharedModuleInBinds(patch),
+    p_updated_by: { val: updatedBy, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  };
 
-  return withConnection(async (connection) => {
-    const exists = await connection.execute(
-      ident.kind === 'id'
-        ? `SELECT IS_SYSTEM_FLAG FROM ${TABLE} WHERE MODULE_ID = :module_id`
-        : `SELECT IS_SYSTEM_FLAG FROM ${TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`,
-      ident.kind === 'id'
-        ? { module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
-        : { module_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(UPDATE_PLSQL, binds, { autoCommit: true })
     );
-    if (!exists.rows?.[0]) {
-      throw new NotFoundError('Module not found');
-    }
-
-    if (Object.prototype.hasOwnProperty.call(patch, 'module_code')) {
-      await ensureUniqueModuleCode(
-        connection,
-        patch.module_code,
-        ident.kind === 'id' ? 'AND MODULE_ID <> :exclude_module_id' : 'AND MODULE_GUID <> HEXTORAW(:exclude_guid_hex)',
-        ident.kind === 'id'
-          ? { exclude_module_id: { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN } }
-          : { exclude_guid_hex: { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 } }
-      );
-    }
-
-    const sets = [];
-    const binds = {
-      last_updated_by: { val: String(actor || 'SYSTEM'), type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 200 }
+    const out = parsePackageOut(result?.outBinds);
+    const success = packageStatusIsSuccess(out.status);
+    return {
+      success,
+      status: out.status,
+      message: out.message || (success ? 'Module updated successfully.' : GENERIC_ERROR_MESSAGE),
+      module_guid,
+      data: null
     };
-    if (ident.kind === 'id') {
-      binds.module_id = { val: ident.module_id, type: oracledb.NUMBER, dir: oracledb.BIND_IN };
-    } else {
-      binds.module_guid_hex = { val: ident.module_guid_hex, type: oracledb.STRING, dir: oracledb.BIND_IN, maxSize: 32 };
-    }
-
-    function setIfProvided(field, col, type, maxSize) {
-      if (!Object.prototype.hasOwnProperty.call(patch, field)) return;
-      sets.push(`${col} = :${field}`);
-      binds[field] = { val: patch[field] == null ? null : patch[field], type, dir: oracledb.BIND_IN };
-      if (maxSize) binds[field].maxSize = maxSize;
-    }
-
-    setIfProvided('module_code', 'MODULE_CODE', oracledb.STRING, 200);
-    setIfProvided('module_name', 'MODULE_NAME', oracledb.STRING, 400);
-    setIfProvided('description', 'DESCRIPTION', oracledb.STRING, 4000);
-    setIfProvided('category_code', 'CATEGORY_CODE', oracledb.STRING, 60);
-    setIfProvided('status_code', 'STATUS_CODE', oracledb.STRING, 60);
-    setIfProvided('color_code', 'COLOR_CODE', oracledb.STRING, 60);
-    if (Object.prototype.hasOwnProperty.call(patch, 'display_order')) {
-      sets.push('DISPLAY_ORDER = :display_order');
-      binds.display_order = {
-        val: patch.display_order == null ? null : Number(patch.display_order),
-        type: oracledb.NUMBER,
-        dir: oracledb.BIND_IN
-      };
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'active_flag')) {
-      sets.push('ACTIVE_FLAG = :active_flag');
-      binds.active_flag = {
-        val: patch.active_flag == null ? null : String(patch.active_flag).trim().toUpperCase(),
-        type: oracledb.STRING,
-        dir: oracledb.BIND_IN,
-        maxSize: 1
-      };
-    }
-    if (Object.prototype.hasOwnProperty.call(patch, 'is_system_flag')) {
-      sets.push('IS_SYSTEM_FLAG = :is_system_flag');
-      binds.is_system_flag = {
-        val: patch.is_system_flag == null ? null : String(patch.is_system_flag).trim().toUpperCase(),
-        type: oracledb.STRING,
-        dir: oracledb.BIND_IN,
-        maxSize: 1
-      };
-    }
-    if (startDate !== undefined) {
-      sets.push('START_DATE = :start_date');
-      binds.start_date = { val: startDate, type: oracledb.DATE, dir: oracledb.BIND_IN };
-    }
-    if (endDate !== undefined) {
-      sets.push('END_DATE = :end_date');
-      binds.end_date = { val: endDate, type: oracledb.DATE, dir: oracledb.BIND_IN };
-    }
-    if (iconBuf !== undefined && replaceIcon) {
-      sets.push('ICON = :icon');
-      binds.icon = { val: iconBuf, type: oracledb.BLOB, dir: oracledb.BIND_IN };
-    }
-
-    if (sets.length === 0) {
-      throw new ValidationError('Validation failed', ['no fields provided to update']);
-    }
-
-    sets.push('LAST_UPDATED_BY = :last_updated_by', 'LAST_UPDATE_DATE = SYSDATE');
-
-    const sql = `
-      UPDATE ${TABLE}
-      SET ${sets.join(', ')}
-      WHERE ${ident.kind === 'id' ? 'MODULE_ID = :module_id' : 'MODULE_GUID = HEXTORAW(:module_guid_hex)'}
-    `;
-
-    try {
-      const res = await connection.execute(sql, binds, { autoCommit: true });
-      if ((res.rowsAffected ?? 0) < 1) {
-        throw new NotFoundError('Module not found');
-      }
-      const updated =
-        ident.kind === 'id'
-          ? await selectModuleByIdMapped(connection, ident.module_id)
-          : await selectModuleByGuidMapped(connection, ident.module_guid_hex);
-      if (!updated) {
-        throw new NotFoundError('Module not found');
-      }
-      return updated;
-    } catch (err) {
-      rethrowKnownOrWrapDb(err, 'updateModule');
-    }
-  });
+  } catch (err) {
+    console.error(`[${LOG_TAG}] updateModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    return packageFailure();
+  }
 }
-
-const DELETE_MODULE_PKG = 'FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE';
 
 /**
- * Hard delete via Oracle API package (not a soft delete).
+ * Hard delete via FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE.
+ * @returns {Promise<{ success: boolean, status: string, message: string, module_id: number|null }>}
  */
-export async function deleteModule(moduleGuid, actor) {
-  const guidHex = parseModuleGuidHexOrThrow(moduleGuid);
-  const lastUpdatedBy = actor;
+export async function deleteModule(moduleGuidRaw) {
+  const module_guid = parseModuleGuidHexOrThrow(moduleGuidRaw);
+  const binds = {
+    p_module_guid: { val: module_guid, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
+    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  };
 
-  const plsql = `
-BEGIN
-  ${DELETE_MODULE_PKG}(
-    P_MODULE_GUID     => :p_module_guid,
-    P_LAST_UPDATED_BY => :p_last_updated_by
-  );
-END;
-`;
-
-  return withConnection(async (connection) => {
-    try {
-      const snapshot = await selectModuleByGuidMapped(connection, guidHex);
-      if (!snapshot) {
-        throw new NotFoundError('Module not found');
-      }
-
-      await connection.execute(
-        plsql,
-        {
-          p_module_guid: {
-            val: guidHex,
-            type: oracledb.STRING,
-            dir: oracledb.BIND_IN,
-            maxSize: 32
-          },
-          p_last_updated_by: {
-            val: String(lastUpdatedBy || 'SYSTEM'),
-            type: oracledb.STRING,
-            dir: oracledb.BIND_IN,
-            maxSize: 200
-          }
-        },
-        { autoCommit: true }
-      );
-      return snapshot;
-    } catch (err) {
-      if (err instanceof NotFoundError || err instanceof ValidationError) throw err;
-      const msg = String(err?.message || '');
-      const num = Number(err?.errorNum);
-      if (num === 1403 || num === 20001 || /ORA-20001/.test(msg)) {
-        throw new NotFoundError('Module not found');
-      }
-      if (num === 20002 || /ORA-20002/.test(msg) || /SYSTEM MODULE|IS_SYSTEM/i.test(msg.toUpperCase())) {
-        throw new ValidationError('Validation failed', ['Cannot delete system module']);
-      }
-      rethrowKnownOrWrapDb(err, 'deleteModule');
-    }
-  });
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(DELETE_PLSQL, binds, { autoCommit: true })
+    );
+    const out = parsePackageOut(result?.outBinds);
+    const success = packageStatusIsSuccess(out.status);
+    return {
+      success,
+      status: out.status,
+      message: out.message || (success ? 'Module deleted successfully.' : GENERIC_ERROR_MESSAGE),
+      module_guid
+    };
+  } catch (err) {
+    console.error(`[${LOG_TAG}] deleteModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    return packageFailure();
+  }
 }
 
+async function fetchAllModulesFromPackage() {
+  const binds = {
+    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+  };
+  const result = await withConnection((connection) => connection.execute(GET_ALL_PLSQL, binds));
+  const parsed = await parseJsonClob(result?.outBinds?.p_result);
+  return extractModulesArray(parsed);
+}
+
+/**
+ * @returns {Promise<{ success: boolean, message: string, data: object|null }>}
+ */
+export async function getModuleByGuid(moduleGuidRaw) {
+  const module_guid = parseModuleGuidHexOrThrow(moduleGuidRaw);
+  const binds = {
+    p_module_guid: { val: module_guid, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
+    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+  };
+
+  try {
+    const result = await withConnection((connection) => connection.execute(GET_PLSQL, binds));
+    const parsed = await parseJsonClob(result?.outBinds?.p_result);
+    const data = extractSingleModule(parsed);
+    if (!data || !data.module_guid) {
+      return {
+        success: false,
+        status: 'ERROR',
+        message: 'Module not found',
+        data: null
+      };
+    }
+    return {
+      success: true,
+      status: 'SUCCESS',
+      message: 'Module fetched successfully.',
+      data
+    };
+  } catch (err) {
+    console.error(`[${LOG_TAG}] getModuleByGuid`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    return packageFailure();
+  }
+}
+
+function applyListFilters(rows, filters) {
+  let result = rows;
+
+  if (filters.search) {
+    const term = escapeLikePattern(String(filters.search).trim().slice(0, MODULE_LIST_SEARCH_MAX_LEN)).toUpperCase();
+    result = result.filter((m) => {
+      const code = String(m.module_code ?? '').toUpperCase();
+      const name = String(m.module_name ?? '').toUpperCase();
+      return code.includes(term) || name.includes(term);
+    });
+  }
+  if (filters.status_code) {
+    const sc = String(filters.status_code).trim();
+    result = result.filter((m) => String(m.status_code ?? '') === sc);
+  }
+  if (filters.category_code) {
+    const cc = String(filters.category_code).trim();
+    result = result.filter((m) => String(m.category_code ?? '') === cc);
+  }
+
+  const activeOnly = filters.active_only !== false;
+  if (activeOnly) {
+    result = result.filter((m) => String(m.active_flag ?? '').toUpperCase() === 'Y');
+  }
+
+  result = [...result].sort((a, b) => {
+    const ao = a.display_order ?? Number.MAX_SAFE_INTEGER;
+    const bo = b.display_order ?? Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    return String(a.module_code ?? '').localeCompare(String(b.module_code ?? ''));
+  });
+
+  return result;
+}
+
+/**
+ * @returns {Promise<{ success: boolean, message: string, rows: object[], total: number }>}
+ */
+export async function listModules(filters, pagination) {
+  try {
+    const all = await fetchAllModulesFromPackage();
+    const filtered = applyListFilters(all, { ...filters, active_only: true });
+    const total = filtered.length;
+    const offset = (pagination.page - 1) * pagination.pageSize;
+    const rows = filtered.slice(offset, offset + pagination.pageSize);
+    return {
+      success: true,
+      message: 'Modules fetched successfully.',
+      rows,
+      total
+    };
+  } catch (err) {
+    console.error(`[${LOG_TAG}] listModules`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    return {
+      success: false,
+      message: GENERIC_ERROR_MESSAGE,
+      rows: [],
+      total: 0
+    };
+  }
+}
+
+export function packageFailureHttpStatus(message) {
+  const msg = String(message ?? '');
+  if (/not found/i.test(msg)) return 404;
+  if (/already exists|duplicate|unique/i.test(msg)) return 409;
+  return 400;
+}

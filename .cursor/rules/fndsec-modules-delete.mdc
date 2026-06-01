@@ -1,23 +1,18 @@
----
-description: FNDSEC security modules — delete must call Oracle API package only
-globs: feature/security/modules/**/*.js
-alwaysApply: false
----
-
 # FNDSEC modules delete
 
 - **Do not** implement module delete as `UPDATE` (soft delete) or raw `DELETE FROM FNDSEC.FNDSEC_MODULES` in Node.
-- **Always** delete through the packaged API:
+- **Always** delete through the packaged API using **module_guid** (32-char hex, bound for `HEXTORAW`):
 
 ```sql
 BEGIN
   FNDSEC.FNDSEC_MODULES_API_PKG.DELETE_MODULE(
-    P_MODULE_GUID     => :p_module_guid,
-    P_ENTERPRISE_ID   => :p_enterprise_id,
-    P_LAST_UPDATED_BY => :p_last_updated_by
+    p_module_guid => HEXTORAW(:p_module_guid),
+    p_status      => :p_status,
+    p_message     => :p_message
   );
 END;
 ```
 
-- Bind `P_MODULE_GUID` as a **32-character hex string** (no dashes), aligned with external API `module_guid`.
-- Map package / Oracle errors in the model when helpful (e.g. not found → `NotFoundError`, system module → `ValidationError`); adjust `ORA-200xx` numbers if the package changes.
+- Validate `module_guid` format in Node before calling Oracle; reject invalid hex.
+- Map package `p_status` / `p_message` to clean JSON (`status: false`, user-facing `message`); log Oracle details server-side only.
+- Do not expose numeric `module_id` on update/delete/get routes; use `module_guid` in URL paths.

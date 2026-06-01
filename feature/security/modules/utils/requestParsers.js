@@ -1,5 +1,6 @@
 import { ConflictError, ValidationError } from '../../../../utils/errors/index.js';
 import { parsePagination } from '../../../../utils/paginationUtils.js';
+import { parseModuleGuidHexOrThrow } from './moduleGuid.js';
 
 export const DEFAULT_ACTOR = 'SYSTEM';
 
@@ -32,6 +33,11 @@ export function parseModuleListQuery(req) {
     status_code: parseOptionalString(q, 'status_code'),
     category_code: parseOptionalString(q, 'category_code')
   };
+}
+
+/** Validate :moduleGuid route param (32-char hex, optional dashes). */
+export function parseModuleGuidRouteParam(raw) {
+  return parseModuleGuidHexOrThrow(raw, 'module_guid');
 }
 
 export function parseListPagination(query) {
