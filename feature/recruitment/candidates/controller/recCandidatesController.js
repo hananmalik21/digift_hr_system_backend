@@ -9,6 +9,12 @@ import {
 } from '../model/recCandidateViewModel.js';
 import { getCandidateResumeByGuid } from '../model/recCandidateResumeModel.js';
 import {
+  createAssessmentViaPackage,
+  deleteAssessmentViaPackage,
+  packageStatusIsSuccess as assessmentPackageStatusIsSuccess,
+  updateAssessmentViaPackage
+} from '../model/recCandidateAssessmentModel.js';
+import {
   createBackgroundCheckViaPackage,
   packageStatusIsSuccess as bgCheckPackageStatusIsSuccess
 } from '../model/recCandidateBgCheckModel.js';
@@ -27,6 +33,15 @@ import {
   buildCandidateBodyFromRequest,
   maybeMulterCandidate
 } from '../utils/recCandidateMultipart.js';
+import {
+  normalizeCreateAssessmentBody,
+  normalizeDeleteAssessmentBody,
+  normalizeUpdateAssessmentBody,
+  parseAssessmentGuidParam,
+  validateCreateAssessmentBody,
+  validateDeleteAssessmentBody,
+  validateUpdateAssessmentBody
+} from '../utils/recCandidateAssessmentValidators.js';
 import {
   normalizeBackgroundCheckBody,
   validateCreateBackgroundCheckBody
@@ -147,6 +162,24 @@ function sendUpdateInterviewResponse(res, pkg) {
     message
   });
 }
+
+function sendCreateAssessmentResponse(res, pkg) {
+  const success = assessmentPackageStatusIsSuccess(pkg.status);
+  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
+  const message = pkg.message ?? '';
+  const httpStatus = success ? 200 : 400;
+
+  return sendPackageResponse(res, httpStatus, {
+    success,
+    assessment_id: pkg.assessment_id ?? null,
+    assessment_guid: pkg.assessment_guid ?? null,
+    status,
+    message
+  });
+}
+
+const sendUpdateAssessmentResponse = sendPackageActionResponse;
+const sendDeleteAssessmentResponse = sendPackageActionResponse;
 
 function buildListPaginationMeta(page, pageSize, total) {
   const p = buildPaginationMeta(page, pageSize, total);
@@ -311,6 +344,88 @@ router.put(
         success: false,
         status: 'ERROR',
         message: 'Unable to update interview. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * POST /api/rec/candidates/assessments
+ * Body: JSON — create assessment via REC.CANDIDATE_ASSESSMENT_PKG.CREATE_ASSESSMENT.
+ */
+router.post(
+  '/assessments',
+  asyncHandler(async (req, res) => {
+    try {
+      const body = normalizeCreateAssessmentBody({ ...(req.body || {}) });
+      body.created_by = resolveAuditActor(req, body, 'created_by');
+      validateCreateAssessmentBody(body);
+
+      const pkg = await createAssessmentViaPackage(body);
+      return sendCreateAssessmentResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to create assessment. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * PUT /api/rec/candidates/assessments/:assessment_guid
+ */
+router.put(
+  '/assessments/:assessment_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const assessment_guid = parseAssessmentGuidParam(req.params.assessment_guid);
+      const body = normalizeUpdateAssessmentBody({ ...(req.body || {}) }, assessment_guid);
+      body.updated_by = resolveAuditActor(req, body, 'updated_by');
+      validateUpdateAssessmentBody(body, assessment_guid);
+
+      const pkg = await updateAssessmentViaPackage(body);
+      return sendUpdateAssessmentResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to update assessment. Please try again.'
+      });
+    }
+  })
+);
+
+/**
+ * DELETE /api/rec/candidates/assessments/:assessment_guid
+ * Body: { enterprise_id, deleted_by }
+ */
+router.delete(
+  '/assessments/:assessment_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const assessment_guid = parseAssessmentGuidParam(req.params.assessment_guid);
+      const body = normalizeDeleteAssessmentBody({ ...(req.body || {}) }, assessment_guid);
+      body.deleted_by = resolveAuditActor(req, body, 'deleted_by');
+      validateDeleteAssessmentBody(body, assessment_guid);
+
+      const pkg = await deleteAssessmentViaPackage(body);
+      return sendDeleteAssessmentResponse(res, pkg);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendValidationError(res, err);
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        status: 'ERROR',
+        message: 'Unable to delete assessment. Please try again.'
       });
     }
   })

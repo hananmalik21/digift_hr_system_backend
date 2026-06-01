@@ -1,6 +1,11 @@
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 
-const JSON_ARRAY_COLUMNS = new Set(['education_json', 'experience_json', 'resumes_json']);
+const JSON_ARRAY_COLUMNS = new Set([
+  'education_json',
+  'experience_json',
+  'resumes_json',
+  'background_checks_json'
+]);
 
 async function readLobVal(v) {
   if (v == null) return null;
