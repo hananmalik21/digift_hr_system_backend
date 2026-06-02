@@ -5,7 +5,8 @@ const JSON_ARRAY_COLUMNS = new Set([
   'experience_json',
   'resumes_json',
   'background_checks_json',
-  'talent_pools_json'
+  'talent_pools_json',
+  'assessments_json'
 ]);
 
 async function readLobVal(v) {

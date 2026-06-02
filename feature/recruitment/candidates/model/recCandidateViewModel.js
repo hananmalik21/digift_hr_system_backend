@@ -19,7 +19,7 @@ const VIEW = process.env.REC_CANDIDATES_FULL_V || 'REC.CANDIDATES_FULL_V';
 const LOG_TAG = 'recCandidateViewModel';
 const FETCH_ERROR_MESSAGE = 'Unable to fetch candidates. Please try again.';
 
-/** List API omits BACKGROUND_CHECKS_JSON (detail-by-GUID returns it). */
+/** List API omits BACKGROUND_CHECKS_JSON and ASSESSMENTS_JSON (detail-by-GUID returns them). */
 const LIST_SELECT_COLS = [
   'CANDIDATE_ID',
   'CANDIDATE_GUID',
@@ -188,7 +188,8 @@ export async function listCandidatesFromView(query) {
         orderSql,
         page,
         limit,
-        mapRow: (row) => mapCandidateViewRow(row, { omitColumns: ['background_checks_json'] })
+        mapRow: (row) =>
+          mapCandidateViewRow(row, { omitColumns: ['background_checks_json', 'assessments_json'] })
       })
     );
   } catch (err) {
