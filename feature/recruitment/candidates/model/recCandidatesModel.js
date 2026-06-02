@@ -1,6 +1,16 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
-import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import {
+  guidInBind,
+  jsonArrayToClobString,
+  numOrNull,
+  parseActionOut,
+  parseCreateOut,
+  statusOutBinds,
+  strOrNull,
+  withConnection
+} from '../../shared/oraclePackageUtils.js';
+
+export { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
 const PKG = 'REC.CANDIDATE_PKG';
 const CREATE_PROC = `${PKG}.CREATE_CANDIDATE`;
@@ -8,47 +18,6 @@ const UPDATE_PROC = `${PKG}.UPDATE_CANDIDATE`;
 const DELETE_PROC = `${PKG}.DELETE_CANDIDATE`;
 
 const GENERIC_ERROR_MESSAGE = 'Unable to process candidate. Please try again.';
-
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
-
-function numOrNull(v) {
-  if (v === undefined || v === null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function strOrNull(v) {
-  if (v === undefined || v === null) return null;
-  const s = String(v).trim();
-  return s === '' ? null : s;
-}
-
-/**
- * Accepts a JSON array from the request body; stringifies for Oracle CLOB bind.
- * @param {unknown} value
- * @returns {string|null}
- */
-function jsonArrayToClobString(value) {
-  if (value == null || value === '') return null;
-  if (Array.isArray(value)) {
-    if (value.length === 0) return null;
-    return JSON.stringify(value);
-  }
-  if (typeof value === 'object') {
-    if (Object.keys(value).length === 0) return null;
-    return JSON.stringify(value);
-  }
-  return null;
-}
 
 function parseFileContent(body) {
   const raw = body.file_content ?? body.fileContent ?? body.file;
@@ -63,41 +32,6 @@ function parseFileContent(body) {
   } catch (_) {
     return null;
   }
-}
-
-function normalizeOutString(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutString(v[0]);
-  const s = String(v).trim();
-  return s.length ? s : null;
-}
-
-function normalizeOutNumber(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutNumber(v[0]);
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function normalizeOutGuidHex(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutGuidHex(v[0]);
-  return bufferToHex(v);
-}
-
-export function packageStatusIsSuccess(status) {
-  return String(status ?? '')
-    .trim()
-    .toUpperCase() === 'SUCCESS';
-}
-
-function guidInBind(hex) {
-  return {
-    val: hexToRawBuffer(hex),
-    dir: oracledb.BIND_IN,
-    type: oracledb.BUFFER,
-    maxSize: 16
-  };
 }
 
 function buildSharedInBinds(b) {
@@ -167,26 +101,13 @@ function buildSharedInBinds(b) {
   return binds;
 }
 
-function parseCreateOut(outBinds) {
-  const ob = outBinds || {};
-  return {
-    candidate_id: normalizeOutNumber(ob.p_candidate_id),
-    candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
-    status: normalizeOutString(ob.p_status),
-    message: normalizeOutString(ob.p_message) ?? ''
-  };
-}
-
-function parseUpdateOut(outBinds) {
-  const ob = outBinds || {};
-  return {
-    status: normalizeOutString(ob.p_status),
-    message: normalizeOutString(ob.p_message) ?? ''
-  };
-}
-
-function parseDeleteOut(outBinds) {
-  return parseUpdateOut(outBinds);
+function parseCandidateCreateOut(outBinds) {
+  return parseCreateOut(outBinds, {
+    idKey: 'p_candidate_id',
+    guidKey: 'p_candidate_guid',
+    idField: 'candidate_id',
+    guidField: 'candidate_guid'
+  });
 }
 
 function packageErrorResult(message = GENERIC_ERROR_MESSAGE, extra = {}) {
@@ -285,15 +206,14 @@ export async function createCandidateViaPackage(body) {
     p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
     p_candidate_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
     p_candidate_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+    ...statusOutBinds()
   };
 
   try {
     const result = await withConnection((connection) =>
       connection.execute(CREATE_PLSQL, binds, { autoCommit: true })
     );
-    return parseCreateOut(result?.outBinds);
+    return parseCandidateCreateOut(result?.outBinds);
   } catch (err) {
     console.error('[recCandidatesModel] CREATE_CANDIDATE failed:', err?.errorNum ?? '', '[redacted]');
     return packageErrorResult();
@@ -311,15 +231,14 @@ export async function updateCandidateViaPackage(body) {
     p_status_code: { val: strOrNull(b.status_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
     p_updated_by: { val: strOrNull(b.updated_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
     ...buildSharedInBinds(b),
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+    ...statusOutBinds()
   };
 
   try {
     const result = await withConnection((connection) =>
       connection.execute(UPDATE_PLSQL, binds, { autoCommit: true })
     );
-    return parseUpdateOut(result?.outBinds);
+    return parseActionOut(result?.outBinds);
   } catch (err) {
     console.error('[recCandidatesModel] UPDATE_CANDIDATE failed:', err?.errorNum ?? '', '[redacted]');
     return { status: 'ERROR', message: GENERIC_ERROR_MESSAGE };
@@ -336,15 +255,14 @@ export async function deleteCandidateViaPackage(body) {
     p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
     p_candidate_guid: guidInBind(b.candidate_guid),
     p_deleted_by: { val: strOrNull(b.deleted_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+    ...statusOutBinds()
   };
 
   try {
     const result = await withConnection((connection) =>
       connection.execute(DELETE_PLSQL, binds, { autoCommit: true })
     );
-    return parseDeleteOut(result?.outBinds);
+    return parseActionOut(result?.outBinds);
   } catch (err) {
     console.error('[recCandidatesModel] DELETE_CANDIDATE failed:', err?.errorNum ?? '', '[redacted]');
     return { status: 'ERROR', message: GENERIC_ERROR_MESSAGE };

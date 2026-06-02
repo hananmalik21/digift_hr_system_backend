@@ -1,8 +1,20 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { getActingUsername } from '../../../../utils/userContext.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
+import {
+  buildListPaginationMeta,
+  firstValidationMessage,
+  handleMutationError,
+  handleReadError,
+  resolveAuditActor,
+  sendPackageResponse,
+  sendValidationError
+} from '../../shared/recControllerHelpers.js';
+import {
+  sendCreateEntityResponse,
+  sendPackageActionResponse
+} from '../../shared/recPackageResponses.js';
+import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 import {
   getCandidateByGuidFromView,
   listCandidatesFromView
@@ -11,15 +23,12 @@ import { getCandidateResumeByGuid } from '../model/recCandidateResumeModel.js';
 import {
   createAssessmentViaPackage,
   deleteAssessmentViaPackage,
-  packageStatusIsSuccess as assessmentPackageStatusIsSuccess,
   updateAssessmentViaPackage
 } from '../model/recCandidateAssessmentModel.js';
 import {
-  createBackgroundCheckViaPackage,
-  packageStatusIsSuccess as bgCheckPackageStatusIsSuccess
+  createBackgroundCheckViaPackage
 } from '../model/recCandidateBgCheckModel.js';
 import {
-  packageStatusIsSuccess as interviewPackageStatusIsSuccess,
   deleteInterviewViaPackage,
   scheduleInterviewViaPackage,
   updateInterviewViaPackage
@@ -27,9 +36,13 @@ import {
 import {
   createCandidateViaPackage,
   deleteCandidateViaPackage,
-  packageStatusIsSuccess,
   updateCandidateViaPackage
 } from '../model/recCandidatesModel.js';
+import {
+  syncCandidatePoolsViaPackage
+} from '../../talent_pools/model/recTalentPoolsModel.js';
+import { listCandidateTalentPoolsFromView } from '../../talent_pools/model/recTalentPoolViewModel.js';
+import { validateSyncCandidatePoolsBody } from '../../talent_pools/utils/recTalentPoolValidators.js';
 import {
   buildCandidateBodyFromRequest,
   maybeMulterCandidate
@@ -69,83 +82,31 @@ import {
 
 const router = express.Router();
 
-function firstValidationMessage(err) {
-  const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
-  return details[0] || err?.message || 'Validation failed';
-}
-
-function resolveAuditActor(req, body, field) {
-  const fromBody = body?.[field];
-  if (fromBody != null && String(fromBody).trim() !== '') return String(fromBody).trim();
-  return getActingUsername(req) ?? 'SYSTEM';
-}
-
-function sendPackageResponse(res, httpStatus, payload) {
-  return res.status(httpStatus).json(payload);
-}
-
-function sendValidationError(res, err) {
-  return sendPackageResponse(res, 400, {
-    success: false,
-    status: 'ERROR',
-    message: firstValidationMessage(err)
-  });
-}
+const CANDIDATE_MUTATION_ERROR = 'Unable to process candidate. Please try again.';
+const SYNC_POOLS_MUTATION_ERROR = 'Unable to sync candidate talent pools. Please try again.';
 
 function sendCreateCandidateResponse(res, pkg) {
-  const success = packageStatusIsSuccess(pkg.status);
-  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
-
-  return sendPackageResponse(res, httpStatus, {
-    success,
-    candidate_id: pkg.candidate_id ?? null,
-    candidate_guid: pkg.candidate_guid ?? null,
-    status,
-    message
-  });
-}
-
-function sendPackageActionResponse(res, pkg) {
-  const success = packageStatusIsSuccess(pkg.status);
-  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
-
-  return sendPackageResponse(res, httpStatus, {
-    success,
-    status,
-    message
-  });
+  return sendCreateEntityResponse(res, pkg, { idField: 'candidate_id', guidField: 'candidate_guid' });
 }
 
 const sendUpdateCandidateResponse = sendPackageActionResponse;
 const sendDeleteCandidateResponse = sendPackageActionResponse;
 
 function sendCreateBackgroundCheckResponse(res, pkg) {
-  const success = bgCheckPackageStatusIsSuccess(pkg.status);
-  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
-
-  return sendPackageResponse(res, httpStatus, {
-    success,
-    background_check_id: pkg.background_check_id ?? null,
-    background_check_guid: pkg.background_check_guid ?? null,
-    status,
-    message
-  });
+  return sendCreateEntityResponse(res, pkg, {
+    idField: 'background_check_id',
+    guidField: 'background_check_guid'
+  }, packageStatusIsSuccess);
 }
 
 function interviewPackageHttpStatus(pkg) {
-  if (interviewPackageStatusIsSuccess(pkg.status)) return 200;
+  if (packageStatusIsSuccess(pkg.status)) return 200;
   if (/not found/i.test(pkg.message ?? '')) return 404;
   return 400;
 }
 
 function sendScheduleInterviewResponse(res, pkg) {
-  const success = interviewPackageStatusIsSuccess(pkg.status);
+  const success = packageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
   const message = pkg.message ?? '';
 
@@ -159,7 +120,7 @@ function sendScheduleInterviewResponse(res, pkg) {
 }
 
 function sendUpdateInterviewResponse(res, pkg) {
-  const success = interviewPackageStatusIsSuccess(pkg.status);
+  const success = packageStatusIsSuccess(pkg.status);
   const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
   const message = pkg.message ?? '';
 
@@ -173,49 +134,14 @@ function sendUpdateInterviewResponse(res, pkg) {
 const sendDeleteInterviewResponse = sendUpdateInterviewResponse;
 
 function sendCreateAssessmentResponse(res, pkg) {
-  const success = assessmentPackageStatusIsSuccess(pkg.status);
-  const status = pkg.status ?? (success ? 'SUCCESS' : 'ERROR');
-  const message = pkg.message ?? '';
-  const httpStatus = success ? 200 : 400;
-
-  return sendPackageResponse(res, httpStatus, {
-    success,
-    assessment_id: pkg.assessment_id ?? null,
-    assessment_guid: pkg.assessment_guid ?? null,
-    status,
-    message
-  });
+  return sendCreateEntityResponse(res, pkg, {
+    idField: 'assessment_id',
+    guidField: 'assessment_guid'
+  }, packageStatusIsSuccess);
 }
 
 const sendUpdateAssessmentResponse = sendPackageActionResponse;
 const sendDeleteAssessmentResponse = sendPackageActionResponse;
-
-function buildListPaginationMeta(page, pageSize, total) {
-  const p = buildPaginationMeta(page, pageSize, total);
-  return {
-    pagination: {
-      page: p.page,
-      page_size: p.pageSize,
-      total: p.total,
-      total_pages: p.totalPages,
-      has_next: p.hasNext,
-      has_previous: p.hasPrevious
-    }
-  };
-}
-
-function handleReadError(res, err, fallbackMessage) {
-  if (err instanceof ValidationError) {
-    return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
-  }
-  if (err instanceof DatabaseError) {
-    return sendPackageResponse(res, 500, {
-      success: false,
-      message: err.userMessage || fallbackMessage
-    });
-  }
-  return sendPackageResponse(res, 500, { success: false, message: fallbackMessage });
-}
 
 /**
  * GET /api/rec/candidates
@@ -272,6 +198,52 @@ router.get(
         success: false,
         message: 'Unable to download resume. Please try again.'
       });
+    }
+  })
+);
+
+/**
+ * GET /api/rec/candidates/:candidate_guid/talent-pools?enterprise_id=1&search=engineering&page=1&page_size=10
+ * Checkbox modal data from REC.CANDIDATE_TALENT_POOLS_V.
+ */
+router.get(
+  '/:candidate_guid/talent-pools',
+  asyncHandler(async (req, res) => {
+    try {
+      const candidate_guid = parseCandidateGuidParam(req.params.candidate_guid);
+      const { rows, total, page, limit } = await listCandidateTalentPoolsFromView(
+        candidate_guid,
+        req.query
+      );
+      return sendPackageResponse(res, 200, {
+        success: true,
+        message: 'Candidate talent pools fetched successfully',
+        meta: buildListPaginationMeta(page, limit, total),
+        data: rows
+      });
+    } catch (err) {
+      return handleReadError(res, err, 'Unable to fetch candidate talent pools. Please try again.');
+    }
+  })
+);
+
+/**
+ * POST /api/rec/candidates/:candidate_guid/talent-pools
+ * Body: { enterprise_id, pools: [{ pool_guid }], updated_by } — final checkbox selection via REC.TALENT_POOL_PKG.SYNC_CANDIDATE_POOLS
+ */
+router.post(
+  '/:candidate_guid/talent-pools',
+  asyncHandler(async (req, res) => {
+    try {
+      const candidate_guid = parseCandidateGuidParam(req.params.candidate_guid);
+      const body = { ...(req.body || {}), candidate_guid };
+      body.updated_by = resolveAuditActor(req, body, 'updated_by');
+      validateSyncCandidatePoolsBody(body, candidate_guid);
+
+      const pkg = await syncCandidatePoolsViaPackage(body);
+      return sendPackageActionResponse(res, pkg);
+    } catch (err) {
+      return handleMutationError(res, err, SYNC_POOLS_MUTATION_ERROR);
     }
   })
 );

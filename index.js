@@ -97,6 +97,7 @@ import fndsecUsersController from './feature/security/users/controller/fndsecUse
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
+import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
@@ -311,6 +312,9 @@ app.use('/api/rec/requisitions', recRequisitionsController);
 
 // Recruitment — candidates (REC.CANDIDATE_PKG)
 app.use('/api/rec/candidates', recCandidatesController);
+
+// Recruitment — talent pools (REC.TALENT_POOL_PKG)
+app.use('/api/rec/talent-pools', recTalentPoolsController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
 app.use('/api/rec/lookup-types', recLookupTypeController);

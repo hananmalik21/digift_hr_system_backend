@@ -1,0 +1,122 @@
+import oracledb from 'oracledb';
+import db from '../../../config/db.js';
+import { bufferToHex, hexToRawBuffer } from '../../../utils/guidUtils.js';
+
+export async function withConnection(fn) {
+  const connection = await db.getConnection();
+  try {
+    return await fn(connection);
+  } finally {
+    try {
+      await connection.close();
+    } catch (_) {}
+  }
+}
+
+export function numOrNull(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function strOrNull(v) {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+
+export function normalizeOutString(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return normalizeOutString(v[0]);
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+export function normalizeOutNumber(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return normalizeOutNumber(v[0]);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function normalizeOutGuidHex(v) {
+  if (v == null) return null;
+  if (Array.isArray(v)) return normalizeOutGuidHex(v[0]);
+  return bufferToHex(v);
+}
+
+export function guidInBind(hex) {
+  return {
+    val: hexToRawBuffer(hex),
+    dir: oracledb.BIND_IN,
+    type: oracledb.BUFFER,
+    maxSize: 16
+  };
+}
+
+export function packageStatusIsSuccess(status) {
+  return String(status ?? '')
+    .trim()
+    .toUpperCase() === 'SUCCESS';
+}
+
+export function statusOutBinds() {
+  return {
+    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
+    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+  };
+}
+
+/**
+ * @param {Record<string, unknown>|undefined} outBinds
+ */
+export function parseActionOut(outBinds) {
+  const ob = outBinds || {};
+  return {
+    status: normalizeOutString(ob.p_status),
+    message: normalizeOutString(ob.p_message) ?? ''
+  };
+}
+
+/**
+ * @param {Record<string, unknown>|undefined} outBinds
+ * @param {{ idKey: string, guidKey: string, idField: string, guidField: string }} keys
+ */
+export function parseCreateOut(outBinds, keys) {
+  const ob = outBinds || {};
+  return {
+    [keys.idField]: normalizeOutNumber(ob[keys.idKey]),
+    [keys.guidField]: normalizeOutGuidHex(ob[keys.guidKey]),
+    status: normalizeOutString(ob.p_status),
+    message: normalizeOutString(ob.p_message) ?? ''
+  };
+}
+
+/**
+ * Accepts a JSON array from the request body; stringifies for Oracle CLOB bind.
+ * @param {unknown} value
+ * @param {{ allowEmptyArray?: boolean }} [options]
+ * @returns {string|null}
+ */
+export function jsonArrayToClobString(value, options = {}) {
+  const { allowEmptyArray = false } = options;
+  if (value == null || value === '') return null;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return allowEmptyArray ? '[]' : null;
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'object') {
+    if (Object.keys(value).length === 0) return null;
+    return JSON.stringify(value);
+  }
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s) return null;
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) return JSON.stringify(parsed);
+    } catch (_) {}
+    return null;
+  }
+  return null;
+}

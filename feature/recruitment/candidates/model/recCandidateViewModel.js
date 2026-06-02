@@ -1,21 +1,23 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
 import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
-import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import {
+  fetchPaginatedRows,
+  isNonEmptyTrimmed,
+  rethrowUnlessOperational,
+  ROW_OPTS,
+  withConnection
+} from '../../shared/recViewModelUtils.js';
+import { parseEnterpriseIdFromQuery, parseListPagination } from '../../shared/recViewQueryValidators.js';
 import { mapCandidateViewRow } from '../utils/recCandidateViewMapper.js';
 import {
   pickQueryFilterValue,
   resolveExperienceBand
 } from '../utils/recCandidateListFilters.js';
-import {
-  parseCandidateListPagination,
-  parseEnterpriseIdFromQuery
-} from '../utils/recCandidateViewValidators.js';
 
 const VIEW = process.env.REC_CANDIDATES_FULL_V || 'REC.CANDIDATES_FULL_V';
 const LOG_TAG = 'recCandidateViewModel';
-const ROW_OPTS = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+const FETCH_ERROR_MESSAGE = 'Unable to fetch candidates. Please try again.';
 
 /** List API omits BACKGROUND_CHECKS_JSON (detail-by-GUID returns it). */
 const LIST_SELECT_COLS = [
@@ -49,27 +51,6 @@ const LIST_SELECT_COLS = [
 ]
   .map((c) => `v.${c}`)
   .join(', ');
-
-function isNonEmptyTrimmed(raw) {
-  return raw !== undefined && raw !== null && String(raw).trim() !== '';
-}
-
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
-
-function rethrowUnlessOperational(err, context) {
-  if (err instanceof ValidationError) throw err;
-  console.error(`[${LOG_TAG}] ${context}`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-  throw new DatabaseError('Unable to fetch candidates. Please try again.', err);
-}
 
 /**
  * @param {Record<string, unknown>} query
@@ -193,39 +174,25 @@ function buildListFilters(query) {
  */
 export async function listCandidatesFromView(query) {
   try {
-    const { page, limit } = parseCandidateListPagination(query);
+    const { page, limit } = parseListPagination(query);
     const { whereSql, binds } = buildListFilters(query);
+    const selectSql = `SELECT ${LIST_SELECT_COLS} FROM ${VIEW} v`;
+    const orderSql = 'ORDER BY v.CREATION_DATE DESC';
 
-    const countSql = `SELECT COUNT(*) AS TOTAL_COUNT FROM ${VIEW} v ${whereSql}`;
-    const dataSql = `SELECT ${LIST_SELECT_COLS} FROM ${VIEW} v ${whereSql} ORDER BY v.CREATION_DATE DESC`;
-
-    return await withConnection(async (connection) => {
-      const countResult = await connection.execute(countSql, binds, ROW_OPTS);
-      const total =
-        Number(countResult.rows?.[0]?.TOTAL_COUNT ?? countResult.rows?.[0]?.total_count ?? 0) || 0;
-
-      const offset = (page - 1) * limit;
-      const dataResult = await connection.execute(
-        `${dataSql} OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
-        {
-          ...binds,
-          offset: { val: offset, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          limit: { val: limit, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
-        },
-        ROW_OPTS
-      );
-
-      const rows = [];
-      for (const row of dataResult.rows || []) {
-        rows.push(
-          await mapCandidateViewRow(row, { omitColumns: ['background_checks_json'] })
-        );
-      }
-
-      return { rows, total, page, limit };
-    });
+    return await withConnection((connection) =>
+      fetchPaginatedRows(connection, {
+        view: VIEW,
+        selectSql,
+        whereSql,
+        binds,
+        orderSql,
+        page,
+        limit,
+        mapRow: (row) => mapCandidateViewRow(row, { omitColumns: ['background_checks_json'] })
+      })
+    );
   } catch (err) {
-    rethrowUnlessOperational(err, 'listCandidatesFromView');
+    rethrowUnlessOperational(err, `${LOG_TAG} listCandidatesFromView`, FETCH_ERROR_MESSAGE);
   }
 }
 
@@ -256,6 +223,6 @@ export async function getCandidateByGuidFromView(candidateGuidHex, enterpriseId)
       return mapCandidateViewRow(row);
     });
   } catch (err) {
-    rethrowUnlessOperational(err, 'getCandidateByGuidFromView');
+    rethrowUnlessOperational(err, `${LOG_TAG} getCandidateByGuidFromView`, FETCH_ERROR_MESSAGE);
   }
 }

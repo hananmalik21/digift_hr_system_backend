@@ -1,30 +1,13 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import {
+  asObject,
+  isBlank,
+  requireField,
+  requirePositiveEnterpriseId
+} from '../../shared/recValidationUtils.js';
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isBlank(v) {
-  return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
-}
-
-function asObject(body) {
-  return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
-}
-
-function requireField(errors, body, field, label = field) {
-  if (isBlank(body[field])) errors.push(`${label} is required`);
-}
-
-function requirePositiveEnterpriseId(errors, body) {
-  if (isBlank(body.enterprise_id)) {
-    errors.push('enterprise_id is required');
-    return;
-  }
-  const n = Number(body.enterprise_id);
-  if (!Number.isFinite(n) || n <= 0) {
-    errors.push('enterprise_id must be a positive number');
-  }
-}
 
 function requirePositiveInteger(errors, body, field, label = field) {
   if (isBlank(body[field])) {
