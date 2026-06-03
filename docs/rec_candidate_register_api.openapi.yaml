@@ -3,7 +3,7 @@ info:
   title: Digify ERP — Career Portal Candidate API
   version: 2.0.0
   description: |
-    Token-free career portal endpoints under `/candidate` (no JWT).
+    Token-free career portal endpoints under `/api/candidate` (no JWT).
 
     - **Register:** `REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER`
     - **Login:** `REC.CANDIDATE_LOGIN_PKG.LOGIN_CANDIDATE` — validates credentials (no JWT issued)
@@ -21,7 +21,7 @@ tags:
   - name: Career Portal
     description: Public candidate registration
 paths:
-  /candidate/register:
+  /api/candidate/register:
     post:
       tags: [Career Portal]
       summary: Register candidate user (career portal)
@@ -65,7 +65,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateRegisterError'
-  /candidate/login:
+  /api/candidate/login:
     post:
       tags: [Career Portal]
       summary: Login candidate user (career portal)

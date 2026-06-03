@@ -22,7 +22,7 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
   // Career portal — token-free (no candidate JWT)
-  { method: '*', pattern: /^\/candidate(\/.*)?$/ },
+  { method: '*', pattern: /^\/api\/candidate(\/.*)?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },

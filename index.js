@@ -318,7 +318,7 @@ app.use('/api/rec/candidates', recCandidatesController);
 app.use('/api/recruitment/candidates', recCandidatesController);
 
 // Career portal — token-free (register, etc.)
-app.use('/candidate', recCandidateUserController);
+app.use('/api/candidate', recCandidateUserController);
 
 // Recruitment — talent pools (REC.TALENT_POOL_PKG)
 app.use('/api/rec/talent-pools', recTalentPoolsController);

@@ -17,7 +17,7 @@ import {
 const router = express.Router();
 
 /**
- * POST /candidate/register
+ * POST /api/candidate/register
  * REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER — public, no JWT
  */
 router.post(
@@ -36,7 +36,7 @@ router.post(
 );
 
 /**
- * POST /candidate/login
+ * POST /api/candidate/login
  * REC.CANDIDATE_LOGIN_PKG.LOGIN_CANDIDATE — public, no JWT
  */
 router.post(
