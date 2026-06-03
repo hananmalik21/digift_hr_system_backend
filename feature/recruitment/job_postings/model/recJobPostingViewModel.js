@@ -8,9 +8,9 @@ import {
 } from '../../shared/recViewModelUtils.js';
 import { parseListPagination } from '../../shared/recViewQueryValidators.js';
 import {
-  FETCH_ERROR_MESSAGE,
   JOB_POSTING_SELECT_SQL,
   LOG_TAG,
+  READ_ERROR_MESSAGE,
   REC_JOB_POSTINGS_VIEW
 } from '../utils/recJobPostingConstants.js';
 import { buildJobPostingListFilters } from '../utils/recJobPostingListFilters.js';
@@ -40,7 +40,7 @@ export async function listJobPostingsFromView(query) {
       })
     );
   } catch (err) {
-    rethrowUnlessOperational(err, `${LOG_TAG} listJobPostingsFromView`, FETCH_ERROR_MESSAGE);
+    rethrowUnlessOperational(err, `${LOG_TAG} listJobPostingsFromView`, READ_ERROR_MESSAGE);
   }
 }
 
@@ -69,6 +69,6 @@ export async function getJobPostingByGuidFromView(postingGuidHex, enterpriseId) 
       return mapJobPostingViewRow(row);
     });
   } catch (err) {
-    rethrowUnlessOperational(err, `${LOG_TAG} getJobPostingByGuidFromView`, FETCH_ERROR_MESSAGE);
+    rethrowUnlessOperational(err, `${LOG_TAG} getJobPostingByGuidFromView`, READ_ERROR_MESSAGE);
   }
 }
