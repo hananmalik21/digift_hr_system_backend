@@ -98,6 +98,7 @@ import fndsecAuthController from './feature/security/auth/controller/fndsecAuthC
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
+import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
@@ -312,6 +313,9 @@ app.use('/api/rec/requisitions', recRequisitionsController);
 
 // Recruitment — candidates (REC.CANDIDATE_PKG)
 app.use('/api/rec/candidates', recCandidatesController);
+
+// Career portal — candidate self-registration (REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER; public)
+app.use('/candidate', recCandidateUserController);
 
 // Recruitment — talent pools (REC.TALENT_POOL_PKG)
 app.use('/api/rec/talent-pools', recTalentPoolsController);

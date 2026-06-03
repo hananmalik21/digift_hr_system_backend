@@ -21,6 +21,8 @@ import jwt from 'jsonwebtoken';
 const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
+  { method: 'POST', pattern: /^\/candidate\/register\/?$/ },
+  { method: 'POST', pattern: /^\/candidate\/login\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
 ];

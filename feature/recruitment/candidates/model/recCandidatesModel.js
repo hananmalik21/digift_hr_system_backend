@@ -12,6 +12,7 @@ import {
   ynInBind
 } from '../../shared/oraclePackageUtils.js';
 import { CANDIDATE_PROFILE_PLSQL_ARGS } from '../utils/recCandidateProfileFields.js';
+import { parseResumeFileContent } from '../../shared/recResumeFileUtils.js';
 
 export { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
@@ -22,28 +23,13 @@ const DELETE_PROC = `${PKG}.DELETE_CANDIDATE`;
 
 const GENERIC_ERROR_MESSAGE = 'Unable to process candidate. Please try again.';
 
-function parseFileContent(body) {
-  const raw = body.file_content ?? body.fileContent ?? body.file;
-  if (raw == null || raw === '') return null;
-  if (Buffer.isBuffer(raw)) return raw;
-  let s = String(raw).trim();
-  if (!s) return null;
-  const dataUrlMatch = /^data:[^;]+;base64,(.+)$/i.exec(s);
-  if (dataUrlMatch) s = dataUrlMatch[1];
-  try {
-    return Buffer.from(s, 'base64');
-  } catch (_) {
-    return null;
-  }
-}
-
 /**
  * @param {Record<string, unknown>} b
  * @param {{ willingToRelocateDefault?: string|null }} [options]
  */
 function buildSharedInBinds(b, options = {}) {
   const { willingToRelocateDefault = null } = options;
-  const fileBuf = parseFileContent(b);
+  const fileBuf = parseResumeFileContent(b.file_content ?? b.fileContent ?? b.file);
   const binds = {
     p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
     p_first_name: { val: strOrNull(b.first_name), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },

@@ -1,0 +1,217 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Career Portal Candidate API
+  version: 1.1.0
+  description: |
+    Public career portal endpoints under `/candidate`.
+
+    - **Register:** `REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER`
+    - **Login:** `REC.CANDIDATE_LOGIN_PKG.LOGIN_CANDIDATE` + JWT (`CANDIDATE_JWT_SECRET`)
+
+    Passwords are verified with Argon2id in Node; only the stored hash is sent to Oracle login.
+servers:
+  - url: /
+    description: Application base URL
+tags:
+  - name: Career Portal
+    description: Public candidate registration
+paths:
+  /candidate/register:
+    post:
+      tags: [Career Portal]
+      summary: Register candidate user (career portal)
+      operationId: registerCandidateUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CandidateRegisterMultipart'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateRegisterJson'
+      responses:
+        '200':
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterSuccess'
+              example:
+                success: true
+                message: Candidate user registered successfully.
+                candidate_id: 101
+                candidate_guid: 5332C3095B5F68E5E0638711000A5963
+                candidate_user_id: 10
+                candidate_user_guid: 5332C3095B5F68E5E0638711000A5964
+        '400':
+          description: Validation or package error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+              example:
+                success: false
+                message: Resume upload failed.
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+  /candidate/login:
+    post:
+      tags: [Career Portal]
+      summary: Candidate login (career portal)
+      operationId: loginCandidateUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateLoginRequest'
+            example:
+              enterprise_id: 1
+              email: khuram@example.com
+              password: UserPassword123
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateLoginSuccess'
+        '401':
+          description: Invalid credentials or inactive user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateLoginError'
+              examples:
+                invalid:
+                  value:
+                    success: false
+                    message: Invalid email or password.
+                inactive:
+                  value:
+                    success: false
+                    message: Candidate user is not active.
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateLoginError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateLoginError'
+components:
+  schemas:
+    YnFlag:
+      type: string
+      enum: [Y, N]
+    CandidateRegisterFields:
+      type: object
+      required: [enterprise_id, first_name, last_name, email, phone, password]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        first_name: { type: string }
+        middle_name: { type: string }
+        last_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        password:
+          type: string
+          minLength: 8
+          description: Plain password (hashed server-side; never stored)
+        current_title: { type: string }
+        current_employer: { type: string }
+        years_experience: { type: number }
+        current_location: { type: string }
+        source: { type: string }
+        current_salary: { type: number }
+        expected_salary: { type: number }
+        salary_currency: { type: string }
+        notice_period: { type: integer }
+        linkedin_profile: { type: string, maxLength: 1000 }
+        portfolio_link: { type: string, maxLength: 1000 }
+        github_link: { type: string, maxLength: 1000 }
+        willing_to_relocate:
+          $ref: '#/components/schemas/YnFlag'
+        created_by: { type: string }
+    CandidateRegisterMultipart:
+      allOf:
+        - $ref: '#/components/schemas/CandidateRegisterFields'
+        - type: object
+          properties:
+            resume:
+              type: string
+              format: binary
+              description: Optional resume file
+            file:
+              type: string
+              format: binary
+            attachment:
+              type: string
+              format: binary
+            document:
+              type: string
+              format: binary
+    CandidateRegisterJson:
+      allOf:
+        - $ref: '#/components/schemas/CandidateRegisterFields'
+        - type: object
+          properties:
+            file_name: { type: string }
+            file_type: { type: string }
+            file_size: { type: integer }
+            file_content:
+              type: string
+              description: Base64-encoded resume (optional)
+    CandidateRegisterSuccess:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        candidate_id: { type: integer }
+        candidate_guid: { type: string }
+        candidate_user_id: { type: integer }
+        candidate_user_guid: { type: string }
+    CandidateRegisterError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+    CandidateLoginRequest:
+      type: object
+      required: [enterprise_id, email, password]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        email: { type: string, format: email }
+        password: { type: string, description: Plain password (verified in Node; never stored) }
+    CandidateLoginSuccess:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: Login successful. }
+        token: { type: string, description: Candidate JWT (CANDIDATE_JWT_SECRET) }
+        data:
+          type: object
+          properties:
+            candidate_user_id: { type: integer }
+            candidate_user_guid: { type: string }
+            candidate_id: { type: integer }
+            candidate_guid: { type: string }
+            full_name: { type: string }
+            email: { type: string }
+            user_status: { type: string, example: ACTIVE }
+    CandidateLoginError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }

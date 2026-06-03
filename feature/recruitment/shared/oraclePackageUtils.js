@@ -124,6 +124,65 @@ export function parseCreateOut(outBinds, keys) {
   };
 }
 
+/** @param {unknown} raw PASSWORD_HASH column value (VARCHAR2 or CLOB). */
+export async function readDbPasswordHashValue(raw) {
+  if (raw == null) return null;
+  if (typeof raw?.getData === 'function') {
+    const p = raw.getData();
+    const data =
+      typeof p?.then === 'function'
+        ? await p
+        : await new Promise((res, rej) => raw.getData((err, d) => (err ? rej(err) : res(d))));
+    const s = data != null ? String(data).trim() : '';
+    return s.length ? s : null;
+  }
+  const s = String(raw).trim();
+  return s.length ? s : null;
+}
+
+/** @param {unknown} hash */
+export function passwordHashInBind(hash) {
+  return {
+    val: strOrNull(hash),
+    dir: oracledb.BIND_IN,
+    type: oracledb.STRING,
+    maxSize: 500
+  };
+}
+
+/**
+ * @param {Record<string, unknown>|undefined} outBinds
+ */
+export function parseCandidateRegistrationOut(outBinds) {
+  const ob = outBinds || {};
+  return {
+    candidate_id: normalizeOutNumber(ob.p_candidate_id),
+    candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
+    candidate_user_id: normalizeOutNumber(ob.p_candidate_user_id),
+    candidate_user_guid: normalizeOutGuidHex(ob.p_candidate_user_guid),
+    status: normalizeOutString(ob.p_status),
+    message: normalizeOutString(ob.p_message) ?? ''
+  };
+}
+
+/**
+ * @param {Record<string, unknown>|undefined} outBinds
+ */
+export function parseCandidateLoginOut(outBinds) {
+  const ob = outBinds || {};
+  return {
+    candidate_user_id: normalizeOutNumber(ob.p_candidate_user_id),
+    candidate_user_guid: normalizeOutGuidHex(ob.p_candidate_user_guid),
+    candidate_id: normalizeOutNumber(ob.p_candidate_id),
+    candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
+    full_name: normalizeOutString(ob.p_full_name),
+    email: normalizeOutString(ob.p_email_out),
+    user_status: normalizeOutString(ob.p_user_status),
+    status: normalizeOutString(ob.p_status),
+    message: normalizeOutString(ob.p_message) ?? ''
+  };
+}
+
 /**
  * Accepts a JSON array from the request body; stringifies for Oracle CLOB bind.
  * @param {unknown} value

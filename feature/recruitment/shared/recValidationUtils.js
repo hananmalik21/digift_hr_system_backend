@@ -9,6 +9,28 @@ export function asObject(body) {
   return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
 }
 
+export function normalizeEmailLower(raw) {
+  return String(raw ?? '').trim().toLowerCase();
+}
+
+/** @param {string[]} errors @param {Record<string, unknown>} body @param {number} [minLen] */
+export function validateRequiredPasswordInErrors(errors, body, minLen = 8) {
+  if (isBlank(body.password)) {
+    errors.push('password is required');
+    return;
+  }
+  if (String(body.password).length < minLen) {
+    errors.push(`password must be at least ${minLen} characters`);
+  }
+}
+
+/** @param {string[]} errors @param {Record<string, unknown>} body */
+export function validateRequiredEmailInErrors(errors, body) {
+  if (isBlank(body.email)) {
+    errors.push('email is required');
+  }
+}
+
 export function requirePositiveEnterpriseId(errors, body) {
   if (isBlank(body.enterprise_id)) {
     errors.push('enterprise_id is required');

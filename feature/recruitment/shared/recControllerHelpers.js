@@ -62,3 +62,14 @@ export function handleMutationError(res, err, fallbackMessage) {
     message: fallbackMessage
   });
 }
+
+/** Career portal JSON errors: `{ success, message }` without ERP `status` field. */
+export function handlePortalError(res, err, fallbackMessage) {
+  if (err instanceof ValidationError) {
+    return sendPackageResponse(res, 400, {
+      success: false,
+      message: firstValidationMessage(err)
+    });
+  }
+  return sendPackageResponse(res, 500, { success: false, message: fallbackMessage });
+}

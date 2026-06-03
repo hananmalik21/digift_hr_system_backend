@@ -96,7 +96,7 @@ async function withConnection(fn) {
   }
 }
 
-async function verifyUserPassword(plainPassword, passwordHash) {
+export async function verifyUserPassword(plainPassword, passwordHash) {
   if (!plainPassword || !passwordHash) return false;
   const hash = toHashStringMaybe(passwordHash);
   const plain = String(plainPassword);
