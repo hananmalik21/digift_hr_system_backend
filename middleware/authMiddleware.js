@@ -23,6 +23,9 @@ const PUBLIC_PATHS = [
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
   { method: 'POST', pattern: /^\/candidate\/register\/?$/ },
   { method: 'POST', pattern: /^\/candidate\/login\/?$/ },
+  // Job posting reads only (no JWT); POST/PUT and other mutations require JWT.
+  { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
+  { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
 ];

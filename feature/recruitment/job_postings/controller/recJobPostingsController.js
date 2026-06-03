@@ -1,7 +1,15 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { handleMutationError, resolveAuditActor } from '../../shared/recControllerHelpers.js';
+import {
+  handleMutationError,
+  handleReadError,
+  resolveAuditActor
+} from '../../shared/recControllerHelpers.js';
 import { recRequirePermission } from '../../shared/recRequirePermission.js';
+import {
+  getJobPostingByGuidFromView,
+  listJobPostingsFromView
+} from '../model/recJobPostingViewModel.js';
 import {
   activateJobPostingViaPackage,
   closeJobPostingViaPackage,
@@ -10,22 +18,29 @@ import {
   pauseJobPostingViaPackage,
   updateJobPostingViaPackage
 } from '../model/recJobPostingsModel.js';
+import {
+  MUTATION_ERROR_MESSAGE,
+  READ_ERROR_MESSAGE
+} from '../utils/recJobPostingConstants.js';
+import { runJobPostingLifecycle } from '../utils/recJobPostingLifecycle.js';
+import { normalizeJobPostingListQuery } from '../utils/recJobPostingListFilters.js';
 import { JOB_POSTING_PERMISSIONS } from '../utils/recJobPostingPermissions.js';
 import {
   sendCreateJobPostingResponse,
-  sendJobPostingActionResponse
+  sendJobPostingActionResponse,
+  sendJobPostingDetailResponse,
+  sendJobPostingListResponse,
+  sendJobPostingNotFoundResponse
 } from '../utils/recJobPostingResponses.js';
+import { validatePostingGuidEnterpriseParams } from '../utils/recJobPostingViewValidators.js';
 import {
   parsePostingGuidParam,
   validateCreateJobPostingBody,
   validateDeleteJobPostingParams,
-  validateGuidEnterpriseParams,
-  validateLifecycleBody,
   validateUpdateJobPostingBody
 } from '../utils/recJobPostingValidators.js';
 
 const router = express.Router();
-const MUTATION_ERROR_MESSAGE = 'Unable to process job posting. Please try again.';
 
 function logAudit(action, req, extra = {}) {
   const user = req.user?.username ?? 'SYSTEM';
@@ -33,7 +48,24 @@ function logAudit(action, req, extra = {}) {
 }
 
 /**
- * POST /api/rec/job-postings
+ * GET /api/rec/job-postings — public list
+ */
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    try {
+      const { rows, total, page, limit } = await listJobPostingsFromView(
+        normalizeJobPostingListQuery(req.query)
+      );
+      return sendJobPostingListResponse(res, rows, { page, limit, total });
+    } catch (err) {
+      return handleReadError(res, err, READ_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * POST /api/rec/job-postings — JWT required
  */
 router.post(
   '/',
@@ -54,7 +86,7 @@ router.post(
 );
 
 /**
- * PUT /api/rec/job-postings/:posting_guid
+ * PUT /api/rec/job-postings/:posting_guid — JWT required
  */
 router.put(
   '/:posting_guid',
@@ -75,90 +107,56 @@ router.put(
   })
 );
 
-/**
- * POST /api/rec/job-postings/:posting_guid/pause
- */
-router.post(
-  '/:posting_guid/pause',
-  recRequirePermission(JOB_POSTING_PERMISSIONS.pause),
-  asyncHandler(async (req, res) => {
-    try {
-      const posting_guid = parsePostingGuidParam(req.params.posting_guid);
-      const body = { ...(req.body || {}) };
-      body.paused_by = resolveAuditActor(req, body, 'paused_by');
-      validateLifecycleBody(body, posting_guid, 'paused_by');
-      const { enterprise_id } = validateGuidEnterpriseParams(
-        posting_guid,
-        body.enterprise_id
-      );
+/** Lifecycle actions — JWT required; register before GET /:posting_guid */
+const LIFECYCLE_ROUTES = [
+  {
+    path: '/:posting_guid/pause',
+    permission: JOB_POSTING_PERMISSIONS.pause,
+    actorField: 'paused_by',
+    action: 'pause',
+    successMessage: 'Job posting paused successfully.',
+    execute: pauseJobPostingViaPackage
+  },
+  {
+    path: '/:posting_guid/activate',
+    permission: JOB_POSTING_PERMISSIONS.activate,
+    actorField: 'activated_by',
+    action: 'activate',
+    successMessage: 'Job posting activated successfully.',
+    execute: activateJobPostingViaPackage
+  },
+  {
+    path: '/:posting_guid/close',
+    permission: JOB_POSTING_PERMISSIONS.close,
+    actorField: 'closed_by',
+    action: 'close',
+    successMessage: 'Job posting closed successfully.',
+    execute: closeJobPostingViaPackage
+  }
+];
 
-      const pkg = await pauseJobPostingViaPackage(posting_guid, enterprise_id, body.paused_by);
-      logAudit('pause', req, { posting_guid, enterprise_id, status: pkg.status });
-      return sendJobPostingActionResponse(res, pkg, 'Job posting paused successfully.');
-    } catch (err) {
-      return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
-    }
-  })
-);
-
-/**
- * POST /api/rec/job-postings/:posting_guid/activate
- */
-router.post(
-  '/:posting_guid/activate',
-  recRequirePermission(JOB_POSTING_PERMISSIONS.activate),
-  asyncHandler(async (req, res) => {
-    try {
-      const posting_guid = parsePostingGuidParam(req.params.posting_guid);
-      const body = { ...(req.body || {}) };
-      body.activated_by = resolveAuditActor(req, body, 'activated_by');
-      validateLifecycleBody(body, posting_guid, 'activated_by');
-      const { enterprise_id } = validateGuidEnterpriseParams(
-        posting_guid,
-        body.enterprise_id
-      );
-
-      const pkg = await activateJobPostingViaPackage(
-        posting_guid,
-        enterprise_id,
-        body.activated_by
-      );
-      logAudit('activate', req, { posting_guid, enterprise_id, status: pkg.status });
-      return sendJobPostingActionResponse(res, pkg, 'Job posting activated successfully.');
-    } catch (err) {
-      return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
-    }
-  })
-);
+for (const route of LIFECYCLE_ROUTES) {
+  router.post(
+    route.path,
+    recRequirePermission(route.permission),
+    asyncHandler(async (req, res) => {
+      try {
+        const { posting_guid, enterprise_id, pkg } = await runJobPostingLifecycle(
+          req,
+          route.actorField,
+          route.execute
+        );
+        logAudit(route.action, req, { posting_guid, enterprise_id, status: pkg.status });
+        return sendJobPostingActionResponse(res, pkg, route.successMessage);
+      } catch (err) {
+        return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
+      }
+    })
+  );
+}
 
 /**
- * POST /api/rec/job-postings/:posting_guid/close
- */
-router.post(
-  '/:posting_guid/close',
-  recRequirePermission(JOB_POSTING_PERMISSIONS.close),
-  asyncHandler(async (req, res) => {
-    try {
-      const posting_guid = parsePostingGuidParam(req.params.posting_guid);
-      const body = { ...(req.body || {}) };
-      body.closed_by = resolveAuditActor(req, body, 'closed_by');
-      validateLifecycleBody(body, posting_guid, 'closed_by');
-      const { enterprise_id } = validateGuidEnterpriseParams(
-        posting_guid,
-        body.enterprise_id
-      );
-
-      const pkg = await closeJobPostingViaPackage(posting_guid, enterprise_id, body.closed_by);
-      logAudit('close', req, { posting_guid, enterprise_id, status: pkg.status });
-      return sendJobPostingActionResponse(res, pkg, 'Job posting closed successfully.');
-    } catch (err) {
-      return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
-    }
-  })
-);
-
-/**
- * DELETE /api/rec/job-postings/:posting_guid
+ * DELETE /api/rec/job-postings/:posting_guid — JWT required
  */
 router.delete(
   '/:posting_guid',
@@ -175,6 +173,28 @@ router.delete(
       return sendJobPostingActionResponse(res, pkg, 'Job posting deleted successfully.');
     } catch (err) {
       return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * GET /api/rec/job-postings/:posting_guid — public detail (after lifecycle routes)
+ */
+router.get(
+  '/:posting_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const { posting_guid, enterprise_id } = validatePostingGuidEnterpriseParams(
+        req.params.posting_guid,
+        req.query?.enterprise_id
+      );
+      const detail = await getJobPostingByGuidFromView(posting_guid, enterprise_id);
+      if (!detail) {
+        return sendJobPostingNotFoundResponse(res);
+      }
+      return sendJobPostingDetailResponse(res, detail);
+    } catch (err) {
+      return handleReadError(res, err, READ_ERROR_MESSAGE);
     }
   })
 );
