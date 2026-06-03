@@ -86,6 +86,49 @@ export function guidInBind(hex) {
   };
 }
 
+/** CLOB bind for long text (notes, rejection comments). */
+export function clobInBind(v) {
+  return {
+    val: strOrNull(v),
+    dir: oracledb.BIND_IN,
+    type: oracledb.CLOB
+  };
+}
+
+/**
+ * Uppercase code VARCHAR2 bind.
+ * @param {unknown} v
+ * @param {number} [maxSize]
+ */
+export function codeInBind(v, maxSize = 50) {
+  const s = strOrNull(v);
+  return {
+    val: s ? s.toUpperCase() : null,
+    dir: oracledb.BIND_IN,
+    type: oracledb.STRING,
+    maxSize
+  };
+}
+
+/**
+ * @param {string} plsql
+ * @param {Record<string, unknown>} binds
+ * @param {(outBinds: Record<string, unknown>|undefined) => Record<string, unknown>} parseOut
+ * @param {string} logLabel
+ * @param {Record<string, unknown>} errorResult
+ */
+export async function executePackagePlsql(plsql, binds, parseOut, logLabel, errorResult) {
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(plsql, binds, { autoCommit: true })
+    );
+    return parseOut(result?.outBinds);
+  } catch (err) {
+    console.error(`[recApplicationsModel] ${logLabel} failed:`, err?.errorNum ?? '', '[redacted]');
+    return errorResult;
+  }
+}
+
 export function packageStatusIsSuccess(status) {
   return String(status ?? '')
     .trim()
@@ -160,24 +203,6 @@ export function parseCandidateRegistrationOut(outBinds) {
     candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
     candidate_user_id: normalizeOutNumber(ob.p_candidate_user_id),
     candidate_user_guid: normalizeOutGuidHex(ob.p_candidate_user_guid),
-    status: normalizeOutString(ob.p_status),
-    message: normalizeOutString(ob.p_message) ?? ''
-  };
-}
-
-/**
- * @param {Record<string, unknown>|undefined} outBinds
- */
-export function parseCandidateLoginOut(outBinds) {
-  const ob = outBinds || {};
-  return {
-    candidate_user_id: normalizeOutNumber(ob.p_candidate_user_id),
-    candidate_user_guid: normalizeOutGuidHex(ob.p_candidate_user_guid),
-    candidate_id: normalizeOutNumber(ob.p_candidate_id),
-    candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
-    full_name: normalizeOutString(ob.p_full_name),
-    email: normalizeOutString(ob.p_email_out),
-    user_status: normalizeOutString(ob.p_user_status),
     status: normalizeOutString(ob.p_status),
     message: normalizeOutString(ob.p_message) ?? ''
   };

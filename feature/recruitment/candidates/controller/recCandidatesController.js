@@ -144,10 +144,11 @@ const sendUpdateAssessmentResponse = sendPackageActionResponse;
 const sendDeleteAssessmentResponse = sendPackageActionResponse;
 
 /**
- * GET /api/rec/candidates
+ * GET /api/rec/candidates | GET /api/recruitment/candidates
  * Query: enterprise_id (required), status, search, page, page_size|limit,
  *   experience_code|experience, location|current_location, skill_code|skill,
  *   years_experience_min, years_experience_max
+ * search also matches portfolio_link and github_link.
  * Omit filter params or send "all" for All Experience / All Locations / All Skills.
  */
 router.get(
@@ -249,7 +250,7 @@ router.post(
 );
 
 /**
- * GET /api/rec/candidates/:candidate_guid?enterprise_id=1
+ * GET /api/rec/candidates/:candidate_guid | GET /api/recruitment/candidates/:candidate_guid
  */
 router.get(
   '/:candidate_guid',

@@ -1,14 +1,18 @@
 openapi: 3.0.3
 info:
   title: Digify ERP — Career Portal Candidate API
-  version: 1.1.0
+  version: 2.0.0
   description: |
-    Public career portal endpoints under `/candidate`.
+    Token-free career portal endpoints under `/candidate` (no JWT).
 
     - **Register:** `REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER`
-    - **Login:** `REC.CANDIDATE_LOGIN_PKG.LOGIN_CANDIDATE` + JWT (`CANDIDATE_JWT_SECRET`)
 
-    Passwords are verified with Argon2id in Node; only the stored hash is sent to Oracle login.
+    Related public career APIs (ERP staff JWT not required):
+    - `GET /api/rec/job-postings` — list postings
+    - `GET /api/rec/job-postings/{postingGuid}` — posting detail
+    - `POST /api/rec/job-postings/{postingGuid}/apply` — submit application
+
+    Passwords on register are hashed server-side (Argon2id) before Oracle storage.
 servers:
   - url: /
     description: Application base URL
@@ -60,56 +64,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateRegisterError'
-  /candidate/login:
-    post:
-      tags: [Career Portal]
-      summary: Candidate login (career portal)
-      operationId: loginCandidateUser
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CandidateLoginRequest'
-            example:
-              enterprise_id: 1
-              email: khuram@example.com
-              password: UserPassword123
-      responses:
-        '200':
-          description: Login successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CandidateLoginSuccess'
-        '401':
-          description: Invalid credentials or inactive user
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CandidateLoginError'
-              examples:
-                invalid:
-                  value:
-                    success: false
-                    message: Invalid email or password.
-                inactive:
-                  value:
-                    success: false
-                    message: Candidate user is not active.
-        '400':
-          description: Validation error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CandidateLoginError'
-        '500':
-          description: Server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CandidateLoginError'
 components:
   schemas:
     YnFlag:
@@ -134,13 +88,13 @@ components:
         years_experience: { type: number }
         current_location: { type: string }
         source: { type: string }
-        current_salary: { type: number }
+        current_salary: { type: number, minimum: 0 }
         expected_salary: { type: number }
         salary_currency: { type: string }
         notice_period: { type: integer }
         linkedin_profile: { type: string, maxLength: 1000 }
-        portfolio_link: { type: string, maxLength: 1000 }
-        github_link: { type: string, maxLength: 1000 }
+        portfolio_link: { type: string, format: uri, maxLength: 1000 }
+        github_link: { type: string, format: uri, maxLength: 1000 }
         willing_to_relocate:
           $ref: '#/components/schemas/YnFlag'
         created_by: { type: string }
@@ -183,34 +137,6 @@ components:
         candidate_user_id: { type: integer }
         candidate_user_guid: { type: string }
     CandidateRegisterError:
-      type: object
-      properties:
-        success: { type: boolean, example: false }
-        message: { type: string }
-    CandidateLoginRequest:
-      type: object
-      required: [enterprise_id, email, password]
-      properties:
-        enterprise_id: { type: integer, minimum: 1 }
-        email: { type: string, format: email }
-        password: { type: string, description: Plain password (verified in Node; never stored) }
-    CandidateLoginSuccess:
-      type: object
-      properties:
-        success: { type: boolean, example: true }
-        message: { type: string, example: Login successful. }
-        token: { type: string, description: Candidate JWT (CANDIDATE_JWT_SECRET) }
-        data:
-          type: object
-          properties:
-            candidate_user_id: { type: integer }
-            candidate_user_guid: { type: string }
-            candidate_id: { type: integer }
-            candidate_guid: { type: string }
-            full_name: { type: string }
-            email: { type: string }
-            user_status: { type: string, example: ACTIVE }
-    CandidateLoginError:
       type: object
       properties:
         success: { type: boolean, example: false }

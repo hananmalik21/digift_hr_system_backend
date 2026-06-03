@@ -80,6 +80,8 @@ function buildListFilters(query) {
       OR LOWER(v.FULL_NAME) LIKE LOWER(:p_search_pat) ESCAPE '\\'
       OR LOWER(v.EMAIL) LIKE LOWER(:p_search_pat) ESCAPE '\\'
       OR LOWER(v.CURRENT_TITLE) LIKE LOWER(:p_search_pat) ESCAPE '\\'
+      OR LOWER(v.PORTFOLIO_LINK) LIKE LOWER(:p_search_pat) ESCAPE '\\'
+      OR LOWER(v.GITHUB_LINK) LIKE LOWER(:p_search_pat) ESCAPE '\\'
       OR (
         v.EXPERIENCE_JSON IS NOT NULL
         AND LOWER(CAST(v.EXPERIENCE_JSON AS VARCHAR2(4000))) LIKE LOWER(:p_search_pat) ESCAPE '\\'

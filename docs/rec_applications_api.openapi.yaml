@@ -1,0 +1,790 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Recruitment Applications API
+  version: 1.7.0
+  description: |
+    Recruitment applications: **GET** endpoints read only from `REC.V_APPLICATIONS`.
+    Mutations via `REC.CREATE_APPLICATION_PKG` on `REC.REC_APPLICATIONS`
+    (`change_application_stage`, `reject_application`, application note procedures).
+    Application notes are embedded on application detail; mutations via note package procedures.
+
+    **Apply:** `POST /api/rec/job-postings/{postingGuid}/apply` — public (career portal, no JWT).
+
+    **Applications:** `GET` list/detail use `REC.V_APPLICATIONS`. Stage history list uses `REC.V_APPLICATION_STAGE_HISTORY`.
+    Detail includes embedded `stage_history` timeline (newest first). **Change stage** is POST (JWT).
+
+    **Stage → status (Oracle):** APPLIED→NEW, SCREENING→SCREENING, SHORTLISTED→SHORTLISTED,
+    INTERVIEW→INTERVIEW, OFFER→OFFER, SELECTED→SELECTED, HIRED→HIRED, REJECTED→REJECTED.
+
+    **Default list sort:** `applied_date` DESC.
+
+    **Stage badge colors:** APPLIED Blue, SCREENING Orange, SHORTLISTED Purple, INTERVIEW Indigo,
+    OFFER Cyan, SELECTED Green, HIRED Emerald, REJECTED Red.
+
+    **Source badges:** CAREER_SITE, LINKEDIN, EMPLOYEE_REFERRAL, INTERNAL, AGENCY.
+servers:
+  - url: /
+tags:
+  - name: Recruitment Applications
+paths:
+  /api/rec/job-postings/{postingGuid}/apply:
+    parameters:
+      - $ref: '#/components/parameters/PostingGuidPath'
+    post:
+      tags: [Recruitment Applications]
+      summary: Apply for job posting
+      operationId: applyForJobPosting
+      description: |
+        Calls `REC.CREATE_APPLICATION_PKG.apply_job`. Validates active posting, approved/open requisition,
+        existing candidate, and one application per candidate per posting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApplyJobRequest'
+      responses:
+        '200':
+          description: Application created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplyJobResponse'
+        '400':
+          $ref: '#/components/responses/PackageError'
+  /api/recruitment/applications:
+    get:
+      tags: [Recruitment Applications]
+      summary: List applications
+      operationId: listRecApplications
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - name: application_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: application_number
+          in: query
+          description: Partial match on application number.
+          schema: { type: string }
+        - name: posting_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: posting_guid
+          in: query
+          schema: { type: string }
+        - name: posting_title
+          in: query
+          description: Partial match on posting title.
+          schema: { type: string }
+        - name: requisition_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: requisition_guid
+          in: query
+          schema: { type: string }
+        - name: requisition_number
+          in: query
+          description: Partial match on requisition number.
+          schema: { type: string }
+        - name: candidate_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: candidate_guid
+          in: query
+          schema: { type: string }
+        - name: candidate_name
+          in: query
+          description: Partial match on candidate name.
+          schema: { type: string }
+        - name: email
+          in: query
+          description: Partial match on candidate email.
+          schema: { type: string }
+        - name: status_code
+          in: query
+          description: Single code or comma-separated (e.g. NEW,SCREENING).
+          schema: { $ref: '#/components/schemas/ApplicationStatusCode' }
+        - name: current_stage_code
+          in: query
+          description: Single stage or comma-separated (e.g. INTERVIEW,SHORTLISTED).
+          schema: { $ref: '#/components/schemas/ApplicationStageCode' }
+        - name: source_code
+          in: query
+          schema: { $ref: '#/components/schemas/ApplicationSourceCode' }
+        - name: rejection_reason_code
+          in: query
+          schema: { $ref: '#/components/schemas/RejectionReasonCode' }
+        - name: applied_date_from
+          in: query
+          schema: { type: string, format: date }
+        - name: applied_date_to
+          in: query
+          schema: { type: string, format: date }
+        - name: search
+          in: query
+          description: |
+            Global search — application_number, candidate_name, email,
+            posting_title, requisition_number, requisition_title.
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Alias for `search`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum:
+              - applied_date
+              - application_id
+              - application_number
+              - candidate_name
+              - first_name
+              - last_name
+              - email
+              - posting_title
+              - requisition_number
+              - requisition_title
+              - status_code
+              - current_stage_code
+              - source_code
+              - creation_date
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [ASC, DESC] }
+      responses:
+        '200':
+          description: Paginated applications
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /api/recruitment/applications/{applicationGuid}/stage-history:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    get:
+      tags: [Recruitment Applications]
+      summary: List application stage history
+      operationId: listRecApplicationStageHistory
+      description: Paginated audit trail from `REC.V_APPLICATION_STAGE_HISTORY`. Default sort `creation_date` DESC.
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum:
+              - creation_date
+              - from_stage_code
+              - to_stage_code
+              - from_status_code
+              - to_status_code
+              - stage_history_id
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [ASC, DESC] }
+      responses:
+        '200':
+          description: Paginated stage history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StageHistoryListResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /api/recruitment/applications/{applicationGuid}:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    get:
+      tags: [Recruitment Applications]
+      summary: Get application detail
+      operationId: getRecApplicationByGuid
+      description: |
+        Reads `REC.V_APPLICATIONS` and embeds `stage_history` from `REC.V_APPLICATION_STAGE_HISTORY`
+        and `notes` from `REC.REC_APPLICATION_NOTES` (newest first, up to 100 rows each).
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /api/recruitment/applications/{applicationGuid}/change-stage:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    post:
+      tags: [Recruitment Applications]
+      summary: Change application stage
+      operationId: changeRecApplicationStage
+      description: |
+        Calls `REC.CREATE_APPLICATION_PKG.change_application_stage`.
+        Updates `REC.REC_APPLICATIONS` and inserts immutable history into `REC.REC_APPLICATION_STAGE_HISTORY`.
+        Rejects duplicate stage, invalid stage, and updates on terminal HIRED/REJECTED applications.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeStageRequest'
+            example:
+              enterprise_id: 1
+              current_stage_code: SHORTLISTED
+              comments: Candidate performed well during screening.
+              updated_by: ADMIN
+      responses:
+        '200':
+          description: Stage updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionSuccessEnvelope'
+              example:
+                success: true
+                message: Application stage updated successfully.
+        '400':
+          $ref: '#/components/responses/PackageError'
+  /api/recruitment/applications/{applicationGuid}/reject:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    post:
+      tags: [Recruitment Applications]
+      summary: Reject application
+      operationId: rejectRecApplication
+      description: |
+        Calls `REC.CREATE_APPLICATION_PKG.reject_application`.
+        Sets `CURRENT_STAGE_CODE` and `STATUS_CODE` to `REJECTED`, persists
+        `REJECTION_REASON_CODE`, `REJECTION_COMMENTS`, `REJECTION_EMAIL_FLAG`, and inserts stage history.
+        Cannot reject applications that are already `REJECTED` or `HIRED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectApplicationRequest'
+            example:
+              enterprise_id: 1
+              rejection_reason_code: NOT_MATCHING_REQUIREMENTS
+              rejection_comments: Candidate does not meet the required technical experience.
+              send_email_flag: Y
+              rejected_by: ADMIN
+      responses:
+        '200':
+          description: Application rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionSuccessEnvelope'
+              example:
+                success: true
+                message: Application rejected successfully.
+        '400':
+          description: Business rule violation (already rejected or hired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                alreadyRejected:
+                  value:
+                    success: false
+                    message: Application is already rejected.
+                hired:
+                  value:
+                    success: false
+                    message: Hired application cannot be rejected.
+        '404':
+          description: Application not found for enterprise
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                success: false
+                message: Application does not exist.
+  /api/recruitment/applications/{applicationGuid}/notes:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    post:
+      tags: [Recruitment Application Notes]
+      summary: Add application note
+      operationId: addRecApplicationNote
+      description: Calls `REC.CREATE_APPLICATION_PKG.add_application_note`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddApplicationNoteRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddApplicationNoteResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/PackageError'
+  /api/recruitment/applications/notes/{noteGuid}:
+    parameters:
+      - $ref: '#/components/parameters/NoteGuidPath'
+    put:
+      tags: [Recruitment Application Notes]
+      summary: Update application note
+      operationId: updateRecApplicationNote
+      description: Calls `REC.CREATE_APPLICATION_PKG.update_application_note`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApplicationNoteRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionSuccessEnvelope'
+              example:
+                success: true
+                message: Application note updated successfully.
+        '404':
+          description: Note not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '400':
+          $ref: '#/components/responses/PackageError'
+    delete:
+      tags: [Recruitment Application Notes]
+      summary: Delete application note
+      operationId: deleteRecApplicationNote
+      description: Calls `REC.CREATE_APPLICATION_PKG.delete_application_note`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteApplicationNoteRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionSuccessEnvelope'
+              example:
+                success: true
+                message: Application note deleted successfully.
+        '404':
+          description: Note not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '400':
+          $ref: '#/components/responses/PackageError'
+components:
+  parameters:
+    EnterpriseIdQuery:
+      name: enterprise_id
+      in: query
+      required: true
+      schema: { type: integer, minimum: 1 }
+    PageQuery:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    LimitQuery:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    PostingGuidPath:
+      name: postingGuid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f-]{32,36}$'
+    ApplicationGuidPath:
+      name: applicationGuid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f-]{32,36}$'
+    NoteGuidPath:
+      name: noteGuid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f-]{32,36}$'
+  responses:
+    PackageError:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ValidationError:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            success: false
+            message: Application not found.
+    ActionSuccess:
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              success: { type: boolean }
+              message: { type: string }
+  schemas:
+    ApplicationStageCode:
+      type: string
+      enum: [APPLIED, SCREENING, SHORTLISTED, INTERVIEW, OFFER, SELECTED, HIRED, REJECTED]
+    ApplicationStatusCode:
+      type: string
+      enum: [NEW, SCREENING, SHORTLISTED, INTERVIEW, OFFER, SELECTED, HIRED, REJECTED, WITHDRAWN]
+    ApplicationSourceCode:
+      type: string
+      enum: [CAREER_SITE, LINKEDIN, EMPLOYEE_REFERRAL, INTERNAL, AGENCY]
+    ApplicationNoteTypeCode:
+      type: string
+      enum: [GENERAL, INTERVIEW, SCREENING, OFFER, REJECTION, INTERNAL]
+    RejectionReasonCode:
+      type: string
+      enum:
+        - NOT_MATCHING_REQUIREMENTS
+        - INSUFFICIENT_EXPERIENCE
+        - FAILED_INTERVIEW
+        - SALARY_EXPECTATION
+        - POSITION_CLOSED
+        - OVERQUALIFIED
+        - UNDERQUALIFIED
+        - CULTURE_MISMATCH
+        - NO_SHOW
+        - OTHER
+    ApplicationListRecord:
+      type: object
+      description: Flat record from REC.V_APPLICATIONS (applications table / list screen).
+      properties:
+        application_id: { type: integer }
+        application_guid: { type: string }
+        application_number: { type: string, example: APP-2026-000001 }
+        enterprise_id: { type: integer }
+        posting_id: { type: integer }
+        posting_guid: { type: string }
+        posting_title: { type: string }
+        requisition_id: { type: integer }
+        requisition_guid: { type: string }
+        requisition_number: { type: string }
+        requisition_title: { type: string }
+        candidate_id: { type: integer }
+        candidate_guid: { type: string }
+        first_name: { type: string, nullable: true }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string, nullable: true }
+        candidate_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        current_title: { type: string, nullable: true }
+        current_employer: { type: string, nullable: true }
+        years_experience: { type: number, nullable: true }
+        current_location: { type: string, nullable: true }
+        current_salary: { type: number, nullable: true }
+        expected_salary: { type: number, nullable: true }
+        salary_currency: { type: string, nullable: true }
+        notice_period: { type: integer, nullable: true }
+        linkedin_profile: { type: string, nullable: true }
+        portfolio_link: { type: string, format: uri, nullable: true }
+        github_link: { type: string, format: uri, nullable: true }
+        willing_to_relocate: { type: string, enum: [Y, N], nullable: true }
+        source_code: { $ref: '#/components/schemas/ApplicationSourceCode' }
+        current_stage_code: { $ref: '#/components/schemas/ApplicationStageCode' }
+        status_code: { $ref: '#/components/schemas/ApplicationStatusCode' }
+        rejection_reason_code: { $ref: '#/components/schemas/RejectionReasonCode', nullable: true }
+        applied_date: { type: string, format: date }
+        created_by: { type: string }
+        creation_date: { type: string, format: date }
+        last_updated_by: { type: string, nullable: true }
+        last_update_date: { type: string, format: date, nullable: true }
+    ApplicationDetailCandidate:
+      type: object
+      properties:
+        candidate_guid: { type: string }
+        candidate_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        current_title: { type: string, nullable: true }
+        current_employer: { type: string, nullable: true }
+        years_experience: { type: number, nullable: true }
+        current_location: { type: string, nullable: true }
+        current_salary: { type: number, nullable: true }
+        expected_salary: { type: number, nullable: true }
+        salary_currency: { type: string, nullable: true }
+        portfolio_link: { type: string, format: uri, nullable: true }
+        github_link: { type: string, format: uri, nullable: true }
+        linkedin_profile: { type: string, nullable: true }
+        willing_to_relocate: { type: string, enum: [Y, N], nullable: true }
+    ApplicationDetailPosting:
+      type: object
+      properties:
+        posting_guid: { type: string }
+        posting_title: { type: string }
+    ApplicationDetailRequisition:
+      type: object
+      properties:
+        requisition_guid: { type: string }
+        requisition_number: { type: string }
+        requisition_title: { type: string }
+    ApplicationDetailStageHistoryEntry:
+      type: object
+      description: Timeline row embedded on application detail.
+      properties:
+        from_stage_code: { type: string, nullable: true }
+        to_stage_code: { type: string }
+        from_status_code: { type: string, nullable: true }
+        to_status_code: { type: string }
+        comments: { type: string, nullable: true }
+        created_by: { type: string }
+        creation_date:
+          type: string
+          example: '2026-06-03 10:30:00'
+    StageHistoryListRecord:
+      type: object
+      properties:
+        stage_history_id: { type: integer }
+        stage_history_guid: { type: string }
+        enterprise_id: { type: integer }
+        application_id: { type: integer }
+        application_guid: { type: string }
+        application_number: { type: string }
+        candidate_id: { type: integer }
+        candidate_guid: { type: string }
+        candidate_name: { type: string }
+        posting_id: { type: integer }
+        posting_guid: { type: string }
+        posting_title: { type: string }
+        requisition_id: { type: integer }
+        requisition_guid: { type: string }
+        requisition_number: { type: string }
+        requisition_title: { type: string }
+        from_stage_code: { type: string, nullable: true }
+        to_stage_code: { type: string }
+        from_status_code: { type: string, nullable: true }
+        to_status_code: { type: string }
+        comments: { type: string, nullable: true }
+        created_by: { type: string }
+        creation_date:
+          type: string
+          example: '2026-06-03 10:30:00'
+    StageHistoryListResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        meta:
+          $ref: '#/components/schemas/ListPaginationMeta'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageHistoryListRecord'
+    ApplicationDetailRecord:
+      type: object
+      properties:
+        application_guid: { type: string }
+        application_number: { type: string }
+        candidate: { $ref: '#/components/schemas/ApplicationDetailCandidate' }
+        posting: { $ref: '#/components/schemas/ApplicationDetailPosting' }
+        requisition: { $ref: '#/components/schemas/ApplicationDetailRequisition' }
+        current_stage_code: { $ref: '#/components/schemas/ApplicationStageCode' }
+        status_code: { $ref: '#/components/schemas/ApplicationStatusCode' }
+        rejection_reason_code: { $ref: '#/components/schemas/RejectionReasonCode', nullable: true }
+        source_code: { $ref: '#/components/schemas/ApplicationSourceCode' }
+        applied_date: { type: string, format: date }
+        rejection_reason_code: { $ref: '#/components/schemas/RejectionReasonCode', nullable: true }
+        rejection_comments: { type: string, nullable: true }
+        rejection_email_flag: { type: string, enum: [Y, N], nullable: true }
+        stage_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplicationDetailStageHistoryEntry'
+        notes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplicationNoteDetailEntry'
+    ApplicationNoteDetailEntry:
+      type: object
+      properties:
+        note_guid: { type: string }
+        note_type_code: { $ref: '#/components/schemas/ApplicationNoteTypeCode' }
+        note_text: { type: string }
+        private_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+        creation_date: { type: string, example: '2026-06-03 12:00:00' }
+    AddApplicationNoteRequest:
+      type: object
+      required: [enterprise_id, note_type_code, note_text, private_flag, created_by]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        note_type_code: { $ref: '#/components/schemas/ApplicationNoteTypeCode' }
+        note_text: { type: string, maxLength: 4000 }
+        private_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+    UpdateApplicationNoteRequest:
+      type: object
+      required: [enterprise_id, note_type_code, note_text, private_flag, last_updated_by]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        note_type_code: { $ref: '#/components/schemas/ApplicationNoteTypeCode' }
+        note_text: { type: string, maxLength: 4000 }
+        private_flag: { type: string, enum: [Y, N] }
+        last_updated_by: { type: string }
+    DeleteApplicationNoteRequest:
+      type: object
+      required: [enterprise_id]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+    AddApplicationNoteResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            note_guid: { type: string }
+    ListPaginationMeta:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            page_size: { type: integer }
+            total: { type: integer }
+            total_pages: { type: integer }
+            has_next: { type: boolean }
+            has_previous: { type: boolean }
+    ApplicationListResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        meta:
+          $ref: '#/components/schemas/ListPaginationMeta'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApplicationListRecord'
+      example:
+        success: true
+        message: Applications fetched successfully
+        meta:
+          pagination:
+            page: 1
+            page_size: 10
+            total: 100
+            total_pages: 10
+            has_next: true
+            has_previous: false
+        data:
+          - application_guid: 53589414358EB2FBE063CA11000A7E75
+            application_number: APP-2026-000001
+            candidate_name: Alex Martinez
+            posting_title: Senior Software Engineer
+            requisition_number: REQ-2026-001
+            current_stage_code: INTERVIEW
+            status_code: INTERVIEW
+            source_code: LINKEDIN
+            applied_date: '2026-04-18'
+    ApplicationDetailResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          $ref: '#/components/schemas/ApplicationDetailRecord'
+    ApplyJobRequest:
+      type: object
+      required: [enterprise_id, candidate_guid, source_code, created_by]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        candidate_guid: { type: string }
+        source_code: { type: string, example: CAREER_SITE }
+        created_by: { type: string, example: CANDIDATE }
+    ApplyJobResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            application_id: { type: integer }
+            application_guid: { type: string }
+            application_number: { type: string, example: APP-2026-000001 }
+    ChangeStageRequest:
+      type: object
+      required: [enterprise_id, current_stage_code, updated_by]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        current_stage_code: { $ref: '#/components/schemas/ApplicationStageCode' }
+        comments:
+          type: string
+          maxLength: 4000
+          description: Optional recruiter notes stored in stage history
+        updated_by: { type: string }
+    RejectApplicationRequest:
+      type: object
+      required: [enterprise_id, rejection_reason_code, send_email_flag, rejected_by]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        rejection_reason_code: { $ref: '#/components/schemas/RejectionReasonCode' }
+        rejection_comments:
+          type: string
+          maxLength: 4000
+          description: Optional; stored on application and used in stage history when provided
+        send_email_flag:
+          type: string
+          enum: [Y, N]
+          description: Maps to `REJECTION_EMAIL_FLAG`; triggers email workflow when Y (package-side)
+        rejected_by:
+          type: string
+          description: Recruiter or system actor (JWT username used when omitted)
+    NoteMutationSuccess:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+    ActionSuccessEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }

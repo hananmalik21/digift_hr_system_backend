@@ -15,5 +15,4 @@ UPDATE REC.CANDIDATES SET WILLING_TO_RELOCATE = 'N' WHERE WILLING_TO_RELOCATE IS
 ALTER TABLE REC.CANDIDATES ADD CONSTRAINT CHK_REC_CANDIDATES_WILLING_RELOC
   CHECK (WILLING_TO_RELOCATE IN ('Y', 'N'));
 
--- If REC.CANDIDATES_FULL_V lists columns explicitly, add the four columns to its SELECT.
--- Views built as SELECT c.* FROM REC.CANDIDATES c pick up new columns automatically.
+-- Next: run rec_candidates_full_v_add_profile_columns.sql to refresh REC.CANDIDATES_FULL_V.

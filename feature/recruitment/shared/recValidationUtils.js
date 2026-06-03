@@ -69,6 +69,25 @@ export function throwIfValidationErrors(errors) {
   }
 }
 
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ * @param {string[]} allowed
+ * @param {{ requiredMessage?: string, label?: string }} [options]
+ */
+export function validateRequiredCodeInErrors(errors, body, field, allowed, options = {}) {
+  const label = options.label ?? field;
+  if (isBlank(body[field])) {
+    errors.push(options.requiredMessage ?? `${label} is required`);
+    return;
+  }
+  const code = String(body[field]).trim().toUpperCase();
+  if (!allowed.includes(code)) {
+    errors.push(`${label} must be one of: ${allowed.join(', ')}`);
+  }
+}
+
 /** @param {string[]} errors @param {Record<string, unknown>} body @param {string} field */
 export function validateOptionalYnInErrors(errors, body, field) {
   if (isBlank(body[field])) return;
@@ -84,6 +103,44 @@ export function validateOptionalNumberInErrors(errors, body, field) {
   const n = Number(body[field]);
   if (!Number.isFinite(n)) {
     errors.push(`${field} must be a valid number`);
+  }
+}
+
+/** @param {string[]} errors @param {Record<string, unknown>} body @param {string} field */
+export function validateOptionalNonNegativeNumberInErrors(errors, body, field) {
+  if (isBlank(body[field])) return;
+  const n = Number(body[field]);
+  if (!Number.isFinite(n)) {
+    errors.push(`${field} must be a valid number`);
+    return;
+  }
+  if (n < 0) {
+    errors.push(`${field} must be greater than or equal to 0`);
+  }
+}
+
+/**
+ * @param {string} raw
+ * @returns {boolean}
+ */
+export function isValidHttpUrl(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return false;
+  try {
+    const u = new URL(s);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** @param {string[]} errors @param {Record<string, unknown>} body @param {string} field */
+export function validateOptionalUrlInErrors(errors, body, field) {
+  if (body[field] === undefined || body[field] === null) return;
+  const s = String(body[field]).trim();
+  if (!s) return;
+  if (!isValidHttpUrl(s)) {
+    errors.push(`${field} must be a valid URL (http or https)`);
   }
 }
 
