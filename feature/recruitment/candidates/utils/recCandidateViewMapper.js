@@ -57,6 +57,53 @@ async function parseJsonColumn(raw, asArray = false) {
   }
 }
 
+/** Nested JSON array columns stored as VARCHAR2 inside JSON_OBJECT aggregates. */
+const NESTED_JSON_ARRAY_FIELDS = ['skills_json'];
+
+/**
+ * Parse stringified JSON arrays on nested objects (e.g. assessment.skills_json).
+ * @param {unknown} items
+ */
+function normalizeNestedJsonArrayFields(items) {
+  if (!Array.isArray(items)) return items;
+
+  return items.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const out = { ...item };
+
+    for (const field of NESTED_JSON_ARRAY_FIELDS) {
+      const key =
+        field in out
+          ? field
+          : Object.keys(out).find((k) => String(k).toLowerCase() === field);
+      if (!key) continue;
+
+      const raw = out[key];
+      if (raw == null || raw === '') {
+        out[key] = [];
+        continue;
+      }
+      if (Array.isArray(raw)) continue;
+
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          out[key] = [];
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(trimmed);
+          out[key] = Array.isArray(parsed) ? parsed : [];
+        } catch {
+          out[key] = [];
+        }
+      }
+    }
+
+    return out;
+  });
+}
+
 function formatDateValue(v) {
   if (v == null) return null;
   if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.toISOString() : null;
@@ -92,7 +139,11 @@ export async function mapCandidateViewRow(row, options = {}) {
     const key = String(k).toLowerCase();
     if (omit.has(key)) continue;
     if (JSON_ARRAY_COLUMNS.has(key)) {
-      out[key] = await parseJsonColumn(v, true);
+      let parsed = await parseJsonColumn(v, true);
+      if (key === 'assessments_json') {
+        parsed = normalizeNestedJsonArrayFields(parsed);
+      }
+      out[key] = parsed;
       continue;
     }
     out[key] = normalizeScalar(key, v);

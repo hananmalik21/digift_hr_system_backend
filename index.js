@@ -99,6 +99,7 @@ import recRequisitionsController from './feature/recruitment/requisitions/contro
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
+import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
@@ -314,8 +315,9 @@ app.use('/api/rec/requisitions', recRequisitionsController);
 
 // Recruitment — candidates (REC.CANDIDATE_PKG)
 app.use('/api/rec/candidates', recCandidatesController);
+app.use('/api/recruitment/candidates', recCandidatesController);
 
-// Career portal — candidate self-registration (REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER; public)
+// Career portal — token-free (register, etc.)
 app.use('/candidate', recCandidateUserController);
 
 // Recruitment — talent pools (REC.TALENT_POOL_PKG)
@@ -323,6 +325,9 @@ app.use('/api/rec/talent-pools', recTalentPoolsController);
 
 // Recruitment — job postings (REC.V_JOB_POSTINGS reads, REC.CREATE_JOB_POSTING_PKG mutations)
 app.use('/api/rec/job-postings', recJobPostingsController);
+
+// Recruitment — applications (REC.V_APPLICATIONS reads, REC.CREATE_APPLICATION_PKG mutations)
+app.use('/api/recruitment/applications', recApplicationsController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
 app.use('/api/rec/lookup-types', recLookupTypeController);

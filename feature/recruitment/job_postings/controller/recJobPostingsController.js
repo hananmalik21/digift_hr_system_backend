@@ -2,6 +2,7 @@ import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   handleMutationError,
+  handlePortalError,
   handleReadError,
   resolveAuditActor
 } from '../../shared/recControllerHelpers.js';
@@ -33,6 +34,10 @@ import {
   sendJobPostingNotFoundResponse
 } from '../utils/recJobPostingResponses.js';
 import { validatePostingGuidEnterpriseParams } from '../utils/recJobPostingViewValidators.js';
+import { applyJobViaPackage } from '../../applications/model/recApplicationsModel.js';
+import { sendApplyJobResponse } from '../../applications/utils/recApplicationResponses.js';
+import { validateApplyJobBody } from '../../applications/utils/recApplicationValidators.js';
+import { APPLY_ERROR_MESSAGE } from '../../applications/utils/recApplicationConstants.js';
 import {
   parsePostingGuidParam,
   validateCreateJobPostingBody,
@@ -103,6 +108,32 @@ router.put(
       return sendJobPostingActionResponse(res, pkg, 'Job posting updated successfully.');
     } catch (err) {
       return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * POST /api/rec/job-postings/:posting_guid/apply — public (career portal)
+ */
+router.post(
+  '/:posting_guid/apply',
+  asyncHandler(async (req, res) => {
+    try {
+      const posting_guid = parsePostingGuidParam(req.params.posting_guid);
+      const body = { ...(req.body || {}) };
+      body.created_by = resolveAuditActor(req, body, 'created_by');
+      validateApplyJobBody(body, posting_guid);
+
+      const pkg = await applyJobViaPackage(body, posting_guid);
+      logAudit('apply', req, {
+        posting_guid,
+        enterprise_id: body.enterprise_id,
+        candidate_guid: body.candidate_guid,
+        status: pkg.status
+      });
+      return sendApplyJobResponse(res, pkg);
+    } catch (err) {
+      return handlePortalError(res, err, APPLY_ERROR_MESSAGE);
     }
   })
 );

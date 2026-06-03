@@ -7,6 +7,12 @@ export function firstValidationMessage(err) {
   return details[0] || err?.message || 'Validation failed';
 }
 
+/** @param {string} tag @param {string} action @param {import('express').Request} req @param {Record<string, unknown>} [extra] */
+export function logRecruitmentAudit(tag, action, req, extra = {}) {
+  const user = req.user?.username ?? 'SYSTEM';
+  console.info(`[${tag}]`, JSON.stringify({ action, user, ...extra }));
+}
+
 export function resolveAuditActor(req, body, field) {
   const fromBody = body?.[field];
   if (fromBody != null && String(fromBody).trim() !== '') return String(fromBody).trim();
