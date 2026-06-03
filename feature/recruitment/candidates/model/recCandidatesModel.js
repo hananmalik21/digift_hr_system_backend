@@ -6,9 +6,12 @@ import {
   parseActionOut,
   parseCreateOut,
   statusOutBinds,
+  strLinkInBind,
   strOrNull,
-  withConnection
+  withConnection,
+  ynInBind
 } from '../../shared/oraclePackageUtils.js';
+import { CANDIDATE_PROFILE_PLSQL_ARGS } from '../utils/recCandidateProfileFields.js';
 
 export { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
@@ -34,7 +37,12 @@ function parseFileContent(body) {
   }
 }
 
-function buildSharedInBinds(b) {
+/**
+ * @param {Record<string, unknown>} b
+ * @param {{ willingToRelocateDefault?: string|null }} [options]
+ */
+function buildSharedInBinds(b, options = {}) {
+  const { willingToRelocateDefault = null } = options;
   const fileBuf = parseFileContent(b);
   const binds = {
     p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
@@ -71,12 +79,11 @@ function buildSharedInBinds(b) {
       maxSize: 10
     },
     p_notice_period: { val: numOrNull(b.notice_period), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    p_linkedin_profile: {
-      val: strOrNull(b.linkedin_profile),
-      dir: oracledb.BIND_IN,
-      type: oracledb.STRING,
-      maxSize: 1000
-    },
+    p_linkedin_profile: strLinkInBind(b.linkedin_profile),
+    p_current_salary: { val: numOrNull(b.current_salary), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    p_portfolio_link: strLinkInBind(b.portfolio_link),
+    p_github_link: strLinkInBind(b.github_link),
+    p_willing_to_relocate: ynInBind(b.willing_to_relocate, willingToRelocateDefault),
     p_education_json: {
       val: jsonArrayToClobString(b.education_json),
       dir: oracledb.BIND_IN,
@@ -137,7 +144,7 @@ BEGIN
     p_expected_salary    => :p_expected_salary,
     p_salary_currency    => :p_salary_currency,
     p_notice_period      => :p_notice_period,
-    p_linkedin_profile   => :p_linkedin_profile,
+    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},
     p_education_json     => :p_education_json,
     p_experience_json    => :p_experience_json,
     p_file_name          => :p_file_name,
@@ -170,7 +177,7 @@ BEGIN
     p_expected_salary    => :p_expected_salary,
     p_salary_currency    => :p_salary_currency,
     p_notice_period      => :p_notice_period,
-    p_linkedin_profile   => :p_linkedin_profile,
+    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},
     p_status_code        => :p_status_code,
     p_education_json     => :p_education_json,
     p_experience_json    => :p_experience_json,
@@ -202,7 +209,7 @@ END;`;
 export async function createCandidateViaPackage(body) {
   const b = { ...(body || {}) };
   const binds = {
-    ...buildSharedInBinds(b),
+    ...buildSharedInBinds(b, { willingToRelocateDefault: 'N' }),
     p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
     p_candidate_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
     p_candidate_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },

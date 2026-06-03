@@ -472,6 +472,7 @@ router.post(
  * Body: application/json or multipart/form-data.
  * Resume optional: field "resume", "file", "attachment", or "document"; or file_content (base64).
  * education_json / experience_json: JSON arrays (or JSON strings in multipart).
+ * Optional: current_salary, portfolio_link, github_link, willing_to_relocate (Y|N, default N).
  */
 router.post(
   '/',
@@ -501,6 +502,7 @@ router.post(
  * PUT /api/rec/candidates/:candidate_guid
  * Body: application/json or multipart/form-data.
  * Resume optional: field "resume", "file", "attachment", or "document"; or file_content (base64).
+ * Optional: current_salary, portfolio_link, github_link, willing_to_relocate (Y|N).
  */
 router.put(
   '/:candidate_guid',

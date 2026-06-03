@@ -1,0 +1,248 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Recruitment Candidates API
+  version: 1.1.0
+  description: |
+    Candidate create/update via `REC.CANDIDATE_PKG` (`CREATE_CANDIDATE`, `UPDATE_CANDIDATE`).
+    List/detail read from `REC.CANDIDATES_FULL_V`.
+
+    **Profile & compensation fields (v1.1):** `current_salary`, `portfolio_link`, `github_link`,
+    `willing_to_relocate` (Y or N; defaults to N on create when omitted).
+
+    Supports `application/json` or `multipart/form-data` (resume upload).
+servers:
+  - url: /
+    description: Application base URL (configure `{{baseUrl}}` in clients)
+tags:
+  - name: Recruitment Candidates
+    description: REC.CANDIDATE_PKG candidate management
+paths:
+  /api/rec/candidates:
+    post:
+      tags: [Recruitment Candidates]
+      summary: Create candidate
+      operationId: createRecCandidate
+      description: |
+        Calls `REC.CANDIDATE_PKG.CREATE_CANDIDATE`. URL fields are trimmed before save.
+        `willing_to_relocate` must be Y or N when sent; omitted values default to N in the database package.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateCreateRequest'
+            example:
+              enterprise_id: 1
+              first_name: John
+              last_name: Doe
+              email: john.doe@example.com
+              expected_salary: 2500
+              current_salary: 2000
+              salary_currency: KWD
+              linkedin_profile: https://linkedin.com/in/johndoe
+              portfolio_link: https://portfolio.example.com/john
+              github_link: https://github.com/johndoe
+              willing_to_relocate: Y
+              created_by: ADMIN
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CandidateCreateMultipart'
+      responses:
+        '200':
+          description: Candidate created (package status SUCCESS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateCreateResponse'
+        '400':
+          $ref: '#/components/responses/ValidationOrPackageError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+  /api/rec/candidates/{candidateGuid}:
+    parameters:
+      - $ref: '#/components/parameters/CandidateGuidPath'
+    put:
+      tags: [Recruitment Candidates]
+      summary: Update candidate
+      operationId: updateRecCandidate
+      description: |
+        Calls `REC.CANDIDATE_PKG.UPDATE_CANDIDATE`. URL fields are trimmed before save.
+        Invalid `willing_to_relocate` returns validation error (Y or N only).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateUpdateRequest'
+            example:
+              enterprise_id: 1
+              current_salary: 2200
+              portfolio_link: https://portfolio.example.com/john
+              github_link: https://github.com/johndoe
+              willing_to_relocate: N
+              status_code: ACTIVE
+              updated_by: ADMIN
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CandidateUpdateMultipart'
+      responses:
+        '200':
+          description: Candidate updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateActionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationOrPackageError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+components:
+  parameters:
+    CandidateGuidPath:
+      name: candidateGuid
+      in: path
+      required: true
+      description: 32-character hexadecimal candidate GUID (dashes optional)
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f-]{32,36}$'
+        example: 50FDBB885E1D190DE0633519000A3BAC
+  responses:
+    ValidationOrPackageError:
+      description: Validation failed or package returned ERROR status
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    ServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    YnFlag:
+      type: string
+      enum: [Y, N]
+      description: Oracle CHAR(1) flag
+    CandidateProfileCompensationFields:
+      type: object
+      properties:
+        current_salary:
+          type: number
+          nullable: true
+          description: Current compensation amount
+        portfolio_link:
+          type: string
+          maxLength: 1000
+          nullable: true
+          description: Portfolio URL (trimmed before save)
+        github_link:
+          type: string
+          maxLength: 1000
+          nullable: true
+          description: GitHub profile URL (trimmed before save)
+        willing_to_relocate:
+          $ref: '#/components/schemas/YnFlag'
+          description: Defaults to N on create when omitted
+    CandidateCoreFields:
+      type: object
+      required: [enterprise_id]
+      properties:
+        enterprise_id:
+          type: integer
+          minimum: 1
+        first_name: { type: string }
+        middle_name: { type: string }
+        last_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        current_title: { type: string }
+        current_employer: { type: string }
+        years_experience: { type: number }
+        current_location: { type: string }
+        source: { type: string }
+        expected_salary: { type: number }
+        salary_currency: { type: string }
+        notice_period: { type: integer }
+        linkedin_profile:
+          type: string
+          maxLength: 1000
+          description: LinkedIn URL (trimmed before save)
+        education_json:
+          type: array
+          items: { type: object }
+        experience_json:
+          type: array
+          items: { type: object }
+        file_name: { type: string }
+        file_type: { type: string }
+        file_size: { type: integer }
+        file_content:
+          type: string
+          description: Base64-encoded resume (JSON body only)
+    CandidateCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/CandidateCoreFields'
+        - $ref: '#/components/schemas/CandidateProfileCompensationFields'
+        - type: object
+          properties:
+            created_by: { type: string }
+    CandidateUpdateRequest:
+      allOf:
+        - $ref: '#/components/schemas/CandidateCoreFields'
+        - $ref: '#/components/schemas/CandidateProfileCompensationFields'
+        - type: object
+          properties:
+            candidate_guid:
+              type: string
+              description: Optional when GUID is in the URL path
+            status_code: { type: string }
+            updated_by: { type: string }
+    CandidateCreateMultipart:
+      allOf:
+        - $ref: '#/components/schemas/CandidateCreateRequest'
+        - type: object
+          properties:
+            resume:
+              type: string
+              format: binary
+            file:
+              type: string
+              format: binary
+            attachment:
+              type: string
+              format: binary
+            document:
+              type: string
+              format: binary
+    CandidateUpdateMultipart:
+      allOf:
+        - $ref: '#/components/schemas/CandidateUpdateRequest'
+        - type: object
+          properties:
+            resume:
+              type: string
+              format: binary
+    CandidateCreateResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        candidate_id: { type: integer, example: 101 }
+        candidate_guid:
+          type: string
+          example: 50FDBB885E1D190DE0633519000A3BAC
+        status: { type: string, example: SUCCESS }
+        message: { type: string, example: Candidate created successfully. }
+    CandidateActionResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        status: { type: string, example: SUCCESS }
+        message: { type: string, example: Candidate updated successfully. }
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        status: { type: string, example: ERROR }
+        message: { type: string, example: willing_to_relocate must be Y or N }
