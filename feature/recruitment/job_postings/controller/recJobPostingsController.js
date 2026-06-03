@@ -35,6 +35,11 @@ import {
 } from '../utils/recJobPostingResponses.js';
 import { validatePostingGuidEnterpriseParams } from '../utils/recJobPostingViewValidators.js';
 import { applyJobViaPackage } from '../../applications/model/recApplicationsModel.js';
+import {
+  buildApplyJobBodyFromRequest,
+  maybeMulterApplyJob
+} from '../../applications/utils/recApplicationApplyMultipart.js';
+import { normalizeApplicationResumeFields } from '../../applications/utils/recApplicationResumeValidation.js';
 import { sendApplyJobResponse } from '../../applications/utils/recApplicationResponses.js';
 import { validateApplyJobBody } from '../../applications/utils/recApplicationValidators.js';
 import { APPLY_ERROR_MESSAGE } from '../../applications/utils/recApplicationConstants.js';
@@ -117,11 +122,13 @@ router.put(
  */
 router.post(
   '/:posting_guid/apply',
+  maybeMulterApplyJob,
   asyncHandler(async (req, res) => {
     try {
       const posting_guid = parsePostingGuidParam(req.params.posting_guid);
-      const body = { ...(req.body || {}) };
+      const body = buildApplyJobBodyFromRequest(req);
       body.created_by = resolveAuditActor(req, body, 'created_by');
+      normalizeApplicationResumeFields(body);
       validateApplyJobBody(body, posting_guid);
 
       const pkg = await applyJobViaPackage(body, posting_guid);

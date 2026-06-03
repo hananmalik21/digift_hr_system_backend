@@ -14,6 +14,7 @@ import {
   strOrNull,
   ynInBind
 } from '../../shared/oraclePackageUtils.js';
+import { parseResumeFileContent } from '../../shared/recResumeFileUtils.js';
 import { NOTE_MUTATION_ERROR_MESSAGE, MUTATION_ERROR_MESSAGE } from '../utils/recApplicationConstants.js';
 
 const PKG = 'REC.CREATE_APPLICATION_PKG';
@@ -48,16 +49,20 @@ function parseApplyJobOut(outBinds) {
 const APPLY_PLSQL = `
 BEGIN
   ${PKG}.apply_job(
-    p_enterprise_id      => :p_enterprise_id,
-    p_posting_guid       => :p_posting_guid,
-    p_candidate_guid     => :p_candidate_guid,
-    p_source_code        => :p_source_code,
-    p_created_by         => :p_created_by,
-    p_application_id     => :p_application_id,
-    p_application_guid   => :p_application_guid,
-    p_application_number => :p_application_number,
-    p_status             => :p_status,
-    p_message            => :p_message
+    p_enterprise_id        => :p_enterprise_id,
+    p_posting_guid         => :p_posting_guid,
+    p_candidate_guid       => :p_candidate_guid,
+    p_source_code          => :p_source_code,
+    p_resume_file_name     => :p_resume_file_name,
+    p_resume_file_type     => :p_resume_file_type,
+    p_resume_file_size     => :p_resume_file_size,
+    p_resume_file_content  => :p_resume_file_content,
+    p_created_by           => :p_created_by,
+    p_application_id       => :p_application_id,
+    p_application_guid     => :p_application_guid,
+    p_application_number   => :p_application_number,
+    p_status               => :p_status,
+    p_message              => :p_message
   );
 END;`;
 
@@ -134,11 +139,32 @@ END;`;
  */
 export async function applyJobViaPackage(body, postingGuidHex) {
   const b = { ...(body || {}) };
+  const fileBuf = parseResumeFileContent(
+    b.resume_file_content ?? b.resumeFileContent ?? b.file_content ?? b.fileContent
+  );
+
   const binds = {
     p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
     p_posting_guid: guidInBind(postingGuidHex),
     p_candidate_guid: guidInBind(b.candidate_guid),
     p_source_code: codeInBind(b.source_code),
+    p_resume_file_name: {
+      val: strOrNull(b.resume_file_name ?? b.file_name),
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 500
+    },
+    p_resume_file_type: {
+      val: strOrNull(b.resume_file_type ?? b.file_type ?? b.mime_type),
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 200
+    },
+    p_resume_file_size: {
+      val: numOrNull(b.resume_file_size ?? b.file_size),
+      dir: oracledb.BIND_IN,
+      type: oracledb.NUMBER
+    },
     p_created_by: {
       val: strOrNull(b.created_by),
       dir: oracledb.BIND_IN,
@@ -150,6 +176,12 @@ export async function applyJobViaPackage(body, postingGuidHex) {
     p_application_number: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 50 },
     ...statusOutBinds()
   };
+
+  if (fileBuf != null) {
+    binds.p_resume_file_content = { val: fileBuf, dir: oracledb.BIND_IN, type: oracledb.BLOB };
+  } else {
+    binds.p_resume_file_content = { val: null, dir: oracledb.BIND_IN, type: oracledb.BLOB };
+  }
 
   return executePackagePlsql(APPLY_PLSQL, binds, parseApplyJobOut, `${LOG} apply_job`, {
     application_id: null,

@@ -99,7 +99,6 @@ export function sendApplyJobResponse(res, pkg) {
     success: true,
     message: message || APPLY_SUCCESS_MESSAGE,
     data: {
-      application_id: pkg.application_id ?? null,
       application_guid: pkg.application_guid ?? null,
       application_number: pkg.application_number ?? null
     }

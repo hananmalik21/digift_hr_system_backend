@@ -1,14 +1,17 @@
 openapi: 3.0.3
 info:
   title: Digify ERP — Recruitment Applications API
-  version: 1.7.0
+  version: 1.9.0
   description: |
     Recruitment applications: **GET** endpoints read only from `REC.V_APPLICATIONS`.
+    View exposes `HAS_RESUME` (Y/N) and `RESUME_URL` (`/api/recruitment/applications/{guid}/resume`).
     Mutations via `REC.CREATE_APPLICATION_PKG` on `REC.REC_APPLICATIONS`
-    (`change_application_stage`, `reject_application`, application note procedures).
+    (`apply_job`, `change_application_stage`, `reject_application`, application note procedures).
     Application notes are embedded on application detail; mutations via note package procedures.
 
     **Apply:** `POST /api/rec/job-postings/{postingGuid}/apply` — public (career portal, no JWT).
+    Accepts `multipart/form-data` with required `resume_file` (PDF, DOC, DOCX; max 5 MB).
+    Resume binary stored in `REC.REC_APPLICATIONS.RESUME_FILE_CONTENT`.
 
     **Applications:** `GET` list/detail use `REC.V_APPLICATIONS`. Stage history list uses `REC.V_APPLICATION_STAGE_HISTORY`.
     Detail includes embedded `stage_history` timeline (newest first). **Change stage** is POST (JWT).
@@ -36,13 +39,17 @@ paths:
       operationId: applyForJobPosting
       description: |
         Calls `REC.CREATE_APPLICATION_PKG.apply_job`. Validates active posting, approved/open requisition,
-        existing candidate, and one application per candidate per posting.
+        existing candidate, one application per candidate per posting, and resume file (PDF/DOC/DOCX, max 5 MB).
+        Sets `CURRENT_STAGE_CODE` = APPLIED, `STATUS_CODE` = NEW, and default stage history.
       requestBody:
         required: true
         content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ApplyJobMultipart'
           application/json:
             schema:
-              $ref: '#/components/schemas/ApplyJobRequest'
+              $ref: '#/components/schemas/ApplyJobJson'
       responses:
         '200':
           description: Application created
@@ -50,8 +57,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApplyJobResponse'
+              example:
+                success: true
+                message: Application submitted successfully.
+                data:
+                  application_guid: 53589414358EB2FBE063CA11000A7E75
+                  application_number: APP-2026-000001
         '400':
-          $ref: '#/components/responses/PackageError'
+          description: Validation or business rule error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                duplicate:
+                  value:
+                    success: false
+                    message: Candidate has already applied for this job posting.
+                inactivePosting:
+                  value:
+                    success: false
+                    message: This job posting is not active.
+                closedRequisition:
+                  value:
+                    success: false
+                    message: This requisition is not open for applications.
+                invalidFileType:
+                  value:
+                    success: false
+                    message: Only PDF, DOC, and DOCX files are allowed.
+                fileTooLarge:
+                  value:
+                    success: false
+                    message: Resume file size exceeds allowed limit.
   /api/recruitment/applications:
     get:
       tags: [Recruitment Applications]
@@ -200,6 +238,53 @@ paths:
           $ref: '#/components/responses/NotFound'
         '400':
           $ref: '#/components/responses/ValidationError'
+  /api/recruitment/applications/{applicationGuid}/resume:
+    parameters:
+      - $ref: '#/components/parameters/ApplicationGuidPath'
+    get:
+      tags: [Recruitment Applications]
+      summary: Download application resume
+      operationId: downloadRecApplicationResume
+      description: |
+        JWT required. Validates application exists for `enterprise_id`, then streams
+        `RESUME_FILE_CONTENT` from `REC.REC_APPLICATIONS`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+      responses:
+        '200':
+          description: Resume file stream
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/msword:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+          headers:
+            Content-Type:
+              schema: { type: string }
+            Content-Disposition:
+              schema: { type: string, example: 'attachment; filename="Alex_Martinez_Resume.pdf"' }
+        '401':
+          description: Missing or invalid JWT
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                applicationNotFound:
+                  value:
+                    success: false
+                    message: Application does not exist.
+                resumeNotFound:
+                  value:
+                    success: false
+                    message: Resume does not exist.
+        '400':
+          $ref: '#/components/responses/ValidationError'
   /api/recruitment/applications/{applicationGuid}:
     parameters:
       - $ref: '#/components/parameters/ApplicationGuidPath'
@@ -210,6 +295,7 @@ paths:
       description: |
         Reads `REC.V_APPLICATIONS` and embeds `stage_history` from `REC.V_APPLICATION_STAGE_HISTORY`
         and `notes` from `REC.REC_APPLICATION_NOTES` (newest first, up to 100 rows each).
+        Includes resume metadata and `resume_url` when `has_resume` is `Y`.
       parameters:
         - $ref: '#/components/parameters/EnterpriseIdQuery'
       responses:
@@ -451,7 +537,7 @@ components:
             $ref: '#/components/schemas/ErrorEnvelope'
           example:
             success: false
-            message: Application not found.
+            message: Application does not exist.
     ActionSuccess:
       content:
         application/json:
@@ -530,6 +616,14 @@ components:
         creation_date: { type: string, format: date }
         last_updated_by: { type: string, nullable: true }
         last_update_date: { type: string, format: date, nullable: true }
+        resume_file_name: { type: string, nullable: true }
+        resume_file_type: { type: string, nullable: true, example: application/pdf }
+        resume_file_size: { type: integer, nullable: true }
+        has_resume: { $ref: '#/components/schemas/YnFlag' }
+        resume_url:
+          type: string
+          nullable: true
+          example: /api/recruitment/applications/5356B06C437A7B6DE063CA11000A7694/resume
     ApplicationDetailCandidate:
       type: object
       properties:
@@ -611,11 +705,34 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StageHistoryListRecord'
+    YnFlag:
+      type: string
+      enum: [Y, N]
+    ApplicationResumeMetadata:
+      type: object
+      properties:
+        resume_file_name: { type: string, nullable: true }
+        resume_file_type: { type: string, nullable: true, example: application/pdf }
+        resume_file_size: { type: integer, nullable: true, description: Size in bytes }
+        has_resume: { $ref: '#/components/schemas/YnFlag' }
+        resume_url:
+          type: string
+          nullable: true
+          example: /api/recruitment/applications/5356B06C437A7B6DE063CA11000A7694/resume
     ApplicationDetailRecord:
       type: object
       properties:
         application_guid: { type: string }
         application_number: { type: string }
+        candidate_name: { type: string }
+        resume_file_name: { type: string, nullable: true }
+        resume_file_type: { type: string, nullable: true }
+        resume_file_size: { type: integer, nullable: true }
+        has_resume: { $ref: '#/components/schemas/YnFlag' }
+        resume_url:
+          type: string
+          nullable: true
+          example: /api/recruitment/applications/5356B06C437A7B6DE063CA11000A7694/resume
         candidate: { $ref: '#/components/schemas/ApplicationDetailCandidate' }
         posting: { $ref: '#/components/schemas/ApplicationDetailPosting' }
         requisition: { $ref: '#/components/schemas/ApplicationDetailRequisition' }
@@ -726,7 +843,7 @@ components:
         success: { type: boolean, example: true }
         data:
           $ref: '#/components/schemas/ApplicationDetailRecord'
-    ApplyJobRequest:
+    ApplyJobFields:
       type: object
       required: [enterprise_id, candidate_guid, source_code, created_by]
       properties:
@@ -734,6 +851,28 @@ components:
         candidate_guid: { type: string }
         source_code: { type: string, example: CAREER_SITE }
         created_by: { type: string, example: CANDIDATE }
+    ApplyJobMultipart:
+      allOf:
+        - $ref: '#/components/schemas/ApplyJobFields'
+        - type: object
+          required: [resume_file]
+          properties:
+            resume_file:
+              type: string
+              format: binary
+              description: Required resume (PDF, DOC, or DOCX; max 5 MB)
+    ApplyJobJson:
+      allOf:
+        - $ref: '#/components/schemas/ApplyJobFields'
+        - type: object
+          required: [resume_file_name, resume_file_type, resume_file_size, resume_file_content]
+          properties:
+            resume_file_name: { type: string }
+            resume_file_type: { type: string, example: application/pdf }
+            resume_file_size: { type: integer, minimum: 1, maximum: 5242880 }
+            resume_file_content:
+              type: string
+              description: Base64-encoded resume bytes
     ApplyJobResponse:
       type: object
       properties:
@@ -742,7 +881,6 @@ components:
         data:
           type: object
           properties:
-            application_id: { type: integer }
             application_guid: { type: string }
             application_number: { type: string, example: APP-2026-000001 }
     ChangeStageRequest:
@@ -788,3 +926,8 @@ components:
       properties:
         success: { type: boolean, example: false }
         message: { type: string }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

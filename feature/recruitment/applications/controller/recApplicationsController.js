@@ -1,10 +1,13 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 import {
+  firstValidationMessage,
   handleMutationError,
   handleReadError,
   logRecruitmentAudit,
-  resolveAuditActor
+  resolveAuditActor,
+  sendPackageResponse
 } from '../../shared/recControllerHelpers.js';
 import {
   addApplicationNoteViaPackage,
@@ -14,6 +17,10 @@ import {
   updateApplicationNoteViaPackage
 } from '../model/recApplicationsModel.js';
 import {
+  applicationResumeExists,
+  getApplicationResumeByGuid
+} from '../model/recApplicationResumeModel.js';
+import {
   applicationExistsInApplicationsView,
   getApplicationByGuidFromView,
   listApplicationsFromView,
@@ -21,8 +28,11 @@ import {
 } from '../model/recApplicationViewModel.js';
 import {
   MUTATION_ERROR_MESSAGE,
+  NOT_FOUND_MESSAGE,
   NOTE_MUTATION_ERROR_MESSAGE,
   READ_ERROR_MESSAGE,
+  RESUME_DOWNLOAD_ERROR_MESSAGE,
+  RESUME_NOT_FOUND_MESSAGE,
   STAGE_HISTORY_READ_ERROR_MESSAGE
 } from '../utils/recApplicationConstants.js';
 import { normalizeApplicationListQuery } from '../utils/recApplicationListFilters.js';
@@ -227,6 +237,52 @@ router.get(
       return sendStageHistoryListResponse(res, rows, { page, limit, total });
     } catch (err) {
       return handleReadError(res, err, STAGE_HISTORY_READ_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * GET /api/recruitment/applications/:application_guid/resume
+ */
+router.get(
+  '/:application_guid/resume',
+  asyncHandler(async (req, res) => {
+    try {
+      const { application_guid, enterprise_id } = validateApplicationGuidEnterpriseParams(
+        req.params.application_guid,
+        req.query?.enterprise_id
+      );
+
+      const exists = await applicationResumeExists(application_guid, enterprise_id);
+      if (!exists) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: NOT_FOUND_MESSAGE
+        });
+      }
+
+      const file = await getApplicationResumeByGuid(application_guid, enterprise_id);
+      if (!file?.file_content) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: RESUME_NOT_FOUND_MESSAGE
+        });
+      }
+
+      const fileName = file.file_name || 'resume';
+      const contentType = file.file_type || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+      res.setHeader('Content-Length', String(file.file_content.length));
+      return res.send(file.file_content);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
+      }
+      return sendPackageResponse(res, 500, {
+        success: false,
+        message: RESUME_DOWNLOAD_ERROR_MESSAGE
+      });
     }
   })
 );

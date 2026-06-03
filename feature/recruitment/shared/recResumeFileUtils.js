@@ -1,6 +1,6 @@
 import multer from 'multer';
 
-const RESUME_FIELD_NAMES = ['resume', 'file', 'attachment', 'document'];
+const RESUME_FIELD_NAMES = ['resume_file', 'resume', 'file', 'attachment', 'document'];
 
 /** @returns {import('multer').Multer} */
 export function createCandidateResumeMulter() {
@@ -19,6 +19,7 @@ export function getUploadedResumeFile(req) {
   const files = req.files;
   if (!files) return null;
   return (
+    files.resume_file?.[0] ??
     files.resume?.[0] ??
     files.file?.[0] ??
     files.attachment?.[0] ??
@@ -81,7 +82,7 @@ export function mergeResumeUploadIntoBody(req, body) {
 export function multerResumeUploadErrorMessage(err) {
   if (err.code === 'LIMIT_FILE_SIZE') return 'File too large (max 10MB)';
   if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-    return 'Use only one resume field: "resume", "file", "attachment", or "document"';
+    return 'Use only one resume field: "resume_file", "resume", "file", "attachment", or "document"';
   }
   return err.message || 'File upload error';
 }

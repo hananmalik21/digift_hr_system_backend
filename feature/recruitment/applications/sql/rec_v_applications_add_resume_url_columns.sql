@@ -1,0 +1,20 @@
+-- REC.V_APPLICATIONS — resume metadata + computed HAS_RESUME / RESUME_URL.
+-- Merge into your existing view definition (do not expose RESUME_FILE_CONTENT).
+--
+-- HAS_RESUME: Y when resume BLOB has content; otherwise N.
+-- RESUME_URL: download API path when HAS_RESUME = Y.
+
+-- Example expressions (adjust table alias `a` to match your view):
+--
+--   a.RESUME_FILE_NAME,
+--   a.RESUME_FILE_TYPE,
+--   a.RESUME_FILE_SIZE,
+--   CASE
+--     WHEN NVL(DBMS_LOB.GETLENGTH(a.RESUME_FILE_CONTENT), 0) > 0 THEN 'Y'
+--     ELSE 'N'
+--   END AS HAS_RESUME,
+--   CASE
+--     WHEN NVL(DBMS_LOB.GETLENGTH(a.RESUME_FILE_CONTENT), 0) > 0 THEN
+--       '/api/recruitment/applications/' || RAWTOHEX(a.APPLICATION_GUID) || '/resume'
+--     ELSE NULL
+--   END AS RESUME_URL

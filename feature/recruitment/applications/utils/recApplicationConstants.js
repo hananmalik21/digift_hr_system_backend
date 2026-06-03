@@ -8,9 +8,21 @@ export const LIST_SUCCESS_MESSAGE = 'Applications fetched successfully';
 export const MUTATION_ERROR_MESSAGE = 'Unable to process application. Please try again.';
 export const APPLY_ERROR_MESSAGE = 'Unable to submit application. Please try again.';
 
-export const NOT_FOUND_MESSAGE = 'Application not found.';
+export const NOT_FOUND_MESSAGE = 'Application does not exist.';
 
 export const APPLY_SUCCESS_MESSAGE = 'Application submitted successfully.';
+
+/** Node-side resume validation (apply job). */
+export const RESUME_REQUIRED_MESSAGE = 'Resume file is required.';
+export const RESUME_INVALID_FILE_TYPE_MESSAGE = 'Only PDF, DOC, and DOCX files are allowed.';
+export const RESUME_FILE_TOO_LARGE_MESSAGE = 'Resume file size exceeds allowed limit.';
+export const RESUME_NOT_FOUND_MESSAGE = 'Resume does not exist.';
+export const RESUME_DOWNLOAD_ERROR_MESSAGE = 'Unable to download resume. Please try again.';
+
+/** Oracle apply_job business errors (keep in sync with REC.CREATE_APPLICATION_PKG). */
+export const APPLY_ERROR_DUPLICATE = 'Candidate has already applied for this job posting.';
+export const APPLY_ERROR_INACTIVE_POSTING = 'This job posting is not active.';
+export const APPLY_ERROR_CLOSED_REQUISITION = 'This requisition is not open for applications.';
 
 export const CHANGE_STAGE_SUCCESS_MESSAGE = 'Application stage updated successfully.';
 
@@ -136,7 +148,12 @@ export const APPLICATION_VIEW_COLUMNS = [
   'LAST_UPDATE_DATE',
   'REJECTION_REASON_CODE',
   'REJECTION_COMMENTS',
-  'REJECTION_EMAIL_FLAG'
+  'REJECTION_EMAIL_FLAG',
+  'RESUME_FILE_NAME',
+  'RESUME_FILE_TYPE',
+  'RESUME_FILE_SIZE',
+  'HAS_RESUME',
+  'RESUME_URL'
 ];
 
 export const APPLICATION_SELECT_SQL = APPLICATION_VIEW_COLUMNS.map((c) =>
