@@ -6,6 +6,7 @@ info:
     Token-free career portal endpoints under `/candidate` (no JWT).
 
     - **Register:** `REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER`
+    - **Login:** `REC.CANDIDATE_LOGIN_PKG.LOGIN_CANDIDATE` — validates credentials (no JWT issued)
 
     Related public career APIs (ERP staff JWT not required):
     - `GET /api/rec/job-postings` — list postings
@@ -58,6 +59,56 @@ paths:
               example:
                 success: false
                 message: Resume upload failed.
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+  /candidate/login:
+    post:
+      tags: [Career Portal]
+      summary: Login candidate user (career portal)
+      operationId: loginCandidateUser
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateLoginRequest'
+            example:
+              enterprise_id: 1
+              email: johnny.doe@example.com
+              password: Password1!
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateLoginSuccess'
+        '401':
+          description: Invalid credentials or inactive user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+              examples:
+                invalidCredentials:
+                  value:
+                    success: false
+                    message: Invalid email or password.
+                inactiveUser:
+                  value:
+                    success: false
+                    message: Candidate user is not active.
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
         '500':
           description: Server error
           content:
@@ -141,3 +192,25 @@ components:
       properties:
         success: { type: boolean, example: false }
         message: { type: string }
+    CandidateLoginRequest:
+      type: object
+      required: [enterprise_id, email, password]
+      properties:
+        enterprise_id: { type: integer, minimum: 1 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    CandidateLoginSuccess:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: Login successful. }
+        data:
+          type: object
+          properties:
+            candidate_user_id: { type: integer }
+            candidate_user_guid: { type: string }
+            candidate_id: { type: integer }
+            candidate_guid: { type: string }
+            full_name: { type: string }
+            email: { type: string, format: email }
+            user_status: { type: string }

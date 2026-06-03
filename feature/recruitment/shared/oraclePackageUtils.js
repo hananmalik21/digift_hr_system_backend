@@ -193,6 +193,22 @@ export function passwordHashInBind(hash) {
   };
 }
 
+/** @param {Record<string, unknown>|undefined} outBinds */
+export function parseCandidateLoginOut(outBinds) {
+  const ob = outBinds || {};
+  return {
+    candidate_user_id: normalizeOutNumber(ob.p_candidate_user_id),
+    candidate_user_guid: normalizeOutGuidHex(ob.p_candidate_user_guid),
+    candidate_id: normalizeOutNumber(ob.p_candidate_id),
+    candidate_guid: normalizeOutGuidHex(ob.p_candidate_guid),
+    full_name: normalizeOutString(ob.p_full_name),
+    email: normalizeOutString(ob.p_email_out),
+    user_status: normalizeOutString(ob.p_user_status),
+    status: normalizeOutString(ob.p_status),
+    message: normalizeOutString(ob.p_message) ?? ''
+  };
+}
+
 /**
  * @param {Record<string, unknown>|undefined} outBinds
  */
