@@ -25,6 +25,38 @@ export function strOrNull(v) {
   return s === '' ? null : s;
 }
 
+/** Trimmed VARCHAR2 bind for profile / link fields (default max 1000). */
+export function strLinkInBind(v, maxSize = 1000) {
+  return {
+    val: strOrNull(v),
+    dir: oracledb.BIND_IN,
+    type: oracledb.STRING,
+    maxSize
+  };
+}
+
+/**
+ * Y/N bind for Oracle CHAR(1). When value is omitted, uses defaultVal (often 'N' on create, null on update).
+ * @param {unknown} v
+ * @param {string|null} [defaultVal]
+ */
+export function ynInBind(v, defaultVal = null) {
+  if (v === undefined || v === null || String(v).trim() === '') {
+    return {
+      val: defaultVal,
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 1
+    };
+  }
+  return {
+    val: String(v).trim().toUpperCase(),
+    dir: oracledb.BIND_IN,
+    type: oracledb.STRING,
+    maxSize: 1
+  };
+}
+
 export function normalizeOutString(v) {
   if (v == null) return null;
   if (Array.isArray(v)) return normalizeOutString(v[0]);

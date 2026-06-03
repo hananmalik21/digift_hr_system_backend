@@ -47,6 +47,39 @@ export function throwIfValidationErrors(errors) {
   }
 }
 
+/** @param {string[]} errors @param {Record<string, unknown>} body @param {string} field */
+export function validateOptionalYnInErrors(errors, body, field) {
+  if (isBlank(body[field])) return;
+  const u = String(body[field]).trim().toUpperCase();
+  if (u !== 'Y' && u !== 'N') {
+    errors.push(`${field} must be Y or N`);
+  }
+}
+
+/** @param {string[]} errors @param {Record<string, unknown>} body @param {string} field */
+export function validateOptionalNumberInErrors(errors, body, field) {
+  if (isBlank(body[field])) return;
+  const n = Number(body[field]);
+  if (!Number.isFinite(n)) {
+    errors.push(`${field} must be a valid number`);
+  }
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ * @param {number} [maxLen]
+ */
+export function validateOptionalMaxLengthInErrors(errors, body, field, maxLen = 1000) {
+  if (body[field] === undefined || body[field] === null) return;
+  const s = String(body[field]).trim();
+  if (!s) return;
+  if (s.length > maxLen) {
+    errors.push(`${field} must not exceed ${maxLen} characters`);
+  }
+}
+
 /**
  * @param {unknown} value
  * @param {{ requiredMessage: string, invalidMessage: string }} messages
