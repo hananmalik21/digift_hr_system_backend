@@ -321,9 +321,8 @@ app.use('/candidate', recCandidateUserController);
 // Recruitment — talent pools (REC.TALENT_POOL_PKG)
 app.use('/api/rec/talent-pools', recTalentPoolsController);
 
-// Recruitment — job postings (REC.CREATE_JOB_POSTING_PKG)
+// Recruitment — job postings (REC.V_JOB_POSTINGS reads, REC.CREATE_JOB_POSTING_PKG mutations)
 app.use('/api/rec/job-postings', recJobPostingsController);
-app.use('/api/recruitment/job-postings', recJobPostingsController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
 app.use('/api/rec/lookup-types', recLookupTypeController);

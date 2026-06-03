@@ -1,24 +1,75 @@
 openapi: 3.0.3
 info:
   title: Digify ERP — Recruitment Job Postings API
-  version: 1.2.0
+  version: 1.3.0
   description: |
-    Job posting mutations via `REC.CREATE_JOB_POSTING_PKG`.
+    Job postings via `REC.CREATE_JOB_POSTING_PKG` (mutations) and `REC.V_JOB_POSTINGS` (reads).
 
-    **Content fields:** `about_the_role` (CLOB), `responsibilities` and `qualifications` (JSON array → CLOB).
+    **Content fields:** `about_the_role` (CLOB), `responsibilities` and `qualifications` (JSON string arrays in CLOB, parsed to arrays in API responses).
 
-    **Business rules:**
-    - One posting per requisition per enterprise.
-    - Expiry is automatic (DB scheduler); no expire API.
-    - No list/detail GET endpoints in this API layer.
+    **Route:** `/api/rec/job-postings` only. GET list and GET detail are public; POST, PUT, DELETE, and lifecycle actions require JWT (`Authorization: Bearer` from main user login).
 
-    **Routes:** `/api/rec/job-postings` and `/api/recruitment/job-postings` (JWT required).
+    **Default list sort:** `creation_date` DESC.
 servers:
   - url: /
 tags:
   - name: Recruitment Job Postings
 paths:
   /api/rec/job-postings:
+    get:
+      tags: [Recruitment Job Postings]
+      summary: List job postings
+      operationId: listRecJobPostings
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - name: status_code
+          in: query
+          schema: { type: string }
+        - name: requisition_guid
+          in: query
+          schema: { type: string }
+        - name: portal_visible_flag
+          in: query
+          schema: { $ref: '#/components/schemas/YnFlag' }
+        - name: search
+          in: query
+          description: |
+            Case-insensitive match if **any** of: posting_title, requisition_number,
+            requisition_title, position_name, posting_description, about_the_role,
+            responsibilities, qualifications, employment_type_code, work_mode_code,
+            status_code, posted_by.
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Alias for `search`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum:
+              - creation_date
+              - posting_title
+              - start_date
+              - end_date
+              - status_code
+              - posted_date
+              - requisition_number
+              - position_name
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [ASC, DESC] }
+      responses:
+        '200':
+          description: Paginated job postings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobPostingListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
     post:
       tags: [Recruitment Job Postings]
       summary: Create job posting
@@ -40,6 +91,22 @@ paths:
   /api/rec/job-postings/{postingGuid}:
     parameters:
       - $ref: '#/components/parameters/PostingGuidPath'
+    get:
+      tags: [Recruitment Job Postings]
+      summary: Get job posting detail
+      operationId: getRecJobPostingByGuid
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobPostingDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '400':
+          $ref: '#/components/responses/ValidationError'
     put:
       tags: [Recruitment Job Postings]
       summary: Update job posting
@@ -59,14 +126,8 @@ paths:
       tags: [Recruitment Job Postings]
       summary: Delete job posting
       operationId: deleteRecJobPosting
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [enterprise_id]
-              properties:
-                enterprise_id: { type: integer, minimum: 1 }
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
       responses:
         '200':
           $ref: '#/components/responses/ActionSuccess'
@@ -117,6 +178,19 @@ paths:
           $ref: '#/components/responses/ActionSuccess'
 components:
   parameters:
+    EnterpriseIdQuery:
+      name: enterprise_id
+      in: query
+      required: true
+      schema: { type: integer, minimum: 1 }
+    PageQuery:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    LimitQuery:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
     PostingGuidPath:
       name: postingGuid
       in: path
@@ -130,9 +204,19 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorEnvelope'
+    ValidationError:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    NotFound:
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
           example:
             success: false
-            message: Job posting already exists for this requisition.
+            message: Job posting not found.
     ActionSuccess:
       content:
         application/json:
@@ -148,6 +232,82 @@ components:
     BulletStringList:
       type: array
       items: { type: string }
+    ListPaginationMeta:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            page_size: { type: integer }
+            total: { type: integer }
+            total_pages: { type: integer }
+            has_next: { type: boolean }
+            has_previous: { type: boolean }
+    JobPostingRecord:
+      type: object
+      properties:
+        posting_id: { type: integer }
+        posting_guid: { type: string }
+        enterprise_id: { type: integer }
+        requisition_id: { type: integer }
+        requisition_guid: { type: string }
+        requisition_number: { type: string }
+        requisition_title: { type: string }
+        approval_status_code: { type: string }
+        open_status_code: { type: string }
+        posting_title: { type: string }
+        posting_description: { type: string }
+        about_the_role: { type: string }
+        responsibilities:
+          $ref: '#/components/schemas/BulletStringList'
+        qualifications:
+          $ref: '#/components/schemas/BulletStringList'
+        visibility_code: { type: string }
+        status_code: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        internal_site_flag: { $ref: '#/components/schemas/YnFlag' }
+        external_site_flag: { $ref: '#/components/schemas/YnFlag' }
+        linkedin_flag: { $ref: '#/components/schemas/YnFlag' }
+        posted_by: { type: string }
+        posted_date: { type: string, format: date }
+        paused_by: { type: string }
+        paused_date: { type: string, format: date }
+        closed_by: { type: string }
+        closed_date: { type: string, format: date }
+        number_of_openings: { type: integer }
+        priority_code: { type: string }
+        employment_type_code: { type: string }
+        work_mode_code: { type: string }
+        target_start_date: { type: string, format: date }
+        expected_end_date: { type: string, format: date }
+        position_id: { type: string }
+        position_name: { type: string }
+        org_unit_id: { type: string }
+        portal_visible_flag: { $ref: '#/components/schemas/YnFlag' }
+        created_by: { type: string }
+        creation_date: { type: string, format: date }
+        last_updated_by: { type: string }
+        last_update_date: { type: string, format: date }
+    JobPostingListResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        meta:
+          $ref: '#/components/schemas/ListPaginationMeta'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobPostingRecord'
+    JobPostingDetailResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          $ref: '#/components/schemas/JobPostingRecord'
     JobPostingContentFields:
       type: object
       properties:

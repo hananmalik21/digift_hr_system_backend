@@ -27,11 +27,27 @@ function validateOptionalBulletListInErrors(errors, body, field) {
   errors.push(`${field} must be an array of strings or a JSON array string`);
 }
 
+const POSTING_GUID_MESSAGES = {
+  requiredMessage: 'posting_guid is required',
+  invalidMessage: 'posting_guid must be a valid 32-character hex GUID'
+};
+
+const REQUISITION_GUID_MESSAGES = {
+  requiredMessage: 'requisition_guid is required',
+  invalidMessage: 'requisition_guid must be a valid 32-character hex GUID'
+};
+
 export function parsePostingGuidParam(value) {
-  return parseHexGuidParam(value, {
-    requiredMessage: 'posting_guid is required',
-    invalidMessage: 'posting_guid must be a valid 32-character hex GUID'
-  });
+  return parseHexGuidParam(value, POSTING_GUID_MESSAGES);
+}
+
+/**
+ * @param {Record<string, unknown>|undefined} query
+ * @returns {string|null}
+ */
+export function parseRequisitionGuidFromQuery(query) {
+  if (isBlank(query?.requisition_guid)) return null;
+  return parseHexGuidParam(query.requisition_guid, REQUISITION_GUID_MESSAGES);
 }
 
 /**
