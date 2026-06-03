@@ -10,7 +10,7 @@ info:
     Related public career APIs (ERP staff JWT not required):
     - `GET /api/rec/job-postings` — list postings
     - `GET /api/rec/job-postings/{postingGuid}` — posting detail
-    - `POST /api/rec/job-postings/{postingGuid}/apply` — submit application
+    - `POST /api/rec/job-postings/{postingGuid}/apply` — submit application (multipart + resume_file)
 
     Passwords on register are hashed server-side (Argon2id) before Oracle storage.
 servers:

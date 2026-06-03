@@ -7,6 +7,7 @@ import {
   safeFiniteNumber,
   strOrNull
 } from './recApplicationRowUtils.js';
+import { mapApplicationResumeFields } from './recApplicationResumeMapper.js';
 
 function mapCandidateNested(m) {
   return {
@@ -31,10 +32,11 @@ function mapCandidateNested(m) {
 /** @param {Record<string, unknown>} row */
 export function mapApplicationListRow(row) {
   const m = rowKeyMap(row);
+  const application_guid = normalizeGuidValue(m.application_guid);
 
   return {
     application_id: safeFiniteNumber(m.application_id),
-    application_guid: normalizeGuidValue(m.application_guid),
+    application_guid,
     application_number: strOrNull(m.application_number),
     enterprise_id: safeFiniteNumber(m.enterprise_id),
     posting_id: safeFiniteNumber(m.posting_id),
@@ -72,17 +74,21 @@ export function mapApplicationListRow(row) {
     created_by: strOrNull(m.created_by),
     creation_date: formatDateOnly(m.creation_date),
     last_updated_by: strOrNull(m.last_updated_by),
-    last_update_date: formatDateOnly(m.last_update_date)
+    last_update_date: formatDateOnly(m.last_update_date),
+    ...mapApplicationResumeFields(m, application_guid)
   };
 }
 
 /** @param {Record<string, unknown>} row */
 export function mapApplicationDetailRow(row) {
   const m = rowKeyMap(row);
+  const application_guid = normalizeGuidValue(m.application_guid);
 
   return {
-    application_guid: normalizeGuidValue(m.application_guid),
+    application_guid,
     application_number: strOrNull(m.application_number),
+    candidate_name: strOrNull(m.candidate_name),
+    ...mapApplicationResumeFields(m, application_guid),
     candidate: mapCandidateNested(m),
     posting: {
       posting_guid: normalizeGuidValue(m.posting_guid),

@@ -71,3 +71,18 @@ export function setBindValue(binds, key, value) {
     binds[key].val = value;
   }
 }
+
+/**
+ * Oracle ORA-01036 when binds are passed that do not appear in the SQL text.
+ * @param {string} sql
+ * @param {Record<string, import('oracledb').BindParameter>} binds
+ */
+export function pruneBindsForSql(sql, binds) {
+  const pruned = {};
+  for (const [key, spec] of Object.entries(binds)) {
+    if (sql.includes(`:${key}`)) {
+      pruned[key] = spec;
+    }
+  }
+  return pruned;
+}

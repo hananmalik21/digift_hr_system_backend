@@ -18,6 +18,7 @@ import {
   TEXT_FIELD_MAX_LEN,
   VALID_STAGE_CODES
 } from './recApplicationConstants.js';
+import { validateApplicationResumeInErrors } from './recApplicationResumeValidation.js';
 
 const APPLICATION_GUID_MESSAGES = {
   requiredMessage: 'application_guid is required',
@@ -51,6 +52,7 @@ export function validateApplyJobBody(body, postingGuidHex) {
   validateHexGuidInErrors(errors, b.candidate_guid, 'candidate_guid');
   requireNonBlankString(errors, b, 'source_code');
   requireNonBlankString(errors, b, 'created_by');
+  validateApplicationResumeInErrors(errors, b);
 
   throwIfValidationErrors(errors);
 }

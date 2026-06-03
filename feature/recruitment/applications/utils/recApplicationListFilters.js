@@ -7,6 +7,7 @@ import {
   optionalEqClause,
   optionalLikeClause,
   parseQueryCodeFilter,
+  pruneBindsForSql,
   setBindValue
 } from '../../shared/recViewListSql.js';
 import { isNonEmptyTrimmed } from '../../shared/recViewModelUtils.js';
@@ -254,5 +255,6 @@ export function buildApplicationListFilters(query) {
   }
   parts.push(optionalEqClause('p_rejection_reason_code', 'REJECTION_REASON_CODE'));
 
-  return { whereSql: `WHERE ${parts.join(' AND ')}`, binds };
+  const whereSql = `WHERE ${parts.join(' AND ')}`;
+  return { whereSql, binds: pruneBindsForSql(whereSql, binds) };
 }
