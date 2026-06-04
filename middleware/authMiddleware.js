@@ -21,8 +21,9 @@ import jwt from 'jsonwebtoken';
 const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
-  // Career portal — token-free (no candidate JWT)
-  { method: '*', pattern: /^\/api\/candidate(\/.*)?$/ },
+  // Career portal — token-free (register, login, apply-related public flows)
+  { method: '*', pattern: /^\/api\/candidate(\/.*)?\/?$/ },
+  { method: '*', pattern: /^\/candidate(\/.*)?\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
@@ -30,11 +31,17 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
 ];
 
+function requestPathname(req) {
+  const raw = req.path || req.originalUrl || req.url || '';
+  const withoutQuery = String(raw).split('?')[0].split('#')[0];
+  return withoutQuery.replace(/\/+$/, '') || '/';
+}
+
 function isPublicRequest(req) {
   if (req.method === 'OPTIONS') return true;
-  const path = req.path || req.url || '';
-  return PUBLIC_PATHS.some(p =>
-    (p.method === '*' || p.method === req.method) && p.pattern.test(path)
+  const path = requestPathname(req);
+  return PUBLIC_PATHS.some(
+    (p) => (p.method === '*' || p.method === req.method) && p.pattern.test(path)
   );
 }
 
