@@ -1,45 +1,23 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
-import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import {
+  executePackagePlsql,
+  guidInBind,
+  jsonArrayToClobString,
+  numOrNull,
+  packageStatusIsSuccess,
+  parseActionOut,
+  parseCreateOut,
+  statusOutBinds,
+  strOrNull
+} from '../../shared/oraclePackageUtils.js';
 import { normalizeUtcIsoTimestampZ } from '../utils/recInterviewUtcTimestamps.js';
-import { jsonArrayToClobString } from './recCandidateAssessmentModel.js';
-import { packageStatusIsSuccess } from './recCandidatesModel.js';
+import { INTERVIEW_MUTATION_ERRORS } from '../utils/recCandidateInterviewConstants.js';
 
 export { packageStatusIsSuccess };
 
 const PKG = 'REC.CANDIDATE_INTERVIEW_PKG';
-const SCHEDULE_PROC = `${PKG}.SCHEDULE_INTERVIEW`;
-const UPDATE_PROC = `${PKG}.UPDATE_INTERVIEW`;
-const DELETE_PROC = `${PKG}.DELETE_INTERVIEW`;
-
+const LOG_TAG = 'recCandidateInterviewModel';
 const UTC_TS_FORMAT_Z = `YYYY-MM-DD"T"HH24:MI:SS"Z"`;
-
-const GENERIC_SCHEDULE_ERROR_MESSAGE = 'Unable to schedule interview. Please try again.';
-const GENERIC_UPDATE_ERROR_MESSAGE = 'Unable to update interview. Please try again.';
-const GENERIC_DELETE_ERROR_MESSAGE = 'Unable to delete interview. Please try again.';
-
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
-
-function numOrNull(v) {
-  if (v === undefined || v === null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function strOrNull(v) {
-  if (v === undefined || v === null) return null;
-  const s = String(v).trim();
-  return s === '' ? null : s;
-}
 
 function parseDateBind(v) {
   if (v == null || v === '') return null;
@@ -47,15 +25,6 @@ function parseDateBind(v) {
   const s = String(v).trim();
   const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00Z`) : new Date(s);
   return Number.isFinite(d.getTime()) ? d : null;
-}
-
-function interviewersJsonBind(value) {
-  const json = jsonArrayToClobString(value);
-  return {
-    val: json,
-    dir: oracledb.BIND_IN,
-    type: oracledb.CLOB
-  };
 }
 
 function utcTimestampZBind(value) {
@@ -68,48 +37,22 @@ function utcTimestampZBind(value) {
   };
 }
 
-function oraclePlsqlErrorMessage(err, fallback) {
-  const msg = err?.message;
-  if (!msg) return fallback;
-  const line = msg.split('\n').find((l) => l.includes('ORA-')) ?? msg.split('\n')[0];
-  return line?.replace(/^ORA-\d+:\s*/, '').trim() || fallback;
-}
-
-function normalizeOutString(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutString(v[0]);
-  const s = String(v).trim();
-  return s.length ? s : null;
-}
-
-function normalizeOutNumber(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutNumber(v[0]);
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function normalizeOutGuidHex(v) {
-  if (v == null) return null;
-  if (Array.isArray(v)) return normalizeOutGuidHex(v[0]);
-  return bufferToHex(v);
-}
-
-function parseScheduleOut(outBinds) {
-  const ob = outBinds || {};
+function interviewersJsonBind(value) {
   return {
-    interview_id: normalizeOutNumber(ob.p_interview_id),
-    interview_guid: normalizeOutGuidHex(ob.p_interview_guid),
-    status: normalizeOutString(ob.p_status),
-    message: normalizeOutString(ob.p_message) ?? ''
+    val: jsonArrayToClobString(value),
+    dir: oracledb.BIND_IN,
+    type: oracledb.CLOB
   };
 }
 
-function parseActionOut(outBinds) {
-  const ob = outBinds || {};
+function enterpriseInBind(enterpriseId) {
+  return { val: numOrNull(enterpriseId), dir: oracledb.BIND_IN, type: oracledb.NUMBER };
+}
+
+function buildInterviewGuidBinds(b) {
   return {
-    status: normalizeOutString(ob.p_status),
-    message: normalizeOutString(ob.p_message) ?? ''
+    p_enterprise_id: enterpriseInBind(b.enterprise_id),
+    p_interview_guid: guidInBind(b.interview_guid)
   };
 }
 
@@ -154,7 +97,7 @@ function buildSharedInterviewInBinds(b) {
 
 const SCHEDULE_PLSQL = `
 BEGIN
-  ${SCHEDULE_PROC}(
+  ${PKG}.SCHEDULE_INTERVIEW(
     p_enterprise_id         => :p_enterprise_id,
     p_candidate_guid        => :p_candidate_guid,
     p_interview_title       => :p_interview_title,
@@ -177,7 +120,7 @@ END;`;
 
 const UPDATE_PLSQL = `
 BEGIN
-  ${UPDATE_PROC}(
+  ${PKG}.UPDATE_INTERVIEW(
     p_enterprise_id         => :p_enterprise_id,
     p_interview_guid        => :p_interview_guid,
     p_interview_title       => :p_interview_title,
@@ -200,9 +143,26 @@ BEGIN
   );
 END;`;
 
+const SUBMIT_FEEDBACK_PLSQL = `
+BEGIN
+  ${PKG}.SUBMIT_FEEDBACK(
+    p_enterprise_id       => :p_enterprise_id,
+    p_interview_guid      => :p_interview_guid,
+    p_overall_rating      => :p_overall_rating,
+    p_technical_skills    => :p_technical_skills,
+    p_communication       => :p_communication,
+    p_culture_fit         => :p_culture_fit,
+    p_recommendation      => :p_recommendation,
+    p_detailed_comments   => :p_detailed_comments,
+    p_created_by          => :p_created_by,
+    p_status              => :p_status,
+    p_message             => :p_message
+  );
+END;`;
+
 const DELETE_PLSQL = `
 BEGIN
-  ${DELETE_PROC}(
+  ${PKG}.DELETE_INTERVIEW(
     p_enterprise_id   => :p_enterprise_id,
     p_interview_guid  => :p_interview_guid,
     p_deleted_by      => :p_deleted_by,
@@ -211,119 +171,131 @@ BEGIN
   );
 END;`;
 
+const SCHEDULE_PARSE_KEYS = {
+  idKey: 'p_interview_id',
+  guidKey: 'p_interview_guid',
+  idField: 'interview_id',
+  guidField: 'interview_guid'
+};
+
 /**
  * @param {Record<string, unknown>} body
- * @returns {Promise<{ interview_id: number|null, interview_guid: string|null, status: string, message: string }>}
  */
 export async function scheduleInterviewViaPackage(body) {
   const b = { ...(body || {}) };
-
-  const binds = {
-    p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    p_candidate_guid: {
-      val: hexToRawBuffer(b.candidate_guid),
-      dir: oracledb.BIND_IN,
-      type: oracledb.BUFFER,
-      maxSize: 16
+  return executePackagePlsql(
+    SCHEDULE_PLSQL,
+    {
+      p_enterprise_id: enterpriseInBind(b.enterprise_id),
+      p_candidate_guid: guidInBind(b.candidate_guid),
+      ...buildSharedInterviewInBinds(b),
+      p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+      p_interview_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
+      p_interview_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },
+      ...statusOutBinds()
     },
-    ...buildSharedInterviewInBinds(b),
-    p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-    p_interview_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-    p_interview_guid: { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize: 16 },
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
-  };
-
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(SCHEDULE_PLSQL, binds, { autoCommit: true })
-    );
-    return parseScheduleOut(result?.outBinds);
-  } catch (err) {
-    console.error('[recCandidateInterviewModel] SCHEDULE_INTERVIEW failed:', err?.errorNum ?? '', '[redacted]');
-    return {
+    (outBinds) => parseCreateOut(outBinds, SCHEDULE_PARSE_KEYS),
+    `${LOG_TAG} SCHEDULE_INTERVIEW`,
+    {
       interview_id: null,
       interview_guid: null,
       status: 'ERROR',
-      message: oraclePlsqlErrorMessage(err, GENERIC_SCHEDULE_ERROR_MESSAGE)
-    };
-  }
+      message: INTERVIEW_MUTATION_ERRORS.schedule
+    }
+  );
 }
 
 /**
  * @param {Record<string, unknown>} body
- * @returns {Promise<{ status: string, message: string }>}
  */
 export async function updateInterviewViaPackage(body) {
   const b = { ...(body || {}) };
-
-  const binds = {
-    p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    p_interview_guid: {
-      val: hexToRawBuffer(b.interview_guid),
-      dir: oracledb.BIND_IN,
-      type: oracledb.BUFFER,
-      maxSize: 16
+  return executePackagePlsql(
+    UPDATE_PLSQL,
+    {
+      ...buildInterviewGuidBinds(b),
+      ...buildSharedInterviewInBinds(b),
+      p_status_code: { val: strOrNull(b.status_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
+      p_result_status: {
+        val: strOrNull(b.result_status),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 50
+      },
+      p_feedback: { val: strOrNull(b.feedback), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
+      p_rating: { val: numOrNull(b.rating), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+      p_updated_by: { val: strOrNull(b.updated_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+      ...statusOutBinds()
     },
-    ...buildSharedInterviewInBinds(b),
-    p_status_code: { val: strOrNull(b.status_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
-    p_result_status: {
-      val: strOrNull(b.result_status),
-      dir: oracledb.BIND_IN,
-      type: oracledb.STRING,
-      maxSize: 50
-    },
-    p_feedback: { val: strOrNull(b.feedback), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
-    p_rating: { val: numOrNull(b.rating), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    p_updated_by: { val: strOrNull(b.updated_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
-  };
-
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(UPDATE_PLSQL, binds, { autoCommit: true })
-    );
-    return parseActionOut(result?.outBinds);
-  } catch (err) {
-    console.error('[recCandidateInterviewModel] UPDATE_INTERVIEW failed:', err?.errorNum ?? '', '[redacted]');
-    return {
-      status: 'ERROR',
-      message: oraclePlsqlErrorMessage(err, GENERIC_UPDATE_ERROR_MESSAGE)
-    };
-  }
+    parseActionOut,
+    `${LOG_TAG} UPDATE_INTERVIEW`,
+    { status: 'ERROR', message: INTERVIEW_MUTATION_ERRORS.update }
+  );
 }
 
 /**
  * @param {Record<string, unknown>} body
- * @returns {Promise<{ status: string, message: string }>}
+ */
+export async function submitInterviewFeedbackViaPackage(body) {
+  const b = { ...(body || {}) };
+  return executePackagePlsql(
+    SUBMIT_FEEDBACK_PLSQL,
+    {
+      ...buildInterviewGuidBinds(b),
+      p_overall_rating: { val: numOrNull(b.overall_rating), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+      p_technical_skills: {
+        val: strOrNull(b.technical_skills),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 50
+      },
+      p_communication: {
+        val: strOrNull(b.communication),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 50
+      },
+      p_culture_fit: {
+        val: strOrNull(b.culture_fit),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 50
+      },
+      p_recommendation: {
+        val: strOrNull(b.recommendation),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 50
+      },
+      p_detailed_comments: {
+        val: strOrNull(b.detailed_comments ?? b.feedback),
+        dir: oracledb.BIND_IN,
+        type: oracledb.STRING,
+        maxSize: 4000
+      },
+      p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+      ...statusOutBinds()
+    },
+    parseActionOut,
+    `${LOG_TAG} SUBMIT_FEEDBACK`,
+    { status: 'ERROR', message: INTERVIEW_MUTATION_ERRORS.feedback }
+  );
+}
+
+/**
+ * @param {Record<string, unknown>} body
  */
 export async function deleteInterviewViaPackage(body) {
   const b = { ...(body || {}) };
-
-  const binds = {
-    p_enterprise_id: { val: numOrNull(b.enterprise_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    p_interview_guid: {
-      val: hexToRawBuffer(b.interview_guid),
-      dir: oracledb.BIND_IN,
-      type: oracledb.BUFFER,
-      maxSize: 16
+  return executePackagePlsql(
+    DELETE_PLSQL,
+    {
+      ...buildInterviewGuidBinds(b),
+      p_deleted_by: { val: strOrNull(b.deleted_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+      ...statusOutBinds()
     },
-    p_deleted_by: { val: strOrNull(b.deleted_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-    p_status: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 20 },
-    p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
-  };
-
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(DELETE_PLSQL, binds, { autoCommit: true })
-    );
-    return parseActionOut(result?.outBinds);
-  } catch (err) {
-    console.error('[recCandidateInterviewModel] DELETE_INTERVIEW failed:', err?.errorNum ?? '', '[redacted]');
-    return {
-      status: 'ERROR',
-      message: oraclePlsqlErrorMessage(err, GENERIC_DELETE_ERROR_MESSAGE)
-    };
-  }
+    parseActionOut,
+    `${LOG_TAG} DELETE_INTERVIEW`,
+    { status: 'ERROR', message: INTERVIEW_MUTATION_ERRORS.delete }
+  );
 }

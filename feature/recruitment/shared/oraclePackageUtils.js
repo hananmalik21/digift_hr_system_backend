@@ -117,6 +117,13 @@ export function codeInBind(v, maxSize = 50) {
  * @param {string} logLabel
  * @param {Record<string, unknown>} errorResult
  */
+export function oraclePlsqlErrorMessage(err, fallback) {
+  const msg = err?.message;
+  if (!msg) return fallback;
+  const line = msg.split('\n').find((l) => l.includes('ORA-')) ?? msg.split('\n')[0];
+  return line?.replace(/^ORA-\d+:\s*/, '').trim() || fallback;
+}
+
 export async function executePackagePlsql(plsql, binds, parseOut, logLabel, errorResult) {
   try {
     const result = await withConnection((connection) =>
@@ -124,8 +131,12 @@ export async function executePackagePlsql(plsql, binds, parseOut, logLabel, erro
     );
     return parseOut(result?.outBinds);
   } catch (err) {
-    console.error(`[recApplicationsModel] ${logLabel} failed:`, err?.errorNum ?? '', '[redacted]');
-    return errorResult;
+    console.error(`[${logLabel}]`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    const fallback = errorResult?.message ?? 'A database error occurred. Please try again.';
+    return {
+      ...errorResult,
+      message: oraclePlsqlErrorMessage(err, fallback)
+    };
   }
 }
 

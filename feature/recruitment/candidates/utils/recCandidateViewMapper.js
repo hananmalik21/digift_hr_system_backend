@@ -34,7 +34,7 @@ async function readLobVal(v) {
  * @param {unknown} raw
  * @param {boolean} asArray
  */
-async function parseJsonColumn(raw, asArray = false) {
+export async function parseJsonColumn(raw, asArray = false) {
   if (raw == null) return asArray ? [] : null;
   if (asArray && Array.isArray(raw)) return raw;
   if (!asArray && typeof raw === 'object' && !Buffer.isBuffer(raw) && !Array.isArray(raw)) {

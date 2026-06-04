@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
-import { packageStatusIsSuccess } from './recCandidatesModel.js';
+import { jsonArrayToClobString as sharedJsonArrayToClobString, packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
 export { packageStatusIsSuccess };
 
@@ -37,26 +37,9 @@ function strOrNull(v) {
   return s === '' ? null : s;
 }
 
-/**
- * @param {unknown} value
- * @returns {string|null}
- */
+/** @param {unknown} value @returns {string|null} */
 export function jsonArrayToClobString(value) {
-  if (value == null || value === '') return null;
-  if (Array.isArray(value)) {
-    if (value.length === 0) return null;
-    return JSON.stringify(value);
-  }
-  if (typeof value === 'string') {
-    const s = value.trim();
-    if (!s) return null;
-    try {
-      const parsed = JSON.parse(s);
-      if (Array.isArray(parsed)) return JSON.stringify(parsed);
-    } catch (_) {}
-    return null;
-  }
-  return null;
+  return sharedJsonArrayToClobString(value);
 }
 
 function parseDateBind(v) {

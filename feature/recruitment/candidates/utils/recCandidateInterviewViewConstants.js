@@ -1,0 +1,60 @@
+export const REC_CANDIDATE_INTERVIEWS_VIEW =
+  process.env.REC_CANDIDATE_INTERVIEWS_V || 'REC.CANDIDATE_INTERVIEWS_V';
+
+export const LOG_TAG = 'recCandidateInterviewViewModel';
+
+export const READ_ERROR_MESSAGE = 'Unable to fetch interviews. Please try again.';
+
+export const INTERVIEW_SORT_COLUMNS = {
+  interview_id: 'INTERVIEW_ID',
+  interview_date: 'INTERVIEW_DATE',
+  interview_start_utc: 'INTERVIEW_START_UTC',
+  creation_date: 'CREATION_DATE',
+  status: 'STATUS',
+  result_status: 'RESULT_STATUS',
+  candidate_name: 'CANDIDATE_NAME'
+};
+
+export const INTERVIEW_SELECT_SQL = `
+  v.CANDIDATE_ID,
+  v.CANDIDATE_GUID,
+  v.ENTERPRISE_ID,
+  v.FIRST_NAME,
+  v.MIDDLE_NAME,
+  v.LAST_NAME,
+  v.CANDIDATE_NAME,
+  v.EMAIL,
+  v.PHONE,
+  v.CURRENT_TITLE,
+  v.CURRENT_EMPLOYER,
+  v.YEARS_EXPERIENCE,
+  v.CURRENT_LOCATION,
+  v.PORTFOLIO_LINK,
+  v.GITHUB_LINK,
+  v.WILLING_TO_RELOCATE,
+  v.CURRENT_SALARY,
+  v.EXPECTED_SALARY,
+  v.SALARY_CURRENCY,
+  v.SOURCE,
+  v.INTERVIEW_ID,
+  v.INTERVIEW_GUID,
+  v.INTERVIEW_TITLE,
+  v.INTERVIEW_TYPE,
+  v.INTERVIEW_ROUND,
+  v.INTERVIEW_DATE,
+  v.INTERVIEW_MODE,
+  v.LOCATION,
+  v.MEETING_LINK,
+  v.STATUS,
+  v.RESULT_STATUS,
+  v.FEEDBACK,
+  v.RATING,
+  v.ACTIVE_FLAG,
+  v.INTERVIEW_START_UTC,
+  v.INTERVIEW_END_UTC,
+  v.INTERVIEWERS_JSON,
+  v.FEEDBACK_OBJ,
+  v.CREATED_BY,
+  v.CREATION_DATE,
+  v.LAST_UPDATED_BY,
+  v.LAST_UPDATE_DATE`;

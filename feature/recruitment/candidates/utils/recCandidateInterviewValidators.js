@@ -1,14 +1,18 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { parseEnterpriseIdFromQuery } from '../../shared/recViewQueryValidators.js';
+import {
+  INTERVIEW_MODES,
+  INTERVIEW_RECOMMENDATIONS,
+  INTERVIEW_RESULT_STATUSES,
+  INTERVIEW_STATUS_CODES
+} from './recCandidateInterviewConstants.js';
 import {
   applyInterviewUtcBodyAliases,
   validateInterviewUtcRange,
   validateUtcTimestampField
 } from './recInterviewUtcTimestamps.js';
 
-const INTERVIEW_MODES = new Set(['ONSITE', 'ONLINE', 'PHONE']);
-const STATUS_CODES = new Set(['SCHEDULED', 'COMPLETED', 'CANCELLED', 'RESCHEDULED']);
-const RESULT_STATUSES = new Set(['PENDING', 'SELECTED', 'REJECTED', 'ON_HOLD']);
 const PRIMARY_INTERVIEWER = new Set(['Y', 'N']);
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,6 +36,24 @@ function requirePositiveEnterpriseId(errors, body) {
   const n = Number(body.enterprise_id);
   if (!Number.isFinite(n) || n <= 0) {
     errors.push('enterprise_id must be a positive number');
+  }
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {string} [interviewGuid]
+ */
+function appendInterviewGuidErrors(errors, body, interviewGuid) {
+  const guid = interviewGuid ?? body.interview_guid;
+  if (isBlank(guid)) {
+    errors.push('interview_guid is required');
+    return;
+  }
+  try {
+    ensureHex32(normalizeHex32(guid));
+  } catch {
+    errors.push('interview_guid must be a valid 32-character hex GUID');
   }
 }
 
@@ -146,6 +168,17 @@ function applyInterviewersNormalization(body) {
 }
 
 /**
+ * @param {unknown} interviewGuidParam
+ * @param {unknown} enterpriseIdQuery
+ * @returns {{ interview_guid: string, enterprise_id: number }}
+ */
+export function validateInterviewGuidEnterpriseParams(interviewGuidParam, enterpriseIdQuery) {
+  const interview_guid = parseInterviewGuidParam(interviewGuidParam);
+  const enterprise_id = parseEnterpriseIdFromQuery({ enterprise_id: enterpriseIdQuery });
+  return { interview_guid, enterprise_id };
+}
+
+/**
  * @param {unknown} value
  * @returns {string}
  */
@@ -230,16 +263,7 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
   requirePositiveEnterpriseId(errors, b);
   requireField(errors, b, 'updated_by');
 
-  const guid = interviewGuid ?? b.interview_guid;
-  if (isBlank(guid)) {
-    errors.push('interview_guid is required');
-  } else {
-    try {
-      ensureHex32(normalizeHex32(guid));
-    } catch {
-      errors.push('interview_guid must be a valid 32-character hex GUID');
-    }
-  }
+  appendInterviewGuidErrors(errors, b, interviewGuid);
 
   if (!isBlank(b.interview_mode)) {
     const mode = String(b.interview_mode).trim().toUpperCase();
@@ -250,14 +274,14 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
 
   if (!isBlank(b.status_code)) {
     const code = String(b.status_code).trim().toUpperCase();
-    if (!STATUS_CODES.has(code)) {
+    if (!INTERVIEW_STATUS_CODES.has(code)) {
       errors.push('status_code must be SCHEDULED, COMPLETED, CANCELLED, or RESCHEDULED');
     }
   }
 
   if (!isBlank(b.result_status)) {
     const rs = String(b.result_status).trim().toUpperCase();
-    if (!RESULT_STATUSES.has(rs)) {
+    if (!INTERVIEW_RESULT_STATUSES.has(rs)) {
       errors.push('result_status must be PENDING, SELECTED, REJECTED, or ON_HOLD');
     }
   }
@@ -320,16 +344,7 @@ export function validateDeleteInterviewBody(body, interviewGuid) {
   requirePositiveEnterpriseId(errors, b);
   requireField(errors, b, 'deleted_by');
 
-  const guid = interviewGuid ?? b.interview_guid;
-  if (isBlank(guid)) {
-    errors.push('interview_guid is required');
-  } else {
-    try {
-      ensureHex32(normalizeHex32(guid));
-    } catch {
-      errors.push('interview_guid must be a valid 32-character hex GUID');
-    }
-  }
+  appendInterviewGuidErrors(errors, b, interviewGuid);
 
   if (errors.length) {
     throw new ValidationError('Validation failed', errors);
@@ -343,5 +358,58 @@ export function validateDeleteInterviewBody(body, interviewGuid) {
 export function normalizeDeleteInterviewBody(body, interviewGuid) {
   const b = asObject(body);
   if (interviewGuid) b.interview_guid = ensureHex32(normalizeHex32(interviewGuid));
+  return b;
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} interviewGuid
+ */
+export function validateSubmitInterviewFeedbackBody(body, interviewGuid) {
+  const b = asObject(body);
+  const errors = [];
+
+  requirePositiveEnterpriseId(errors, b);
+  requireField(errors, b, 'created_by');
+
+  appendInterviewGuidErrors(errors, b, interviewGuid);
+
+  if (isBlank(b.overall_rating)) {
+    errors.push('overall_rating is required');
+  } else {
+    const n = Number(b.overall_rating);
+    if (!Number.isFinite(n) || n < 1 || n > 5) {
+      errors.push('overall_rating must be between 1 and 5');
+    }
+  }
+
+  if (isBlank(b.recommendation)) {
+    errors.push('recommendation is required');
+  } else {
+    const rec = String(b.recommendation).trim().toUpperCase();
+    if (!INTERVIEW_RECOMMENDATIONS.has(rec)) {
+      errors.push('recommendation must be HIRE, SELECTED, NO_HIRE, REJECTED, HOLD, or ON_HOLD');
+    }
+  }
+
+  if (errors.length) {
+    throw new ValidationError('Validation failed', errors);
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} interviewGuid
+ */
+export function normalizeSubmitInterviewFeedbackBody(body, interviewGuid) {
+  const b = asObject(body);
+  b.interview_guid = ensureHex32(normalizeHex32(interviewGuid));
+  if (!isBlank(b.recommendation)) b.recommendation = String(b.recommendation).trim().toUpperCase();
+  if (!isBlank(b.technical_skills)) b.technical_skills = String(b.technical_skills).trim().toUpperCase();
+  if (!isBlank(b.communication)) b.communication = String(b.communication).trim().toUpperCase();
+  if (!isBlank(b.culture_fit)) b.culture_fit = String(b.culture_fit).trim().toUpperCase();
+  if (b.detailed_comments == null && b.feedback != null) {
+    b.detailed_comments = b.feedback;
+  }
   return b;
 }
