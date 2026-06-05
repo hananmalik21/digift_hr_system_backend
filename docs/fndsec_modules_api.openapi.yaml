@@ -7,7 +7,7 @@ info:
 
     - **Identifiers:** `module_guid` (32-char hex, RAW(16) in Oracle) is used in URLs for get, update, and delete.
     - **Create** returns both `module_id` (internal) and `module_guid` (client-facing).
-    - **List/get** responses expose `module_guid` only (not numeric `module_id`).
+    - **List/get** responses expose both `module_id` and `module_guid`.
 servers:
   - url: /
     description: Application base URL
@@ -163,6 +163,9 @@ components:
     ModulePublic:
       type: object
       properties:
+        module_id:
+          type: integer
+          description: Internal numeric id
         module_guid:
           $ref: '#/components/schemas/ModuleGuid'
         module_code: { type: string, example: CORE_HR }

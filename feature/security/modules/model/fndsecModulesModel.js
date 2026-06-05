@@ -129,12 +129,13 @@ function pick(obj, ...keys) {
   return null;
 }
 
-/** API-facing module shape (module_guid only; no numeric module_id). */
+/** API-facing module shape returned by list/get endpoints. */
 function mapModuleForApi(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const module_guid = moduleGuidFromDb(pick(raw, 'module_guid', 'MODULE_GUID'));
   if (!module_guid) return null;
   return {
+    module_id: normalizeOutNumber(pick(raw, 'module_id', 'MODULE_ID')),
     module_guid,
     module_code: pick(raw, 'module_code') ?? null,
     module_name: pick(raw, 'module_name') ?? null,
