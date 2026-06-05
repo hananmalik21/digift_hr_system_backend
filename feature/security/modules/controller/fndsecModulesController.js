@@ -65,7 +65,8 @@ function sendModulePackageFailure(res, pkg) {
   const httpStatus = packageFailureHttpStatus(pkg?.message);
   return res.status(httpStatus).json({
     status: false,
-    message: pkg?.message || 'Request failed.'
+    message: pkg?.message || 'Request failed.',
+    ...(pkg?.error_details ? { error_details: pkg.error_details } : {})
   });
 }
 
@@ -131,18 +132,13 @@ router.put(
     const actor = resolveActor(req);
     const moduleGuid = parseModuleGuidRouteParam(req.params.moduleGuid);
     const body = normalizeModuleRequestBody(req.body, req.file);
-    try {
-      const pkg = await updateModule(moduleGuid, body, actor);
-      if (!pkg.success) {
-        return sendModulePackageFailure(res, pkg);
-      }
-      return sendUpdated(res, {
-        message: pkg.message || 'Module updated successfully.'
-      });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
-      return sendModulePackageFailure(res, { message: 'Unable to process module request. Please try again.' });
+    const pkg = await updateModule(moduleGuid, body, actor);
+    if (!pkg.success) {
+      return sendModulePackageFailure(res, pkg);
     }
+    return sendUpdated(res, {
+      message: pkg.message || 'Module updated successfully.'
+    });
   })
 );
 
@@ -157,18 +153,13 @@ router.delete(
   '/:moduleGuid',
   asyncHandler(async (req, res) => {
     const moduleGuid = parseModuleGuidRouteParam(req.params.moduleGuid);
-    try {
-      const pkg = await deleteModule(moduleGuid);
-      if (!pkg.success) {
-        return sendModulePackageFailure(res, pkg);
-      }
-      return sendDeleted(res, {
-        message: pkg.message || 'Module deleted successfully.'
-      });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
-      return sendModulePackageFailure(res, { message: 'Unable to process module request. Please try again.' });
+    const pkg = await deleteModule(moduleGuid);
+    if (!pkg.success) {
+      return sendModulePackageFailure(res, pkg);
     }
+    return sendDeleted(res, {
+      message: pkg.message || 'Module deleted successfully.'
+    });
   })
 );
 
@@ -186,7 +177,7 @@ router.get(
     const pagination = parseListPagination(req.query);
     const result = await listModules(filters, pagination);
     if (!result.success) {
-      return sendModulePackageFailure(res, { message: result.message });
+      return sendModulePackageFailure(res, result);
     }
     const p = buildPaginationMeta(pagination.page, pagination.pageSize, result.total);
     return sendSuccess(res, {
@@ -252,19 +243,14 @@ router.get(
   '/:moduleGuid',
   asyncHandler(async (req, res) => {
     const moduleGuid = parseModuleGuidRouteParam(req.params.moduleGuid);
-    try {
-      const pkg = await getModuleByGuid(moduleGuid);
-      if (!pkg.success) {
-        return sendModulePackageFailure(res, pkg);
-      }
-      return sendSuccess(res, {
-        message: pkg.message || 'Module fetched successfully.',
-        data: pkg.data
-      });
-    } catch (err) {
-      if (err instanceof ValidationError) throw err;
-      return sendModulePackageFailure(res, { message: 'Unable to process module request. Please try again.' });
+    const pkg = await getModuleByGuid(moduleGuid);
+    if (!pkg.success) {
+      return sendModulePackageFailure(res, pkg);
     }
+    return sendSuccess(res, {
+      message: pkg.message || 'Module fetched successfully.',
+      data: pkg.data
+    });
   })
 );
 

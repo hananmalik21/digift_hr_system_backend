@@ -1,4 +1,4 @@
-import { ConflictError, ValidationError } from '../../../../utils/errors/index.js';
+import { ValidationError } from '../../../../utils/errors/index.js';
 import { parsePagination } from '../../../../utils/paginationUtils.js';
 import { parseModuleGuidHexOrThrow } from './moduleGuid.js';
 
@@ -25,13 +25,14 @@ export function parseOptionalYn(query, key) {
   return u;
 }
 
-/** @returns {{ search: string|null, status_code: string|null, category_code: string|null }} */
+/** @returns {{ search: string|null, status_code: string|null, category_code: string|null, active_flag: string|null }} */
 export function parseModuleListQuery(req) {
   const q = req.query || {};
   return {
     search: parseOptionalString(q, 'search'),
     status_code: parseOptionalString(q, 'status_code'),
-    category_code: parseOptionalString(q, 'category_code')
+    category_code: parseOptionalString(q, 'category_code'),
+    active_flag: parseOptionalYn(q, 'active_flag')
   };
 }
 
@@ -47,12 +48,4 @@ export function parseListPagination(query) {
     const msg = e?.message || 'Invalid pagination';
     throw new ValidationError('Validation failed', [msg]);
   }
-}
-
-export function mapModuleConflict(err) {
-  if (!(err instanceof ConflictError)) return null;
-  const msg = String(err.message || '').toLowerCase();
-  if (msg.includes('module_code')) return new ConflictError('Module code already exists');
-  if (msg.includes('module_name')) return new ConflictError('Module name already exists');
-  return err;
 }

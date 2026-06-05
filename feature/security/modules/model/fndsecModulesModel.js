@@ -1,12 +1,12 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { escapeLikePattern } from '../utils/escapeLikePattern.js';
 import {
   moduleGuidFromDb,
   normalizeOutGuidHex,
   parseModuleGuidHexOrThrow
 } from '../utils/moduleGuid.js';
+import { fetchAllFromRefCursor } from '../utils/refCursor.js';
 
 const PKG = 'FNDSEC.FNDSEC_MODULES_API_PKG';
 const CREATE_PROC = `${PKG}.CREATE_MODULE`;
@@ -17,7 +17,27 @@ const GET_ALL_PROC = `${PKG}.GET_MODULES`;
 
 const LOG_TAG = 'fndsecModulesModel';
 const MODULE_LIST_SEARCH_MAX_LEN = 200;
-const GENERIC_ERROR_MESSAGE = 'Unable to process module request. Please try again.';
+export const GENERIC_ERROR_MESSAGE = 'Unable to process module request. Please try again.';
+const CURSOR_FETCH_OPTIONS = { outFormat: oracledb.OUT_FORMAT_OBJECT };
+
+function logPackageError(operation, err) {
+  const ora = err?.errorNum != null ? `ORA-${err.errorNum}` : 'UNKNOWN';
+  console.error(`[${LOG_TAG}] ${operation} ${ora}`, err?.message || err);
+}
+
+function safeErrorDetails(err) {
+  if (!err || typeof err !== 'object') return null;
+  const details = {};
+  if (err.errorNum != null) details.error_num = err.errorNum;
+  if (err.code != null) details.code = err.code;
+  if (err.oracleCode != null) details.oracle_code = err.oracleCode;
+  // ORA-06550 is a PL/SQL compilation/execution error; the message is typically
+  // safe and critical for diagnosing signature/name mismatches.
+  if (typeof err.message === 'string' && err.message.trim()) {
+    details.oracle_message = err.message.trim().slice(0, 500);
+  }
+  return Object.keys(details).length ? details : null;
+}
 
 async function withConnection(fn) {
   const connection = await db.getConnection();
@@ -45,9 +65,8 @@ function normalizeOutNumber(v) {
 }
 
 export function packageStatusIsSuccess(status) {
-  return String(status ?? '')
-    .trim()
-    .toUpperCase() === 'SUCCESS';
+  const s = String(status ?? '').trim().toUpperCase();
+  return s === 'S' || s === 'SUCCESS';
 }
 
 function numOrNull(v) {
@@ -98,37 +117,6 @@ function validateDateRange(startDate, endDate) {
   }
 }
 
-async function readClobOut(val) {
-  if (val == null) return null;
-  if (typeof val === 'string') return val;
-  const v = Array.isArray(val) ? val[0] : val;
-  if (v == null) return null;
-  if (typeof v.getData === 'function') {
-    try {
-      const p = v.getData();
-      const data =
-        typeof p?.then === 'function'
-          ? await p
-          : await new Promise((res, rej) => v.getData((err, d) => (err ? rej(err) : res(d))));
-      return data != null ? String(data) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-  return String(v);
-}
-
-async function parseJsonClob(clobVal) {
-  const jsonStr = await readClobOut(Array.isArray(clobVal) ? clobVal[0] : clobVal);
-  if (!jsonStr || !String(jsonStr).trim()) return null;
-  try {
-    return JSON.parse(String(jsonStr));
-  } catch (e) {
-    console.error(`[${LOG_TAG}] invalid JSON from package`, e?.message || e);
-    return null;
-  }
-}
-
 function pick(obj, ...keys) {
   if (!obj || typeof obj !== 'object') return null;
   for (const k of keys) {
@@ -145,6 +133,7 @@ function pick(obj, ...keys) {
 function mapModuleForApi(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const module_guid = moduleGuidFromDb(pick(raw, 'module_guid', 'MODULE_GUID'));
+  if (!module_guid) return null;
   return {
     module_guid,
     module_code: pick(raw, 'module_code') ?? null,
@@ -166,31 +155,15 @@ function mapModuleForApi(raw) {
   };
 }
 
-function extractModulesArray(parsed) {
-  if (parsed == null) return [];
-  if (Array.isArray(parsed)) return parsed.map(mapModuleForApi).filter(Boolean);
-  const nested =
-    pick(parsed, 'modules') ??
-    pick(parsed, 'data') ??
-    pick(parsed, 'rows') ??
-    pick(parsed, 'items');
-  if (Array.isArray(nested)) return nested.map(mapModuleForApi).filter(Boolean);
-  const single = mapModuleForApi(parsed);
-  return single ? [single] : [];
-}
-
-function extractSingleModule(parsed) {
-  if (parsed == null) return null;
-  if (Array.isArray(parsed)) return mapModuleForApi(parsed[0]);
-  const nested = pick(parsed, 'module') ?? pick(parsed, 'data');
-  if (nested && typeof nested === 'object') return mapModuleForApi(nested);
-  return mapModuleForApi(parsed);
+function mapCursorRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(mapModuleForApi).filter(Boolean);
 }
 
 function parsePackageOut(outBinds) {
   const ob = outBinds || {};
   return {
-    status: normalizeOutString(ob.p_status) ?? 'ERROR',
+    status: normalizeOutString(ob.p_status) ?? 'E',
     message: normalizeOutString(ob.p_message) ?? '',
     module_id: normalizeOutNumber(ob.p_module_id),
     module_guid: normalizeOutGuidHex(ob.p_module_guid)
@@ -200,12 +173,36 @@ function parsePackageOut(outBinds) {
 function packageFailure(message = GENERIC_ERROR_MESSAGE, extra = {}) {
   return {
     success: false,
-    status: 'ERROR',
+    status: 'E',
     message,
     module_guid: null,
     data: null,
     ...extra
   };
+}
+
+function buildMutationResult(out, { successMessage, module_guid = null, data = null }) {
+  const success = packageStatusIsSuccess(out.status);
+  return {
+    success,
+    status: out.status,
+    message: out.message || (success ? successMessage : GENERIC_ERROR_MESSAGE),
+    module_id: out.module_id,
+    module_guid: module_guid ?? out.module_guid ?? null,
+    data
+  };
+}
+
+async function executeMutation(plsql, binds, operation, buildResult) {
+  try {
+    const result = await withConnection((connection) =>
+      connection.execute(plsql, binds, { autoCommit: true })
+    );
+    return buildResult(parsePackageOut(result?.outBinds));
+  } catch (err) {
+    logPackageError(operation, err);
+    return packageFailure(GENERIC_ERROR_MESSAGE, { error_details: safeErrorDetails(err) });
+  }
 }
 
 function buildSharedModuleInBinds(input) {
@@ -329,33 +326,17 @@ export async function createModule(input, actor) {
     p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
   };
 
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(CREATE_PLSQL, binds, { autoCommit: true })
-    );
-    const out = parsePackageOut(result?.outBinds);
+  return executeMutation(CREATE_PLSQL, binds, 'createModule', (out) => {
     const success = packageStatusIsSuccess(out.status);
     const data =
-      success && out.module_guid
-        ? {
-            module_id: out.module_id,
-            module_guid: out.module_guid
-          }
-        : success && out.module_id != null
-          ? { module_id: out.module_id, module_guid: out.module_guid }
-          : null;
-    return {
-      success,
-      status: out.status,
-      message: out.message || (success ? 'Module created successfully.' : GENERIC_ERROR_MESSAGE),
-      module_id: out.module_id,
-      module_guid: out.module_guid,
+      success && (out.module_guid || out.module_id != null)
+        ? { module_id: out.module_id, module_guid: out.module_guid }
+        : null;
+    return buildMutationResult(out, {
+      successMessage: 'Module created successfully.',
       data
-    };
-  } catch (err) {
-    console.error(`[${LOG_TAG}] createModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-    return packageFailure();
-  }
+    });
+  });
 }
 
 /**
@@ -380,23 +361,12 @@ export async function updateModule(moduleGuidRaw, patch, actor) {
     p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
   };
 
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(UPDATE_PLSQL, binds, { autoCommit: true })
-    );
-    const out = parsePackageOut(result?.outBinds);
-    const success = packageStatusIsSuccess(out.status);
-    return {
-      success,
-      status: out.status,
-      message: out.message || (success ? 'Module updated successfully.' : GENERIC_ERROR_MESSAGE),
-      module_guid,
-      data: null
-    };
-  } catch (err) {
-    console.error(`[${LOG_TAG}] updateModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-    return packageFailure();
-  }
+  return executeMutation(UPDATE_PLSQL, binds, 'updateModule', (out) =>
+    buildMutationResult(out, {
+      successMessage: 'Module updated successfully.',
+      module_guid
+    })
+  );
 }
 
 /**
@@ -411,31 +381,27 @@ export async function deleteModule(moduleGuidRaw) {
     p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
   };
 
-  try {
-    const result = await withConnection((connection) =>
-      connection.execute(DELETE_PLSQL, binds, { autoCommit: true })
-    );
-    const out = parsePackageOut(result?.outBinds);
-    const success = packageStatusIsSuccess(out.status);
-    return {
-      success,
-      status: out.status,
-      message: out.message || (success ? 'Module deleted successfully.' : GENERIC_ERROR_MESSAGE),
+  return executeMutation(DELETE_PLSQL, binds, 'deleteModule', (out) =>
+    buildMutationResult(out, {
+      successMessage: 'Module deleted successfully.',
       module_guid
-    };
-  } catch (err) {
-    console.error(`[${LOG_TAG}] deleteModule`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-    return packageFailure();
-  }
+    })
+  );
+}
+
+async function fetchModulesFromPackage(plsql, binds) {
+  return withConnection(async (connection) => {
+    const result = await connection.execute(plsql, binds, CURSOR_FETCH_OPTIONS);
+    const rows = await fetchAllFromRefCursor(result?.outBinds?.p_result);
+    return mapCursorRows(rows);
+  });
 }
 
 async function fetchAllModulesFromPackage() {
   const binds = {
-    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR }
   };
-  const result = await withConnection((connection) => connection.execute(GET_ALL_PLSQL, binds));
-  const parsed = await parseJsonClob(result?.outBinds?.p_result);
-  return extractModulesArray(parsed);
+  return fetchModulesFromPackage(GET_ALL_PLSQL, binds);
 }
 
 /**
@@ -445,30 +411,24 @@ export async function getModuleByGuid(moduleGuidRaw) {
   const module_guid = parseModuleGuidHexOrThrow(moduleGuidRaw);
   const binds = {
     p_module_guid: { val: module_guid, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 },
-    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+    p_result: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR }
   };
 
   try {
-    const result = await withConnection((connection) => connection.execute(GET_PLSQL, binds));
-    const parsed = await parseJsonClob(result?.outBinds?.p_result);
-    const data = extractSingleModule(parsed);
-    if (!data || !data.module_guid) {
-      return {
-        success: false,
-        status: 'ERROR',
-        message: 'Module not found',
-        data: null
-      };
+    const rows = await fetchModulesFromPackage(GET_PLSQL, binds);
+    const data = rows[0] ?? null;
+    if (!data) {
+      return packageFailure('Module not found.');
     }
     return {
       success: true,
-      status: 'SUCCESS',
+      status: 'S',
       message: 'Module fetched successfully.',
       data
     };
   } catch (err) {
-    console.error(`[${LOG_TAG}] getModuleByGuid`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-    return packageFailure();
+    logPackageError('getModuleByGuid', err);
+    return packageFailure(GENERIC_ERROR_MESSAGE, { error_details: safeErrorDetails(err) });
   }
 }
 
@@ -476,7 +436,7 @@ function applyListFilters(rows, filters) {
   let result = rows;
 
   if (filters.search) {
-    const term = escapeLikePattern(String(filters.search).trim().slice(0, MODULE_LIST_SEARCH_MAX_LEN)).toUpperCase();
+    const term = String(filters.search).trim().slice(0, MODULE_LIST_SEARCH_MAX_LEN).toUpperCase();
     result = result.filter((m) => {
       const code = String(m.module_code ?? '').toUpperCase();
       const name = String(m.module_name ?? '').toUpperCase();
@@ -484,25 +444,17 @@ function applyListFilters(rows, filters) {
     });
   }
   if (filters.status_code) {
-    const sc = String(filters.status_code).trim();
-    result = result.filter((m) => String(m.status_code ?? '') === sc);
+    const sc = String(filters.status_code).trim().toUpperCase();
+    result = result.filter((m) => String(m.status_code ?? '').toUpperCase() === sc);
   }
   if (filters.category_code) {
-    const cc = String(filters.category_code).trim();
-    result = result.filter((m) => String(m.category_code ?? '') === cc);
+    const cc = String(filters.category_code).trim().toUpperCase();
+    result = result.filter((m) => String(m.category_code ?? '').toUpperCase() === cc);
   }
-
-  const activeOnly = filters.active_only !== false;
-  if (activeOnly) {
-    result = result.filter((m) => String(m.active_flag ?? '').toUpperCase() === 'Y');
+  if (filters.active_flag) {
+    const af = String(filters.active_flag).trim().toUpperCase();
+    result = result.filter((m) => String(m.active_flag ?? '').toUpperCase() === af);
   }
-
-  result = [...result].sort((a, b) => {
-    const ao = a.display_order ?? Number.MAX_SAFE_INTEGER;
-    const bo = b.display_order ?? Number.MAX_SAFE_INTEGER;
-    if (ao !== bo) return ao - bo;
-    return String(a.module_code ?? '').localeCompare(String(b.module_code ?? ''));
-  });
 
   return result;
 }
@@ -513,7 +465,7 @@ function applyListFilters(rows, filters) {
 export async function listModules(filters, pagination) {
   try {
     const all = await fetchAllModulesFromPackage();
-    const filtered = applyListFilters(all, { ...filters, active_only: true });
+    const filtered = applyListFilters(all, filters);
     const total = filtered.length;
     const offset = (pagination.page - 1) * pagination.pageSize;
     const rows = filtered.slice(offset, offset + pagination.pageSize);
@@ -524,10 +476,11 @@ export async function listModules(filters, pagination) {
       total
     };
   } catch (err) {
-    console.error(`[${LOG_TAG}] listModules`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
+    logPackageError('listModules', err);
     return {
       success: false,
       message: GENERIC_ERROR_MESSAGE,
+      error_details: safeErrorDetails(err),
       rows: [],
       total: 0
     };
@@ -536,6 +489,7 @@ export async function listModules(filters, pagination) {
 
 export function packageFailureHttpStatus(message) {
   const msg = String(message ?? '');
+  if (msg === GENERIC_ERROR_MESSAGE) return 500;
   if (/not found/i.test(msg)) return 404;
   if (/already exists|duplicate|unique/i.test(msg)) return 409;
   return 400;
