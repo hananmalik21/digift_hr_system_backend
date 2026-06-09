@@ -24,6 +24,8 @@ export function mapJobOfferListRow(row) {
     job_title: strOrNull(m.job_title),
     position_name: strOrNull(m.position_name),
     department_name: strOrNull(m.department_name),
+    location: strOrNull(m.location),
+
     start_date: formatDateOnly(m.start_date),
     offer_date: formatDateOnly(m.offer_date),
     expiry_date: formatDateOnly(m.expiry_date)
@@ -48,7 +50,8 @@ export function mapJobOfferDetailOffer(row) {
     position_name: strOrNull(m.position_name),
     department_id: normalizeGuidValue(m.department_id),
     department_name: strOrNull(m.department_name),
-    location_id: normalizeGuidValue(m.location_id),
+    location: strOrNull(m.location),
+
     work_mode_code: strOrNull(m.work_mode_code),
     employment_type_code: strOrNull(m.employment_type_code),
     grade_id: safeFiniteNumber(m.grade_id),

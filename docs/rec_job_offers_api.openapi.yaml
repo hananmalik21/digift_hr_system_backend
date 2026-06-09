@@ -234,7 +234,8 @@ components:
         stage: { type: string, example: Extend to Candidate }
         status_code: { type: string, example: EXTENDED }
         stage_description: { type: string }
-        decline_comments: { type: string, nullable: true, example: I accepted another offer. }
+        decline_comments: { type: string, nullable: true, example: Accepted another opportunity. }
+
     JobOfferCreateRequest:
       type: object
       required: [enterprise_id, application_guid, candidate_guid, posting_id, job_title, start_date, created_by]
@@ -246,7 +247,11 @@ components:
         job_title: { type: string }
         position_id: { type: string, nullable: true }
         department_id: { type: string, nullable: true }
-        location_id: { type: string, nullable: true }
+        location:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: Kuwait City, Kuwait
         work_mode_code: { type: string }
         employment_type_code: { type: string }
         grade_id: { type: integer, nullable: true }
@@ -282,7 +287,8 @@ components:
         decline_comments:
           type: string
           maxLength: 4000
-          example: I accepted another offer.
+          example: Accepted another opportunity.
+
         updated_by: { type: string, example: CANDIDATE }
     JobOfferActionResponse:
       type: object
@@ -307,6 +313,8 @@ components:
             job_title: { type: string }
             position_name: { type: string }
             department_name: { type: string }
+            location: { type: string, example: Kuwait City, Kuwait }
+
             start_date: { type: string, format: date }
             offer_date: { type: string, format: date }
             expiry_date: { type: string, format: date }
