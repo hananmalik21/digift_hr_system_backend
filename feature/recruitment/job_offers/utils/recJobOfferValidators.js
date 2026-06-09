@@ -120,6 +120,28 @@ export function validateDeclineOfferBody(body, offerGuidHex) {
  * @param {Record<string, unknown>} body
  * @param {string} offerGuidHex
  */
+export function validateDeclineOfferBody(body, offerGuidHex) {
+  const b = asObject(body);
+  const errors = [];
+
+  validateHexGuidInErrors(errors, offerGuidHex, 'offer_guid');
+  requireNonBlankString(errors, b, 'decline_comments');
+  requireNonBlankString(errors, b, 'updated_by');
+
+  throwIfValidationErrors(errors);
+
+  return {
+    ...b,
+    offer_guid: offerGuidHex,
+    decline_comments: String(b.decline_comments).trim(),
+    updated_by: String(b.updated_by).trim()
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} offerGuidHex
+ */
 export function validateOfferActionBody(body, offerGuidHex) {
   const b = asObject(body);
   const errors = [];

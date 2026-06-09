@@ -86,6 +86,7 @@ export async function getJobOfferByGuid(offerGuidHex) {
       o.DEPARTMENT_ID,
       ou.ORG_UNIT_NAME_EN AS DEPARTMENT_NAME,
       o.LOCATION,
+
       o.WORK_MODE_CODE,
       o.EMPLOYMENT_TYPE_CODE,
       o.GRADE_ID,
