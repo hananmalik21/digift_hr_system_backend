@@ -27,6 +27,10 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
+  // Career portal — candidate job offer actions (no JWT)
+  { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/accept\/?$/ },
+  { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/decline\/?$/ },
+  { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/withdraw\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
 ];

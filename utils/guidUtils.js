@@ -114,7 +114,13 @@ export function ensureHex32(value, fieldName = 'guid') {
   }
   const viaApi = normalizeApiGuidString(value);
   const compact = viaApi != null ? String(viaApi).replace(/-/g, '') : '';
-  const hex = REGEX_HEX_32.test(compact) ? compact.toUpperCase() : normalizeHex32(value);
+  let hex = REGEX_HEX_32.test(compact) ? compact.toUpperCase() : normalizeHex32(value);
+
+  // Align with hexToRawBuffer: left-pad when a leading zero was dropped from RAWTOHEX display.
+  if (/^[0-9A-F]+$/.test(hex) && hex.length > 0 && hex.length < 32) {
+    hex = hex.padStart(32, '0');
+  }
+
   if (!REGEX_HEX_32.test(hex)) {
     throw new ValidationError(`${fieldName} must be a 32-character hex GUID`);
   }
