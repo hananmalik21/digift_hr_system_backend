@@ -74,7 +74,9 @@ export function validateCreateJobOfferBody(body) {
 
   validateOptionalHexGuidInErrors(errors, b.position_id, 'position_id');
   validateOptionalHexGuidInErrors(errors, b.department_id, 'department_id');
-  validateOptionalHexGuidInErrors(errors, b.location_id, 'location_id');
+  if (b.location !== undefined && b.location !== null && typeof b.location !== 'string') {
+    errors.push('location must be a string');
+  }
 
   validateArrayTypeInErrors(errors, b, 'components');
   validateObjectTypeInErrors(errors, b, 'benefits');
@@ -88,7 +90,29 @@ export function validateCreateJobOfferBody(body) {
     candidate_guid: ensureHex32(normalizeHex32(b.candidate_guid)),
     position_id: isBlank(b.position_id) ? null : ensureHex32(normalizeHex32(b.position_id)),
     department_id: isBlank(b.department_id) ? null : ensureHex32(normalizeHex32(b.department_id)),
-    location_id: isBlank(b.location_id) ? null : ensureHex32(normalizeHex32(b.location_id))
+    location: isBlank(b.location) ? null : String(b.location).trim()
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ * @param {string} offerGuidHex
+ */
+export function validateDeclineOfferBody(body, offerGuidHex) {
+  const b = asObject(body);
+  const errors = [];
+
+  validateHexGuidInErrors(errors, offerGuidHex, 'offer_guid');
+  requireNonBlankString(errors, b, 'decline_comments');
+  requireNonBlankString(errors, b, 'updated_by');
+
+  throwIfValidationErrors(errors);
+
+  return {
+    ...b,
+    offer_guid: offerGuidHex,
+    decline_comments: String(b.decline_comments).trim(),
+    updated_by: String(b.updated_by).trim()
   };
 }
 

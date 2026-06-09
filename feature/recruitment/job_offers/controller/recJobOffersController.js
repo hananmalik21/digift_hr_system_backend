@@ -2,28 +2,52 @@ import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   handleMutationError,
+  handleReadError,
   logRecruitmentAudit,
   resolveAuditActor
 } from '../../shared/recControllerHelpers.js';
 import {
   acceptOfferViaPackage,
+  approveOfferViaPackage,
   createJobOfferViaPackage,
   declineOfferViaPackage,
+  extendOfferViaPackage,
+  rejectOfferViaPackage,
   withdrawOfferViaPackage
 } from '../model/recJobOffersModel.js';
-import { MUTATION_ERROR_MESSAGE } from '../utils/recJobOfferConstants.js';
+import { getJobOfferByGuid, jobOfferExists, listJobOffersFromView } from '../model/recJobOfferViewModel.js';
+import { MUTATION_ERROR_MESSAGE, READ_ERROR_MESSAGE } from '../utils/recJobOfferConstants.js';
 import {
   sendCreateJobOfferResponse,
-  sendJobOfferActionResponse
+  sendJobOfferActionResponse,
+  sendJobOfferDetailResponse,
+  sendJobOfferListResponse,
+  sendJobOfferNotFoundResponse
 } from '../utils/recJobOfferResponses.js';
 import {
   parseOfferGuidParam,
   validateCreateJobOfferBody,
+  validateDeclineOfferBody,
   validateOfferActionBody
 } from '../utils/recJobOfferValidators.js';
 
 const AUDIT_TAG = 'recJobOffers';
 const router = express.Router();
+
+/**
+ * GET /api/rec/job-offers
+ */
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    try {
+      const { rows, total, page, limit } = await listJobOffersFromView(req.query);
+      return sendJobOfferListResponse(res, rows, { page, limit, total });
+    } catch (err) {
+      return handleReadError(res, err, READ_ERROR_MESSAGE);
+    }
+  })
+);
 
 /**
  * POST /api/rec/job-offers
@@ -48,26 +72,31 @@ router.post(
   })
 );
 
-/**
- * POST /api/rec/job-offers/:offer_guid/accept
- */
-router.post(
-  '/:offer_guid/accept',
-  asyncHandler(async (req, res) => {
-    try {
-      const offer_guid = parseOfferGuidParam(req.params.offer_guid);
-      const body = { ...(req.body || {}) };
-      body.updated_by = resolveAuditActor(req, body, 'updated_by');
-      const validated = validateOfferActionBody(body, offer_guid);
+function registerOfferActionRoute(path, auditAction, packageFn) {
+  router.post(
+    path,
+    asyncHandler(async (req, res) => {
+      try {
+        const offer_guid = parseOfferGuidParam(req.params.offer_guid);
+        const body = { ...(req.body || {}) };
+        body.updated_by = resolveAuditActor(req, body, 'updated_by');
+        const validated = validateOfferActionBody(body, offer_guid);
 
-      const pkg = await acceptOfferViaPackage(validated);
-      logRecruitmentAudit(AUDIT_TAG, 'accept', req, { offer_guid, status: pkg.status });
-      return sendJobOfferActionResponse(res, pkg);
-    } catch (err) {
-      return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
-    }
-  })
-);
+        const pkg = await packageFn(validated);
+        logRecruitmentAudit(AUDIT_TAG, auditAction, req, { offer_guid, status: pkg.status });
+        return sendJobOfferActionResponse(res, pkg);
+      } catch (err) {
+        return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
+      }
+    })
+  );
+}
+
+registerOfferActionRoute('/:offer_guid/approve', 'approve', approveOfferViaPackage);
+registerOfferActionRoute('/:offer_guid/reject', 'reject', rejectOfferViaPackage);
+registerOfferActionRoute('/:offer_guid/extend', 'extend', extendOfferViaPackage);
+registerOfferActionRoute('/:offer_guid/accept', 'accept', acceptOfferViaPackage);
+registerOfferActionRoute('/:offer_guid/withdraw', 'withdraw', withdrawOfferViaPackage);
 
 /**
  * POST /api/rec/job-offers/:offer_guid/decline
@@ -79,7 +108,7 @@ router.post(
       const offer_guid = parseOfferGuidParam(req.params.offer_guid);
       const body = { ...(req.body || {}) };
       body.updated_by = resolveAuditActor(req, body, 'updated_by');
-      const validated = validateOfferActionBody(body, offer_guid);
+      const validated = validateDeclineOfferBody(body, offer_guid);
 
       const pkg = await declineOfferViaPackage(validated);
       logRecruitmentAudit(AUDIT_TAG, 'decline', req, { offer_guid, status: pkg.status });
@@ -91,22 +120,27 @@ router.post(
 );
 
 /**
- * POST /api/rec/job-offers/:offer_guid/withdraw
+ * GET /api/rec/job-offers/:offer_guid
  */
-router.post(
-  '/:offer_guid/withdraw',
+router.get(
+  '/:offer_guid',
   asyncHandler(async (req, res) => {
     try {
       const offer_guid = parseOfferGuidParam(req.params.offer_guid);
-      const body = { ...(req.body || {}) };
-      body.updated_by = resolveAuditActor(req, body, 'updated_by');
-      const validated = validateOfferActionBody(body, offer_guid);
 
-      const pkg = await withdrawOfferViaPackage(validated);
-      logRecruitmentAudit(AUDIT_TAG, 'withdraw', req, { offer_guid, status: pkg.status });
-      return sendJobOfferActionResponse(res, pkg);
+      const exists = await jobOfferExists(offer_guid);
+      if (!exists) {
+        return sendJobOfferNotFoundResponse(res);
+      }
+
+      const detail = await getJobOfferByGuid(offer_guid);
+      if (!detail) {
+        return sendJobOfferNotFoundResponse(res);
+      }
+
+      return sendJobOfferDetailResponse(res, detail);
     } catch (err) {
-      return handleMutationError(res, err, MUTATION_ERROR_MESSAGE);
+      return handleReadError(res, err, READ_ERROR_MESSAGE);
     }
   })
 );

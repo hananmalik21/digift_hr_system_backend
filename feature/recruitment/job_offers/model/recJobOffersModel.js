@@ -16,6 +16,9 @@ export { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
 const PKG = 'REC.REC_JOB_OFFER_PKG';
 const CREATE_PROC = `${PKG}.CREATE_OFFER`;
+const APPROVE_PROC = `${PKG}.APPROVE_OFFER`;
+const REJECT_PROC = `${PKG}.REJECT_OFFER`;
+const EXTEND_PROC = `${PKG}.EXTEND_OFFER`;
 const ACCEPT_PROC = `${PKG}.ACCEPT_OFFER`;
 const DECLINE_PROC = `${PKG}.DECLINE_OFFER`;
 const WITHDRAW_PROC = `${PKG}.WITHDRAW_OFFER`;
@@ -71,7 +74,7 @@ BEGIN
     p_job_title             => :p_job_title,
     p_position_id           => :p_position_id,
     p_department_id         => :p_department_id,
-    p_location_id           => :p_location_id,
+    p_location              => :p_location,
     p_work_mode_code        => :p_work_mode_code,
     p_employment_type_code  => :p_employment_type_code,
     p_grade_id              => :p_grade_id,
@@ -101,9 +104,22 @@ BEGIN
 END;`;
 }
 
+const APPROVE_PLSQL = offerActionPlsql(APPROVE_PROC);
+const REJECT_PLSQL = offerActionPlsql(REJECT_PROC);
+const EXTEND_PLSQL = offerActionPlsql(EXTEND_PROC);
 const ACCEPT_PLSQL = offerActionPlsql(ACCEPT_PROC);
-const DECLINE_PLSQL = offerActionPlsql(DECLINE_PROC);
 const WITHDRAW_PLSQL = offerActionPlsql(WITHDRAW_PROC);
+
+const DECLINE_PLSQL = `
+BEGIN
+  ${DECLINE_PROC}(
+    p_offer_guid       => :p_offer_guid,
+    p_decline_comments => :p_decline_comments,
+    p_updated_by       => :p_updated_by,
+    p_status           => :p_status,
+    p_message          => :p_message
+  );
+END;`;
 
 /**
  * @param {Record<string, unknown>} body
@@ -118,7 +134,7 @@ function buildCreateInBinds(body) {
     p_job_title: { val: strOrNull(b.job_title), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 500 },
     p_position_id: optionalGuidInBind(b.position_id),
     p_department_id: optionalGuidInBind(b.department_id),
-    p_location_id: optionalGuidInBind(b.location_id),
+    p_location: { val: strOrNull(b.location), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 500 },
     p_work_mode_code: codeInBind(b.work_mode_code),
     p_employment_type_code: codeInBind(b.employment_type_code),
     p_grade_id: { val: numOrNull(b.grade_id), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
@@ -152,6 +168,21 @@ function buildOfferActionBinds(body) {
   };
 }
 
+function buildDeclineOfferActionBinds(body) {
+  const b = { ...(body || {}) };
+  return {
+    p_offer_guid: guidInBind(b.offer_guid),
+    p_decline_comments: {
+      val: strOrNull(b.decline_comments),
+      dir: oracledb.BIND_IN,
+      type: oracledb.STRING,
+      maxSize: 4000
+    },
+    p_updated_by: { val: strOrNull(b.updated_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
+    ...statusOutBinds()
+  };
+}
+
 /**
  * @param {Record<string, unknown>} body
  */
@@ -177,6 +208,45 @@ export async function createJobOfferViaPackage(body) {
 /**
  * @param {Record<string, unknown>} body
  */
+export async function approveOfferViaPackage(body) {
+  return executePackagePlsql(
+    APPROVE_PLSQL,
+    buildOfferActionBinds(body),
+    parseActionOut,
+    'recJobOffersModel.APPROVE_OFFER',
+    { status: 'ERROR', message: GENERIC_ERROR_MESSAGE }
+  );
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function rejectOfferViaPackage(body) {
+  return executePackagePlsql(
+    REJECT_PLSQL,
+    buildOfferActionBinds(body),
+    parseActionOut,
+    'recJobOffersModel.REJECT_OFFER',
+    { status: 'ERROR', message: GENERIC_ERROR_MESSAGE }
+  );
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+export async function extendOfferViaPackage(body) {
+  return executePackagePlsql(
+    EXTEND_PLSQL,
+    buildOfferActionBinds(body),
+    parseActionOut,
+    'recJobOffersModel.EXTEND_OFFER',
+    { status: 'ERROR', message: GENERIC_ERROR_MESSAGE }
+  );
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
 export async function acceptOfferViaPackage(body) {
   return executePackagePlsql(
     ACCEPT_PLSQL,
@@ -193,7 +263,7 @@ export async function acceptOfferViaPackage(body) {
 export async function declineOfferViaPackage(body) {
   return executePackagePlsql(
     DECLINE_PLSQL,
-    buildOfferActionBinds(body),
+    buildDeclineOfferActionBinds(body),
     parseActionOut,
     'recJobOffersModel.DECLINE_OFFER',
     { status: 'ERROR', message: GENERIC_ERROR_MESSAGE }

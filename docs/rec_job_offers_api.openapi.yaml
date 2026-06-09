@@ -1,33 +1,54 @@
 openapi: 3.0.3
 info:
   title: Digify ERP — Recruitment Job Offers API
-  version: 2.0.0
+  version: 3.0.0
   description: |
-    Job offers via `REC.REC_JOB_OFFER_PKG` (mutations only).
+    Job offers via `REC.REC_JOB_OFFER_PKG` and `REC.V_JOB_OFFERS`.
 
-    **Lifecycle:** CREATE_OFFER → `SENT` → `ACCEPTED` | `DECLINED` | `WITHDRAWN` | `EXPIRED` (scheduler).
+    **Lifecycle:** Draft Offer (`DRAFT`) → Offer Approval (`APPROVED` / `REJECTED`) → Extend to Candidate (`EXTENDED`) → Candidate Response (`ACCEPTED` / `DECLINED` / `EXPIRED`) or Company Action (`WITHDRAWN`).
 
-    **Statuses:** `SENT`, `ACCEPTED`, `DECLINED`, `WITHDRAWN`, `EXPIRED` (no draft status).
+    **Auth:** Create, approve, reject, extend, withdraw, and reads require JWT. Accept and decline are public career-portal endpoints.
 
     Package validation messages are returned directly (e.g. "Only sent offers can be updated.").
-
-    **Auth:** `POST /api/rec/job-offers` requires JWT. Accept, decline, and withdraw are public career-portal endpoints (no token).
-
-    **Route:** `/api/rec/job-offers`
 servers:
   - url: /
 tags:
   - name: Recruitment Job Offers
-    description: REC.REC_JOB_OFFER_PKG job offer management
 paths:
   /api/rec/job-offers:
+    get:
+      tags: [Recruitment Job Offers]
+      summary: List job offers
+      operationId: listRecJobOffers
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - name: status_code
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, APPROVED, REJECTED, EXTENDED, ACCEPTED, DECLINED, EXPIRED, WITHDRAWN]
+        - name: candidate_guid
+          in: query
+          schema: { type: string }
+        - name: application_guid
+          in: query
+          schema: { type: string }
+        - name: posting_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOfferListResponse'
     post:
       tags: [Recruitment Job Offers]
-      summary: Create and send job offer
+      summary: Create draft job offer
       operationId: createRecJobOffer
-      description: |
-        Calls `REC.REC_JOB_OFFER_PKG.CREATE_OFFER`.
-        On success the offer is created with `STATUS_CODE = SENT`.
+      description: Calls `REC.REC_JOB_OFFER_PKG.CREATE_OFFER`. Creates offer in `DRAFT` status.
       requestBody:
         required: true
         content:
@@ -36,15 +57,70 @@ paths:
               $ref: '#/components/schemas/JobOfferCreateRequest'
       responses:
         '200':
-          description: Offer created and sent
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobOfferCreateResponse'
-        '400':
-          $ref: '#/components/responses/ValidationOrPackageError'
-        '500':
-          $ref: '#/components/responses/ServerError'
+  /api/rec/job-offers/{offerGuid}/approve:
+    parameters:
+      - $ref: '#/components/parameters/OfferGuidPath'
+    post:
+      tags: [Recruitment Job Offers]
+      summary: Approve offer
+      operationId: approveRecJobOffer
+      description: Calls `REC.REC_JOB_OFFER_PKG.APPROVE_OFFER`. Allowed when status is `DRAFT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOfferActionRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOfferActionResponse'
+  /api/rec/job-offers/{offerGuid}/reject:
+    parameters:
+      - $ref: '#/components/parameters/OfferGuidPath'
+    post:
+      tags: [Recruitment Job Offers]
+      summary: Reject offer
+      operationId: rejectRecJobOffer
+      description: Calls `REC.REC_JOB_OFFER_PKG.REJECT_OFFER`. Allowed when status is `DRAFT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOfferActionRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOfferActionResponse'
+  /api/rec/job-offers/{offerGuid}/extend:
+    parameters:
+      - $ref: '#/components/parameters/OfferGuidPath'
+    post:
+      tags: [Recruitment Job Offers]
+      summary: Extend offer to candidate
+      operationId: extendRecJobOffer
+      description: Calls `REC.REC_JOB_OFFER_PKG.EXTEND_OFFER`. Allowed when status is `APPROVED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobOfferActionRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOfferActionResponse'
   /api/rec/job-offers/{offerGuid}/accept:
     parameters:
       - $ref: '#/components/parameters/OfferGuidPath'
@@ -54,7 +130,7 @@ paths:
       operationId: acceptRecJobOffer
       description: |
         Career portal — no JWT required.
-        Calls `REC.REC_JOB_OFFER_PKG.ACCEPT_OFFER`. Only `SENT` offers can be updated.
+        Calls `REC.REC_JOB_OFFER_PKG.ACCEPT_OFFER`. Allowed when status is `EXTENDED`.
       security: []
       requestBody:
         required: true
@@ -68,8 +144,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobOfferActionResponse'
-        '400':
-          $ref: '#/components/responses/ValidationOrPackageError'
   /api/rec/job-offers/{offerGuid}/decline:
     parameters:
       - $ref: '#/components/parameters/OfferGuidPath'
@@ -79,22 +153,20 @@ paths:
       operationId: declineRecJobOffer
       description: |
         Career portal — no JWT required.
-        Calls `REC.REC_JOB_OFFER_PKG.DECLINE_OFFER`.
+        Calls `REC.REC_JOB_OFFER_PKG.DECLINE_OFFER`. Allowed when status is `EXTENDED`.
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/JobOfferActionRequest'
+              $ref: '#/components/schemas/JobOfferDeclineRequest'
       responses:
         '200':
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobOfferActionResponse'
-        '400':
-          $ref: '#/components/responses/ValidationOrPackageError'
   /api/rec/job-offers/{offerGuid}/withdraw:
     parameters:
       - $ref: '#/components/parameters/OfferGuidPath'
@@ -102,10 +174,7 @@ paths:
       tags: [Recruitment Job Offers]
       summary: Withdraw offer
       operationId: withdrawRecJobOffer
-      description: |
-        Career portal — no JWT required.
-        Calls `REC.REC_JOB_OFFER_PKG.WITHDRAW_OFFER`.
-      security: []
+      description: Calls `REC.REC_JOB_OFFER_PKG.WITHDRAW_OFFER`. Allowed from `DRAFT`, `APPROVED`, or `EXTENDED`.
       requestBody:
         required: true
         content:
@@ -118,10 +187,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobOfferActionResponse'
-        '400':
-          $ref: '#/components/responses/ValidationOrPackageError'
+  /api/rec/job-offers/{offerGuid}:
+    parameters:
+      - $ref: '#/components/parameters/OfferGuidPath'
+    get:
+      tags: [Recruitment Job Offers]
+      summary: Get job offer details
+      operationId: getRecJobOfferByGuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobOfferDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   parameters:
+    EnterpriseIdQuery:
+      name: enterprise_id
+      in: query
+      required: true
+      schema: { type: integer, minimum: 1 }
+    PageQuery:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    LimitQuery:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
     OfferGuidPath:
       name: offerGuid
       in: path
@@ -130,43 +225,19 @@ components:
         type: string
         pattern: '^[0-9A-Fa-f]{32}$'
   responses:
-    ValidationOrPackageError:
-      description: Validation or package business error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    ServerError:
-      description: Server error
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Offer not found
   schemas:
-    ErrorResponse:
+    OfferStageFields:
       type: object
       properties:
-        success: { type: boolean, example: false }
-        status: { type: string, example: ERROR }
-        message: { type: string }
-    JobOfferComponent:
-      type: object
-      properties:
-        plan_id: { type: integer }
-        component_id: { type: integer }
-        amount: { type: number }
-        currency_code: { type: string }
-        frequency_code: { type: string }
+        stage: { type: string, example: Extend to Candidate }
+        status_code: { type: string, example: EXTENDED }
+        stage_description: { type: string }
+        decline_comments: { type: string, nullable: true, example: Accepted another opportunity. }
     JobOfferCreateRequest:
       type: object
-      required:
-        - enterprise_id
-        - application_guid
-        - candidate_guid
-        - posting_id
-        - job_title
-        - start_date
-        - created_by
+      required: [enterprise_id, application_guid, candidate_guid, posting_id, job_title, start_date, created_by]
       properties:
         enterprise_id: { type: integer }
         application_guid: { type: string }
@@ -175,44 +246,97 @@ components:
         job_title: { type: string }
         position_id: { type: string, nullable: true }
         department_id: { type: string, nullable: true }
-        location_id: { type: string, nullable: true }
+        location:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: Kuwait City, Kuwait
         work_mode_code: { type: string }
         employment_type_code: { type: string }
         grade_id: { type: integer, nullable: true }
         reporting_manager_id: { type: integer, nullable: true }
         start_date: { type: string, format: date }
         comments: { type: string }
-        components:
-          type: array
-          items:
-            $ref: '#/components/schemas/JobOfferComponent'
-        benefits:
-          type: object
-          additionalProperties: true
-        terms:
-          type: object
-          additionalProperties: true
+        components: { type: array, items: { type: object } }
+        benefits: { type: object }
+        terms: { type: object }
         created_by: { type: string }
     JobOfferCreateResponse:
       type: object
       properties:
         success: { type: boolean }
-        status: { type: string, example: SUCCESS }
-        message: { type: string, example: Offer created and sent successfully. }
+        status: { type: string }
+        message: { type: string, example: Offer created successfully. }
         data:
-          type: object
-          properties:
-            offer_id: { type: integer }
-            offer_guid: { type: string }
-            status_code: { type: string, example: SENT }
+          allOf:
+            - type: object
+              properties:
+                offer_id: { type: integer }
+                offer_guid: { type: string }
+            - $ref: '#/components/schemas/OfferStageFields'
     JobOfferActionRequest:
       type: object
       required: [updated_by]
       properties:
         updated_by: { type: string }
+    JobOfferDeclineRequest:
+      type: object
+      required: [decline_comments, updated_by]
+      properties:
+        decline_comments:
+          type: string
+          maxLength: 4000
+          example: Accepted another opportunity.
+        updated_by: { type: string, example: CANDIDATE }
     JobOfferActionResponse:
       type: object
       properties:
         success: { type: boolean }
         status: { type: string }
         message: { type: string }
+    JobOfferListItem:
+      allOf:
+        - type: object
+          properties:
+            offer_guid: { type: string }
+            offer_number: { type: string }
+        - $ref: '#/components/schemas/OfferStageFields'
+        - type: object
+          properties:
+            application_guid: { type: string }
+            application_number: { type: string }
+            candidate_guid: { type: string }
+            candidate_name: { type: string }
+            posting_id: { type: integer }
+            job_title: { type: string }
+            position_name: { type: string }
+            department_name: { type: string }
+            location: { type: string, example: Kuwait City, Kuwait }
+            start_date: { type: string, format: date }
+            offer_date: { type: string, format: date }
+            expiry_date: { type: string, format: date }
+    JobOfferListResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        meta: { type: object }
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobOfferListItem'
+    JobOfferDetailResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            offer:
+              allOf:
+                - type: object
+                - $ref: '#/components/schemas/OfferStageFields'
+            components: { type: array, items: { type: object } }
+            benefits: { type: object }
+            terms: { type: object }
