@@ -1,6 +1,51 @@
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
-import { sendPackageResponse } from '../../shared/recControllerHelpers.js';
-import { CREATE_SUCCESS_MESSAGE, OFFER_STATUS_SENT } from './recJobOfferConstants.js';
+import {
+  buildListPaginationMeta,
+  sendPackageResponse
+} from '../../shared/recControllerHelpers.js';
+import {
+  CREATE_SUCCESS_MESSAGE,
+  DETAIL_SUCCESS_MESSAGE,
+  LIST_SUCCESS_MESSAGE,
+  NOT_FOUND_MESSAGE,
+  OFFER_STAGE_DESCRIPTION_DRAFT,
+  OFFER_STAGE_DRAFT,
+  OFFER_STATUS_DRAFT
+} from './recJobOfferConstants.js';
+
+/**
+ * @param {import('express').Response} res
+ * @param {unknown[]} rows
+ * @param {{ page: number, limit: number, total: number }} meta
+ */
+export function sendJobOfferListResponse(res, rows, meta) {
+  return sendPackageResponse(res, 200, {
+    success: true,
+    message: LIST_SUCCESS_MESSAGE,
+    meta: buildListPaginationMeta(meta.page, meta.limit, meta.total),
+    data: rows
+  });
+}
+
+/**
+ * @param {import('express').Response} res
+ * @param {Record<string, unknown>} detail
+ */
+export function sendJobOfferDetailResponse(res, detail) {
+  return sendPackageResponse(res, 200, {
+    success: true,
+    message: DETAIL_SUCCESS_MESSAGE,
+    data: detail
+  });
+}
+
+/** @param {import('express').Response} res */
+export function sendJobOfferNotFoundResponse(res) {
+  return sendPackageResponse(res, 404, {
+    success: false,
+    message: NOT_FOUND_MESSAGE
+  });
+}
 
 /**
  * @param {import('express').Response} res
@@ -24,7 +69,9 @@ export function sendCreateJobOfferResponse(res, pkg) {
     data: {
       offer_id: pkg.offer_id ?? null,
       offer_guid: pkg.offer_guid ?? null,
-      status_code: OFFER_STATUS_SENT
+      stage: OFFER_STAGE_DRAFT,
+      status_code: OFFER_STATUS_DRAFT,
+      stage_description: OFFER_STAGE_DESCRIPTION_DRAFT
     }
   });
 }
