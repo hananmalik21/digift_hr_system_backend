@@ -330,7 +330,7 @@ app.use('/api/rec/job-postings', recJobPostingsController);
 // Recruitment — applications (REC.V_APPLICATIONS reads, REC.CREATE_APPLICATION_PKG mutations)
 app.use('/api/recruitment/applications', recApplicationsController);
 
-// Recruitment — job offers (REC.V_JOB_OFFERS reads, REC.REC_JOB_OFFER_PKG mutations)
+// Recruitment — job offers (REC.V_JOB_OFFER_MANAGEMENT reads, REC.REC_JOB_OFFER_PKG mutations)
 app.use('/api/rec/job-offers', recJobOffersController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)

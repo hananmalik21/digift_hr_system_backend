@@ -1,8 +1,5 @@
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
-import {
-  buildListPaginationMeta,
-  sendPackageResponse
-} from '../../shared/recControllerHelpers.js';
+import { sendPackageResponse } from '../../shared/recControllerHelpers.js';
 import {
   CREATE_SUCCESS_MESSAGE,
   DETAIL_SUCCESS_MESSAGE,
@@ -20,10 +17,14 @@ import {
  */
 export function sendJobOfferListResponse(res, rows, meta) {
   return sendPackageResponse(res, 200, {
-    success: true,
+    status: 'success',
     message: LIST_SUCCESS_MESSAGE,
-    meta: buildListPaginationMeta(meta.page, meta.limit, meta.total),
-    data: rows
+    data: rows,
+    pagination: {
+      page: meta.page,
+      limit: meta.limit,
+      total: meta.total
+    }
   });
 }
 

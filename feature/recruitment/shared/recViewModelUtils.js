@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError } from '../../../utils/errors/index.js';
 import { withConnection } from './oraclePackageUtils.js';
+import { pruneBindsForSql } from './recViewListSql.js';
 
 export { withConnection };
 
@@ -29,21 +30,19 @@ export async function fetchPaginatedRows(connection, opts) {
   const { view, selectSql, whereSql, binds, orderSql, page, limit, mapRow } = opts;
 
   const countSql = `SELECT COUNT(*) AS TOTAL_COUNT FROM ${view} v ${whereSql}`;
-  const countResult = await connection.execute(countSql, binds, ROW_OPTS);
+  const countBinds = pruneBindsForSql(countSql, binds);
+  const countResult = await connection.execute(countSql, countBinds, ROW_OPTS);
   const total =
     Number(countResult.rows?.[0]?.TOTAL_COUNT ?? countResult.rows?.[0]?.total_count ?? 0) || 0;
 
   const offset = (page - 1) * limit;
   const dataSql = `${selectSql} ${whereSql} ${orderSql} OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
-  const dataResult = await connection.execute(
-    dataSql,
-    {
-      ...binds,
-      offset: { val: offset, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-      limit: { val: limit, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
-    },
-    ROW_OPTS
-  );
+  const dataBinds = pruneBindsForSql(dataSql, {
+    ...binds,
+    offset: { val: offset, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+    limit: { val: limit, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+  });
+  const dataResult = await connection.execute(dataSql, dataBinds, ROW_OPTS);
 
   const rows = [];
   for (const row of dataResult.rows || []) {

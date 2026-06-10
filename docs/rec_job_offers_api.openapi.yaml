@@ -3,7 +3,7 @@ info:
   title: Digify ERP — Recruitment Job Offers API
   version: 3.0.0
   description: |
-    Job offers via `REC.REC_JOB_OFFER_PKG` and `REC.V_JOB_OFFERS`.
+    Job offers via `REC.REC_JOB_OFFER_PKG` and `REC.V_JOB_OFFER_MANAGEMENT`.
 
     **Lifecycle:** Draft Offer (`DRAFT`) → Offer Approval (`APPROVED` / `REJECTED`) → Extend to Candidate (`EXTENDED`) → Candidate Response (`ACCEPTED` / `DECLINED` / `EXPIRED`) or Company Action (`WITHDRAWN`).
 
@@ -18,24 +18,21 @@ paths:
   /api/rec/job-offers:
     get:
       tags: [Recruitment Job Offers]
-      summary: List job offers
+      summary: List job offers (offer management)
       operationId: listRecJobOffers
+      description: Reads from `REC.V_JOB_OFFER_MANAGEMENT` only.
       parameters:
         - $ref: '#/components/parameters/EnterpriseIdQuery'
-        - name: status_code
+        - name: status
           in: query
+          description: Matches `display_status` or `status_code`.
           schema:
             type: string
-            enum: [DRAFT, APPROVED, REJECTED, EXTENDED, ACCEPTED, DECLINED, EXPIRED, WITHDRAWN]
-        - name: candidate_guid
+            example: ACCEPTED
+        - name: search
           in: query
+          description: Searches offer number, job title, posting title, candidate name, and location.
           schema: { type: string }
-        - name: application_guid
-          in: query
-          schema: { type: string }
-        - name: posting_id
-          in: query
-          schema: { type: integer, minimum: 1 }
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/LimitQuery'
       responses:
@@ -297,37 +294,59 @@ components:
         status: { type: string }
         message: { type: string }
     JobOfferListItem:
-      allOf:
-        - type: object
-          properties:
-            offer_guid: { type: string }
-            offer_number: { type: string }
-        - $ref: '#/components/schemas/OfferStageFields'
-        - type: object
-          properties:
-            application_guid: { type: string }
-            application_number: { type: string }
-            candidate_guid: { type: string }
-            candidate_name: { type: string }
-            posting_id: { type: integer }
-            job_title: { type: string }
-            position_name: { type: string }
-            department_name: { type: string }
-            location: { type: string, example: Kuwait City, Kuwait }
-
-            start_date: { type: string, format: date }
-            offer_date: { type: string, format: date }
-            expiry_date: { type: string, format: date }
+      type: object
+      properties:
+        offer_id: { type: integer }
+        offer_guid: { type: string }
+        enterprise_id: { type: integer }
+        application_id: { type: integer }
+        candidate_guid: { type: string }
+        posting_id: { type: integer }
+        offer_number: { type: string }
+        posting_guid: { type: string }
+        posting_title: { type: string }
+        job_title: { type: string }
+        location: { type: string }
+        work_mode_code: { type: string }
+        employment_type_code: { type: string }
+        start_date: { type: string, format: date }
+        offer_date: { type: string, format: date }
+        expiry_date: { type: string, format: date }
+        status_code: { type: string }
+        approval_status: { type: string }
+        display_status: { type: string }
+        stage: { type: string }
+        stage_description: { type: string }
+        annual_salary: { type: number }
+        candidate_obj: { type: object }
+        posting_obj: { type: object }
+        position_obj: { type: object }
+        department_obj: { type: object }
+        grade_obj: { type: object }
+        components_json: { type: array, items: { type: object } }
+        benefits_json: { type: object }
+        terms_json: { type: object }
+        comments: { type: string, nullable: true }
+        decline_comments: { type: string, nullable: true }
+        created_by: { type: string }
+        creation_date: { type: string }
+        last_updated_by: { type: string }
+        last_update_date: { type: string }
     JobOfferListResponse:
       type: object
       properties:
-        success: { type: boolean }
+        status: { type: string, example: success }
         message: { type: string }
-        meta: { type: object }
         data:
           type: array
           items:
             $ref: '#/components/schemas/JobOfferListItem'
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
     JobOfferDetailResponse:
       type: object
       properties:

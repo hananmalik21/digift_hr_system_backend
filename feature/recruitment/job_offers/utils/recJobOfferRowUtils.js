@@ -42,6 +42,19 @@ export function formatDateOnly(v) {
   return s;
 }
 
+/** @param {unknown} v @returns {string|null} */
+export function formatDateTime(v) {
+  if (v == null) return null;
+  if (v instanceof Date) {
+    if (!Number.isFinite(v.getTime())) return null;
+    return v.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  const s = String(v).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) return s.slice(0, 19).replace('T', ' ');
+  return s;
+}
+
 export function normalizeYnFlag(v) {
   if (v == null || v === '') return null;
   const s = String(v).trim().toUpperCase();

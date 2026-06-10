@@ -7,17 +7,18 @@ import {
 } from '../../shared/recViewModelUtils.js';
 import { parseListPagination } from '../../shared/recViewQueryValidators.js';
 import {
-  JOB_OFFER_LIST_SELECT_SQL,
+  JOB_OFFER_MANAGEMENT_LIST_ORDER_SQL,
+  JOB_OFFER_MANAGEMENT_SELECT_SQL,
   LOG_TAG,
   READ_ERROR_MESSAGE,
-  REC_JOB_OFFERS_VIEW
+  REC_JOB_OFFER_MANAGEMENT_VIEW
 } from '../utils/recJobOfferConstants.js';
-import { buildJobOfferListFilters } from '../utils/recJobOfferListFilters.js';
+import { buildJobOfferManagementListFilters } from '../utils/recJobOfferManagementListFilters.js';
+import { mapJobOfferManagementListRow } from '../utils/recJobOfferManagementMappers.js';
 import {
   mapJobOfferBenefitsRow,
   mapJobOfferComponentRow,
   mapJobOfferDetailOffer,
-  mapJobOfferListRow,
   mapJobOfferTermsRow
 } from '../utils/recJobOfferMappers.js';
 import { OFFER_BY_GUID_WHERE, offerGuidBinds, rowKeyMap, safeFiniteNumber } from '../utils/recJobOfferRowUtils.js';
@@ -30,19 +31,19 @@ const OFFERS_TABLE = 'REC.REC_JOB_OFFERS';
 export async function listJobOffersFromView(query) {
   try {
     const { page, limit } = parseListPagination(query);
-    const { whereSql, binds } = buildJobOfferListFilters(query);
-    const selectSql = `SELECT ${JOB_OFFER_LIST_SELECT_SQL} FROM ${REC_JOB_OFFERS_VIEW} v`;
+    const { whereSql, binds } = buildJobOfferManagementListFilters(query);
+    const selectSql = `SELECT ${JOB_OFFER_MANAGEMENT_SELECT_SQL} FROM ${REC_JOB_OFFER_MANAGEMENT_VIEW} v`;
 
     return await withConnection((connection) =>
       fetchPaginatedRows(connection, {
-        view: REC_JOB_OFFERS_VIEW,
+        view: REC_JOB_OFFER_MANAGEMENT_VIEW,
         selectSql,
         whereSql,
         binds,
-        orderSql: 'ORDER BY v.OFFER_DATE DESC NULLS LAST, v.OFFER_NUMBER DESC NULLS LAST',
+        orderSql: JOB_OFFER_MANAGEMENT_LIST_ORDER_SQL,
         page,
         limit,
-        mapRow: mapJobOfferListRow
+        mapRow: mapJobOfferManagementListRow
       })
     );
   } catch (err) {

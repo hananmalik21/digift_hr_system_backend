@@ -9,30 +9,6 @@ import {
 } from './recJobOfferRowUtils.js';
 
 /** @param {Record<string, unknown>} row */
-export function mapJobOfferListRow(row) {
-  const m = rowKeyMap(row);
-
-  return {
-    offer_guid: normalizeGuidValue(m.offer_guid),
-    offer_number: strOrNull(m.offer_number),
-    ...mapOfferStageFields(m),
-    application_guid: normalizeGuidValue(m.application_guid),
-    application_number: strOrNull(m.application_number),
-    candidate_guid: normalizeGuidValue(m.candidate_guid),
-    candidate_name: strOrNull(m.candidate_name),
-    posting_id: safeFiniteNumber(m.posting_id),
-    job_title: strOrNull(m.job_title),
-    position_name: strOrNull(m.position_name),
-    department_name: strOrNull(m.department_name),
-    location: strOrNull(m.location),
-
-    start_date: formatDateOnly(m.start_date),
-    offer_date: formatDateOnly(m.offer_date),
-    expiry_date: formatDateOnly(m.expiry_date)
-  };
-}
-
-/** @param {Record<string, unknown>} row */
 export function mapJobOfferDetailOffer(row) {
   const m = rowKeyMap(row);
 
