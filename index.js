@@ -62,6 +62,7 @@ import compAdjustmentsRoutes from './feature/compensation/adjustments/routes/com
 import compEmployeeAssignedComponentsRoutes from './feature/compensation/employee_assigned_components/routes/compEmployeeAssignedComponents.routes.js';
 import compEmployeeComponentsJsonRoutes from './feature/compensation/employee_components_json/routes/compEmployeeComponentsJson.routes.js';
 import compEligiblePlansByCriteriaRoutes from './feature/compensation/eligible_plans_by_criteria/routes/compEligiblePlansByCriteria.routes.js';
+import compEligiblePlansByPositionRoutes from './feature/compensation/eligible_plans_by_position/routes/compEligiblePlansByPosition.routes.js';
 import compEligiblePlansRoutes from './feature/compensation/eligible_plans/routes/compEligiblePlans.routes.js';
 import compensationPlanController from './feature/compensation/plans/controller/compensationPlanController.js';
 import compPlansFullViewController from './feature/compensation/plans/controller/compPlansFullViewController.js';
@@ -262,6 +263,7 @@ app.use('/api/comp', compAdjustmentsRoutes);
 app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
 app.use('/api/comp', compEmployeeComponentsJsonRoutes);
 app.use('/api/comp', compEligiblePlansByCriteriaRoutes);
+app.use('/api/comp', compEligiblePlansByPositionRoutes);
 app.use('/api/comp', compEligiblePlansRoutes);
 app.use('/api/comp', compPlansFullViewController);
 app.use('/api/compensation/plans', compensationPlanController);
