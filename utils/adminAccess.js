@@ -1,32 +1,26 @@
 /**
- * Admin access helpers for the two platform admin tiers:
+ * Admin access helpers for the platform admin account:
  *
- *   super_admin      — cross-enterprise (any tenant_id on requests)
- *   enterprise_admin — full function access within one enterprise (JWT enterprise_id)
+ *   enterprise_admin — full function and data access within one enterprise (JWT enterprise_id)
  *
  * Admin type is resolved at login from seeded user_code/username, job-role codes, and
- * stored on the JWT as `admin_type`. Super admin takes precedence over enterprise admin.
+ * stored on the JWT as `admin_type`.
  */
 
 export const ADMIN_TYPE = {
-  SUPER: 'super_admin',
   ENTERPRISE: 'enterprise_admin'
 };
-
-/** Job-role codes that grant platform-wide (all enterprises) access. */
-export const SUPER_ADMIN_ROLE_CODES = new Set([
-  'SUPER_ADMIN',
-  'SUPERADMIN',
-  'PLATFORM_ADMIN',
-  'PLATFORMADMIN'
-]);
 
 /** Job-role codes that grant full access within the user's enterprise. */
 export const ENTERPRISE_ADMIN_ROLE_CODES = new Set([
   'ENTERPRISE_ADMIN',
   'ENTERPRISEADMIN',
   'TENANT_ADMIN',
-  'TENANTADMIN'
+  'TENANTADMIN',
+  'SUPER_ADMIN',
+  'SUPERADMIN',
+  'PLATFORM_ADMIN',
+  'PLATFORMADMIN'
 ]);
 
 function asArray(v) {
@@ -84,14 +78,13 @@ function normalizedIdentity(value) {
  * Seeded admin accounts (user_code / username) map to admin_type without job roles.
  *
  * @param {{ user_info?: object }|null|undefined} profile
- * @returns {'super_admin'|'enterprise_admin'|null}
+ * @returns {'enterprise_admin'|null}
  */
 export function resolveAdminTypeFromUserInfo(profile) {
   const info = asObject(profile?.user_info) ?? {};
   const code = normalizedIdentity(info.user_code ?? info.userCode);
   const username = normalizedIdentity(info.username ?? info.user_name ?? info.userName);
 
-  if (code === 'super_admin' || username === 'super_admin') return ADMIN_TYPE.SUPER;
   if (code === 'enterprise_admin' || username === 'enterprise_admin') return ADMIN_TYPE.ENTERPRISE;
   return null;
 }
@@ -100,31 +93,17 @@ export function resolveAdminTypeFromUserInfo(profile) {
  * Derive admin_type from a user-complete-info payload (or any object with `roles`).
  *
  * @param {{ roles?: unknown, user_info?: object }|null|undefined} profile
- * @returns {'super_admin'|'enterprise_admin'|null}
+ * @returns {'enterprise_admin'|null}
  */
 export function resolveAdminTypeFromProfile(profile) {
   const fromUser = resolveAdminTypeFromUserInfo(profile);
-  if (fromUser === ADMIN_TYPE.SUPER) return ADMIN_TYPE.SUPER;
-
-  const codes = collectRoleCodesFromUserRoles(profile?.roles);
-  for (const code of codes) {
-    if (SUPER_ADMIN_ROLE_CODES.has(code)) return ADMIN_TYPE.SUPER;
-  }
-
   if (fromUser === ADMIN_TYPE.ENTERPRISE) return ADMIN_TYPE.ENTERPRISE;
 
+  const codes = collectRoleCodesFromUserRoles(profile?.roles);
   for (const code of codes) {
     if (ENTERPRISE_ADMIN_ROLE_CODES.has(code)) return ADMIN_TYPE.ENTERPRISE;
   }
   return null;
-}
-
-/**
- * @param {import('express').Request} req
- * @returns {boolean}
- */
-export function isSuperAdmin(req) {
-  return req?.user?.admin_type === ADMIN_TYPE.SUPER;
 }
 
 /**
@@ -136,13 +115,11 @@ export function isEnterpriseAdmin(req) {
 }
 
 /**
- * Either admin tier (super or enterprise).
- *
  * @param {import('express').Request} req
  * @returns {boolean}
  */
 export function isAnyAdmin(req) {
-  return isSuperAdmin(req) || isEnterpriseAdmin(req);
+  return isEnterpriseAdmin(req);
 }
 
 /**
@@ -152,17 +129,17 @@ export function isAnyAdmin(req) {
  * @returns {boolean}
  */
 export function bypassesFunctionPermissions(req) {
-  return isAnyAdmin(req);
+  return isEnterpriseAdmin(req);
 }
 
 /**
  * Platform admins bypass FNDSEC employee/org data-access checks
  * (CAN_ACCESS_EMPLOYEE / CAN_ACCESS_ORG_UNIT / V_USER_ACCESSIBLE_EMPLOYEES).
- * Tenant scoping still applies via getScopedTenantId / query enterprise_id.
+ * Tenant scoping still applies via JWT enterprise_id / getScopedTenantId.
  *
  * @param {import('express').Request} req
  * @returns {boolean}
  */
 export function bypassesEmployeeDataAccess(req) {
-  return isAnyAdmin(req);
+  return isEnterpriseAdmin(req);
 }

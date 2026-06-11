@@ -297,8 +297,7 @@ export async function getUserCompleteInfoByGuid(userGuidRaw) {
 
   const normalizedRoles = normalizeRolesHierarchy(roles);
   const adminType = resolveAdminTypeFromUserInfo({ user_info });
-  const isPlatformAdmin =
-    adminType === ADMIN_TYPE.ENTERPRISE || adminType === ADMIN_TYPE.SUPER;
+  const isPlatformAdmin = adminType === ADMIN_TYPE.ENTERPRISE;
 
   let permission_keys_out;
   if (isPlatformAdmin) {

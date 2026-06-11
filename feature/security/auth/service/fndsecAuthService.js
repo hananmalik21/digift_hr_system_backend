@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { parseTenantId } from '../../../../utils/tenantUtils.js';
 import { verifyUserPassword } from '../../../../utils/passwordVerification.js';
+import { resolveAdminTypeFromUserInfo } from '../../../../utils/adminAccess.js';
 import { fetchPasswordHashForLogin, loginUserViaPackage } from '../repository/fndsecAuthRepository.js';
 import { authDebugEnabled } from '../utils/authDebug.js';
 
@@ -131,7 +132,12 @@ export async function loginUserService(body) {
   const responseUserGuid = userObj.user_guid ?? userObj.userGuid ?? null;
   const responseEnterpriseId = userObj.enterprise_id ?? userObj.enterpriseId ?? enterprise_id;
   const responseUsername = userObj.username ?? userObj.user_name ?? login_id;
-  const adminType = userObj.admin_type ?? userObj.adminType ?? null;
+  const adminType = resolveAdminTypeFromUserInfo({
+    user_info: {
+      user_code: userObj.user_code ?? userObj.userCode,
+      username: responseUsername
+    }
+  });
 
   const tokenPayload = {
     user_id: responseUserId,

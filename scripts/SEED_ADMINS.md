@@ -1,32 +1,27 @@
-# Platform admin seed users
+# Platform admin seed user
 
-Digify ERP bootstraps two **system admin accounts** so every environment and every enterprise has a ready-to-use login. These are not employee-linked accounts and do not use job roles; permissions are resolved from `admin_type` and the full function catalog.
+Digify ERP bootstraps an **enterprise_admin** account so every environment and every enterprise has a ready-to-use login. This is not an employee-linked account and does not use job roles; permissions are resolved from `admin_type` and the full function catalog.
 
-## Seeded accounts
+## Seeded account
 
 | Account | Scope | Where created |
 |---------|--------|----------------|
-| **enterprise_admin** | Full function access within one enterprise (JWT `enterprise_id`) | Every enterprise — seed enterprise + auto on enterprise create + backfill |
-| **super_admin** | Cross-enterprise access (any `tenant_id` / `enterprise_id`) | Seed enterprise only (default: enterprise `1`) |
+| **enterprise_admin** | Full function and data access within one enterprise (JWT `enterprise_id`) | Every enterprise — seed enterprise + auto on enterprise create + backfill |
 
 ### Default credentials (change in production)
 
-| Field | enterprise_admin | super_admin |
-|-------|------------------|-------------|
-| Username | `enterprise_admin` | `super_admin` |
-| Password | `Admin!ChangeMe` | `Admin!ChangeMe` |
-| Email (enterprise 1) | `enterprise_admin@localhost.local` | `super_admin@localhost.local` |
-| Email (other enterprises) | `enterprise_admin+{enterpriseId}@localhost.local` | — |
+| Field | Value |
+|-------|--------|
+| Username | `enterprise_admin` |
+| Password | `Admin!ChangeMe` |
+| Email (enterprise 1) | `enterprise_admin@localhost.local` |
+| Email (other enterprises) | `enterprise_admin+{enterpriseId}@localhost.local` |
 
 ---
 
-## Super admin vs enterprise admin
+## Runtime behavior
 
-These two tiers behave differently at **login/storage** vs **runtime access**.
-
-### What is the same
-
-| | Both platform admins |
+| | **enterprise_admin** |
 |--|---------------------|
 | **User record** | Normal row in `FNDSEC.FNDSEC_USERS` |
 | **Employee link** | None (`employee_id = null`) |
@@ -34,57 +29,7 @@ These two tiers behave differently at **login/storage** vs **runtime access**.
 | **Permissions** | Full catalog from `FNDSEC.FNDSEC_FUNCTIONS` (~140 keys), not from RBAC hierarchy |
 | **Function checks** | Bypass fine-grained permission-key gates (`admin_type` on JWT) |
 | **Employee / data access** | Bypass FNDSEC `CAN_ACCESS_EMPLOYEE` / job-role & data-role row filters via `bypassesEmployeeDataAccess()` → `employeeAccessOptionsFromReq(req)` on secured list APIs |
-
-### What is different
-
-| | **enterprise_admin** | **super_admin** |
-|--|---------------------|-----------------|
-| **Purpose** | Admin for **one tenant** | **Platform-wide** operator |
-| **How many** | **One per enterprise** (backfill + enterprise create) | **One per environment** (seed enterprise only) |
-| **Home enterprise** | The enterprise it belongs to | Stored under seed enterprise (default `1`) — a **login anchor**, not an access limit |
-| **JWT `enterprise_id`** | Fixed to that tenant | Set to home enterprise at login |
-| **JWT `admin_type`** | `enterprise_admin` | `super_admin` |
-| **Calling APIs** | `tenant_id` / `enterprise_id` on requests is **ignored**; JWT enterprise always wins | May pass **any** `tenant_id` / `enterprise_id` on query/body/header to act on that tenant |
-| **Employee / data scope** | **Bypasses** FNDSEC employee/data-access checks (`CAN_ACCESS_EMPLOYEE`, job/data roles) within the scoped tenant | Same — sees all employees/users in the tenant selected on the request |
-
-### Super admin is global at runtime, not in the database
-
-`super_admin` is **not** a special Oracle user type and **not** stored without an enterprise. It is a normal security user with:
-
-- `user_code` / `username` = `super_admin`
-- `ENTERPRISE_ID` = seed enterprise (default `1`)
-
-**Global access is not from the DB row.** It comes from:
-
-1. Login resolves `admin_type = super_admin` from `user_code` / `username` (`FNDSEC_AUTH_PKG` + `utils/adminAccess.js`).
-2. JWT carries `admin_type: "super_admin"`.
-3. Middleware and `getScopedTenantId()` (`utils/tenantUtils.js`) let super admin **choose the tenant per request** instead of locking to JWT `enterprise_id`.
-
-```
-Login (DB)                         After login (API)
-─────────────────────────         ─────────────────────────────────────
-FNDSEC_USERS row                  JWT: admin_type = super_admin
-  enterprise_id = 1                 enterprise_id = 1  (home / login anchor)
-  username = super_admin
-                                  GET /api/...?tenant_id=7   → acts on enterprise 7
-No employee, no job roles         POST body tenant_id=12       → acts on enterprise 12
-```
-
-**Why login still needs `enterprise_id`:** usernames are unique **per enterprise** in `FNDSEC_USERS`. Every enterprise can have its own `enterprise_admin`; the same login id can exist in multiple tenants. `enterprise_id` on login selects **which row** to authenticate — for `super_admin`, use the seed enterprise (default `1`).
-
-```http
-POST /api/security/auth/login
-
-{
-  "login_id": "super_admin",
-  "password": "Admin!ChangeMe",
-  "enterprise_id": 1
-}
-```
-
-**Super admin is never backfilled per enterprise** — only `enterprise_admin` is created for each new/missing tenant. There is intentionally a single platform super admin (plus optional future ones you create manually under the same pattern).
-
----
+| **Tenant scope** | Locked to JWT `enterprise_id`; client `tenant_id` / `enterprise_id` cannot override |
 
 **Login requires `enterprise_id`** (same username can exist per tenant):
 
@@ -109,8 +54,8 @@ Node (config + Argon2 hash)
         ▼
 FNDSEC.FNDSEC_ADMIN_SEED_PKG
         │
-        ├── ENSURE_PLATFORM_ADMIN   → one admin for one enterprise
-        └── SEED_PLATFORM_ADMINS    → enterprise_admin + super_admin for seed enterprise
+        ├── ENSURE_PLATFORM_ADMIN   → one enterprise_admin for one enterprise
+        └── SEED_PLATFORM_ADMINS    → enterprise_admin for seed enterprise
         │
         ▼
 FNDSEC.FNDSEC_USERS_PKG (CREATE_USER / UPDATE_USER)
@@ -119,8 +64,8 @@ FNDSEC.FNDSEC_USERS_PKG (CREATE_USER / UPDATE_USER)
 ```
 
 - **Password hashing** is done in Node (Argon2id); the DB package receives `password_hash`.
-- **Permissions** for these users come from all active rows in `FNDSEC.FNDSEC_FUNCTIONS` (~140 keys), not from RBAC job roles. Profile returns `roles: []`.
-- **`admin_type`** on login JWT: `enterprise_admin` or `super_admin`.
+- **Permissions** for this user come from all active rows in `FNDSEC.FNDSEC_FUNCTIONS` (~140 keys), not from RBAC job roles. Profile returns `roles: []`.
+- **`admin_type`** on login JWT: `enterprise_admin` (resolved in Node from `user_code` / `username`).
 
 ---
 
@@ -133,8 +78,8 @@ File: `scripts/seed-admin.config.js`
 | Option | Default | Description |
 |--------|---------|-------------|
 | `enabled` | `true` | Set `false` to skip seed and backfill |
-| `enterpriseId` | `1` | Seed enterprise (super_admin + fixed enterprise_admin email) |
-| `password` | `Admin!ChangeMe` | Initial password for seeded admins |
+| `enterpriseId` | `1` | Seed enterprise |
+| `password` | `Admin!ChangeMe` | Initial password for seeded admin |
 | `skipIfUserExists` | `true` | Skip create if user already exists; still normalizes existing admin |
 | `backfillActiveOnly` | `true` | Backfill only enterprises with `IS_ACTIVE = 'Y'` |
 
@@ -163,8 +108,8 @@ export default {
 
 | Trigger | What happens |
 |---------|----------------|
-| **App startup** (`index.js`) | Seed platform admins for configured enterprise, then backfill missing `enterprise_admin` per enterprise |
-| **`npm run seed:admins`** | Seed `enterprise_admin` + `super_admin` for seed enterprise |
+| **App startup** (`index.js`) | Seed `enterprise_admin` for configured enterprise, then backfill missing admins per enterprise |
+| **`npm run seed:admins`** | Seed `enterprise_admin` for seed enterprise |
 | **`npm run seed:admins:backfill`** | Create `enterprise_admin` for active enterprises that don't have one |
 | **New enterprise created** | `POST /api/enterprises` or onboard-enterprise-hierarchy → `enterprise_admin` for that tenant |
 
@@ -226,3 +171,4 @@ If `FNDSEC_AUTH_PKG` is not redeployed, login still works — password lookup us
 | `NJS-003` / closed connection on login | Fixed in auth repository — ensure latest code; restart app |
 | Backfill skips enterprises | Enterprise already has `enterprise_admin`, or `IS_ACTIVE != 'Y'` and `backfillActiveOnly` is true |
 | Only ~7 permission keys | User has job roles attached — re-run seed; package clears roles on normalize |
+| Empty employee list as admin | Log in as `enterprise_admin` with matching `enterprise_id`; JWT must include `admin_type: enterprise_admin` |

@@ -15,7 +15,7 @@ const LOG = '[seed-admins]';
 function mergeSeedConfig(base, local) {
   if (!local || typeof local !== 'object') return base;
   const out = { ...base, ...local };
-  for (const key of ['enterpriseAdmin', 'superAdmin']) {
+  for (const key of ['enterpriseAdmin']) {
     if (base[key] && typeof base[key] === 'object') {
       out[key] = {
         ...base[key],
@@ -84,7 +84,6 @@ export function validateSeedAdminConfig(cfg) {
     errors.push('password is required (seed-admin.config.js or ADMIN_SEED_PASSWORD env)');
   }
   errors.push(...validateUserBlock(cfg?.enterpriseAdmin?.user, 'enterpriseAdmin'));
-  errors.push(...validateUserBlock(cfg?.superAdmin?.user, 'superAdmin'));
   return { errors, enterpriseId, password: String(cfg?.password ?? '') };
 }
 
@@ -107,9 +106,6 @@ function buildSeedPackagePayload(cfg, passwordHash) {
     skip_if_exists: cfg.skipIfUserExists !== false,
     enterprise_admin: {
       user: mapUserProfileToDb(cfg.enterpriseAdmin.user)
-    },
-    super_admin: {
-      user: mapUserProfileToDb(cfg.superAdmin.user)
     }
   };
 }
@@ -200,9 +196,6 @@ export async function ensureSeedAdminUsers() {
     console.error(`${LOG} seed failed for enterprise ${enterpriseId}:`, result.message);
     if (result.enterpriseAdmin && !result.enterpriseAdmin.ok) {
       console.error(`${LOG} enterprise_admin:`, result.enterpriseAdmin.message);
-    }
-    if (result.superAdmin && !result.superAdmin.ok) {
-      console.error(`${LOG} super_admin:`, result.superAdmin.message);
     }
   }
 

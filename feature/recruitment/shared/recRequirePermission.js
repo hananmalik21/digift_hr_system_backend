@@ -4,7 +4,7 @@ import { bypassesFunctionPermissions } from '../../../utils/adminAccess.js';
 /**
  * Optional permission gate. Set REC_ENFORCE_PERMISSIONS=true to require
  * `req.user.permissions` (string array) to include the function code.
- * Enterprise and super admins bypass this check.
+ * Enterprise admins bypass this check.
  *
  * @param {string} permissionCode
  */
