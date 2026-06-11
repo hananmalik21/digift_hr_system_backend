@@ -1002,11 +1002,13 @@ class ScheduleAssignmentModel {
       // binds, each :N occurrence counts as a separate position and causes
       // ORA-01008.
       const fromClause = `${this.TABLE_NAME} sa`;
+      const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
       const securityCondition = employeeAccessPredicate(
         'sa.TENANT_ID',
         'sa.EMPLOYEE_ID',
         'RAWTOHEX(sa.DEPARTMENT_ID)',
-        ':user_id'
+        ':user_id',
+        accessOptions
       );
 
       let dataSql = `
@@ -1161,17 +1163,18 @@ class ScheduleAssignmentModel {
    *   CAN_ACCESS_ORG_UNIT against DEPARTMENT_ID. Passing null/undefined keeps
    *   legacy behavior (used by create/update/delete flows).
    */
-  static async findById(scheduleAssignmentId, tenantId, userId = null) {
+  static async findById(scheduleAssignmentId, tenantId, userId = null, options = {}) {
     try {
       if (tenantId === null || tenantId === undefined) throw new ValidationError('tenant_id is required');
 
       const applySecurity = userId !== null && userId !== undefined;
-      // Use named binds: the security predicate references :user_id twice.
+      const accessOptions = options.bypassEmployeeAccess ? { bypass: true } : undefined;
       const securityCondition = employeeAccessPredicate(
         'sa.TENANT_ID',
         'sa.EMPLOYEE_ID',
         'RAWTOHEX(sa.DEPARTMENT_ID)',
-        ':user_id'
+        ':user_id',
+        accessOptions
       );
       const sql = applySecurity
         ? `

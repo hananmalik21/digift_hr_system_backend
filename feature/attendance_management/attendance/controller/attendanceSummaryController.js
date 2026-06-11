@@ -7,7 +7,7 @@ import { getAttendanceSummary } from '../model/attendanceSummaryModel.js';
 import { sendValidationError, sendDatabaseError, sendError } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { requireActingUserId, logSecuredAccess } from '../../../../utils/userContext.js';
+import { requireActingUserId, logSecuredAccess, employeeAccessOptionsFromReq } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
@@ -38,6 +38,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const filters = {
     enterprise_id: enterpriseId,
     user_id: actingUserId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
     from_date: req.query.from_date ?? req.query.date_from ?? null,
     to_date: req.query.to_date ?? req.query.date_to ?? null,
     attendance_date: req.query.attendance_date ?? null,

@@ -22,7 +22,8 @@ import { asyncHandler } from '../../middleware/asyncHandler.js';
 import {
   requireActingUserId,
   logSecuredAccess,
-  handleSecuredQueryError
+  handleSecuredQueryError,
+  employeeAccessOptionsFromReq
 } from '../../utils/userContext.js';
 
 const ROUTE_TAG_LIST = 'GET /api/tm/overtime/requests';
@@ -61,6 +62,7 @@ export const list = asyncHandler(async (req, res) => {
   try {
     result = await listRequests(data.tenant_id, {
       user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
       status: data.status,
       date_from: data.date_from,
       date_to: data.date_to,

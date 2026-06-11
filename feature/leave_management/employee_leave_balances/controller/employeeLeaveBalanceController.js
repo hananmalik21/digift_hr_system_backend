@@ -23,6 +23,7 @@ import { getUserId } from '../../../../utils/requestUtils.js';
 import {
   requireActingUserId,
   canAccessEmployee,
+  employeeAccessOptionsFromReq,
   logSecuredAccess
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
@@ -263,7 +264,8 @@ router.get('/employees/:employeeGuid/leave-balances', async (req, res) => {
     const allowed = await canAccessEmployee({
       userId: actingUserId,
       enterpriseId: tenantId,
-      employeeId
+      employeeId,
+      bypass: employeeAccessOptionsFromReq(req).bypass
     });
     if (!allowed) {
       if (IS_DEV_MODE) {
@@ -489,6 +491,7 @@ router.get('/leave-balances', async (req, res) => {
     const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
       tenantId,
       userId: actingUserId,
+      bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
       page,
       pageSize,
       search: req.query.search ?? null,

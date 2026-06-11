@@ -147,11 +147,22 @@ export function isAnyAdmin(req) {
 
 /**
  * Admins bypass fine-grained permission-key checks (function-level).
- * Data-level FNDSEC checks may still apply unless Oracle grants full data roles.
  *
  * @param {import('express').Request} req
  * @returns {boolean}
  */
 export function bypassesFunctionPermissions(req) {
+  return isAnyAdmin(req);
+}
+
+/**
+ * Platform admins bypass FNDSEC employee/org data-access checks
+ * (CAN_ACCESS_EMPLOYEE / CAN_ACCESS_ORG_UNIT / V_USER_ACCESSIBLE_EMPLOYEES).
+ * Tenant scoping still applies via getScopedTenantId / query enterprise_id.
+ *
+ * @param {import('express').Request} req
+ * @returns {boolean}
+ */
+export function bypassesEmployeeDataAccess(req) {
   return isAnyAdmin(req);
 }

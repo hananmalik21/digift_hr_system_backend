@@ -19,7 +19,7 @@ import {
 } from '../view/leaveRequestView.js';
 import { parseGuid } from '../../../../utils/guidUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { requireActingUserId, logSecuredAccess } from '../../../../utils/userContext.js';
+import { requireActingUserId, logSecuredAccess, employeeAccessOptionsFromReq } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const ROUTE_TAG_LIST = 'GET /api/abs/leave-requests';
@@ -336,7 +336,10 @@ router.get('/', async (req, res) => {
   if (actingUserId == null) return; // 401 already sent
 
   try {
-    const filters = { userId: actingUserId };
+    const filters = {
+      userId: actingUserId,
+      bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass
+    };
 
     // TENANT_ID should be included for multi-tenant filtering (better performance and security)
     // Check both query param and header, prefer query param if provided

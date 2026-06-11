@@ -10,7 +10,7 @@ import { getConnection } from '../config/db.js';
 import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
 import { getEmployeeListRowByEmployeeId } from '../feature/employee_management/employees/controller/employeeController.js';
 import EmployeeModel from '../feature/employee_management/employees/model/employeeModel.js';
-import { requireActingUserId, logSecuredAccess } from '../utils/userContext.js';
+import { requireActingUserId, logSecuredAccess, employeeAccessOptionsFromReq } from '../utils/userContext.js';
 import { IS_DEV_MODE } from '../utils/env.js';
 
 const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
@@ -67,6 +67,7 @@ export async function getEmplEmployeesListHandler(req, res) {
     const { data, next_cursor, has_next } = await getEmplEmployeesList({
       enterprise_id: enterpriseId,
       user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
       limit: q.limit,
       cursor: q.cursor,
       sort_by: q.sort_by,

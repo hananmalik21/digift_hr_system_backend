@@ -45,6 +45,7 @@ function countFromRow(row) {
  * @typedef {Object} UsersListFilters
  * @property {number} enterprise_id
  * @property {number} acting_user_id - JWT-resolved acting user_id for FNDSEC checks (required)
+ * @property {boolean} [bypass_employee_access] - platform admins skip CAN_ACCESS_EMPLOYEE
  * @property {string|null} username_inner - LIKE middle (already escaped for LIKE), or null
  * @property {string|null} primary_email_inner
  * @property {string|null} account_status
@@ -71,6 +72,7 @@ export async function queryUsersList(filters, pagination) {
   const {
     enterprise_id,
     acting_user_id,
+    bypass_employee_access,
     username_inner,
     primary_email_inner,
     account_status,
@@ -85,6 +87,8 @@ export async function queryUsersList(filters, pagination) {
     throw new ValidationError('Validation failed', ['acting user_id is required']);
   }
 
+  const accessOptions = bypass_employee_access ? { bypass: true } : undefined;
+
   const binds = {
     enterprise_id: { val: enterprise_id, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
     acting_user_id: { val: actingUserIdNum, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
@@ -97,7 +101,7 @@ export async function queryUsersList(filters, pagination) {
 
   const whereParts = [
     'v.ENTERPRISE_ID = :enterprise_id',
-    nullableEmployeeAccessPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':acting_user_id'),
+    nullableEmployeeAccessPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':acting_user_id', accessOptions),
     `(:username_inner IS NULL OR LOWER(v.USERNAME) LIKE LOWER('%' || :username_inner || '%') ESCAPE '\\')`,
     `(:primary_email_inner IS NULL OR LOWER(v.PRIMARY_EMAIL) LIKE LOWER('%' || :primary_email_inner || '%') ESCAPE '\\')`,
     '(:account_status IS NULL OR v.ACCOUNT_STATUS = :account_status)',

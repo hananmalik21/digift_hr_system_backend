@@ -22,7 +22,8 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   requireActingUserId,
   logSecuredAccess,
-  handleSecuredQueryError
+  handleSecuredQueryError,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 
 const router = express.Router();
@@ -35,7 +36,7 @@ const LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
 const listCache = new Map();
 
 function listCacheKey(filters) {
-  return `list:${filters.enterpriseId}:${filters.userId}:${filters.page}:${filters.limit}:${filters.sortBy}:${filters.sortOrder}:${filters.search ?? ''}:${filters.status ?? ''}:${filters.isActive ?? ''}:${filters.employeeId ?? ''}:${filters.weekStartFrom ?? ''}:${filters.weekStartTo ?? ''}:${filters.submittedFrom ?? ''}:${filters.submittedTo ?? ''}:${filters.levelCode ?? ''}:${filters.orgUnitId ?? ''}`;
+  return `list:${filters.enterpriseId}:${filters.userId}:${filters.bypassEmployeeAccess ? '1' : '0'}:${filters.page}:${filters.limit}:${filters.sortBy}:${filters.sortOrder}:${filters.search ?? ''}:${filters.status ?? ''}:${filters.isActive ?? ''}:${filters.employeeId ?? ''}:${filters.weekStartFrom ?? ''}:${filters.weekStartTo ?? ''}:${filters.submittedFrom ?? ''}:${filters.submittedTo ?? ''}:${filters.levelCode ?? ''}:${filters.orgUnitId ?? ''}`;
 }
 
 function invalidateTimesheetsListCache() {
@@ -374,6 +375,7 @@ router.get('/', asyncHandler(async (req, res) => {
   const filters = {
     enterpriseId,
     userId: actingUserId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
     page: req.query.page ?? 1,
     limit: req.query.limit ?? 10,
     search: req.query.search,

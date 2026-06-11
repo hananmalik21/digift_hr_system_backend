@@ -968,6 +968,7 @@ export async function listTimesheetsFromView(filters) {
     limit
   };
 
+  const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
   const whereClause = `
     v.ENTERPRISE_ID = :enterpriseId
     AND (:search IS NULL OR LOWER(v.SEARCH) LIKE '%' || LOWER(:search) || '%')
@@ -978,7 +979,7 @@ export async function listTimesheetsFromView(filters) {
     AND (:weekStartTo IS NULL OR v.WEEK_START_DATE <= TO_DATE(:weekStartTo,'YYYY-MM-DD'))
     AND (:submittedFrom IS NULL OR v.SUBMITTED_DATE >= TO_DATE(:submittedFrom,'YYYY-MM-DD'))
     AND (:submittedTo IS NULL OR v.SUBMITTED_DATE <= TO_DATE(:submittedTo,'YYYY-MM-DD'))
-    AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId')}
+    AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId', accessOptions)}
     AND (
       :levelCode IS NULL
       OR :orgUnitId IS NULL

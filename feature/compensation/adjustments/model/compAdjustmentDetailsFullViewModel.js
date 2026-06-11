@@ -164,9 +164,10 @@ function buildWhereClause(filters, entCol) {
     throw new AdjustmentListValidationError('user_id is required');
   }
 
+  const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
   const whereParts = [
     `v.${entCol} = :enterprise_id`,
-    employeeAccessFunctionPredicate(`v.${entCol}`, 'v.EMPLOYEE_ID', ':user_id')
+    employeeAccessFunctionPredicate(`v.${entCol}`, 'v.EMPLOYEE_ID', ':user_id', accessOptions)
   ];
   const binds = { enterprise_id: filters.enterprise_id, user_id: userIdNum };
 

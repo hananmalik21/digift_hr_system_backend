@@ -346,11 +346,10 @@ export async function getEmplEmployeesList(params) {
   const { cursorCondition, orderBy, binds: cursorBinds } = buildCursorAndOrder(cursor, binds);
   Object.assign(binds, cursorBinds);
 
+  const accessOptions = params.bypass_employee_access ? { bypass: true } : undefined;
   const whereClause = whereParts.join(' AND ');
-  // FNDSEC DB-level data access: JOIN ensures only employees the acting user is
-  // authorized to access (per FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE) are returned.
   const sql = `SELECT v.* FROM ${VIEW} v
-  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}
   WHERE ${whereClause}
   ${cursorCondition}
   ORDER BY ${orderBy}

@@ -16,7 +16,8 @@ import { parseSalaryChangeHistoryQuery } from '../utils/parseSalaryChangeHistory
 import {
   requireActingUserId,
   logSecuredAccess,
-  EMPLOYEE_ACCESS_SECURITY_LABEL
+  EMPLOYEE_ACCESS_SECURITY_LABEL,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
@@ -64,7 +65,8 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
   try {
     const { total, rows } = await fetchSalaryChangeHistory({
       ...parsed,
-      user_id: actingUserId
+      user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass
     });
 
     logSecuredAccess(ROUTE_TAG_LIST, {

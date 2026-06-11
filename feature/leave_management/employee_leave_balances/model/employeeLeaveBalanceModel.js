@@ -3486,8 +3486,9 @@ END;`;
     const v = 'v';
 
     // View uses ENTERPRISE_ID (not TENANT_ID). API tenant_id maps to enterprise.
+    const accessOptions = options.bypassEmployeeAccess ? { bypass: true } : undefined;
     const securityPredicate = acting != null
-      ? `\n        AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}`
+      ? `\n        AND ${employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}`
       : '';
 
     const baseWhere = `WHERE v.ENTERPRISE_ID = :enterprise_id
