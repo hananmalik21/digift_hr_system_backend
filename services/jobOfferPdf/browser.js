@@ -1,103 +1,134 @@
+import fs from 'fs';
 import puppeteer from 'puppeteer';
-import { LOG_TAG, PDF_OPTIONS, PUPPETEER_LAUNCH_ARGS, SET_CONTENT_OPTIONS } from './constants.js';
+import { LOG_TAG, PDF_OPTIONS, PUPPETEER_LAUNCH_ARGS } from './constants.js';
+import { ensureChromeAvailable, findInstalledChromePath } from './ensureChrome.js';
 import { OfferPdfGenerationError } from './errors.js';
 
 /** @type {import('puppeteer').Browser | null} */
-let browserInstance = null;
+let sharedBrowser = null;
 
 /** @type {Promise<import('puppeteer').Browser> | null} */
 let browserLaunchPromise = null;
 
-function resolveChromeExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
+/**
+ * Resolve Chrome path for Render/Linux without hardcoded local paths.
+ * @returns {string|undefined}
+ */
+export function resolveChromeExecutablePath() {
+  const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (fromEnv) {
+    if (fs.existsSync(fromEnv)) {
+      return fromEnv;
+    }
+    console.warn(`[${LOG_TAG}] PUPPETEER_EXECUTABLE_PATH not found: ${fromEnv}`);
   }
-  if (process.platform === 'darwin') {
-    return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+  const installed = findInstalledChromePath();
+  if (installed) {
+    return installed;
   }
-  if (process.platform === 'linux') {
-    return '/usr/bin/google-chrome';
+
+  try {
+    const bundled = puppeteer.executablePath();
+    if (bundled && fs.existsSync(bundled)) {
+      return bundled;
+    }
+    console.warn(`[${LOG_TAG}] Puppeteer executablePath file not found: ${bundled}`);
+  } catch (err) {
+    console.warn(`[${LOG_TAG}] Puppeteer executablePath failed:`, err?.message || err);
   }
+
   return undefined;
 }
 
-function buildLaunchOptions() {
+/**
+ * @returns {Promise<import('puppeteer').Browser>}
+ */
+async function launchPuppeteerBrowser() {
+  await ensureChromeAvailable();
+
   const launchOptions = {
     headless: true,
     args: PUPPETEER_LAUNCH_ARGS
   };
+
   const executablePath = resolveChromeExecutablePath();
   if (executablePath) {
     launchOptions.executablePath = executablePath;
   }
-  return launchOptions;
+
+  try {
+    const browser = await puppeteer.launch(launchOptions);
+    console.info(`[${LOG_TAG}] Browser launched`);
+    return browser;
+  } catch (err) {
+    if (!launchOptions.executablePath) {
+      console.error(`[${LOG_TAG}] Browser launch failed`, err?.message || err);
+      throw err;
+    }
+
+    console.warn(
+      `[${LOG_TAG}] Browser launch failed with executablePath, retrying without it:`,
+      err?.message || err
+    );
+
+    try {
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: PUPPETEER_LAUNCH_ARGS
+      });
+      console.info(`[${LOG_TAG}] Browser launched`);
+      return browser;
+    } catch (retryErr) {
+      console.error(`[${LOG_TAG}] Browser launch failed`, retryErr?.message || retryErr);
+      throw retryErr;
+    }
+  }
 }
 
 /**
- * @param {import('puppeteer').Browser} browser
- */
-function attachBrowserLifecycleHandlers(browser) {
-  browser.on('disconnected', () => {
-    browserInstance = null;
-    browserLaunchPromise = null;
-  });
-}
-
-async function launchBrowser() {
-  const browser = await puppeteer.launch(buildLaunchOptions());
-  attachBrowserLifecycleHandlers(browser);
-  return browser;
-}
-
-/**
- * Reuse a single headless browser across PDF requests.
+ * Reuse one browser process across PDF requests (avoids launch storms under load).
  * @returns {Promise<import('puppeteer').Browser>}
  */
-export async function getPdfBrowser() {
-  if (browserInstance?.isConnected()) {
-    return browserInstance;
+export async function getPuppeteerBrowser() {
+  if (sharedBrowser?.connected) {
+    return sharedBrowser;
   }
 
-  if (!browserLaunchPromise) {
-    browserLaunchPromise = launchBrowser()
-      .then((browser) => {
-        browserInstance = browser;
-        return browser;
-      })
-      .catch((err) => {
-        browserLaunchPromise = null;
-        throw err;
-      });
+  if (browserLaunchPromise) {
+    return browserLaunchPromise;
   }
+
+  browserLaunchPromise = launchPuppeteerBrowser()
+    .then((browser) => {
+      sharedBrowser = browser;
+      browser.on('disconnected', () => {
+        sharedBrowser = null;
+        browserLaunchPromise = null;
+      });
+      return browser;
+    })
+    .finally(() => {
+      browserLaunchPromise = null;
+    });
 
   return browserLaunchPromise;
 }
 
-export function shouldPrewarmPdfBrowser() {
-  return process.env.JOB_OFFER_PDF_PREWARM !== 'false';
-}
-
-export async function prewarmPdfBrowser() {
-  if (!shouldPrewarmPdfBrowser()) return;
+/**
+ * Launch Chrome once at startup to verify Render/Linux compatibility.
+ * Does not block server boot on failure.
+ */
+export async function prewarmJobOfferPdfBrowser() {
+  if (process.env.JOB_OFFER_PDF_PREWARM === 'false') {
+    return;
+  }
 
   try {
-    await getPdfBrowser();
+    await getPuppeteerBrowser();
     console.info(`[${LOG_TAG}] Puppeteer browser prewarmed`);
   } catch (err) {
-    console.warn(`[${LOG_TAG}] Browser prewarm skipped:`, err?.message || err);
-  }
-}
-
-export async function closePdfBrowser() {
-  browserLaunchPromise = null;
-  if (!browserInstance) return;
-
-  try {
-    await browserInstance.close();
-  } catch (_) {
-    // Browser may already be closed after a crash/disconnect.
-  } finally {
-    browserInstance = null;
+    console.error(`[${LOG_TAG}] Browser prewarm failed:`, err?.message || err);
   }
 }
 
@@ -110,21 +141,25 @@ export async function renderHtmlToPdf(html) {
   let page;
 
   try {
-    const browser = await getPdfBrowser();
+    const browser = await getPuppeteerBrowser();
     page = await browser.newPage();
 
-    await page.setJavaScriptEnabled(false);
-    await page.setContent(html, SET_CONTENT_OPTIONS);
+    // Inline HTML only — no external assets; networkidle0 can hang indefinitely.
+    await page.setContent(html, { waitUntil: 'load', timeout: 15000 });
+    await page.emulateMediaType('print');
+
     const pdf = await page.pdf(PDF_OPTIONS);
     return Buffer.from(pdf);
   } catch (err) {
-    console.error(`[${LOG_TAG}] renderHtmlToPdf error:`, err);
+    console.error(`[${LOG_TAG}] renderHtmlToPdf error:`, err?.message || err);
     throw new OfferPdfGenerationError(err);
   } finally {
     if (page) {
       try {
         await page.close();
-      } catch (_) {}
+      } catch (closePageErr) {
+        console.warn(`[${LOG_TAG}] Failed to close page:`, closePageErr?.message || closePageErr);
+      }
     }
   }
 }

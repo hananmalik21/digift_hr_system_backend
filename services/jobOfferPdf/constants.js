@@ -1,6 +1,6 @@
 export const LOG_TAG = 'jobOfferPdf';
 
-export const PDF_ERROR_MESSAGE = 'Unable to generate offer letter PDF. Please try again.';
+export const PDF_ERROR_MESSAGE = 'Failed to generate PDF';
 
 export const DEFAULT_COMPANY_NAME = 'Company';
 
@@ -36,15 +36,8 @@ export const PUPPETEER_LAUNCH_ARGS = [
   '--disable-setuid-sandbox',
   '--disable-dev-shm-usage',
   '--disable-gpu',
-  '--no-first-run',
-  '--font-render-hinting=none'
+  '--disable-software-rasterizer'
 ];
-
-/** Inline HTML only — avoid networkidle waits on every request. */
-export const SET_CONTENT_OPTIONS = {
-  waitUntil: 'domcontentloaded',
-  timeout: 15000
-};
 
 /** @param {string} viewName */
 export function buildOfferByGuidSql(viewName) {

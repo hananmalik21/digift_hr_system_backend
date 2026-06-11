@@ -10,7 +10,8 @@
     "db:test": "node scripts/db-test.js",
     "test": "echo \"No tests configured\"",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "keywords": [],
   "author": "",

@@ -82,7 +82,7 @@ import { requireAuth } from './middleware/authMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
-import { closePdfBrowser, prewarmPdfBrowser } from './services/jobOfferPdf/index.js';
+import { prewarmJobOfferPdfBrowser } from './services/jobOfferPdf/index.js';
 import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
 import fndsecSubModulesController from './feature/security/sub_modules/controller/fndsecSubModulesController.js';
 import fndsecActionsController from './feature/security/actions/controller/fndsecActionsController.js';
@@ -345,7 +345,7 @@ app.use('/api/rec/lookup-values', recLookupValueController);
 // Initialize database pool on startup
 await createPool();
 await createFaceOraclePool();
-await Promise.all([prewarmFaceModels(), prewarmPdfBrowser()]);
+await Promise.all([prewarmFaceModels(), prewarmJobOfferPdfBrowser()]);
 
 // ==========================================
 // 📌 HEALTH CHECK ENDPOINT
@@ -385,7 +385,6 @@ process.on('SIGINT', async () => {
   server.close(async () => {
     await closePool();
     await closeFaceOraclePool();
-    await closePdfBrowser();
     process.exit(0);
   });
 });
