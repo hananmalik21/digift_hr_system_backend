@@ -12,6 +12,10 @@ info:
     - `GET /api/rec/job-postings` — list postings
     - `GET /api/rec/job-postings/{postingGuid}` — posting detail
     - `POST /api/rec/job-postings/{postingGuid}/apply` — submit application (multipart + resume_file)
+    - `GET /api/candidate/offers` — list EXTENDED job offers for a candidate
+    - `GET /api/candidate/offers/{offerGuid}` — EXTENDED offer detail
+    - `POST /api/rec/job-offers/{offerGuid}/accept` — accept offer
+    - `POST /api/rec/job-offers/{offerGuid}/decline` — decline offer
 
     Passwords on register are hashed server-side (Argon2id) before Oracle storage.
 servers:
@@ -115,7 +119,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CandidateRegisterError'
+  /api/candidate/offers:
+    get:
+      tags: [Career Portal]
+      summary: List EXTENDED job offers for candidate (career portal)
+      operationId: listCandidateExtendedOffers
+      security: []
+      description: |
+        Returns job offers with `EXTENDED` status for the given candidate.
+        Reads from `REC.V_JOB_OFFER_MANAGEMENT`. No JWT required.
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - $ref: '#/components/parameters/CandidateGuidQuery'
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/LimitQuery'
+      responses:
+        '200':
+          description: Offers fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateOfferListResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+  /api/candidate/offers/{offerGuid}:
+    get:
+      tags: [Career Portal]
+      summary: Get EXTENDED job offer detail (career portal)
+      operationId: getCandidateExtendedOffer
+      security: []
+      description: |
+        Returns offer detail when the offer is `EXTENDED` and belongs to the candidate.
+        No JWT required.
+      parameters:
+        - $ref: '#/components/parameters/OfferGuidPath'
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+        - $ref: '#/components/parameters/CandidateGuidQuery'
+      responses:
+        '200':
+          description: Offer detail fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateOfferDetailResponse'
+        '404':
+          description: Offer not found or not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+              example:
+                success: false
+                message: Offer not found.
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateRegisterError'
 components:
+  parameters:
+    EnterpriseIdQuery:
+      name: enterprise_id
+      in: query
+      required: true
+      schema: { type: integer, minimum: 1 }
+    CandidateGuidQuery:
+      name: candidate_guid
+      in: query
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f]{32}$'
+    PageQuery:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    LimitQuery:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    OfferGuidPath:
+      name: offerGuid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9A-Fa-f]{32}$'
   schemas:
     YnFlag:
       type: string
@@ -214,3 +320,53 @@ components:
             full_name: { type: string }
             email: { type: string, format: email }
             user_status: { type: string }
+    CandidateOfferListItem:
+      type: object
+      properties:
+        offer_guid: { type: string }
+        offer_number: { type: string }
+        job_title: { type: string }
+        location: { type: string }
+        work_mode_code: { type: string }
+        employment_type_code: { type: string }
+        start_date: { type: string, format: date }
+        offer_date: { type: string, format: date }
+        expiry_date: { type: string, format: date }
+        stage: { type: string }
+        status_code: { type: string, example: EXTENDED }
+        stage_description: { type: string }
+        annual_salary: { type: number }
+        posting_obj: { type: object }
+        position_obj: { type: object }
+        department_obj: { type: object }
+        grade_obj: { type: object }
+        components_json: { type: array, items: { type: object } }
+        benefits_json: { type: object }
+        terms_json: { type: object }
+    CandidateOfferListResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateOfferListItem'
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
+    CandidateOfferDetailResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            offer: { type: object }
+            components: { type: array, items: { type: object } }
+            benefits: { type: object }
+            terms: { type: object }

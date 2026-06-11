@@ -7,7 +7,7 @@ info:
 
     **Lifecycle:** Draft Offer (`DRAFT`) → Offer Approval (`APPROVED` / `REJECTED`) → Extend to Candidate (`EXTENDED`) → Candidate Response (`ACCEPTED` / `DECLINED` / `EXPIRED`) or Company Action (`WITHDRAWN`).
 
-    **Auth:** Create, approve, reject, extend, withdraw, and reads require JWT. Accept and decline are public career-portal endpoints.
+    **Auth:** Create, approve, reject, extend, withdraw, and ERP reads require JWT. Career portal (no JWT): `GET /api/candidate/offers`, `GET /api/candidate/offers/{offerGuid}`, accept, and decline.
 
     Package validation messages are returned directly (e.g. "Only sent offers can be updated.").
 servers:

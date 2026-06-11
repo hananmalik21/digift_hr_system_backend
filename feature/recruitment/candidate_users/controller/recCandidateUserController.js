@@ -1,6 +1,20 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { sendPackageResponse, handlePortalError } from '../../shared/recControllerHelpers.js';
+import {
+  getExtendedOfferForCandidate,
+  listExtendedOffersForCandidate
+} from '../../job_offers/model/recJobOfferPortalViewModel.js';
+import { PORTAL_READ_ERROR_MESSAGE } from '../../job_offers/utils/recJobOfferPortalConstants.js';
+import {
+  sendCandidateOfferDetailResponse,
+  sendCandidateOfferListResponse,
+  sendCandidateOfferNotFoundResponse
+} from '../../job_offers/utils/recJobOfferPortalResponses.js';
+import {
+  parseCandidateOfferGuidParam,
+  validateCandidateOfferPortalQuery
+} from '../../job_offers/utils/recJobOfferPortalValidators.js';
 import { loginCandidateUserService } from '../service/recCandidateLoginService.js';
 import { registerCandidateUserService } from '../service/recCandidateRegisterService.js';
 import {
@@ -48,6 +62,46 @@ router.post(
       return sendPackageResponse(res, httpStatus, payload);
     } catch (err) {
       return handlePortalError(res, err, LOGIN_GENERIC_ERROR);
+    }
+  })
+);
+
+/**
+ * GET /api/candidate/offers
+ * Career portal — list EXTENDED job offers for a candidate (no JWT)
+ */
+router.get(
+  '/offers',
+  asyncHandler(async (req, res) => {
+    try {
+      validateCandidateOfferPortalQuery(req.query);
+      const { rows, total, page, limit } = await listExtendedOffersForCandidate(req.query);
+      return sendCandidateOfferListResponse(res, rows, { page, limit, total });
+    } catch (err) {
+      return handlePortalError(res, err, PORTAL_READ_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * GET /api/candidate/offers/:offer_guid
+ * Career portal — EXTENDED offer detail for a candidate (no JWT)
+ */
+router.get(
+  '/offers/:offer_guid',
+  asyncHandler(async (req, res) => {
+    try {
+      const offer_guid = parseCandidateOfferGuidParam(req.params.offer_guid);
+      const { enterprise_id, candidate_guid } = validateCandidateOfferPortalQuery(req.query);
+
+      const detail = await getExtendedOfferForCandidate(offer_guid, enterprise_id, candidate_guid);
+      if (!detail) {
+        return sendCandidateOfferNotFoundResponse(res);
+      }
+
+      return sendCandidateOfferDetailResponse(res, detail);
+    } catch (err) {
+      return handlePortalError(res, err, PORTAL_READ_ERROR_MESSAGE);
     }
   })
 );
