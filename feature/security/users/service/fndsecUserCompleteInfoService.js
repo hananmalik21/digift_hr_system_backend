@@ -1,6 +1,8 @@
 import { bufferToGuidHex, guidToBuffer } from '../../../../src/utils/oracleGuid.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { fetchUserCompleteInfoRowByGuid } from '../repository/fndsecUserCompleteInfoRepository.js';
+import { fetchAllActivePermissionKeys } from '../../functions/repository/fndsecPermissionKeysRepository.js';
+import { ADMIN_TYPE, resolveAdminTypeFromUserInfo } from '../../../../utils/adminAccess.js';
 
 const LOG_TAG = 'fndsecUserCompleteInfoService';
 
@@ -294,9 +296,20 @@ export async function getUserCompleteInfoByGuid(userGuidRaw) {
   ]);
 
   const normalizedRoles = normalizeRolesHierarchy(roles);
-  const normalizedPermissionKeys = normalizePermissionKeys(permission_keys);
-  const permission_keys_out =
-    normalizedPermissionKeys.length > 0 ? normalizedPermissionKeys : aggregatePermissionKeysFromRoles(normalizedRoles);
+  const adminType = resolveAdminTypeFromUserInfo({ user_info });
+  const isPlatformAdmin =
+    adminType === ADMIN_TYPE.ENTERPRISE || adminType === ADMIN_TYPE.SUPER;
+
+  let permission_keys_out;
+  if (isPlatformAdmin) {
+    permission_keys_out = await fetchAllActivePermissionKeys();
+  } else {
+    const normalizedPermissionKeys = normalizePermissionKeys(permission_keys);
+    permission_keys_out =
+      normalizedPermissionKeys.length > 0
+        ? normalizedPermissionKeys
+        : aggregatePermissionKeysFromRoles(normalizedRoles);
+  }
 
   return {
     user_guid: normalizeUserGuid(row.USER_GUID ?? row.user_guid),
@@ -308,7 +321,7 @@ export async function getUserCompleteInfoByGuid(userGuidRaw) {
     reporting_manager,
     work_location,
     employment,
-    roles: normalizedRoles,
+    roles: isPlatformAdmin ? [] : normalizedRoles,
     permission_keys: permission_keys_out,
     preferences,
     security

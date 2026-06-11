@@ -1,5 +1,6 @@
 import express from 'express';
 import HrOrgHierarchyLevelModel from '../model/hrOrgHierarchyLevelModel.js';
+import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/users/service/enterpriseAdminProvisioningService.js';
 import {
   sendLevelList,
   sendLevel,
@@ -552,6 +553,13 @@ router.post('/org-structures/onboard-enterprise-hierarchy', async (req, res) => 
 
     const result = await HrOrgHierarchyLevelModel.onboardEnterpriseHierarchy(data, userId, loginId);
 
+    const enterprise = result?.enterprise ?? {};
+    const adminUser = await provisionEnterpriseAdminOnEnterpriseCreate({
+      enterpriseId: enterprise.enterprise_id,
+      enterpriseCode: enterprise.enterprise_code,
+      enterpriseName: enterprise.enterprise_name
+    });
+
     const startTime = req._startTime || Date.now();
     const executionTime = Date.now() - startTime;
 
@@ -560,7 +568,15 @@ router.post('/org-structures/onboard-enterprise-hierarchy', async (req, res) => 
       data: result,
       meta: {
         execution_time: `${executionTime}ms`,
-        action: 'onboarded'
+        action: 'onboarded',
+        enterprise_admin: adminUser.ok
+          ? {
+              user_guid: adminUser.userGuid ?? null,
+              created: adminUser.created === true,
+              username: 'enterprise_admin'
+            }
+          : null,
+        ...(adminUser.ok ? {} : { enterprise_admin_warning: adminUser.message ?? 'Failed to create enterprise admin user' })
       }
     });
   } catch (error) {

@@ -34,8 +34,8 @@ export function sendSuccess(res, { message = 'Success', data = null, meta = {}, 
  * @param {*} options.data - Created resource (default: null)
  * @param {Object} options.meta - Optional metadata (default: {})
  */
-export function sendCreated(res, { message = 'Created successfully', data = null }) {
-  sendSuccess(res, { message, data, statusCode: 201 });
+export function sendCreated(res, { message = 'Created successfully', data = null, meta = {} }) {
+  sendSuccess(res, { message, data, meta, statusCode: 201 });
 }
 
 /**
@@ -46,8 +46,8 @@ export function sendCreated(res, { message = 'Created successfully', data = null
  * @param {*} options.data - Updated resource (default: null)
  * @param {Object} options.meta - Optional metadata (default: {})
  */
-export function sendUpdated(res, { message = 'Updated successfully', data = null }) {
-  sendSuccess(res, { message, data, statusCode: 200 });
+export function sendUpdated(res, { message = 'Updated successfully', data = null, meta = {} }) {
+  sendSuccess(res, { message, data, meta, statusCode: 200 });
 }
 
 /**
@@ -58,8 +58,8 @@ export function sendUpdated(res, { message = 'Updated successfully', data = null
  * @param {*} options.data - Deleted resource ID or null (default: null)
  * @param {Object} options.meta - Optional metadata (default: {})
  */
-export function sendDeleted(res, { message = 'Deleted successfully', data = null }) {
-  sendSuccess(res, { message, data, statusCode: 200 });
+export function sendDeleted(res, { message = 'Deleted successfully', data = null, meta = {} }) {
+  sendSuccess(res, { message, data, meta, statusCode: 200 });
 }
 
 /**
