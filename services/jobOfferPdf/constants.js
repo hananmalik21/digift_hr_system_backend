@@ -31,7 +31,20 @@ export const PDF_OPTIONS = {
   }
 };
 
-export const PUPPETEER_LAUNCH_ARGS = ['--no-sandbox', '--disable-setuid-sandbox'];
+export const PUPPETEER_LAUNCH_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run',
+  '--font-render-hinting=none'
+];
+
+/** Inline HTML only — avoid networkidle waits on every request. */
+export const SET_CONTENT_OPTIONS = {
+  waitUntil: 'domcontentloaded',
+  timeout: 15000
+};
 
 /** @param {string} viewName */
 export function buildOfferByGuidSql(viewName) {
