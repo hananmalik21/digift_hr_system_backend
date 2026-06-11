@@ -124,9 +124,12 @@ export async function prewarmJobOfferPdfBrowser() {
     return;
   }
 
+  console.info(`[${LOG_TAG}] PUPPETEER_CACHE_DIR=${process.env.PUPPETEER_CACHE_DIR || '(default)'}`);
+
   try {
     await getPuppeteerBrowser();
-    console.info(`[${LOG_TAG}] Puppeteer browser prewarmed`);
+    const chromePath = resolveChromeExecutablePath();
+    console.info(`[${LOG_TAG}] Puppeteer browser prewarmed${chromePath ? ` (${chromePath})` : ''}`);
   } catch (err) {
     console.error(`[${LOG_TAG}] Browser prewarm failed:`, err?.message || err);
   }

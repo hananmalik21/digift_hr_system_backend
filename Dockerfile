@@ -48,7 +48,9 @@ WORKDIR /app
 
 # Install deps first (layer cache); postinstall downloads Puppeteer Chrome
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev \
+  && npx puppeteer browsers install chrome \
+  && node --input-type=module -e "import puppeteer from 'puppeteer'; import fs from 'fs'; const p = puppeteer.executablePath(); if (!fs.existsSync(p)) throw new Error('Chrome missing at ' + p); console.log('[build] Chrome OK:', p);"
 
 # App source (Wallet/, TESTDB/, public/face-models/, etc.)
 COPY . .
