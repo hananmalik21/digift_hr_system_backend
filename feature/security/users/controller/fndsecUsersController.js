@@ -17,7 +17,8 @@ import { getUserCompleteInfoByGuid } from '../service/fndsecUserCompleteInfoServ
 import {
   requireActingUserId,
   logSecuredAccess,
-  EMPLOYEE_ACCESS_SECURITY_LABEL
+  EMPLOYEE_ACCESS_SECURITY_LABEL,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
@@ -130,7 +131,10 @@ router.get(
     try {
       const { items, total, page, pageSize } = await listUsersFromView(
         req.query || {},
-        { acting_user_id: actingUserId }
+        {
+          acting_user_id: actingUserId,
+          bypass_employee_access: employeeAccessOptionsFromReq(req).bypass
+        }
       );
 
       logSecuredAccess(ROUTE_TAG_USERS_LIST, {

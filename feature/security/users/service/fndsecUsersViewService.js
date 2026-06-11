@@ -140,7 +140,7 @@ export async function mapUserViewRowToOutput(row) {
   return out;
 }
 
-function buildListFiltersFromQuery(query, actingUserId) {
+function buildListFiltersFromQuery(query, actingUserId, bypassEmployeeAccess = false) {
   const enterprise_id = parseEnterpriseId(query?.enterprise_id);
 
   const username_inner = buildOptionalLikeInner(query?.username);
@@ -160,6 +160,7 @@ function buildListFiltersFromQuery(query, actingUserId) {
   return {
     enterprise_id,
     acting_user_id: actingUserId,
+    bypass_employee_access: bypassEmployeeAccess === true,
     username_inner,
     primary_email_inner,
     account_status,
@@ -170,7 +171,7 @@ function buildListFiltersFromQuery(query, actingUserId) {
 
 /**
  * @param {object} query - raw request query
- * @param {{ acting_user_id: number }} security - JWT-resolved acting user_id
+ * @param {{ acting_user_id: number, bypass_employee_access?: boolean }} security - JWT-resolved acting user_id
  * @returns {Promise<{ items: object[], total: number, page: number, pageSize: number }>}
  */
 export async function listUsersFromView(query, security) {
@@ -179,7 +180,7 @@ export async function listUsersFromView(query, security) {
   if (!Number.isFinite(actingUserId) || actingUserId < 1) {
     throw new ValidationError('Validation failed', ['acting user_id is required']);
   }
-  const filters = buildListFiltersFromQuery(q, actingUserId);
+  const filters = buildListFiltersFromQuery(q, actingUserId, security?.bypass_employee_access === true);
   const { page, pageSize } = parseUsersListPagination(q);
   const { rows, total } = await queryUsersList(filters, { page, pageSize });
   const items = await Promise.all(rows.map((row) => mapUserViewRowToOutput(row)));

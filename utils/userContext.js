@@ -21,6 +21,7 @@
  *     user_guid:     <string|null>,
  *     enterprise_id: <number|null>,
  *     username:      <string|null>,
+ *     admin_type:    <'super_admin'|'enterprise_admin'|null>,
  *     iat, exp
  *   }
  *
@@ -32,6 +33,23 @@
 import { IS_DEV_MODE } from './env.js';
 import { AppError, ValidationError, NotFoundError } from './errors/index.js';
 import { executeQuery } from '../config/db.js';
+import { bypassesEmployeeDataAccess } from './adminAccess.js';
+
+const EMPLOYEE_ACCESS_BYPASS_SQL = '1=1';
+
+function isEmployeeAccessBypassed(options) {
+  return options?.bypass === true;
+}
+
+/**
+ * Options for FNDSEC employee data-access SQL helpers.
+ *
+ * @param {import('express').Request} req
+ * @returns {{ bypass: boolean }}
+ */
+export function employeeAccessOptionsFromReq(req) {
+  return { bypass: bypassesEmployeeDataAccess(req) };
+}
 
 /**
  * Internal: pick the first defined candidate that resolves to a positive
@@ -177,9 +195,11 @@ export function requireActingUserId(req, res) {
  * @param {string} enterpriseIdExpr - SQL expression for enterprise_id (e.g. 'v.ENTERPRISE_ID' or 'sa.TENANT_ID').
  * @param {string} employeeIdExpr   - SQL expression for the employee_id column (e.g. 'v.EMPLOYEE_ID').
  * @param {string} userIdBind       - Bind placeholder for the acting user_id (e.g. ':user_id' or ':12').
+ * @param {{ bypass?: boolean }} [options] - When bypass is true (platform admin), returns empty string.
  * @returns {string}
  */
-export function employeeAccessJoin(enterpriseIdExpr, employeeIdExpr, userIdBind) {
+export function employeeAccessJoin(enterpriseIdExpr, employeeIdExpr, userIdBind, options) {
+  if (isEmployeeAccessBypassed(options)) return '';
   return `JOIN FNDSEC.V_USER_ACCESSIBLE_EMPLOYEES sec
     ON sec.ENTERPRISE_ID = ${enterpriseIdExpr}
    AND sec.EMPLOYEE_ID   = ${employeeIdExpr}
@@ -194,9 +214,11 @@ export const EMPLOYEE_ACCESS_SECURITY_LABEL = 'FNDSEC.CAN_ACCESS_EMPLOYEE';
  * @param {string} enterpriseIdExpr
  * @param {string} employeeIdExpr
  * @param {string} userIdBind
+ * @param {{ bypass?: boolean }} [options]
  * @returns {string}
  */
-export function employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind) {
+export function employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options) {
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
   return `FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE(
         p_user_id            => ${userIdBind},
         p_enterprise_id      => ${enterpriseIdExpr},
@@ -211,12 +233,14 @@ export function employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr
  * @param {string} enterpriseIdExpr
  * @param {string} employeeIdExpr
  * @param {string} userIdBind
+ * @param {{ bypass?: boolean }} [options]
  * @returns {string}
  */
-export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind) {
+export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options) {
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
   return `(
   ${employeeIdExpr} IS NULL
-  OR ${employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind)}
+  OR ${employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options)}
 )`;
 }
 
@@ -241,13 +265,15 @@ export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr
  * @param {string} employeeIdExpr
  * @param {string} orgUnitIdExpr
  * @param {string} userIdBind
+ * @param {{ bypass?: boolean }} [options]
  * @returns {string}
  */
-export function employeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, orgUnitIdExpr, userIdBind) {
+export function employeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, orgUnitIdExpr, userIdBind, options) {
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
   return `(
     (
       ${employeeIdExpr} IS NOT NULL
-      AND ${employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind)}
+      AND ${employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options)}
     )
     OR (
       ${employeeIdExpr} IS NULL
@@ -333,10 +359,11 @@ export function handleSecuredQueryError(err, { route, friendlyMessage, context =
  *   });
  *   if (!allowed) return sendNotFound(res, req, 'Employee not found');
  *
- * @param {{ userId: number, enterpriseId: number, employeeId: number }} args
+ * @param {{ userId: number, enterpriseId: number, employeeId: number, bypass?: boolean }} args
  * @returns {Promise<boolean>}
  */
-export async function canAccessEmployee({ userId, enterpriseId, employeeId }) {
+export async function canAccessEmployee({ userId, enterpriseId, employeeId, bypass = false }) {
+  if (bypass) return true;
   const uid = Number(userId);
   const eid = Number(enterpriseId);
   const empId = Number(employeeId);

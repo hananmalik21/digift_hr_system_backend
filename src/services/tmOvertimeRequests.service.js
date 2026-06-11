@@ -193,7 +193,7 @@ function getEnterpriseIdFromTenantId(tenantId) {
   return tenantId;
 }
 
-const LIST_BASE_SQL = `
+const buildListBaseSql = (accessOptions) => `
 SELECT v.*
 FROM   TM.V_OT_REQUEST_DETAILS v
 JOIN (
@@ -217,7 +217,7 @@ JOIN (
 WHERE  1=1
   AND (:p_enterprise_id IS NULL OR v.enterprise_id = :p_enterprise_id)
   AND (:p_status IS NULL OR v.status = :p_status)
-  AND ${employeeAccessFunctionPredicate('v.enterprise_id', 'v.employee_id', ':p_user_id')}
+  AND ${employeeAccessFunctionPredicate('v.enterprise_id', 'v.employee_id', ':p_user_id', accessOptions)}
   AND (:p_date_from IS NULL
        OR TRUNC(v.attendance_date) >= TRUNC(TO_DATE(:p_date_from,'YYYY-MM-DD')))
   AND (:p_date_to IS NULL
@@ -287,17 +287,20 @@ export async function listRequests(tenantId, filters = {}) {
     p_level_code: levelCode,
   };
 
+  const accessOptions = filters.bypass_employee_access ? { bypass: true } : undefined;
+  const listBaseSql = buildListBaseSql(accessOptions);
+
   return runReadOnly(async (connection) => {
     const countSql = `
       SELECT COUNT(*) AS CNT FROM (
-        ${LIST_BASE_SQL}
+        ${listBaseSql}
       ) cnt_sub
     `;
     const countResult = await connection.execute(countSql, baseBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     const total = countResult.rows?.[0]?.CNT ?? 0;
 
     const dataSql = `
-      ${LIST_BASE_SQL}
+      ${listBaseSql}
       ORDER BY v.attendance_date DESC, v.creation_date DESC
       OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
     `;

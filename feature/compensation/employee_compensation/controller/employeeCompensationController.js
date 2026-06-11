@@ -13,7 +13,8 @@ import { parsePlanFullDetailsQuery } from '../validation/employeePlanFullDetails
 import {
   requireActingUserId,
   logSecuredAccess,
-  EMPLOYEE_ACCESS_SECURITY_LABEL
+  EMPLOYEE_ACCESS_SECURITY_LABEL,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
@@ -539,6 +540,7 @@ router.get(
         {
           enterprise_id,
           user_id: actingUserId,
+          bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
           employee_id,
           plan_id,
           employee_guid_hex,

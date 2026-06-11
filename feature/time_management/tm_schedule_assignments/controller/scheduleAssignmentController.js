@@ -9,7 +9,8 @@ import {
   requireActingUserId,
   getActingUsername,
   handleSecuredQueryError,
-  logSecuredAccess
+  logSecuredAccess,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 
 const ROUTE_TAG_LIST = 'GET /api/tm/schedule-assignments';
@@ -205,7 +206,11 @@ router.get('/', asyncHandler(async (req, res) => {
   const actingUserId = requireActingUserId(req, res);
   if (actingUserId == null) return; // 401 already sent
 
-  const filters = { tenantId, userId: actingUserId };
+  const filters = {
+    tenantId,
+    userId: actingUserId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass
+  };
   const appliedFilters = { tenant_id: tenantId };
 
   if (req.query.assignment_level) {
@@ -333,7 +338,9 @@ router.get('/:schedule_assignment_id', asyncHandler(async (req, res) => {
 
   let assignment;
   try {
-    assignment = await ScheduleAssignmentModel.findById(id, tenantId, actingUserId);
+    assignment = await ScheduleAssignmentModel.findById(id, tenantId, actingUserId, {
+      bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass
+    });
   } catch (err) {
     handleSecuredQueryError(err, {
       route: ROUTE_TAG_DETAIL,

@@ -29,6 +29,7 @@ import {
   requireActingUserId,
   getActingUsername,
   employeeAccessJoin,
+  employeeAccessOptionsFromReq,
   logSecuredAccess
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
@@ -186,8 +187,9 @@ function buildEmployeeListWhereAndBinds(filters) {
 
   // FNDSEC DB-level data access: only rows the acting user is authorized to see
   // are returned (see FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE).
+  const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
   const baseFrom = `EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
-    ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}`;
+    ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}`;
 
   const whereClause = conditions.join(' AND ');
   const countSql = `SELECT COUNT(*) AS total_records FROM ${baseFrom} WHERE ${whereClause}`;
@@ -646,17 +648,17 @@ export function mapRowToFullDetailsShape(row) {
   };
 }
 
-const SQL_FULL_DETAILS_BY_ID = `
+const buildFullDetailsSqlById = (accessOptions) => `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
-  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
 `;
 
-const SQL_FULL_DETAILS_BY_GUID = `
+const buildFullDetailsSqlByGuid = (accessOptions) => `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
-  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id')}
+  ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}
   WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)
 `;
 
@@ -682,11 +684,12 @@ export async function getEmployeeById(req, res) {
     ? { user_id: actingUserId, enterprise_id: enterpriseId, employee_guid_hex: normalizedGuid }
     : { user_id: actingUserId, enterprise_id: enterpriseId, employee_id: parseInt(param, 10) };
 
+  const accessOptions = employeeAccessOptionsFromReq(req);
   let connection;
   try {
     connection = await getConnection();
     const opts = { outFormat: oracledb.OUT_FORMAT_OBJECT };
-    const sql = isGuid ? SQL_FULL_DETAILS_BY_GUID : SQL_FULL_DETAILS_BY_ID;
+    const sql = isGuid ? buildFullDetailsSqlByGuid(accessOptions) : buildFullDetailsSqlById(accessOptions);
     const result = await connection.execute(sql, binds, opts);
     const row = result.rows?.[0] ?? null;
     if (!row) return sendNotFound(res, req, 'Employee not found');
@@ -808,6 +811,7 @@ export async function getEmployees(req, res) {
   const filters = {
     userId: actingUserId,
     enterpriseId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
     org_unit_id_hex: orgUnitIdHexForJson,
     level_code: levelCodeRaw ?? null,
     positionId: positionIdBuf,

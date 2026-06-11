@@ -4,35 +4,19 @@ import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead.js';
 
-const EMPLOYEE_ACCESS_PREDICATE = employeeAccessFunctionPredicate(
-  'v.ENTERPRISE_ID',
-  'v.EMPLOYEE_ID',
-  ':p_user_id'
-);
-
-/**
- * Plan full details list:
- * - row shape from COMP.V_EMPLOYEE_PLAN_FULL_DETAILS
- * - category totals from COMP.V_EMP_ASSIGNED_COMPONENTS_FULL (grouped by enterprise_id/employee_id/plan_id)
- *
- * Filter: when `employee_guid_hex` / `plan_guid_hex` are non-null, those match RAW(16) on the view and
- * take precedence over numeric `employee_id` / `plan_id`. Totals use `filtered_keys` so GUID-only filters
- * stay correct without requiring GUID columns on V_EMP_ASSIGNED_COMPONENTS_FULL.
- *
- * Security:
- *   The FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE predicate is applied
- *   in both the `filtered_keys` CTE (so totals are limited to accessible rows)
- *   and the outer SELECT (so the data rows + COUNT(*) OVER () total exclude
- *   inaccessible employees).
- *
- * This ensures ALLOWANCE totals never leak into TOTAL_BASE_SALARY.
- */
-const PLAN_FULL_DETAILS_PAGED_SQL = `
+function buildPlanFullDetailsSql(accessOptions) {
+  const employeePredicate = employeeAccessFunctionPredicate(
+    'v.ENTERPRISE_ID',
+    'v.EMPLOYEE_ID',
+    ':p_user_id',
+    accessOptions
+  );
+  return `
   WITH filtered_keys AS (
     SELECT DISTINCT v.enterprise_id, v.employee_id, v.plan_id
       FROM COMP.V_EMPLOYEE_PLAN_FULL_DETAILS v
      WHERE v.ENTERPRISE_ID = :p_enterprise_id
-       AND ${EMPLOYEE_ACCESS_PREDICATE}
+       AND ${employeePredicate}
        AND (
              (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
           OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
@@ -87,7 +71,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
    AND t.employee_id = v.employee_id
    AND t.plan_id = v.plan_id
   WHERE v.ENTERPRISE_ID = :p_enterprise_id
-    AND ${EMPLOYEE_ACCESS_PREDICATE}
+    AND ${employeePredicate}
     AND (
           (:p_employee_guid_hex IS NOT NULL AND v.EMPLOYEE_GUID = HEXTORAW(:p_employee_guid_hex))
        OR (:p_employee_guid_hex IS NULL AND (:p_employee_id IS NULL OR v.EMPLOYEE_ID = :p_employee_id))
@@ -99,6 +83,7 @@ const PLAN_FULL_DETAILS_PAGED_SQL = `
   ORDER BY v.EMPLOYEE_ID, v.PLAN_ID
   OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
 `;
+}
 
 /**
  * Strip JSON column before `convertKeysToSnakeCase` so Lob-like values are not deep-copied as plain objects.
@@ -163,7 +148,8 @@ export async function getEmployeePlanFullDetails(filters, pagination = { page: 1
     p_offset: offset,
     p_limit: Math.max(1, limit)
   };
-  const result = await executeQuery(PLAN_FULL_DETAILS_PAGED_SQL, binds);
+  const accessOptions = filters.bypass_employee_access ? { bypass: true } : undefined;
+  const result = await executeQuery(buildPlanFullDetailsSql(accessOptions), binds);
   const rawRows = result?.rows || [];
   const total =
     rawRows.length > 0

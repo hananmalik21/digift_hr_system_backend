@@ -85,13 +85,10 @@ function parseJsonFields(row, jsonFields = ['org_structure_list']) {
  */
 function buildSummaryQuery(filters) {
   const whereParts = ['v.ENTERPRISE_ID = :enterpriseId'];
+  const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
 
-  // FNDSEC DB-level data access: restrict rows to employees the acting user
-  // is authorized to see (CAN_ACCESS_EMPLOYEE = 'Y'). Applied inside the
-  // single inner SELECT, so both the COUNT(*) OVER () total and the returned
-  // rows reflect only accessible employees.
   whereParts.push(
-    employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId')
+    employeeAccessFunctionPredicate('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':userId', accessOptions)
   );
 
   if (filters.fromDate != null) {

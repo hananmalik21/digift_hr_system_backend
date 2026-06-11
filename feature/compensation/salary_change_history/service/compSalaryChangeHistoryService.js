@@ -8,12 +8,6 @@ import {
   parseOrgStructureListFromOracle
 } from '../../employee_compensation/utils/oracleCompensationRead.js';
 
-const EMPLOYEE_ACCESS_PREDICATE = employeeAccessFunctionPredicate(
-  'enterprise_id',
-  'employee_id',
-  ':user_id'
-);
-
 function formatOracleDateTimeToIsoSeconds(value) {
   if (value == null) return null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -119,13 +113,16 @@ function buildBindsFromParams(params) {
   };
 }
 
-/**
- * Security: only rows whose EMPLOYEE_ID the caller can access are returned.
- * Applied to both COUNT and LIST queries via the shared BASE_WHERE.
- */
-const BASE_WHERE = `
+function buildBaseWhere(accessOptions) {
+  const employeePredicate = employeeAccessFunctionPredicate(
+    'enterprise_id',
+    'employee_id',
+    ':user_id',
+    accessOptions
+  );
+  return `
 WHERE enterprise_id = :enterprise_id
-  AND ${EMPLOYEE_ACCESS_PREDICATE}
+  AND ${employeePredicate}
   AND (:employee_id IS NULL OR employee_id = :employee_id)
   AND (:employee_guid IS NULL OR employee_guid = HEXTORAW(:employee_guid))
   AND (
@@ -157,6 +154,7 @@ WHERE enterprise_id = :enterprise_id
     OR change_effective_date BETWEEN TO_DATE(:from_date, 'YYYY-MM-DD') AND TO_DATE(:to_date, 'YYYY-MM-DD')
   )
 `;
+}
 
 /**
  * Oldest → latest (ascending only). NULLS FIRST on change_created_date so Initial Load rows with a null
@@ -164,7 +162,8 @@ WHERE enterprise_id = :enterprise_id
  */
 const ORDER_BY_LIST = `ORDER BY change_effective_date ASC, change_created_date ASC NULLS FIRST`;
 
-const SQL_LIST = `
+function buildListSql(accessOptions) {
+  return `
 SELECT
   enterprise_id,
   employee_id,
@@ -196,18 +195,24 @@ SELECT
   component_count,
   components_json
 FROM COMP.COMP_SALARY_CHANGE_HISTORY_V
-${BASE_WHERE}
+${buildBaseWhere(accessOptions)}
 ${ORDER_BY_LIST}
 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
 `;
+}
 
-const SQL_COUNT = `
+function buildCountSql(accessOptions) {
+  return `
 SELECT COUNT(*) AS total_count
 FROM COMP.COMP_SALARY_CHANGE_HISTORY_V
-${BASE_WHERE}
+${buildBaseWhere(accessOptions)}
 `;
+}
 
 export async function fetchSalaryChangeHistory(params) {
+  const accessOptions = params.bypass_employee_access ? { bypass: true } : undefined;
+  const sqlList = buildListSql(accessOptions);
+  const sqlCount = buildCountSql(accessOptions);
   const binds = buildBindsFromParams(params);
   // Oracle throws ORA-01036 if we pass binds not present in the SQL text.
   // COUNT does not include pagination binds. user_id is included in both
@@ -216,8 +221,8 @@ export async function fetchSalaryChangeHistory(params) {
   const listBinds = { ...filterBinds, limit, offset };
 
   const [countResult, listResult] = await Promise.all([
-    executeQuery(SQL_COUNT, filterBinds),
-    executeQuery(SQL_LIST, listBinds)
+    executeQuery(sqlCount, filterBinds),
+    executeQuery(sqlList, listBinds)
   ]);
 
   const total = Number(countResult?.rows?.[0]?.TOTAL_COUNT ?? 0) || 0;

@@ -240,7 +240,8 @@ class LeaveRequestModel {
         if (!Number.isFinite(acting) || acting < 1) {
           throw new ValidationError('userId must be a positive number');
         }
-        conditions.push(employeeAccessFunctionPredicate('a.TENANT_ID', 'a.EMPLOYEE_ID', `:${paramIndex}`));
+        const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
+        conditions.push(employeeAccessFunctionPredicate('a.TENANT_ID', 'a.EMPLOYEE_ID', `:${paramIndex}`, accessOptions));
         bindParams.push(acting);
         paramIndex++;
       }

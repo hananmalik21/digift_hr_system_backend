@@ -33,6 +33,7 @@ These two tiers behave differently at **login/storage** vs **runtime access**.
 | **Job roles** | None (`roles: []` in profile) |
 | **Permissions** | Full catalog from `FNDSEC.FNDSEC_FUNCTIONS` (~140 keys), not from RBAC hierarchy |
 | **Function checks** | Bypass fine-grained permission-key gates (`admin_type` on JWT) |
+| **Employee / data access** | Bypass FNDSEC `CAN_ACCESS_EMPLOYEE` / job-role & data-role row filters via `bypassesEmployeeDataAccess()` → `employeeAccessOptionsFromReq(req)` on secured list APIs |
 
 ### What is different
 
@@ -44,7 +45,7 @@ These two tiers behave differently at **login/storage** vs **runtime access**.
 | **JWT `enterprise_id`** | Fixed to that tenant | Set to home enterprise at login |
 | **JWT `admin_type`** | `enterprise_admin` | `super_admin` |
 | **Calling APIs** | `tenant_id` / `enterprise_id` on requests is **ignored**; JWT enterprise always wins | May pass **any** `tenant_id` / `enterprise_id` on query/body/header to act on that tenant |
-| **Employee / data scope** | Still subject to FNDSEC data-access rules unless Oracle grants say otherwise | Same — global **tenant selection** is API-level; row-level data access may still apply |
+| **Employee / data scope** | **Bypasses** FNDSEC employee/data-access checks (`CAN_ACCESS_EMPLOYEE`, job/data roles) within the scoped tenant | Same — sees all employees/users in the tenant selected on the request |
 
 ### Super admin is global at runtime, not in the database
 

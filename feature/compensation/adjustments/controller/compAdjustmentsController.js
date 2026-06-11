@@ -12,7 +12,8 @@ import { AdjustmentListValidationError } from '../utils/adjustmentListErrors.js'
 import {
   requireActingUserId,
   logSecuredAccess,
-  EMPLOYEE_ACCESS_SECURITY_LABEL
+  EMPLOYEE_ACCESS_SECURITY_LABEL,
+  employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 
@@ -78,7 +79,8 @@ export const getAdjustmentsList = asyncHandler(async (req, res) => {
   try {
     const { rows, total } = await listAdjustmentDetailsFullViewPaged({
       ...parsed,
-      user_id: actingUserId
+      user_id: actingUserId,
+      bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass
     });
 
     logSecuredAccess(ROUTE_TAG_LIST, {
