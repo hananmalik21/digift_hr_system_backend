@@ -3,7 +3,6 @@
  * Use for APIs that require tenant_id from body or query.
  */
 import { ValidationError } from './errors/index.js';
-import { isSuperAdmin } from './adminAccess.js';
 import { getActingEnterpriseId } from './userContext.js';
 
 /**
@@ -68,10 +67,9 @@ export function requireTenantIdInBody(data, missingMessage = 'tenant_id is requi
 }
 
 /**
- * Resolve tenant_id with admin-aware scoping.
+ * Resolve tenant_id with JWT enterprise scoping.
  *
- * - Super admin: may pass tenant_id in query/body/header (required on the request).
- * - Everyone else: JWT enterprise_id wins; client-supplied tenant cannot override.
+ * JWT `enterprise_id` always wins; client-supplied tenant cannot override.
  *
  * @param {import('express').Request} req
  * @param {object} [options] - Same options as getTenantId
@@ -79,10 +77,6 @@ export function requireTenantIdInBody(data, missingMessage = 'tenant_id is requi
  * @throws {ValidationError}
  */
 export function getScopedTenantId(req, options = {}) {
-  if (isSuperAdmin(req)) {
-    return getTenantId(req, options);
-  }
-
   const tokenEnterpriseId = getActingEnterpriseId(req);
   if (tokenEnterpriseId != null) {
     return tokenEnterpriseId;

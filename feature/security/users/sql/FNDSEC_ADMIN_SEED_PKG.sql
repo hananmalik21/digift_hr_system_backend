@@ -1,8 +1,8 @@
 -- FNDSEC.FNDSEC_ADMIN_SEED_PKG - platform admin seeding / provisioning (DB-centric)
 -- Run as FNDSEC.
 --
--- ENSURE_PLATFORM_ADMIN       - create or normalize enterprise_admin / super_admin for one tenant
--- SEED_PLATFORM_ADMINS        - ensure enterprise_admin + super_admin for the configured seed enterprise
+-- ENSURE_PLATFORM_ADMIN       - create or normalize enterprise_admin for one tenant
+-- SEED_PLATFORM_ADMINS        - ensure enterprise_admin for the configured seed enterprise
 -- BACKFILL_ENTERPRISE_ADMINS  - optional; requires SELECT on ENT.ENTERPRISES (see grants below).
 --                               Node backfill (npm run seed:admins:backfill) is preferred and does not need this grant.
 --
@@ -133,14 +133,8 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
       P_PRIMARY_EMAIL := RESOLVE_ENTERPRISE_ADMIN_EMAIL(P_INPUT_JSON, P_ENTERPRISE_ID, P_SEED_ENTERPRISE_ID);
       P_FIRST_NAME    := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'enterprise_admin', 'first_name'), 'Enterprise');
       P_LAST_NAME     := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'enterprise_admin', 'last_name'), 'Admin');
-    ELSIF L_TYPE = 'super_admin' THEN
-      P_USER_CODE     := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'super_admin', 'user_code'), 'super_admin');
-      P_USERNAME      := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'super_admin', 'username'), 'super_admin');
-      P_PRIMARY_EMAIL := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'super_admin', 'primary_email'), 'super_admin@localhost.local');
-      P_FIRST_NAME    := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'super_admin', 'first_name'), 'Super');
-      P_LAST_NAME     := NVL(JSON_PROFILE_VALUE(P_INPUT_JSON, 'super_admin', 'last_name'), 'Admin');
     ELSE
-      RAISE_APPLICATION_ERROR(-20001, 'admin_type must be enterprise_admin or super_admin');
+      RAISE_APPLICATION_ERROR(-20001, 'admin_type must be enterprise_admin');
     END IF;
   END;
 
@@ -277,8 +271,8 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
     END IF;
 
     L_ADMIN_TYPE := LOWER(TRIM(JSON_VALUE(P_INPUT_JSON, '$.admin_type')));
-    IF L_ADMIN_TYPE NOT IN ('enterprise_admin', 'super_admin') THEN
-      P_MESSAGE := 'admin_type must be enterprise_admin or super_admin';
+    IF L_ADMIN_TYPE != 'enterprise_admin' THEN
+      P_MESSAGE := 'admin_type must be enterprise_admin';
       RETURN;
     END IF;
 
@@ -368,17 +362,11 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
     L_CREATED            VARCHAR2(1);
     L_GUID               VARCHAR2(32);
     L_ENT_OK             BOOLEAN := TRUE;
-    L_SUP_OK             BOOLEAN := TRUE;
     L_ENT_CREATED        VARCHAR2(1) := 'N';
-    L_SUP_CREATED        VARCHAR2(1) := 'N';
     L_ENT_GUID           VARCHAR2(32);
-    L_SUP_GUID           VARCHAR2(32);
     L_ENT_MSG            VARCHAR2(4000);
-    L_SUP_MSG            VARCHAR2(4000);
     L_ENT_BLOCK          CLOB;
-    L_SUP_BLOCK          CLOB;
     L_ENT_OK_STR         VARCHAR2(1);
-    L_SUP_OK_STR         VARCHAR2(1);
   BEGIN
     P_SUCCESS     := 'N';
     P_MESSAGE     := NULL;
@@ -415,8 +403,7 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
              'seed_enterprise_id' VALUE L_SEED_ENTERPRISE_ID,
              'password_hash'      VALUE L_PASSWORD_HASH,
              'skip_if_exists'     VALUE L_SKIP_STR,
-             'enterprise_admin'   VALUE JSON_QUERY(P_INPUT_JSON, '$.enterprise_admin'),
-             'super_admin'        VALUE JSON_QUERY(P_INPUT_JSON, '$.super_admin')
+             'enterprise_admin'   VALUE JSON_QUERY(P_INPUT_JSON, '$.enterprise_admin')
              RETURNING CLOB
            )
       INTO L_PAYLOAD
@@ -435,42 +422,10 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
     L_ENT_GUID    := L_GUID;
     L_ENT_MSG     := L_MSG;
 
-    SELECT JSON_OBJECT(
-             'admin_type'         VALUE 'super_admin',
-             'enterprise_id'      VALUE L_ENTERPRISE_ID,
-             'seed_enterprise_id' VALUE L_SEED_ENTERPRISE_ID,
-             'password_hash'      VALUE L_PASSWORD_HASH,
-             'skip_if_exists'     VALUE L_SKIP_STR,
-             'enterprise_admin'   VALUE JSON_QUERY(P_INPUT_JSON, '$.enterprise_admin'),
-             'super_admin'        VALUE JSON_QUERY(P_INPUT_JSON, '$.super_admin')
-             RETURNING CLOB
-           )
-      INTO L_PAYLOAD
-      FROM DUAL;
-
-    ENSURE_PLATFORM_ADMIN(
-      L_PAYLOAD,
-      L_OK,
-      L_MSG,
-      L_CREATED,
-      L_GUID
-    );
-
-    L_SUP_OK      := L_OK = 'Y';
-    L_SUP_CREATED := NVL(L_CREATED, 'N');
-    L_SUP_GUID    := L_GUID;
-    L_SUP_MSG     := L_MSG;
-
     IF L_ENT_OK THEN
       L_ENT_OK_STR := 'Y';
     ELSE
       L_ENT_OK_STR := 'N';
-    END IF;
-
-    IF L_SUP_OK THEN
-      L_SUP_OK_STR := 'Y';
-    ELSE
-      L_SUP_OK_STR := 'N';
     END IF;
 
     SELECT JSON_OBJECT(
@@ -484,26 +439,15 @@ CREATE OR REPLACE EDITIONABLE PACKAGE BODY "FNDSEC"."FNDSEC_ADMIN_SEED_PKG" AS
       FROM DUAL;
 
     SELECT JSON_OBJECT(
-             'ok'        VALUE L_SUP_OK_STR,
-             'created'   VALUE L_SUP_CREATED,
-             'user_guid' VALUE L_SUP_GUID,
-             'message'   VALUE L_SUP_MSG
-             RETURNING CLOB
-           )
-      INTO L_SUP_BLOCK
-      FROM DUAL;
-
-    SELECT JSON_OBJECT(
-             'enterprise_admin' VALUE JSON_QUERY(L_ENT_BLOCK, '$'),
-             'super_admin'      VALUE JSON_QUERY(L_SUP_BLOCK, '$')
+             'enterprise_admin' VALUE JSON_QUERY(L_ENT_BLOCK, '$')
              RETURNING CLOB
            )
       INTO P_RESULT_JSON
       FROM DUAL;
 
-    IF L_ENT_OK AND L_SUP_OK THEN
+    IF L_ENT_OK THEN
       P_SUCCESS := 'Y';
-      P_MESSAGE := 'Platform admins seeded successfully for enterprise ' || L_ENTERPRISE_ID;
+      P_MESSAGE := 'enterprise_admin seeded successfully for enterprise ' || L_ENTERPRISE_ID;
     ELSE
       P_SUCCESS := 'N';
       P_MESSAGE := 'Platform admin seed completed with errors';

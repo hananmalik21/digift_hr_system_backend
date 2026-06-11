@@ -91,7 +91,7 @@ END;`;
 
 /**
  * @param {object} input
- * @returns {Promise<{ ok: boolean, message: string, enterpriseAdmin: object|null, superAdmin: object|null }>}
+ * @returns {Promise<{ ok: boolean, message: string, enterpriseAdmin: object|null }>}
  */
 export async function seedPlatformAdminsViaPackage(input) {
   const json = JSON.stringify(input ?? {});
@@ -136,8 +136,7 @@ END;`;
     return {
       ok: success,
       message,
-      enterpriseAdmin: mapBlock(parsed?.enterprise_admin),
-      superAdmin: mapBlock(parsed?.super_admin)
+      enterpriseAdmin: mapBlock(parsed?.enterprise_admin)
     };
   });
 }

@@ -21,7 +21,7 @@
  *     user_guid:     <string|null>,
  *     enterprise_id: <number|null>,
  *     username:      <string|null>,
- *     admin_type:    <'super_admin'|'enterprise_admin'|null>,
+ *     admin_type:    <'enterprise_admin'|null>,
  *     iat, exp
  *   }
  *
