@@ -27,6 +27,7 @@
     "moment-timezone": "^0.6.1",
     "multer": "^2.0.2",
     "oracledb": "^6.10.0",
+    "puppeteer": "^24.43.1",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },

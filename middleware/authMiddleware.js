@@ -30,6 +30,7 @@ const PUBLIC_PATHS = [
   // Career portal — candidate job offer response (no JWT)
   { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/accept\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/decline\/?$/ },
+  { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
 ];

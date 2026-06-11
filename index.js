@@ -102,6 +102,7 @@ import recTalentPoolsController from './feature/recruitment/talent_pools/control
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
 import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
+import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
@@ -333,6 +334,7 @@ app.use('/api/rec/job-postings', recJobPostingsController);
 app.use('/api/recruitment/applications', recApplicationsController);
 
 // Recruitment — job offers (REC.V_JOB_OFFER_MANAGEMENT reads, REC.REC_JOB_OFFER_PKG mutations)
+app.use('/api/rec/job-offers', jobOfferRoutes);
 app.use('/api/rec/job-offers', recJobOffersController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
