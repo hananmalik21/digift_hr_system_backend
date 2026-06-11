@@ -5,7 +5,7 @@
 
 import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
-import { employeeAccessJoin } from '../utils/userContext.js';
+import { employeeAccessJoin, employeeAccessBypassBindClause } from '../utils/userContext.js';
 
 const VIEW = 'EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST';
 
@@ -347,6 +347,9 @@ export async function getEmplEmployeesList(params) {
   Object.assign(binds, cursorBinds);
 
   const accessOptions = params.bypass_employee_access ? { bypass: true } : undefined;
+  if (params.bypass_employee_access) {
+    whereParts.push(employeeAccessBypassBindClause(':user_id'));
+  }
   const whereClause = whereParts.join(' AND ');
   const sql = `SELECT v.* FROM ${VIEW} v
   ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}

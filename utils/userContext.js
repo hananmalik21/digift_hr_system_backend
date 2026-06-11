@@ -35,10 +35,22 @@ import { AppError, ValidationError, NotFoundError } from './errors/index.js';
 import { executeQuery } from '../config/db.js';
 import { bypassesEmployeeDataAccess } from './adminAccess.js';
 
-const EMPLOYEE_ACCESS_BYPASS_SQL = '1=1';
+const EMPLOYEE_ACCESS_BYPASS_BIND = (userIdBind) =>
+  `(${userIdBind} IS NULL OR ${userIdBind} IS NOT NULL)`;
 
 function isEmployeeAccessBypassed(options) {
   return options?.bypass === true;
+}
+
+/**
+ * WHERE fragment that keeps the acting user_id bind valid when FNDSEC access
+ * is bypassed (Oracle ORA-01036 if the bind is omitted from the SQL text).
+ *
+ * @param {string} userIdBind
+ * @returns {string}
+ */
+export function employeeAccessBypassBindClause(userIdBind) {
+  return EMPLOYEE_ACCESS_BYPASS_BIND(userIdBind);
 }
 
 /**
@@ -218,7 +230,7 @@ export const EMPLOYEE_ACCESS_SECURITY_LABEL = 'FNDSEC.CAN_ACCESS_EMPLOYEE';
  * @returns {string}
  */
 export function employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options) {
-  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_BIND(userIdBind);
   return `FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE(
         p_user_id            => ${userIdBind},
         p_enterprise_id      => ${enterpriseIdExpr},
@@ -237,7 +249,7 @@ export function employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr
  * @returns {string}
  */
 export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options) {
-  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_BIND(userIdBind);
   return `(
   ${employeeIdExpr} IS NULL
   OR ${employeeAccessFunctionPredicate(enterpriseIdExpr, employeeIdExpr, userIdBind, options)}
@@ -269,7 +281,7 @@ export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr
  * @returns {string}
  */
 export function employeeAccessPredicate(enterpriseIdExpr, employeeIdExpr, orgUnitIdExpr, userIdBind, options) {
-  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_SQL;
+  if (isEmployeeAccessBypassed(options)) return EMPLOYEE_ACCESS_BYPASS_BIND(userIdBind);
   return `(
     (
       ${employeeIdExpr} IS NOT NULL

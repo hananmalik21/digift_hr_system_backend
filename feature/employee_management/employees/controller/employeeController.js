@@ -29,6 +29,7 @@ import {
   requireActingUserId,
   getActingUsername,
   employeeAccessJoin,
+  employeeAccessBypassBindClause,
   employeeAccessOptionsFromReq,
   logSecuredAccess
 } from '../../../../utils/userContext.js';
@@ -188,6 +189,9 @@ function buildEmployeeListWhereAndBinds(filters) {
   // FNDSEC DB-level data access: only rows the acting user is authorized to see
   // are returned (see FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE).
   const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
+  if (filters.bypassEmployeeAccess) {
+    conditions.push(employeeAccessBypassBindClause(':user_id'));
+  }
   const baseFrom = `EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
     ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}`;
 
@@ -648,19 +652,29 @@ export function mapRowToFullDetailsShape(row) {
   };
 }
 
-const buildFullDetailsSqlById = (accessOptions) => `
+const buildFullDetailsSqlById = (accessOptions) => {
+  const bypassClause = accessOptions?.bypass
+    ? ` AND ${employeeAccessBypassBindClause(':user_id')}`
+    : '';
+  return `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}
-  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id
+  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_ID = :employee_id${bypassClause}
 `;
+};
 
-const buildFullDetailsSqlByGuid = (accessOptions) => `
+const buildFullDetailsSqlByGuid = (accessOptions) => {
+  const bypassClause = accessOptions?.bypass
+    ? ` AND ${employeeAccessBypassBindClause(':user_id')}`
+    : '';
+  return `
   SELECT v.*
   FROM EMPL.V_EMPLOYEE_FULL_DETAILS v
   ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}
-  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)
+  WHERE v.ENTERPRISE_ID = :enterprise_id AND v.EMPLOYEE_GUID = HEXTORAW(:employee_guid_hex)${bypassClause}
 `;
+};
 
 export async function getEmployeeById(req, res) {
   const param = String(req.params.guid ?? '').trim();
