@@ -85,6 +85,7 @@ function attachUserFromPayload(req, payload) {
     id: userId,
     user_guid: payload.user_guid ?? payload.userGuid ?? null,
     enterprise_id: payload.enterprise_id ?? payload.enterpriseId ?? null,
+    admin_type: payload.admin_type ?? payload.adminType ?? null,
     username: payload.username ?? payload.userName ?? null,
     iat: payload.iat,
     exp: payload.exp

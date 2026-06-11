@@ -1,5 +1,6 @@
 import express from 'express';
 import EnterpriseModel from '../model/enterpriseModel.js';
+import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/users/service/enterpriseAdminProvisioningService.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, ConflictError, DatabaseError } from '../../../../utils/errors/index.js';
@@ -155,12 +156,28 @@ router.post('/', asyncHandler(async (req, res) => {
   const userId = getUserId(req);
   try {
     const newEnterprise = await EnterpriseModel.create(data, userId);
-    // Convert keys to lowercase snake_case
     const convertedEnterprise = toLowerCaseKeys(newEnterprise);
-    
+    const enterpriseId = convertedEnterprise.enterprise_id ?? convertedEnterprise.ENTERPRISE_ID;
+
+    const adminUser = await provisionEnterpriseAdminOnEnterpriseCreate({
+      enterpriseId,
+      enterpriseCode: convertedEnterprise.enterprise_code ?? data.ENTERPRISE_CODE,
+      enterpriseName: convertedEnterprise.enterprise_name ?? data.ENTERPRISE_NAME
+    });
+
     sendCreated(res, {
       message: 'Enterprise created successfully',
-      data: convertedEnterprise
+      data: convertedEnterprise,
+      meta: {
+        enterprise_admin: adminUser.ok
+          ? {
+              user_guid: adminUser.userGuid ?? null,
+              created: adminUser.created === true,
+              username: 'enterprise_admin'
+            }
+          : null,
+        ...(adminUser.ok ? {} : { enterprise_admin_warning: adminUser.message ?? 'Failed to create enterprise admin user' })
+      }
     });
   } catch (error) {
     // Database errors from model are already wrapped in DatabaseError

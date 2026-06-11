@@ -1,6 +1,6 @@
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 import { normalizeEmailLower } from '../../shared/recValidationUtils.js';
-import { verifyUserPassword } from '../../../security/auth/service/fndsecAuthService.js';
+import { verifyUserPassword } from '../../../../utils/passwordVerification.js';
 import {
   fetchCandidatePasswordHash,
   loginCandidateViaPackage

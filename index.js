@@ -83,6 +83,7 @@ import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
 import { prewarmJobOfferPdfBrowser } from './services/jobOfferPdf/index.js';
+import { ensureSeedAndBackfillAdminUsers } from './scripts/seedAdminsService.js';
 import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
 import fndsecSubModulesController from './feature/security/sub_modules/controller/fndsecSubModulesController.js';
 import fndsecActionsController from './feature/security/actions/controller/fndsecActionsController.js';
@@ -345,6 +346,16 @@ app.use('/api/rec/lookup-values', recLookupValueController);
 // Initialize database pool on startup
 await createPool();
 await createFaceOraclePool();
+
+try {
+  const seedResult = await ensureSeedAndBackfillAdminUsers();
+  if (!seedResult.ok && !seedResult.seed?.skipped) {
+    console.error('[startup] Admin seed/backfill failed; continuing server startup.');
+  }
+} catch (err) {
+  console.error('[startup] Admin seed error:', err?.message || err);
+}
+
 await Promise.all([prewarmFaceModels(), prewarmJobOfferPdfBrowser()]);
 
 // ==========================================

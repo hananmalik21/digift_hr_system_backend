@@ -1,14 +1,19 @@
 import { sendPackageResponse } from './recControllerHelpers.js';
+import { bypassesFunctionPermissions } from '../../../utils/adminAccess.js';
 
 /**
  * Optional permission gate. Set REC_ENFORCE_PERMISSIONS=true to require
  * `req.user.permissions` (string array) to include the function code.
+ * Enterprise and super admins bypass this check.
  *
  * @param {string} permissionCode
  */
 export function recRequirePermission(permissionCode) {
   return (req, res, next) => {
     if (process.env.REC_ENFORCE_PERMISSIONS !== 'true') {
+      return next();
+    }
+    if (bypassesFunctionPermissions(req)) {
       return next();
     }
     const perms = req.user?.permissions;
