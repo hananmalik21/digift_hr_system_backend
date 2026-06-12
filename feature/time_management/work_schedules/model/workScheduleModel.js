@@ -8,6 +8,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
+import { toAuditActorId } from '../../../../utils/requestUtils.js';
 import { normalizeDayType } from '../constants.js';
 
 class WorkScheduleModel {
@@ -98,7 +99,7 @@ class WorkScheduleModel {
     ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8)`;
 
     const linesData = weeklyLines.map(line => {
-      const dayOfWeek = line.DAY_OF_WEEK ?? line.day_of_week;
+      const dayOfWeek = Number(line.DAY_OF_WEEK ?? line.day_of_week);
       const dayType = this.normalizeDayType(line.DAY_TYPE ?? line.day_type);
       const shiftIdRaw = line.SHIFT_ID ?? line.shift_id;
 
@@ -167,7 +168,7 @@ class WorkScheduleModel {
         }
 
         const now = new Date();
-        const createdBy = userId || 'SYSTEM';
+        const createdBy = toAuditActorId(userId);
 
         const effectiveStartDate = data.EFFECTIVE_START_DATE instanceof Date
           ? data.EFFECTIVE_START_DATE
@@ -683,7 +684,7 @@ class WorkScheduleModel {
         if (!lockRes.rows?.length) throw new NotFoundError('Work schedule not found');
 
         const now = new Date();
-        const actor = userId || 'SYSTEM';
+        const actor = toAuditActorId(userId);
 
         const updateFields = [];
         const bindParams = [];
@@ -779,7 +780,7 @@ class WorkScheduleModel {
         if (!lockRes.rows?.length) throw new NotFoundError('Work schedule not found');
 
         const now = new Date();
-        const actor = userId || 'SYSTEM';
+        const actor = toAuditActorId(userId);
 
         await connection.execute(
           `DELETE FROM ${this.LINES_TABLE_NAME}
@@ -824,7 +825,7 @@ class WorkScheduleModel {
                LAST_UPDATED_BY = :1,
                LAST_UPDATE_DATE = :2
            WHERE WORK_SCHEDULE_ID = :3 AND TENANT_ID = :4`,
-          [userId || 'SYSTEM', new Date(), workScheduleId, tenantId],
+          [toAuditActorId(userId), new Date(), workScheduleId, tenantId],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 

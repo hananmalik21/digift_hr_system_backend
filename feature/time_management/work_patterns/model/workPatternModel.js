@@ -2,6 +2,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
+import { toAuditActorId } from '../../../../utils/requestUtils.js';
 
 /**
  * Work Pattern Model
@@ -108,7 +109,7 @@ class WorkPatternModel {
         }
 
         const now = new Date();
-        const createdBy = userId || 'SYSTEM';
+        const createdBy = toAuditActorId(userId);
 
         // Insert header
         const insertHeaderSql = `INSERT INTO ${this.TABLE_NAME} (
@@ -167,9 +168,9 @@ class WorkPatternModel {
         ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8)`;
 
         const daysData = (data.DAYS || []).map(d => ([
-          data.TENANT_ID,
-          returnedId,
-          d.DAY_OF_WEEK,
+          Number(data.TENANT_ID),
+          Number(returnedId),
+          Number(d.DAY_OF_WEEK),
           String(d.DAY_TYPE).toUpperCase(),
           now,
           createdBy,
@@ -400,7 +401,7 @@ class WorkPatternModel {
         }
 
         const now = new Date();
-        const actor = userId || 'SYSTEM';
+        const actor = toAuditActorId(userId);
 
         // 1) Upsert days using MERGE (no delete => avoids deadlocks)
         if (data.DAYS !== undefined && Array.isArray(data.DAYS)) {
@@ -591,7 +592,7 @@ class WorkPatternModel {
                LAST_UPDATED_BY = :1,
                LAST_UPDATE_DATE = :2
            WHERE WORK_PATTERN_ID = :3 AND TENANT_ID = :4`,
-          [userId || 'SYSTEM', new Date(), workPatternId, tenantId],
+          [toAuditActorId(userId), new Date(), workPatternId, tenantId],
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 

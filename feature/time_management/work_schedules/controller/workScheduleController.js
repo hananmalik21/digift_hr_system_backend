@@ -15,6 +15,7 @@ import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '..
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { getUserId } from '../../../../utils/requestUtils.js';
 
 const router = express.Router();
 
@@ -160,10 +161,6 @@ function convertToUpperCase(data) {
 /**
  * Extract user ID from request
  */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
-
 /**
  * Validate that tenant_id exists in enterprise table
  */
