@@ -2,7 +2,6 @@ import express from 'express';
 import AbsLookupValueModel from '../model/absLookupValueModel.js';
 import {
   sendLookupValueList,
-  sendLookupValue,
   sendCreated,
   sendUpdated,
   sendDeleted,
@@ -11,238 +10,174 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/absLookupValueView.js';
+import { getUserId } from '../../../../../utils/requestUtils.js';
+import { normalizeTenantId } from '../../../../../utils/lookupEnterpriseUtils.js';
+import {
+  normalizeAbsBody,
+  parsePositiveInt,
+  resolveTenantIdFromRequest,
+  resolveWriteTenantId,
+  validateAbsCode,
+  validateAbsName,
+  validateAbsStatus,
+  validateDisplayOrder
+} from '../../absLookupRequestUtils.js';
 
 const router = express.Router({ mergeParams: true });
+const BODY_FIELDS = {
+  tenant_id: 'TENANT_ID',
+  lookup_value_code: 'LOOKUP_VALUE_CODE',
+  lookup_value_name: 'LOOKUP_VALUE_NAME',
+  display_order: 'DISPLAY_ORDER',
+  status: 'STATUS'
+};
 
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
-
 function validateLookupValueData(data, isUpdate = false) {
   const errors = [];
-
   if (!isUpdate) {
-    if (!data.lookup_value_code && !data.LOOKUP_VALUE_CODE) {
-      errors.push('lookup_value_code is required');
-    } else {
-      const lookupValueCode = (data.lookup_value_code || data.LOOKUP_VALUE_CODE || '').trim();
-      if (!/^[A-Z0-9_]+$/.test(lookupValueCode.toUpperCase())) {
-        errors.push('lookup_value_code must contain only uppercase letters, numbers, and underscores');
-      }
-    }
-    if (!data.lookup_value_name && !data.LOOKUP_VALUE_NAME) {
-      errors.push('lookup_value_name is required');
-    } else {
-      const lookupValueName = (data.lookup_value_name || data.LOOKUP_VALUE_NAME || '').trim();
-      if (lookupValueName === '') {
-        errors.push('lookup_value_name cannot be empty');
-      }
-    }
+    errors.push(...validateAbsCode(data.LOOKUP_VALUE_CODE, 'lookup_value_code'));
+    errors.push(...validateAbsName(data.LOOKUP_VALUE_NAME, 'lookup_value_name', { required: true }));
   } else {
-    if (data.lookup_value_name !== undefined || data.LOOKUP_VALUE_NAME !== undefined) {
-      const lookupValueName = (data.lookup_value_name || data.LOOKUP_VALUE_NAME || '').trim();
-      if (lookupValueName === '') {
-        errors.push('lookup_value_name cannot be empty');
-      }
-    }
-    if (data.display_order !== undefined || data.DISPLAY_ORDER !== undefined) {
-      const displayOrder = data.display_order !== undefined ? data.display_order : data.DISPLAY_ORDER;
-      if (displayOrder === null || isNaN(displayOrder) || displayOrder < 1) {
-        errors.push('display_order must be a valid positive number');
-      }
+    errors.push(...validateAbsName(data.LOOKUP_VALUE_NAME, 'lookup_value_name'));
+    errors.push(...validateDisplayOrder(data.DISPLAY_ORDER));
+    if (data.LOOKUP_VALUE_CODE !== undefined) {
+      errors.push('lookup_value_code cannot be changed');
     }
   }
-
-  if (data.status !== undefined || data.STATUS !== undefined) {
-    const status = (data.status || data.STATUS || '').toUpperCase();
-    if (status !== 'ACTIVE' && status !== 'INACTIVE') {
-      errors.push('status must be ACTIVE or INACTIVE');
-    }
-  }
-
-  if (isUpdate && (data.lookup_value_code !== undefined || data.LOOKUP_VALUE_CODE !== undefined)) {
-    errors.push('lookup_value_code cannot be changed');
-  }
-
+  errors.push(...validateAbsStatus(data.STATUS));
   return errors;
 }
 
-function normalizeBody(body) {
-  const normalized = {};
-  const fieldMap = {
-    'lookup_value_code': 'LOOKUP_VALUE_CODE',
-    'lookup_value_name': 'LOOKUP_VALUE_NAME',
-    'display_order': 'DISPLAY_ORDER',
-    'status': 'STATUS'
-  };
-  for (const [lowerKey, upperKey] of Object.entries(fieldMap)) {
-    if (body[lowerKey] !== undefined) {
-      normalized[upperKey] = body[lowerKey];
-    } else if (body[upperKey] !== undefined) {
-      normalized[upperKey] = body[upperKey];
-    }
+function parseTenantId(req, res) {
+  try {
+    return { value: resolveTenantIdFromRequest(req) };
+  } catch (e) {
+    sendBadRequest(res, req, e.message);
+    return { error: true };
   }
-  return normalized;
+}
+
+function parseLookupRoute(req, res) {
+  const lookupId = parsePositiveInt(req.params.lookup_id, 'lookup_id');
+  if (lookupId.error) {
+    sendBadRequest(res, req, lookupId.error);
+    return { error: true };
+  }
+  return { lookupId: lookupId.value };
 }
 
 router.get('/', async (req, res) => {
   try {
-    const lookupId = parseInt(req.params.lookup_id);
-    if (isNaN(lookupId) || lookupId <= 0) {
-      return sendBadRequest(res, req, 'Invalid lookup_id format');
-    }
-    const tenantId = req.query.tenant_id || req.query.TENANT_ID;
-    if (!tenantId) {
-      return sendBadRequest(res, req, 'tenant_id is required');
-    }
-    const tenantIdNum = parseInt(tenantId);
-    if (isNaN(tenantIdNum) || tenantIdNum <= 0) {
-      return sendBadRequest(res, req, 'tenant_id must be a valid positive number');
-    }
-    const values = await AbsLookupValueModel.findAll(lookupId, tenantIdNum);
-    sendLookupValueList(res, req, values, { lookup_id: lookupId, tenant_id: tenantIdNum });
+    const route = parseLookupRoute(req, res);
+    if (route.error) return;
+    const tenant = parseTenantId(req, res);
+    if (tenant.error) return;
+
+    const values = await AbsLookupValueModel.findAll(route.lookupId, tenant.value);
+    sendLookupValueList(res, req, values, {
+      lookup_id: route.lookupId,
+      tenant_id: tenant.value ?? null
+    });
   } catch (error) {
-    if (error.code === 'VALIDATION_ERROR' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'NOT_FOUND' && error.statusCode === 404) {
-      return sendNotFound(res, req, error.message);
-    }
+    if (error.code === 'NOT_FOUND') return sendNotFound(res, req, error.message);
     sendServerError(res, req, 'Failed to fetch lookup values', error);
   }
 });
 
 router.post('/', async (req, res) => {
   try {
-    const lookupId = parseInt(req.params.lookup_id);
-    if (isNaN(lookupId) || lookupId <= 0) {
-      return sendBadRequest(res, req, 'Invalid lookup_id format');
-    }
-    const tenantId = req.query.tenant_id || req.query.TENANT_ID;
-    if (!tenantId) {
-      return sendBadRequest(res, req, 'tenant_id is required');
-    }
-    const tenantIdNum = parseInt(tenantId);
-    if (isNaN(tenantIdNum) || tenantIdNum <= 0) {
-      return sendBadRequest(res, req, 'tenant_id must be a valid positive number');
-    }
-    const normalizedBody = normalizeBody(req.body);
+    const route = parseLookupRoute(req, res);
+    if (route.error) return;
+
+    const normalizedBody = normalizeAbsBody(req.body, BODY_FIELDS);
     const errors = validateLookupValueData(normalizedBody, false);
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-    if (normalizedBody.LOOKUP_VALUE_CODE) {
-      normalizedBody.LOOKUP_VALUE_CODE = normalizedBody.LOOKUP_VALUE_CODE.toUpperCase().trim();
-    }
-    if (!normalizedBody.STATUS) {
-      normalizedBody.STATUS = 'ACTIVE';
-    } else {
-      normalizedBody.STATUS = normalizedBody.STATUS.toUpperCase();
-    }
+    if (errors.length > 0) return sendBadRequest(res, req, errors);
+
+    normalizedBody.LOOKUP_VALUE_CODE = normalizedBody.LOOKUP_VALUE_CODE.toUpperCase().trim();
+    normalizedBody.STATUS = normalizedBody.STATUS?.toUpperCase() || 'ACTIVE';
     if (normalizedBody.DISPLAY_ORDER !== undefined) {
-      normalizedBody.DISPLAY_ORDER = parseInt(normalizedBody.DISPLAY_ORDER);
-      if (isNaN(normalizedBody.DISPLAY_ORDER) || normalizedBody.DISPLAY_ORDER < 1) {
-        return sendBadRequest(res, req, 'display_order must be a valid positive number');
-      }
+      normalizedBody.DISPLAY_ORDER = parseInt(normalizedBody.DISPLAY_ORDER, 10);
+      const orderErrors = validateDisplayOrder(normalizedBody.DISPLAY_ORDER);
+      if (orderErrors.length) return sendBadRequest(res, req, orderErrors);
     }
-    const userId = getUserId(req);
-    const newValue = await AbsLookupValueModel.create(lookupId, tenantIdNum, normalizedBody, userId);
-    sendCreated(res, req, newValue);
+
+    let tenantId;
+    try {
+      tenantId = resolveWriteTenantId(req, normalizedBody);
+    } catch (e) {
+      return sendBadRequest(res, req, e.message);
+    }
+
+    const created = await AbsLookupValueModel.create(
+      route.lookupId,
+      tenantId,
+      normalizedBody,
+      getUserId(req)
+    );
+    sendCreated(res, req, created);
   } catch (error) {
-    if (error.code === 'CONFLICT' && error.statusCode === 409) {
-      return sendConflict(res, req, error.message);
-    }
-    if (error.code === 'VALIDATION_ERROR' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'NOT_FOUND' && error.statusCode === 404) {
-      return sendNotFound(res, req, error.message);
-    }
+    if (error.code === 'CONFLICT') return sendConflict(res, req, error.message);
+    if (error.code === 'NOT_FOUND') return sendNotFound(res, req, error.message);
     sendServerError(res, req, 'Failed to create lookup value', error);
   }
 });
 
 router.put('/:value_id', async (req, res) => {
   try {
-    const lookupId = parseInt(req.params.lookup_id);
-    const valueId = parseInt(req.params.value_id);
-    if (isNaN(lookupId) || lookupId <= 0) {
-      return sendBadRequest(res, req, 'Invalid lookup_id format');
-    }
-    if (isNaN(valueId) || valueId <= 0) {
-      return sendBadRequest(res, req, 'Invalid value_id format');
-    }
-    const tenantId = req.query.tenant_id || req.query.TENANT_ID;
-    if (!tenantId) {
-      return sendBadRequest(res, req, 'tenant_id is required');
-    }
-    const tenantIdNum = parseInt(tenantId);
-    if (isNaN(tenantIdNum) || tenantIdNum <= 0) {
-      return sendBadRequest(res, req, 'tenant_id must be a valid positive number');
-    }
-    const normalizedBody = normalizeBody(req.body);
+    const route = parseLookupRoute(req, res);
+    if (route.error) return;
+    const parsedValueId = parsePositiveInt(req.params.value_id, 'value_id');
+    if (parsedValueId.error) return sendBadRequest(res, req, parsedValueId.error);
+    const tenant = parseTenantId(req, res);
+    if (tenant.error) return;
+
+    const normalizedBody = normalizeAbsBody(req.body, BODY_FIELDS);
     const errors = validateLookupValueData(normalizedBody, true);
-    if (errors.length > 0) {
-      return sendBadRequest(res, req, errors);
-    }
-    if (normalizedBody.STATUS) {
-      normalizedBody.STATUS = normalizedBody.STATUS.toUpperCase();
-    }
+    if (errors.length > 0) return sendBadRequest(res, req, errors);
+    if (normalizedBody.STATUS) normalizedBody.STATUS = normalizedBody.STATUS.toUpperCase();
     if (normalizedBody.DISPLAY_ORDER !== undefined) {
-      normalizedBody.DISPLAY_ORDER = parseInt(normalizedBody.DISPLAY_ORDER);
-      if (isNaN(normalizedBody.DISPLAY_ORDER) || normalizedBody.DISPLAY_ORDER < 1) {
-        return sendBadRequest(res, req, 'display_order must be a valid positive number');
-      }
+      normalizedBody.DISPLAY_ORDER = parseInt(normalizedBody.DISPLAY_ORDER, 10);
+      const orderErrors = validateDisplayOrder(normalizedBody.DISPLAY_ORDER);
+      if (orderErrors.length) return sendBadRequest(res, req, orderErrors);
     }
-    const userId = getUserId(req);
-    const updatedValue = await AbsLookupValueModel.update(lookupId, valueId, tenantIdNum, normalizedBody, userId);
-    sendUpdated(res, req, updatedValue);
+    if (normalizedBody.TENANT_ID !== undefined) {
+      normalizedBody.TENANT_ID = normalizeTenantId(normalizedBody.TENANT_ID);
+    }
+
+    const updated = await AbsLookupValueModel.update(
+      route.lookupId,
+      parsedValueId.value,
+      tenant.value,
+      normalizedBody,
+      getUserId(req)
+    );
+    sendUpdated(res, req, updated);
   } catch (error) {
-    if (error.code === 'NOT_FOUND' && error.statusCode === 404) {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'VALIDATION_ERROR' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.message);
-    }
-    if (error.code === 'CONFLICT' && error.statusCode === 409) {
-      return sendConflict(res, req, error.message);
-    }
+    if (error.code === 'NOT_FOUND') return sendNotFound(res, req, error.message);
+    if (error.code === 'CONFLICT') return sendConflict(res, req, error.message);
+    if (error.code === 'VALIDATION_ERROR') return sendBadRequest(res, req, error.message);
     sendServerError(res, req, 'Failed to update lookup value', error);
   }
 });
 
 router.delete('/:value_id', async (req, res) => {
   try {
-    const lookupId = parseInt(req.params.lookup_id);
-    const valueId = parseInt(req.params.value_id);
-    if (isNaN(lookupId) || lookupId <= 0) {
-      return sendBadRequest(res, req, 'Invalid lookup_id format');
-    }
-    if (isNaN(valueId) || valueId <= 0) {
-      return sendBadRequest(res, req, 'Invalid value_id format');
-    }
-    const tenantId = req.query.tenant_id || req.query.TENANT_ID;
-    if (!tenantId) {
-      return sendBadRequest(res, req, 'tenant_id is required');
-    }
-    const tenantIdNum = parseInt(tenantId);
-    if (isNaN(tenantIdNum) || tenantIdNum <= 0) {
-      return sendBadRequest(res, req, 'tenant_id must be a valid positive number');
-    }
-    await AbsLookupValueModel.delete(lookupId, valueId, tenantIdNum);
-    sendDeleted(res, req, 'Lookup value deleted successfully', valueId);
+    const route = parseLookupRoute(req, res);
+    if (route.error) return;
+    const parsedValueId = parsePositiveInt(req.params.value_id, 'value_id');
+    if (parsedValueId.error) return sendBadRequest(res, req, parsedValueId.error);
+    const tenant = parseTenantId(req, res);
+    if (tenant.error) return;
+
+    await AbsLookupValueModel.delete(route.lookupId, parsedValueId.value, tenant.value);
+    sendDeleted(res, req, 'Lookup value deleted successfully', parsedValueId.value);
   } catch (error) {
-    if (error.code === 'NOT_FOUND' && error.statusCode === 404) {
-      return sendNotFound(res, req, error.message);
-    }
-    if (error.code === 'VALIDATION_ERROR' && error.statusCode === 400) {
-      return sendBadRequest(res, req, error.message);
-    }
+    if (error.code === 'NOT_FOUND') return sendNotFound(res, req, error.message);
     sendServerError(res, req, 'Failed to delete lookup value', error);
   }
 });

@@ -1,9 +1,16 @@
 import db from '../../../../../config/db.js';
 import oracledb from 'oracledb';
+import {
+  applyLookupTenantFilter,
+  bindLookupTenantId,
+  isVisibleToScopeFilter,
+  normalizeTenantId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 /**
  * ABS Lookup Value Model
- * Handles all database operations for ABS.ABS_LOOKUP_VALUES table
+ * Handles all database operations for ABS.ABS_LOOKUP_VALUES table.
+ * TENANT_ID NULL = global; non-null = tenant-specific.
  */
 class AbsLookupValueModel {
   static TABLE_NAME = 'ABS.ABS_LOOKUP_VALUES';
@@ -69,49 +76,96 @@ class AbsLookupValueModel {
     }
   }
 
-  static async verifyLookupBelongsToTenant(lookupId, tenantId, connection = null) {
-    try {
-      const query = `SELECT COUNT(*) AS count 
-        FROM ${this.PARENT_TABLE_NAME}
-        WHERE LOOKUP_ID = :1 AND TENANT_ID = :2`;
+  static async verifyLookupVisible(lookupId, tenantId, connection = null) {
+    const conditions = ['p.LOOKUP_ID = :1'];
+    const bindParams = [lookupId];
+    applyLookupTenantFilter(conditions, bindParams, 2, tenantId, 'p');
 
-      let result;
-      if (connection) {
-        result = await connection.execute(query, [lookupId, tenantId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-      } else {
-        result = await this.executeQuery(query, [lookupId, tenantId]);
+    const query = `SELECT 1
+      FROM ${this.PARENT_TABLE_NAME} p
+      WHERE ${conditions.join(' AND ')}
+      FETCH FIRST 1 ROWS ONLY`;
+
+    let result;
+    if (connection) {
+      result = await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    } else {
+      result = await this.executeQuery(query, bindParams);
+    }
+    return Boolean(result.rows?.length);
+  }
+
+  static async assertNoCrossScopeValueCodeConflict(
+    connection,
+    { tenantId, lookupId, lookupValueCode, excludeValueId = null }
+  ) {
+    const code = lookupValueCode != null ? String(lookupValueCode).trim() : '';
+    if (!code) return;
+
+    const bindParams = [lookupId, code];
+    let excludeClause = '';
+    if (excludeValueId) {
+      excludeClause = ' AND v.LOOKUP_VALUE_ID <> :3';
+      bindParams.push(excludeValueId);
+    }
+
+    if (tenantId != null) {
+      const query = `SELECT 1
+        FROM ${this.TABLE_NAME} v
+        WHERE v.TENANT_ID IS NULL
+          AND v.LOOKUP_ID = :1
+          AND UPPER(TRIM(v.LOOKUP_VALUE_CODE)) = UPPER(TRIM(:2))
+          ${excludeClause}
+        FETCH FIRST 1 ROWS ONLY`;
+      const result = await connection.execute(query, bindParams, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      if (result.rows?.length) {
+        const conflictError = new Error(
+          `Lookup value code '${code}' already exists as global for this lookup and cannot be duplicated for a tenant.`
+        );
+        conflictError.code = 'CONFLICT';
+        conflictError.statusCode = 409;
+        throw conflictError;
       }
+      return;
+    }
 
-      const row = result.rows && result.rows.length > 0 ? result.rows[0] : null;
-      if (!row) return false;
-      const count = row.COUNT !== undefined ? row.COUNT : (row.count !== undefined ? row.count : 0);
-      return count > 0;
-    } catch (error) {
-      console.error('Error in verifyLookupBelongsToTenant:', error);
-      throw new Error(`Failed to verify lookup: ${error.message}`);
+    const query = `SELECT 1
+      FROM ${this.TABLE_NAME} v
+      WHERE v.TENANT_ID IS NOT NULL
+        AND v.LOOKUP_ID = :1
+        AND UPPER(TRIM(v.LOOKUP_VALUE_CODE)) = UPPER(TRIM(:2))
+        ${excludeClause}
+      FETCH FIRST 1 ROWS ONLY`;
+    const result = await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+    if (result.rows?.length) {
+      const conflictError = new Error(
+        `Lookup value code '${code}' already exists for a tenant and cannot be created as global.`
+      );
+      conflictError.code = 'CONFLICT';
+      conflictError.statusCode = 409;
+      throw conflictError;
     }
   }
 
   static async findAll(lookupId, tenantId) {
     try {
-      if (!tenantId) {
-        const validationError = new Error('tenant_id is required');
-        validationError.code = 'VALIDATION_ERROR';
-        validationError.statusCode = 400;
-        throw validationError;
-      }
-
-      const belongsToTenant = await this.verifyLookupBelongsToTenant(lookupId, tenantId);
-      if (!belongsToTenant) {
-        const notFoundError = new Error('Lookup not found or does not belong to tenant');
+      const visible = await this.verifyLookupVisible(lookupId, tenantId);
+      if (!visible) {
+        const notFoundError = new Error('Lookup not found or not visible for this tenant scope');
         notFoundError.code = 'NOT_FOUND';
         notFoundError.statusCode = 404;
         throw notFoundError;
       }
 
-      const query = `SELECT 
+      const conditions = ['v.LOOKUP_ID = :1'];
+      const bindParams = [lookupId];
+      applyLookupTenantFilter(conditions, bindParams, 2, tenantId, 'v');
+
+      const query = `SELECT
         LOOKUP_VALUE_ID,
         LOOKUP_ID,
         LOOKUP_VALUE_CODE,
@@ -121,39 +175,37 @@ class AbsLookupValueModel {
         TENANT_ID,
         CREATED_BY,
         CREATED_DATE
-      FROM ${this.TABLE_NAME}
-      WHERE LOOKUP_ID = :1 AND TENANT_ID = :2
-      ORDER BY DISPLAY_ORDER, LOOKUP_VALUE_CODE`;
+      FROM ${this.TABLE_NAME} v
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY CASE WHEN v.TENANT_ID IS NULL THEN 0 ELSE 1 END, v.DISPLAY_ORDER, v.LOOKUP_VALUE_CODE`;
 
-      const result = await this.executeQuery(query, [lookupId, tenantId]);
+      const result = await this.executeQuery(query, bindParams);
       return result.rows || [];
     } catch (error) {
       console.error('Error in findAll:', error);
-      if (error.code === 'NOT_FOUND' || error.code === 'VALIDATION_ERROR') {
-        throw error;
-      }
+      if (error.code === 'NOT_FOUND') throw error;
       throw new Error(`Failed to fetch lookup values: ${error.message}`);
     }
   }
 
   static async findById(lookupId, valueId, tenantId) {
     try {
-      if (!tenantId) {
-        const validationError = new Error('tenant_id is required');
-        validationError.code = 'VALIDATION_ERROR';
-        validationError.statusCode = 400;
-        throw validationError;
-      }
-
-      const belongsToTenant = await this.verifyLookupBelongsToTenant(lookupId, tenantId);
-      if (!belongsToTenant) {
-        const notFoundError = new Error('Lookup not found or does not belong to tenant');
+      const visible = await this.verifyLookupVisible(lookupId, tenantId);
+      if (!visible) {
+        const notFoundError = new Error('Lookup not found or not visible for this tenant scope');
         notFoundError.code = 'NOT_FOUND';
         notFoundError.statusCode = 404;
         throw notFoundError;
       }
 
-      const query = `SELECT 
+      const conditions = [
+        'v.LOOKUP_VALUE_ID = :1',
+        'v.LOOKUP_ID = :2'
+      ];
+      const bindParams = [valueId, lookupId];
+      applyLookupTenantFilter(conditions, bindParams, 3, tenantId, 'v');
+
+      const query = `SELECT
         LOOKUP_VALUE_ID,
         LOOKUP_ID,
         LOOKUP_VALUE_CODE,
@@ -163,123 +215,128 @@ class AbsLookupValueModel {
         TENANT_ID,
         CREATED_BY,
         CREATED_DATE
-      FROM ${this.TABLE_NAME}
-      WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2 AND TENANT_ID = :3`;
+      FROM ${this.TABLE_NAME} v
+      WHERE ${conditions.join(' AND ')}`;
 
-      const result = await this.executeQuery(query, [valueId, lookupId, tenantId]);
-      if (result.rows && result.rows.length > 0) {
-        return result.rows[0];
-      }
-      return null;
+      const result = await this.executeQuery(query, bindParams);
+      return result.rows?.[0] ?? null;
     } catch (error) {
       console.error('Error in findById:', error);
-      if (error.code === 'NOT_FOUND' || error.code === 'VALIDATION_ERROR') {
-        throw error;
-      }
+      if (error.code === 'NOT_FOUND') throw error;
       throw new Error(`Failed to fetch lookup value: ${error.message}`);
     }
   }
 
   static async getNextDisplayOrder(lookupId, tenantId, connection) {
-    try {
-      const query = `SELECT NVL(MAX(DISPLAY_ORDER), 0) + 1 AS next_order
-        FROM ${this.TABLE_NAME}
-        WHERE LOOKUP_ID = :1 AND TENANT_ID = :2`;
-
-      const result = await connection.execute(query, [lookupId, tenantId], {
-        outFormat: oracledb.OUT_FORMAT_OBJECT
-      });
-
-      const row = result.rows && result.rows.length > 0 ? result.rows[0] : null;
-      const nextOrder = row ? (row.NEXT_ORDER !== undefined ? row.NEXT_ORDER : (row.next_order !== undefined ? row.next_order : 1)) : 1;
-      return nextOrder;
-    } catch (error) {
-      console.error('Error in getNextDisplayOrder:', error);
-      throw new Error(`Failed to get next display order: ${error.message}`);
+    let query = `SELECT NVL(MAX(DISPLAY_ORDER), 0) + 1 AS next_order
+      FROM ${this.TABLE_NAME}
+      WHERE LOOKUP_ID = :1`;
+    const bindParams = [lookupId];
+    if (tenantId != null) {
+      query += ' AND TENANT_ID = :2';
+      bindParams.push(tenantId);
+    } else {
+      query += ' AND TENANT_ID IS NULL';
     }
+
+    const result = await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+    const row = result.rows?.[0];
+    return row?.NEXT_ORDER ?? row?.next_order ?? 1;
   }
 
-  static async codeExists(lookupId, lookupValueCode, tenantId, excludeValueId = null, connection = null) {
-    try {
-      let query = `SELECT COUNT(*) AS count 
-        FROM ${this.TABLE_NAME}
-        WHERE LOOKUP_ID = :1 AND UPPER(LOOKUP_VALUE_CODE) = UPPER(:2) AND TENANT_ID = :3`;
-      const bindParams = [lookupId, lookupValueCode, tenantId];
-      if (excludeValueId) {
-        query += ` AND LOOKUP_VALUE_ID != :4`;
-        bindParams.push(excludeValueId);
-      }
+  static async codeExistsInScope(lookupId, lookupValueCode, tenantId, excludeValueId = null, connection = null) {
+    let query = `SELECT COUNT(*) AS count
+      FROM ${this.TABLE_NAME}
+      WHERE LOOKUP_ID = :1 AND UPPER(LOOKUP_VALUE_CODE) = UPPER(:2)`;
+    const bindParams = [lookupId, lookupValueCode];
+    let paramIndex = 3;
 
-      let result;
-      if (connection) {
-        result = await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-      } else {
-        result = await this.executeQuery(query, bindParams);
-      }
-
-      const row = result.rows && result.rows.length > 0 ? result.rows[0] : null;
-      if (!row) return false;
-      const count = row.COUNT !== undefined ? row.COUNT : (row.count !== undefined ? row.count : 0);
-      return count > 0;
-    } catch (error) {
-      console.error('Error in codeExists:', error);
-      throw new Error(`Failed to check lookup value code: ${error.message}`);
+    if (tenantId != null) {
+      query += ` AND TENANT_ID = :${paramIndex}`;
+      bindParams.push(tenantId);
+      paramIndex++;
+    } else {
+      query += ' AND TENANT_ID IS NULL';
     }
+
+    if (excludeValueId) {
+      query += ` AND LOOKUP_VALUE_ID <> :${paramIndex}`;
+      bindParams.push(excludeValueId);
+    }
+
+    let result;
+    if (connection) {
+      result = await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    } else {
+      result = await this.executeQuery(query, bindParams);
+    }
+
+    const row = result.rows?.[0];
+    return (row?.COUNT ?? row?.count ?? 0) > 0;
   }
 
   static async displayOrderExists(lookupId, displayOrder, tenantId, excludeValueId = null, connection = null) {
-    try {
-      let query = `SELECT COUNT(*) AS count 
-        FROM ${this.TABLE_NAME}
-        WHERE LOOKUP_ID = :1 AND DISPLAY_ORDER = :2 AND TENANT_ID = :3`;
-      const bindParams = [lookupId, displayOrder, tenantId];
-      if (excludeValueId) {
-        query += ` AND LOOKUP_VALUE_ID != :4`;
-        bindParams.push(excludeValueId);
-      }
+    let query = `SELECT COUNT(*) AS count
+      FROM ${this.TABLE_NAME}
+      WHERE LOOKUP_ID = :1 AND DISPLAY_ORDER = :2`;
+    const bindParams = [lookupId, displayOrder];
+    let paramIndex = 3;
 
-      let result;
-      if (connection) {
-        result = await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-      } else {
-        result = await this.executeQuery(query, bindParams);
-      }
-
-      const row = result.rows && result.rows.length > 0 ? result.rows[0] : null;
-      if (!row) return false;
-      const count = row.COUNT !== undefined ? row.COUNT : (row.count !== undefined ? row.count : 0);
-      return count > 0;
-    } catch (error) {
-      console.error('Error in displayOrderExists:', error);
-      throw new Error(`Failed to check display order: ${error.message}`);
+    if (tenantId != null) {
+      query += ` AND TENANT_ID = :${paramIndex}`;
+      bindParams.push(tenantId);
+      paramIndex++;
+    } else {
+      query += ' AND TENANT_ID IS NULL';
     }
+
+    if (excludeValueId) {
+      query += ` AND LOOKUP_VALUE_ID <> :${paramIndex}`;
+      bindParams.push(excludeValueId);
+    }
+
+    let result;
+    if (connection) {
+      result = await connection.execute(query, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    } else {
+      result = await this.executeQuery(query, bindParams);
+    }
+
+    const row = result.rows?.[0];
+    return (row?.COUNT ?? row?.count ?? 0) > 0;
   }
 
   static async create(lookupId, tenantId, data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        if (!tenantId) {
-          const validationError = new Error('tenant_id is required');
-          validationError.code = 'VALIDATION_ERROR';
-          validationError.statusCode = 400;
-          throw validationError;
-        }
-
-        const belongsToTenant = await this.verifyLookupBelongsToTenant(lookupId, tenantId, connection);
-        if (!belongsToTenant) {
-          const notFoundError = new Error('Lookup not found or does not belong to tenant');
+        const visible = await this.verifyLookupVisible(lookupId, tenantId, connection);
+        if (!visible) {
+          const notFoundError = new Error('Lookup not found or not visible for this tenant scope');
           notFoundError.code = 'NOT_FOUND';
           notFoundError.statusCode = 404;
           throw notFoundError;
         }
 
-        const codeExists = await this.codeExists(lookupId, data.LOOKUP_VALUE_CODE, tenantId, null, connection);
-        if (codeExists) {
-          const conflictError = new Error(`Lookup value code '${data.LOOKUP_VALUE_CODE}' already exists for this lookup`);
+        const rowTenantId =
+          data.TENANT_ID !== undefined
+            ? normalizeTenantId(data.TENANT_ID)
+            : tenantId !== undefined
+              ? tenantId
+              : null;
+        const lookupValueCode = data.LOOKUP_VALUE_CODE?.toUpperCase?.() ?? data.LOOKUP_VALUE_CODE;
+
+        await this.assertNoCrossScopeValueCodeConflict(connection, {
+          tenantId: rowTenantId,
+          lookupId,
+          lookupValueCode
+        });
+
+        if (await this.codeExistsInScope(lookupId, lookupValueCode, rowTenantId, null, connection)) {
+          const conflictError = new Error(
+            `Lookup value code '${lookupValueCode}' already exists for this lookup in this scope`
+          );
           conflictError.code = 'CONFLICT';
           conflictError.statusCode = 409;
           throw conflictError;
@@ -287,119 +344,68 @@ class AbsLookupValueModel {
 
         let displayOrder = data.DISPLAY_ORDER;
         if (displayOrder === undefined || displayOrder === null) {
-          displayOrder = await this.getNextDisplayOrder(lookupId, tenantId, connection);
-        } else {
-          const orderExists = await this.displayOrderExists(lookupId, displayOrder, tenantId, null, connection);
-          if (orderExists) {
-            const conflictError = new Error(`Display order ${displayOrder} already exists for this lookup`);
-            conflictError.code = 'CONFLICT';
-            conflictError.statusCode = 409;
-            throw conflictError;
-          }
+          displayOrder = await this.getNextDisplayOrder(lookupId, rowTenantId, connection);
+        } else if (
+          await this.displayOrderExists(lookupId, displayOrder, rowTenantId, null, connection)
+        ) {
+          const conflictError = new Error(`Display order ${displayOrder} already exists for this lookup in this scope`);
+          conflictError.code = 'CONFLICT';
+          conflictError.statusCode = 409;
+          throw conflictError;
         }
 
         const status = data.STATUS || 'ACTIVE';
-
         let valueId;
+
         try {
-          const seqQuery = `SELECT ABS.ABS_LOOKUP_VALUES_SEQ.NEXTVAL AS next_id FROM DUAL`;
-          const seqResult = await connection.execute(seqQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          const seqRow = seqResult.rows && seqResult.rows.length > 0 ? seqResult.rows[0] : null;
-          valueId = seqRow ? (seqRow.NEXT_ID !== undefined ? seqRow.NEXT_ID : seqRow.next_id) : null;
-          if (!valueId) {
-            throw new Error('Failed to get next sequence value');
-          }
-        } catch (seqError) {
-          const maxQuery = `SELECT NVL(MAX(LOOKUP_VALUE_ID), 0) + 1 AS next_id FROM ${this.TABLE_NAME}`;
-          const maxResult = await connection.execute(maxQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          const maxRow = maxResult.rows && maxResult.rows.length > 0 ? maxResult.rows[0] : null;
-          valueId = maxRow ? (maxRow.NEXT_ID !== undefined ? maxRow.NEXT_ID : maxRow.next_id) : 1;
+          const seqResult = await connection.execute(
+            `SELECT ABS.ABS_LOOKUP_VALUES_SEQ.NEXTVAL AS next_id FROM DUAL`,
+            [],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          valueId = seqResult.rows[0].NEXT_ID ?? seqResult.rows[0].next_id;
+        } catch {
+          const maxResult = await connection.execute(
+            `SELECT NVL(MAX(LOOKUP_VALUE_ID), 0) + 1 AS next_id FROM ${this.TABLE_NAME}`,
+            [],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          valueId = maxResult.rows[0].NEXT_ID ?? maxResult.rows[0].next_id ?? 1;
         }
 
-        const insertQuery = `INSERT INTO ${this.TABLE_NAME} (
-          LOOKUP_VALUE_ID,
-          LOOKUP_ID,
-          LOOKUP_VALUE_CODE,
-          LOOKUP_VALUE_NAME,
-          DISPLAY_ORDER,
-          STATUS,
-          TENANT_ID,
-          CREATED_BY,
-          CREATED_DATE
-        ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9
-        )`;
-
         const now = new Date();
-        try {
-          await connection.execute(insertQuery, [
+        await connection.execute(
+          `INSERT INTO ${this.TABLE_NAME} (
+            LOOKUP_VALUE_ID, LOOKUP_ID, LOOKUP_VALUE_CODE, LOOKUP_VALUE_NAME,
+            DISPLAY_ORDER, STATUS, TENANT_ID, CREATED_BY, CREATED_DATE
+          ) VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9)`,
+          [
             valueId,
             lookupId,
-            data.LOOKUP_VALUE_CODE.toUpperCase(),
+            lookupValueCode,
             data.LOOKUP_VALUE_NAME,
             displayOrder,
             status,
-            tenantId,
+            bindLookupTenantId(rowTenantId),
             userId || 'SYSTEM',
             now
-          ], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-        } catch (insertError) {
-          if (insertError.errorNum === 1 || insertError.message?.includes('ORA-00001') ||
-              insertError.message?.includes('unique constraint')) {
-            const maxQuery = `SELECT NVL(MAX(LOOKUP_VALUE_ID), 0) + 1 AS next_id FROM ${this.TABLE_NAME}`;
-            const maxResult = await connection.execute(maxQuery, [], {
-              outFormat: oracledb.OUT_FORMAT_OBJECT
-            });
-            const maxRow = maxResult.rows && maxResult.rows.length > 0 ? maxResult.rows[0] : null;
-            valueId = maxRow ? (maxRow.NEXT_ID !== undefined ? maxRow.NEXT_ID : maxRow.next_id) : 1;
-            await connection.execute(insertQuery, [
-              valueId,
-              lookupId,
-              data.LOOKUP_VALUE_CODE.toUpperCase(),
-              data.LOOKUP_VALUE_NAME,
-              displayOrder,
-              status,
-              tenantId,
-              userId || 'SYSTEM',
-              now
-            ], {
-              outFormat: oracledb.OUT_FORMAT_OBJECT
-            });
-          } else {
-            throw insertError;
-          }
-        }
+          ],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
-        const selectQuery = `SELECT 
-          LOOKUP_VALUE_ID,
-          LOOKUP_ID,
-          LOOKUP_VALUE_CODE,
-          LOOKUP_VALUE_NAME,
-          DISPLAY_ORDER,
-          STATUS,
-          TENANT_ID,
-          CREATED_BY,
-          CREATED_DATE
-        FROM ${this.TABLE_NAME}
-        WHERE LOOKUP_VALUE_ID = :1`;
-
-        const selectResult = await connection.execute(selectQuery, [valueId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
+        const selectResult = await connection.execute(
+          `SELECT LOOKUP_VALUE_ID, LOOKUP_ID, LOOKUP_VALUE_CODE, LOOKUP_VALUE_NAME,
+            DISPLAY_ORDER, STATUS, TENANT_ID, CREATED_BY, CREATED_DATE
+          FROM ${this.TABLE_NAME} WHERE LOOKUP_VALUE_ID = :1`,
+          [valueId],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
       console.error('Error in create:', error);
-      if (error.code === 'CONFLICT' || error.code === 'VALIDATION_ERROR' || error.code === 'NOT_FOUND') {
-        throw error;
-      }
+      if (error.code === 'CONFLICT' || error.code === 'NOT_FOUND') throw error;
       throw new Error(`Failed to create lookup value: ${error.message}`);
     }
   }
@@ -407,23 +413,23 @@ class AbsLookupValueModel {
   static async update(lookupId, valueId, tenantId, data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        if (!tenantId) {
-          const validationError = new Error('tenant_id is required');
-          validationError.code = 'VALIDATION_ERROR';
-          validationError.statusCode = 400;
-          throw validationError;
-        }
-
-        const belongsToTenant = await this.verifyLookupBelongsToTenant(lookupId, tenantId, connection);
-        if (!belongsToTenant) {
-          const notFoundError = new Error('Lookup not found or does not belong to tenant');
+        const existingResult = await connection.execute(
+          `SELECT LOOKUP_VALUE_ID, LOOKUP_ID, LOOKUP_VALUE_CODE, LOOKUP_VALUE_NAME,
+            DISPLAY_ORDER, STATUS, TENANT_ID, CREATED_BY, CREATED_DATE
+          FROM ${this.TABLE_NAME}
+          WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2`,
+          [valueId, lookupId],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (!existingResult.rows?.length) {
+          const notFoundError = new Error('Lookup value not found');
           notFoundError.code = 'NOT_FOUND';
           notFoundError.statusCode = 404;
           throw notFoundError;
         }
+        const existing = existingResult.rows[0];
 
-        const existing = await this.findById(lookupId, valueId, tenantId);
-        if (!existing) {
+        if (!isVisibleToScopeFilter(existing.TENANT_ID, tenantId)) {
           const notFoundError = new Error('Lookup value not found');
           notFoundError.code = 'NOT_FOUND';
           notFoundError.statusCode = 404;
@@ -434,6 +440,11 @@ class AbsLookupValueModel {
         const bindParams = [];
         let paramIndex = 1;
 
+        if (data.TENANT_ID !== undefined) {
+          updateFields.push(`TENANT_ID = :${paramIndex}`);
+          bindParams.push(bindLookupTenantId(data.TENANT_ID));
+          paramIndex++;
+        }
         if (data.LOOKUP_VALUE_NAME !== undefined) {
           if (!data.LOOKUP_VALUE_NAME || data.LOOKUP_VALUE_NAME.trim() === '') {
             const validationError = new Error('LOOKUP_VALUE_NAME cannot be empty');
@@ -445,7 +456,6 @@ class AbsLookupValueModel {
           bindParams.push(data.LOOKUP_VALUE_NAME);
           paramIndex++;
         }
-
         if (data.DISPLAY_ORDER !== undefined) {
           if (data.DISPLAY_ORDER === null || isNaN(data.DISPLAY_ORDER) || data.DISPLAY_ORDER < 1) {
             const validationError = new Error('DISPLAY_ORDER must be a valid positive number');
@@ -453,9 +463,20 @@ class AbsLookupValueModel {
             validationError.statusCode = 400;
             throw validationError;
           }
-          const orderExists = await this.displayOrderExists(lookupId, data.DISPLAY_ORDER, tenantId, valueId, connection);
-          if (orderExists) {
-            const conflictError = new Error(`Display order ${data.DISPLAY_ORDER} already exists for this lookup`);
+          const effectiveTenantId =
+            data.TENANT_ID !== undefined ? data.TENANT_ID : existing.TENANT_ID;
+          if (
+            await this.displayOrderExists(
+              lookupId,
+              data.DISPLAY_ORDER,
+              effectiveTenantId,
+              valueId,
+              connection
+            )
+          ) {
+            const conflictError = new Error(
+              `Display order ${data.DISPLAY_ORDER} already exists for this lookup in this scope`
+            );
             conflictError.code = 'CONFLICT';
             conflictError.statusCode = 409;
             throw conflictError;
@@ -464,7 +485,6 @@ class AbsLookupValueModel {
           bindParams.push(data.DISPLAY_ORDER);
           paramIndex++;
         }
-
         if (data.STATUS !== undefined) {
           updateFields.push(`STATUS = :${paramIndex}`);
           bindParams.push(data.STATUS);
@@ -472,41 +492,36 @@ class AbsLookupValueModel {
         }
 
         if (updateFields.length === 0) {
-          throw new Error('No fields to update');
+          return this.convertKeysToSnakeCase(existing);
         }
+
+        const effectiveTenantId =
+          data.TENANT_ID !== undefined ? data.TENANT_ID : existing.TENANT_ID;
+        await this.assertNoCrossScopeValueCodeConflict(connection, {
+          tenantId: effectiveTenantId,
+          lookupId,
+          lookupValueCode: existing.LOOKUP_VALUE_CODE,
+          excludeValueId: valueId
+        });
 
         bindParams.push(valueId);
         bindParams.push(lookupId);
-        bindParams.push(tenantId);
-        const query = `UPDATE ${this.TABLE_NAME} 
-          SET ${updateFields.join(', ')} 
-          WHERE LOOKUP_VALUE_ID = :${paramIndex} AND LOOKUP_ID = :${paramIndex + 1} AND TENANT_ID = :${paramIndex + 2}`;
+        await connection.execute(
+          `UPDATE ${this.TABLE_NAME}
+            SET ${updateFields.join(', ')}
+            WHERE LOOKUP_VALUE_ID = :${paramIndex} AND LOOKUP_ID = :${paramIndex + 1}`,
+          bindParams,
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
-        await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        const selectQuery = `SELECT 
-          LOOKUP_VALUE_ID,
-          LOOKUP_ID,
-          LOOKUP_VALUE_CODE,
-          LOOKUP_VALUE_NAME,
-          DISPLAY_ORDER,
-          STATUS,
-          TENANT_ID,
-          CREATED_BY,
-          CREATED_DATE
-        FROM ${this.TABLE_NAME}
-        WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2 AND TENANT_ID = :3`;
-        const selectResult = await connection.execute(selectQuery, [valueId, lookupId, tenantId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-        if (!selectResult.rows || selectResult.rows.length === 0) {
-          const notFoundError = new Error('Lookup value not found');
-          notFoundError.code = 'NOT_FOUND';
-          notFoundError.statusCode = 404;
-          throw notFoundError;
-        }
+        const selectResult = await connection.execute(
+          `SELECT LOOKUP_VALUE_ID, LOOKUP_ID, LOOKUP_VALUE_CODE, LOOKUP_VALUE_NAME,
+            DISPLAY_ORDER, STATUS, TENANT_ID, CREATED_BY, CREATED_DATE
+          FROM ${this.TABLE_NAME}
+          WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2`,
+          [valueId, lookupId],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
         return this.convertKeysToSnakeCase(selectResult.rows[0]);
       });
     } catch (error) {
@@ -521,21 +536,6 @@ class AbsLookupValueModel {
   static async delete(lookupId, valueId, tenantId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        if (!tenantId) {
-          const validationError = new Error('tenant_id is required');
-          validationError.code = 'VALIDATION_ERROR';
-          validationError.statusCode = 400;
-          throw validationError;
-        }
-
-        const belongsToTenant = await this.verifyLookupBelongsToTenant(lookupId, tenantId, connection);
-        if (!belongsToTenant) {
-          const notFoundError = new Error('Lookup not found or does not belong to tenant');
-          notFoundError.code = 'NOT_FOUND';
-          notFoundError.statusCode = 404;
-          throw notFoundError;
-        }
-
         const existing = await this.findById(lookupId, valueId, tenantId);
         if (!existing) {
           const notFoundError = new Error('Lookup value not found');
@@ -544,15 +544,14 @@ class AbsLookupValueModel {
           throw notFoundError;
         }
 
-        const deleteQuery = `DELETE FROM ${this.TABLE_NAME} 
-          WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2 AND TENANT_ID = :3`;
+        const deleteResult = await connection.execute(
+          `DELETE FROM ${this.TABLE_NAME}
+            WHERE LOOKUP_VALUE_ID = :1 AND LOOKUP_ID = :2`,
+          [valueId, lookupId],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
 
-        const deleteResult = await connection.execute(deleteQuery, [valueId, lookupId, tenantId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        const rowsAffected = deleteResult.rowsAffected || deleteResult.rowCount || 0;
-        if (rowsAffected === 0) {
+        if ((deleteResult.rowsAffected || deleteResult.rowCount || 0) === 0) {
           const notFoundError = new Error('Lookup value not found');
           notFoundError.code = 'NOT_FOUND';
           notFoundError.statusCode = 404;
@@ -563,9 +562,7 @@ class AbsLookupValueModel {
       });
     } catch (error) {
       console.error('Error in delete:', error);
-      if (error.code === 'NOT_FOUND' || error.code === 'VALIDATION_ERROR') {
-        throw error;
-      }
+      if (error.code === 'NOT_FOUND') throw error;
       throw new Error(`Failed to delete lookup value: ${error.message}`);
     }
   }
