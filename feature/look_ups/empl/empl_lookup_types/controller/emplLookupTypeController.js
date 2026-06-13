@@ -12,6 +12,11 @@ import {
   sendConflict
 } from '../view/emplLookupTypeView.js';
 import { parseGuid } from '../../../../../utils/guidUtils.js';
+import { getUserId } from '../../../../../utils/requestUtils.js';
+import {
+  normalizeEnterpriseId,
+  resolveLookupListEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 const router = express.Router();
 
@@ -19,10 +24,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 function parsePagination(query) {
   let page = 1;
@@ -54,31 +55,6 @@ function buildPaginationMeta(page, pageSize, totalCount) {
     hasNext: page < totalPages,
     hasPrevious: page > 1
   };
-}
-
-/**
- * GET ?enterprise_id=1 => global (NULL) + enterprise 1 rows.
- * GET ?enterprise_id=null => global rows only.
- * Omit => all rows.
- */
-function parseEnterpriseIdQuery(value) {
-  if (value === undefined) return undefined;
-  if (value === null || value === '' || String(value).toLowerCase() === 'null') {
-    return null;
-  }
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 1) {
-    throw new Error('enterprise_id must be a valid positive number');
-  }
-  return n;
-}
-
-/** null / omitted / '' => global (ENTERPRISE_ID IS NULL in DB) */
-function normalizeEnterpriseId(value) {
-  if (value === undefined) return undefined;
-  if (value === null || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function normalizeRequestBody(data) {
@@ -129,12 +105,10 @@ function validateLookupTypeData(data, isUpdate = false) {
 router.get('/', async (req, res) => {
   try {
     const filters = {};
-    if (req.query.enterprise_id !== undefined) {
-      try {
-        filters.enterpriseId = parseEnterpriseIdQuery(req.query.enterprise_id);
-      } catch (e) {
-        return sendBadRequest(res, req, e.message);
-      }
+    try {
+      filters.enterpriseId = resolveLookupListEnterpriseId(req);
+    } catch (e) {
+      return sendBadRequest(res, req, e.message);
     }
     if (req.query.is_active !== undefined) {
       const v = req.query.is_active;

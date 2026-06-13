@@ -2,6 +2,10 @@ import db from '../../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../utils/guidUtils.js';
+import {
+  applyLookupEnterpriseFilter,
+  bindLookupEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 /**
  * Empl Lookup Type Model
@@ -153,15 +157,7 @@ class EmplLookupTypeModel {
       let paramIndex = 1;
 
       // GET: enterprise_id=N => global (NULL) + that enterprise; enterprise_id=null => global only
-      if (filters.enterpriseId !== undefined) {
-        if (filters.enterpriseId === null) {
-          conditions.push('a.ENTERPRISE_ID IS NULL');
-        } else {
-          conditions.push(`(a.ENTERPRISE_ID = :${paramIndex} OR a.ENTERPRISE_ID IS NULL)`);
-          bindParams.push(filters.enterpriseId);
-          paramIndex++;
-        }
-      }
+      paramIndex = applyLookupEnterpriseFilter(conditions, bindParams, paramIndex, filters.enterpriseId, 'a');
       if (filters.isActive !== undefined) {
         const activeVal = filters.isActive === true || filters.isActive === 'Y' || filters.isActive === 1 ? 'Y' : 'N';
         conditions.push(`a.IS_ACTIVE = :${paramIndex}`);
@@ -300,7 +296,7 @@ class EmplLookupTypeModel {
         const bindParams = [
           guidBuffer,
           lookupTypeId,
-          enterpriseId,
+          bindLookupEnterpriseId(enterpriseId),
           typeCode,
           data.TYPE_NAME || null,
           data.IS_ACTIVE !== undefined && data.IS_ACTIVE !== null
@@ -371,7 +367,7 @@ class EmplLookupTypeModel {
 
         if (data.ENTERPRISE_ID !== undefined) {
           updateFields.push(`ENTERPRISE_ID = :${paramIndex}`);
-          bindParams.push(data.ENTERPRISE_ID);
+          bindParams.push(bindLookupEnterpriseId(data.ENTERPRISE_ID));
           paramIndex++;
         }
         if (data.TYPE_CODE !== undefined) {

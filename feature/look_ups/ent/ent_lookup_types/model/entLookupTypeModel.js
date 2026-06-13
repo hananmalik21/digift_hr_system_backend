@@ -2,10 +2,15 @@ import db from '../../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../utils/guidUtils.js';
+import {
+  applyLookupEnterpriseFilter,
+  bindLookupEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 /**
  * Ent Lookup Type Model
- * Handles all database operations for ENT.ENT_LOOKUP_TYPES table
+ * Handles all database operations for ENT.ENT_LOOKUP_TYPES table.
+ * ENTERPRISE_ID NULL = global; non-null = enterprise-specific.
  */
 class EntLookupTypeModel {
   static TABLE_NAME = 'ENT.ENT_LOOKUP_TYPES';
@@ -46,6 +51,62 @@ class EntLookupTypeModel {
       result.rows = this.convertKeysToSnakeCase(result.rows);
     }
     return result;
+  }
+
+  /**
+   * Global vs enterprise TYPE_CODE cannot coexist (case-insensitive).
+   */
+  static async assertNoCrossScopeTypeCodeConflict(connection, { enterpriseId, typeCode, excludeGuidBuffer = null }) {
+    const code = typeCode != null ? String(typeCode).trim() : '';
+    if (!code) return;
+
+    const bindParams = [code];
+    let excludeClause = '';
+    if (excludeGuidBuffer) {
+      excludeClause = ' AND t.LOOKUP_TYPE_GUID <> :2';
+      bindParams.push(excludeGuidBuffer);
+    }
+
+    if (enterpriseId != null) {
+      const query = `SELECT 1
+        FROM ${this.TABLE_NAME} t
+        WHERE t.ENTERPRISE_ID IS NULL
+          AND UPPER(TRIM(t.TYPE_CODE)) = UPPER(TRIM(:1))
+          ${excludeClause}
+        FETCH FIRST 1 ROWS ONLY`;
+      const result = await connection.execute(query, bindParams, {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      if (result.rows?.length) {
+        const err = new DatabaseError(
+          `TYPE_CODE "${code}" already exists as a global lookup type and cannot be duplicated for a specific enterprise.`,
+          null,
+          `TYPE_CODE "${code}" already exists as a global lookup type.`
+        );
+        err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+        throw err;
+      }
+      return;
+    }
+
+    const query = `SELECT 1
+      FROM ${this.TABLE_NAME} t
+      WHERE t.ENTERPRISE_ID IS NOT NULL
+        AND UPPER(TRIM(t.TYPE_CODE)) = UPPER(TRIM(:1))
+        ${excludeClause}
+      FETCH FIRST 1 ROWS ONLY`;
+    const result = await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+    if (result.rows?.length) {
+      const err = new DatabaseError(
+        `TYPE_CODE "${code}" already exists for one or more enterprises and cannot be created as a global lookup type.`,
+        null,
+        `TYPE_CODE "${code}" already exists for an enterprise.`
+      );
+      err.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+      throw err;
+    }
   }
 
   static async executeWithTransaction(callback) {
@@ -95,11 +156,7 @@ class EntLookupTypeModel {
       const bindParams = [];
       let paramIndex = 1;
 
-      if (filters.enterpriseId !== undefined) {
-        conditions.push(`a.ENTERPRISE_ID = :${paramIndex}`);
-        bindParams.push(filters.enterpriseId);
-        paramIndex++;
-      }
+      paramIndex = applyLookupEnterpriseFilter(conditions, bindParams, paramIndex, filters.enterpriseId, 'a');
       if (filters.isActive !== undefined) {
         const activeVal = filters.isActive === true || filters.isActive === 'Y' || filters.isActive === 1 ? 'Y' : 'N';
         conditions.push(`a.IS_ACTIVE = :${paramIndex}`);
@@ -131,7 +188,7 @@ class EntLookupTypeModel {
       const countResult = await this.executeQuery(countQuery, bindParams);
       const total = countResult.rows[0]?.total || 0;
 
-      dataQuery += ` ORDER BY a.TYPE_CODE`;
+      dataQuery += ` ORDER BY CASE WHEN a.ENTERPRISE_ID IS NULL THEN 0 ELSE 1 END, a.TYPE_CODE`;
       dataQuery += ` OFFSET :${paramIndex} ROWS FETCH NEXT :${paramIndex + 1} ROWS ONLY`;
       bindParams.push(offset);
       bindParams.push(pageSize);
@@ -208,6 +265,15 @@ class EntLookupTypeModel {
           lookupTypeId = maxResult.rows[0].NEXT_ID;
         }
 
+        const enterpriseId =
+          data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null;
+        const typeCode = data.TYPE_CODE || null;
+
+        await this.assertNoCrossScopeTypeCodeConflict(connection, {
+          enterpriseId,
+          typeCode
+        });
+
         const { buffer: guidBuffer } = await generateSysGuid(connection);
         const now = new Date();
 
@@ -229,8 +295,8 @@ class EntLookupTypeModel {
         const bindParams = [
           guidBuffer,
           lookupTypeId,
-          data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null,
-          data.TYPE_CODE || null,
+          bindLookupEnterpriseId(enterpriseId),
+          typeCode,
           data.TYPE_NAME || null,
           data.IS_ACTIVE !== undefined && data.IS_ACTIVE !== null
             ? (data.IS_ACTIVE === true || data.IS_ACTIVE === 'Y' || data.IS_ACTIVE === 1 ? 'Y' : 'N')
@@ -300,7 +366,7 @@ class EntLookupTypeModel {
 
         if (data.ENTERPRISE_ID !== undefined) {
           updateFields.push(`ENTERPRISE_ID = :${paramIndex}`);
-          bindParams.push(data.ENTERPRISE_ID);
+          bindParams.push(bindLookupEnterpriseId(data.ENTERPRISE_ID));
           paramIndex++;
         }
         if (data.TYPE_CODE !== undefined) {
@@ -319,6 +385,16 @@ class EntLookupTypeModel {
           bindParams.push(activeVal);
           paramIndex++;
         }
+
+        const existingResult = await connection.execute(
+          `SELECT ENTERPRISE_ID, TYPE_CODE FROM ${this.TABLE_NAME} WHERE LOOKUP_TYPE_GUID = :1`,
+          [guidBuffer],
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (!existingResult.rows?.length) {
+          throw new DatabaseError('Lookup type not found');
+        }
+        const existing = existingResult.rows[0];
 
         if (updateFields.length === 0) {
           const selectQuery = `SELECT
@@ -342,6 +418,16 @@ class EntLookupTypeModel {
           }
           throw new DatabaseError('Lookup type not found');
         }
+
+        const effectiveEnterpriseId =
+          data.ENTERPRISE_ID !== undefined ? data.ENTERPRISE_ID : existing.ENTERPRISE_ID;
+        const effectiveTypeCode = data.TYPE_CODE !== undefined ? data.TYPE_CODE : existing.TYPE_CODE;
+
+        await this.assertNoCrossScopeTypeCodeConflict(connection, {
+          enterpriseId: effectiveEnterpriseId,
+          typeCode: effectiveTypeCode,
+          excludeGuidBuffer: guidBuffer
+        });
 
         updateFields.push(`UPDATED_BY = :${paramIndex}`);
         bindParams.push(userId || 'SYSTEM');

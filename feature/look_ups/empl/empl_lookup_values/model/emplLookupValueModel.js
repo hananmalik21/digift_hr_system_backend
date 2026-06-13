@@ -2,6 +2,10 @@ import db from '../../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../../utils/errors/index.js';
 import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../../utils/guidUtils.js';
+import {
+  applyLookupEnterpriseFilter,
+  bindLookupEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 /**
  * Empl Lookup Value Model
@@ -180,15 +184,7 @@ class EmplLookupValueModel {
       let paramIndex = 1;
 
       // GET: enterprise_id=N => global (NULL) + that enterprise; enterprise_id=null => global only
-      if (filters.enterpriseId !== undefined) {
-        if (filters.enterpriseId === null) {
-          conditions.push('a.ENTERPRISE_ID IS NULL');
-        } else {
-          conditions.push(`(a.ENTERPRISE_ID = :${paramIndex} OR a.ENTERPRISE_ID IS NULL)`);
-          bindParams.push(filters.enterpriseId);
-          paramIndex++;
-        }
-      }
+      paramIndex = applyLookupEnterpriseFilter(conditions, bindParams, paramIndex, filters.enterpriseId, 'a');
       if (filters.lookupType) {
         conditions.push(`a.LOOKUP_TYPE = :${paramIndex}`);
         bindParams.push(filters.lookupType);
@@ -355,7 +351,7 @@ class EmplLookupValueModel {
         const bindParams = [
           guidBuffer,
           lookupId,
-          enterpriseId,
+          bindLookupEnterpriseId(enterpriseId),
           lookupType,
           lookupCode,
           data.MEANING_EN ?? null,
@@ -447,7 +443,7 @@ class EmplLookupValueModel {
 
         if (data.ENTERPRISE_ID !== undefined) {
           updateFields.push(`ENTERPRISE_ID = :${paramIndex}`);
-          bindParams.push(data.ENTERPRISE_ID);
+          bindParams.push(bindLookupEnterpriseId(data.ENTERPRISE_ID));
           paramIndex++;
         }
         if (data.LOOKUP_TYPE !== undefined) {

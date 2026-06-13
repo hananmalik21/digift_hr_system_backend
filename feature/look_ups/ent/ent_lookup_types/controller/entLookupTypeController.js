@@ -12,6 +12,11 @@ import {
   sendConflict
 } from '../view/entLookupTypeView.js';
 import { parseGuid } from '../../../../../utils/guidUtils.js';
+import { getUserId } from '../../../../../utils/requestUtils.js';
+import {
+  normalizeEnterpriseId,
+  resolveLookupListEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 const router = express.Router();
 
@@ -19,10 +24,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 function parsePagination(query) {
   let page = 1;
@@ -104,8 +105,10 @@ function validateLookupTypeData(data, isUpdate = false) {
 router.get('/', async (req, res) => {
   try {
     const filters = {};
-    if (req.query.enterprise_id !== undefined) {
-      filters.enterpriseId = req.query.enterprise_id;
+    try {
+      filters.enterpriseId = resolveLookupListEnterpriseId(req);
+    } catch (e) {
+      return sendBadRequest(res, req, e.message);
     }
     if (req.query.is_active !== undefined) {
       const v = req.query.is_active;
@@ -165,7 +168,9 @@ router.post('/', async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
     const normalizedData = {
-      ENTERPRISE_ID: normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null,
+      ENTERPRISE_ID: normalizeEnterpriseId(
+        normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null
+      ),
       TYPE_CODE: normalizedBody.TYPE_CODE?.toString().trim(),
       TYPE_NAME: normalizedBody.TYPE_NAME?.toString().trim(),
       IS_ACTIVE: normalizedBody.IS_ACTIVE !== undefined
@@ -204,7 +209,9 @@ router.put('/:guid', async (req, res) => {
       return sendBadRequest(res, req, errors);
     }
     const normalizedData = {};
-    if (normalizedBody.ENTERPRISE_ID !== undefined) normalizedData.ENTERPRISE_ID = normalizedBody.ENTERPRISE_ID;
+    if (normalizedBody.ENTERPRISE_ID !== undefined) {
+      normalizedData.ENTERPRISE_ID = normalizeEnterpriseId(normalizedBody.ENTERPRISE_ID);
+    }
     if (normalizedBody.TYPE_CODE !== undefined) normalizedData.TYPE_CODE = normalizedBody.TYPE_CODE?.toString().trim();
     if (normalizedBody.TYPE_NAME !== undefined) normalizedData.TYPE_NAME = normalizedBody.TYPE_NAME?.toString().trim();
     if (normalizedBody.IS_ACTIVE !== undefined) {

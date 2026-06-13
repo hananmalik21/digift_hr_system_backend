@@ -12,6 +12,11 @@ import {
   sendConflict
 } from '../view/entLookupValueView.js';
 import { parseGuid } from '../../../../../utils/guidUtils.js';
+import { getUserId } from '../../../../../utils/requestUtils.js';
+import {
+  normalizeEnterpriseId,
+  resolveLookupListEnterpriseId
+} from '../../../../../utils/lookupEnterpriseUtils.js';
 
 const router = express.Router();
 
@@ -19,10 +24,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
-}
 
 function parsePagination(query) {
   let page = 1;
@@ -125,8 +126,10 @@ function validateLookupValueData(data, isUpdate = false) {
 router.get('/', async (req, res) => {
   try {
     const filters = {};
-    if (req.query.enterprise_id !== undefined) {
-      filters.enterpriseId = req.query.enterprise_id;
+    try {
+      filters.enterpriseId = resolveLookupListEnterpriseId(req);
+    } catch (e) {
+      return sendBadRequest(res, req, e.message);
     }
     if (req.query.lookup_type_id !== undefined) {
       filters.lookupTypeId = req.query.lookup_type_id;
@@ -198,7 +201,9 @@ router.post('/', async (req, res) => {
       return isNaN(d.getTime()) ? null : d;
     };
     const normalizedData = {
-      ENTERPRISE_ID: normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null,
+      ENTERPRISE_ID: normalizeEnterpriseId(
+        normalizedBody.ENTERPRISE_ID !== undefined ? normalizedBody.ENTERPRISE_ID : null
+      ),
       LOOKUP_TYPE_ID: normalizedBody.LOOKUP_TYPE_ID != null ? normalizedBody.LOOKUP_TYPE_ID : null,
       LOOKUP_TYPE: normalizedBody.LOOKUP_TYPE != null ? normalizedBody.LOOKUP_TYPE.toString().trim() : null,
       LOOKUP_CODE: normalizedBody.LOOKUP_CODE?.toString().trim(),
@@ -250,7 +255,9 @@ router.put('/:guid', async (req, res) => {
       return isNaN(d.getTime()) ? null : d;
     };
     const normalizedData = {};
-    if (normalizedBody.ENTERPRISE_ID !== undefined) normalizedData.ENTERPRISE_ID = normalizedBody.ENTERPRISE_ID;
+    if (normalizedBody.ENTERPRISE_ID !== undefined) {
+      normalizedData.ENTERPRISE_ID = normalizeEnterpriseId(normalizedBody.ENTERPRISE_ID);
+    }
     if (normalizedBody.LOOKUP_TYPE_ID !== undefined) normalizedData.LOOKUP_TYPE_ID = normalizedBody.LOOKUP_TYPE_ID;
     if (normalizedBody.LOOKUP_TYPE !== undefined) normalizedData.LOOKUP_TYPE = normalizedBody.LOOKUP_TYPE?.toString().trim();
     if (normalizedBody.LOOKUP_CODE !== undefined) normalizedData.LOOKUP_CODE = normalizedBody.LOOKUP_CODE?.toString().trim();
