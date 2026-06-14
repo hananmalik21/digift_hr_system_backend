@@ -122,22 +122,15 @@ export function sendReportingRelationships(res, req, data) {
   });
 }
 
-/**
- * Paginated list for GET /api/positions/by-org-unit — meta contains pagination only.
- *
- * @param {import('express').Response} res
- * @param {object[]} data
- * @param {object} pagination - snake_case pagination fields
- */
-export function sendPositionsByOrgUnitList(res, data, pagination) {
-  res.json({
-    success: true,
-    meta: { pagination },
-    data: Array.isArray(data) ? data : [],
-  });
-}
-
 /** @param {import('express').Response} res @param {string} message */
 export function sendForbidden(res, message) {
-  res.status(403).json({ success: false, message });
+  res.status(403).json({
+    success: false,
+    error: message,
+    error_details: {
+      message,
+      code: 'FORBIDDEN',
+      type: 'ForbiddenError',
+    },
+  });
 }

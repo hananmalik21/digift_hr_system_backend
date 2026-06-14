@@ -52,6 +52,27 @@ export function buildPaginationMeta(page, pageSize, totalCount) {
 }
 
 /**
+ * List-response meta with snake_case pagination fields (for sendPositionList-style envelopes).
+ * @param {number} page
+ * @param {number} pageSize
+ * @param {number} totalCount
+ * @returns {{ total: number, pagination: { page: number, page_size: number, total_pages: number, has_next: boolean, has_previous: boolean } }}
+ */
+export function buildSnakeListMeta(page, pageSize, totalCount) {
+  const p = buildPaginationMeta(page, pageSize, totalCount);
+  return {
+    total: p.total,
+    pagination: {
+      page: p.page,
+      page_size: p.pageSize,
+      total_pages: p.totalPages,
+      has_next: p.hasNext,
+      has_previous: p.hasPrevious,
+    },
+  };
+}
+
+/**
  * Parse page/limit pagination (supports `limit` or `page_size`).
  * @param {object} query
  * @param {{ defaultPage?: number, defaultLimit?: number, maxLimit?: number }} [options]

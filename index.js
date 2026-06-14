@@ -18,7 +18,6 @@ import employeeController, { createEmployeeRouter, documentsDownloadRouter } fro
 import jobFamilyController from './feature/enterprise_structure/job_families/controller/jobFamilyController.js';
 import gradeController from './feature/enterprise_structure/grades/controller/grades_controller.js';
 import jobLevelsController from './feature/enterprise_structure/job_levels/controller/job_levels_controller.js';
-import positionByOrgUnitRoutes from './feature/enterprise_structure/positions/routes/positionRoutes.js';
 import positionsController from './feature/enterprise_structure/positions/controller/positions_controller.js';
 import shiftController from './feature/time_management/shifts/controller/shiftController.js';
 import workPatternController from './feature/time_management/work_patterns/controller/workPatternController.js';
@@ -165,7 +164,6 @@ app.use('/api/structure-levels', structureLevelController);
 app.use('/api/grades', gradeController);
 app.use('/api/job-families', jobFamilyController);
 app.use('/api/job-levels', jobLevelsController);
-app.use('/api/positions', positionByOrgUnitRoutes);
 app.use('/api/positions', positionsController);
 
 // Holidays routes (must be BEFORE catch-all /api route)

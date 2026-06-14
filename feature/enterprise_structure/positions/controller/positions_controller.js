@@ -13,7 +13,9 @@ import {
 import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
+import { parsePagination, buildSnakeListMeta } from '../../../../utils/paginationUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
+import { validateGetPositionsByOrgUnit } from '../validators/positionValidator.js';
 import {
   sendPositionList,
   sendPosition,
@@ -21,6 +23,7 @@ import {
   sendUpdated,
   sendDeleted,
   sendBadRequest,
+  sendForbidden,
   sendServerError,
   sendConflict,
   sendReportingRelationships,
@@ -207,31 +210,57 @@ router.get('/', async (req, res) => {
       }
     }
 
-    // pagination
-    const page = req.query.page ? parseInt(req.query.page, 10) : 1;
-    const pageSize = req.query.page_size ? parseInt(req.query.page_size, 10) : 10;
-    if (isNaN(page) || page < 1) return sendBadRequest(res, req, 'page must be >= 1');
-    if (isNaN(pageSize) || pageSize < 1) return sendBadRequest(res, req, 'page_size must be >= 1');
+    let page;
+    let pageSize;
+    try {
+      ({ page, pageSize } = parsePagination(req.query));
+    } catch (err) {
+      return sendBadRequest(res, req, err.message);
+    }
     filters.pagination = { page, pageSize };
 
     const result = await PositionsModel.findAll(filters);
 
-    const total = result.total ?? 0;
-    const totalPages = Math.ceil(total / pageSize);
-
-    return sendPositionList(res, req, result.positions || [], {
-      total,
-      pagination: {
-        page,
-        page_size: pageSize,
-        total_pages: totalPages,
-        has_next: page < totalPages,
-        has_previous: page > 1,
-      },
-    });
+    return sendPositionList(
+      res,
+      req,
+      result.positions || [],
+      buildSnakeListMeta(page, pageSize, result.total ?? 0)
+    );
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to fetch positions', error);
+  }
+});
+
+/**
+ * GET /api/positions/by-org-unit
+ * Query: tenant_id (required), org_unit_id (required), page?, page_size?
+ */
+router.get('/by-org-unit', async (req, res) => {
+  try {
+    const validation = validateGetPositionsByOrgUnit(req);
+    if (!validation.ok) {
+      if (validation.statusCode === 403) return sendForbidden(res, validation.message);
+      return sendBadRequest(res, req, validation.message);
+    }
+
+    const { tenantId, orgUnitIdHex, page, pageSize } = validation;
+    const result = await PositionsModel.findAll({
+      tenant_id: tenantId,
+      org_unit_id: orgUnitIdHex,
+      pagination: { page, pageSize },
+    });
+
+    return sendPositionList(
+      res,
+      req,
+      result.positions || [],
+      buildSnakeListMeta(page, pageSize, result.total ?? 0)
+    );
+  } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+    return sendServerError(res, req, 'Failed to fetch positions by org unit', error);
   }
 });
 
