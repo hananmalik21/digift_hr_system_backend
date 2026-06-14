@@ -67,6 +67,39 @@ export function requireTenantIdInBody(data, missingMessage = 'tenant_id is requi
 }
 
 /**
+ * Parse and validate enterprise_id from a raw value.
+ *
+ * @param {*} raw - Raw value (number, string, etc.)
+ * @param {string} [missingMessage] - Message when value is missing
+ * @returns {number} Valid enterprise ID (positive integer)
+ * @throws {ValidationError} When value is missing or invalid
+ */
+export function parseEnterpriseId(raw, missingMessage = 'enterprise_id is required') {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    throw new ValidationError(missingMessage);
+  }
+  const enterpriseId = parseInt(raw, 10);
+  if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
+    throw new ValidationError('enterprise_id must be a valid positive number');
+  }
+  return enterpriseId;
+}
+
+/**
+ * Require enterprise_id from query string (?enterprise_id=).
+ *
+ * @param {import('express').Request} req
+ * @returns {number}
+ * @throws {ValidationError}
+ */
+export function requireEnterpriseIdFromQuery(req) {
+  return parseEnterpriseId(
+    req.query?.enterprise_id ?? req.query?.enterpriseId,
+    'enterprise_id is required'
+  );
+}
+
+/**
  * Resolve tenant_id with JWT enterprise scoping.
  *
  * JWT `enterprise_id` always wins; client-supplied tenant cannot override.
