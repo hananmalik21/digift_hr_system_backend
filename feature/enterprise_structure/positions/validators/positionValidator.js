@@ -10,6 +10,7 @@ function isBlank(v) {
 
 /**
  * Validate query params for GET /api/positions/by-org-unit.
+ * Positions are returned for the org unit and all descendants in the hierarchy.
  *
  * @param {import('express').Request} req
  * @returns {{ ok: true, tenantId: number, orgUnitIdHex: string, page: number, pageSize: number } | { ok: false, message: string, statusCode?: number }}

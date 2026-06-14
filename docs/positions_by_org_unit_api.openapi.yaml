@@ -3,9 +3,10 @@ info:
   title: Digify ERP — Positions by Organization Unit API
   version: 1.0.0
   description: |
-    Returns active positions for a selected organization unit within a tenant.
+    Returns positions for a selected organization unit and all descendants in the hierarchy tree
+    (e.g. Business Unit → divisions, departments, sections below it).
 
-    Reads from Oracle view `ENT.V_POSITIONS_BY_ORG_UNIT`.
+    Reads from `ENT.POSITIONS` with enterprise-scoped org unit subtree filtering.
 
     **Authentication:** JWT Bearer token required (global `requireAuth` middleware).
 
@@ -25,7 +26,7 @@ paths:
   /api/positions/by-org-unit:
     get:
       tags: [Positions]
-      summary: Get active positions by organization unit
+      summary: Get positions by organization unit (subtree)
       operationId: getPositionsByOrgUnit
       security:
         - bearerAuth: []
@@ -41,7 +42,7 @@ paths:
         - name: org_unit_id
           in: query
           required: true
-          description: Organization unit GUID as 32-character RAW hex string (no hyphens)
+          description: Root organization unit GUID; positions from this unit and all descendants are returned
           schema:
             type: string
             pattern: '^[0-9A-Fa-f]{32}$'

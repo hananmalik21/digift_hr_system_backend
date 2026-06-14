@@ -236,6 +236,7 @@ router.get('/', async (req, res) => {
 /**
  * GET /api/positions/by-org-unit
  * Query: tenant_id (required), org_unit_id (required), page?, page_size?
+ * Returns positions for the org unit and all descendants in the hierarchy tree.
  */
 router.get('/by-org-unit', async (req, res) => {
   try {
@@ -246,11 +247,7 @@ router.get('/by-org-unit', async (req, res) => {
     }
 
     const { tenantId, orgUnitIdHex, page, pageSize } = validation;
-    const result = await PositionsModel.findAll({
-      tenant_id: tenantId,
-      org_unit_id: orgUnitIdHex,
-      pagination: { page, pageSize },
-    });
+    const result = await PositionsModel.findByOrgUnitSubtree(tenantId, orgUnitIdHex, { page, pageSize });
 
     return sendPositionList(
       res,

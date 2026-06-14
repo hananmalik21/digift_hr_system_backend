@@ -4,7 +4,15 @@
  */
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
-import { POSITION_ALLOWED_EMPLOYMENT_TYPES, POSITION_ALLOWED_STATUS } from '../constants/positions_constants.js';
+import {
+  POSITION_ALLOWED_EMPLOYMENT_TYPES,
+  POSITION_ALLOWED_STATUS,
+  POSITION_ORG_UNIT_SCOPE,
+} from '../constants/positions_constants.js';
+import {
+  ORG_UNIT_ANCESTORS_CONNECT_BY,
+  positionOrgUnitSubtreeWhere,
+} from '../../../../utils/orgUnitHierarchySql.js';
 
 /** @returns {Error & { code: string, statusCode: number }} */
 function validationError(message) {
@@ -198,11 +206,11 @@ class PositionsModel {
   // ----------------------------
   // Org path from org_unit_id (parents)
   // ----------------------------
-  static async fetchOrgPath(orgUnitIdHex32) {
+  static async fetchOrgPath(orgUnitIdHex32, enterpriseId) {
     if (!orgUnitIdHex32) return [];
     const id = this.raw16Required(orgUnitIdHex32, 'org_unit_id');
+    const enterpriseIdNum = this.assertPositiveTenantId(enterpriseId);
 
-    // NOTE: this traverses up from child -> parent
     const sql = `
       SELECT
         RAWTOHEX(ou.ORG_UNIT_ID) AS ORG_UNIT_ID,
@@ -213,11 +221,12 @@ class PositionsModel {
         LEVEL AS HIERARCHY_LEVEL
       FROM ENT.ORG_UNITS ou
       START WITH ou.ORG_UNIT_ID = :1
-      CONNECT BY PRIOR ou.PARENT_ORG_UNIT_ID = ou.ORG_UNIT_ID
+        AND ou.ENTERPRISE_ID = :2
+      ${ORG_UNIT_ANCESTORS_CONNECT_BY}
       ORDER BY LEVEL DESC
     `;
 
-    const r = await this.executeQuery(sql, [id]);
+    const r = await this.executeQuery(sql, [id, enterpriseIdNum]);
 
     return (r.rows || []).map((x) => ({
       level_code: x.level_code,
@@ -225,6 +234,33 @@ class PositionsModel {
       name_en: x.org_unit_name_en,
       name_ar: x.org_unit_name_ar,
     }));
+  }
+
+  /**
+   * Append org_unit_id filter to a positions WHERE clause.
+   * @returns {number} next bind index
+   */
+  static appendOrgUnitFilter(where, binds, bindIndex, orgUnitIdHex, enterpriseId, scope) {
+    const orgUnitRaw = this.raw16Required(orgUnitIdHex, 'org_unit_id');
+    if (scope === POSITION_ORG_UNIT_SCOPE.SUBTREE) {
+      where.push(positionOrgUnitSubtreeWhere(bindIndex, bindIndex + 1));
+      binds.push(orgUnitRaw, enterpriseId);
+      return bindIndex + 2;
+    }
+    where.push(`p.ORG_UNIT_ID = :${bindIndex}`);
+    binds.push(orgUnitRaw);
+    return bindIndex + 1;
+  }
+
+  static async enrichRowsWithOrgPath(rows, enterpriseId) {
+    const uniqueOrgUnitIds = [...new Set(rows.map((row) => row.org_unit_id).filter(Boolean))];
+    const orgPathArrays = await Promise.all(
+      uniqueOrgUnitIds.map((id) => this.fetchOrgPath(id, enterpriseId).catch(() => []))
+    );
+    const orgPathByUnitId = new Map(uniqueOrgUnitIds.map((id, idx) => [id, orgPathArrays[idx]]));
+    for (const row of rows) {
+      row.org_path = row.org_unit_id ? (orgPathByUnitId.get(row.org_unit_id) || []) : [];
+    }
   }
 
   // ----------------------------
@@ -409,9 +445,11 @@ class PositionsModel {
       i++;
     }
     if (filters.org_unit_id) {
-      where.push(`p.ORG_UNIT_ID = :${i}`);
-      binds.push(this.raw16Required(filters.org_unit_id, 'org_unit_id'));
-      i++;
+      const scope =
+        filters.org_unit_scope === POSITION_ORG_UNIT_SCOPE.SUBTREE
+          ? POSITION_ORG_UNIT_SCOPE.SUBTREE
+          : POSITION_ORG_UNIT_SCOPE.EXACT;
+      i = this.appendOrgUnitFilter(where, binds, i, filters.org_unit_id, tenantIdNum, scope);
     }
 
     // numeric filters
@@ -439,18 +477,21 @@ class PositionsModel {
     const total = countR?.rows?.[0]?.total ?? 0;
     const rows = r.rows || [];
 
-    const uniqueOrgUnitIds = [...new Set(rows.map((row) => row.org_unit_id).filter(Boolean))];
-    const orgPathArrays = await Promise.all(
-      uniqueOrgUnitIds.map((id) =>
-        this.fetchOrgPath(id).catch(() => [])
-      )
-    );
-    const orgPathByUnitId = new Map(uniqueOrgUnitIds.map((id, idx) => [id, orgPathArrays[idx]]));
-    for (const row of rows) {
-      row.org_path = row.org_unit_id ? (orgPathByUnitId.get(row.org_unit_id) || []) : [];
-    }
+    await this.enrichRowsWithOrgPath(rows, tenantIdNum);
 
     return { positions: this.shapeMany(rows), total };
+  }
+
+  /**
+   * Positions for an org unit and all descendants (dynamic hierarchy depth).
+   */
+  static async findByOrgUnitSubtree(tenantId, orgUnitIdHex32, pagination = {}) {
+    return this.findAll({
+      tenant_id: tenantId,
+      org_unit_id: orgUnitIdHex32,
+      org_unit_scope: POSITION_ORG_UNIT_SCOPE.SUBTREE,
+      pagination,
+    });
   }
 
   // ----------------------------
@@ -464,7 +505,7 @@ class PositionsModel {
     if (!r?.rows?.length) return null;
 
     const row = r.rows[0];
-    row.org_path = await this.fetchOrgPath(row.org_unit_id);
+    row.org_path = await this.fetchOrgPath(row.org_unit_id, tenantIdNum);
     return this.shape(row);
   }
 
@@ -583,7 +624,7 @@ class PositionsModel {
         const rr = await connection.execute(selectSql, [newIdBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
         const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
-        row.org_path = await this.fetchOrgPath(row.org_unit_id);
+        row.org_path = await this.fetchOrgPath(row.org_unit_id, tenantIdNum);
 
         return this.shape(row);
       } catch (e) {
@@ -738,7 +779,7 @@ class PositionsModel {
       const rr = await connection.execute(selectSql, [idBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
-      row.org_path = await this.fetchOrgPath(row.org_unit_id);
+      row.org_path = await this.fetchOrgPath(row.org_unit_id, tenantIdNum);
       return this.shape(row);
     });
   }
@@ -764,7 +805,7 @@ class PositionsModel {
       const rr = await connection.execute(selectSql, [idBuf, tenantIdNum], { outFormat: oracledb.OUT_FORMAT_OBJECT });
 
       const row = this.toLowerCaseKeys(this.buffersToHexInRow(rr.rows[0]));
-      row.org_path = await this.fetchOrgPath(row.org_unit_id);
+      row.org_path = await this.fetchOrgPath(row.org_unit_id, tenantIdNum);
       return this.shape(row);
     });
   }

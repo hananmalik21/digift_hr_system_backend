@@ -28,3 +28,9 @@ export const POSITION_GUID_FIELDS = Object.freeze([
   'REPORTS_TO_POSITION_ID',
   'POSITION_ID',
 ]);
+
+/** org_unit_id filter scope for list queries */
+export const POSITION_ORG_UNIT_SCOPE = Object.freeze({
+  EXACT: 'exact',
+  SUBTREE: 'subtree',
+});
