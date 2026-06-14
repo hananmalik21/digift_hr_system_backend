@@ -83,6 +83,16 @@ export function sendCreated(res, req, lookupValue) {
   });
 }
 
+export function sendBulkCreated(res, req, lookupValues) {
+  const convertedData = convertKeysToSnakeCase(lookupValues);
+  res.status(201).json({
+    success: true,
+    message: 'Lookup values created successfully',
+    meta: generateBaseMetadata(req, { count: convertedData.length }),
+    data: convertedData
+  });
+}
+
 export function sendUpdated(res, req, lookupValue) {
   const convertedData = convertKeysToSnakeCase(lookupValue);
   res.json({

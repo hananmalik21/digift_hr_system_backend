@@ -16,6 +16,26 @@ import {
 class EntLookupValueModel {
   static TABLE_NAME = 'ENT.ENT_LOOKUP_VALUES';
 
+  static LOOKUP_VALUE_SELECT = `
+    RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
+    a.LOOKUP_ID,
+    a.ENTERPRISE_ID,
+    a.LOOKUP_TYPE_ID,
+    a.LOOKUP_TYPE,
+    a.LOOKUP_CODE,
+    a.MEANING_EN,
+    a.MEANING_AR,
+    a.DESCRIPTION_EN,
+    a.DESCRIPTION_AR,
+    a.DISPLAY_SEQUENCE,
+    a.IS_ENABLED,
+    a.START_DATE,
+    a.END_DATE,
+    a.CREATED_AT,
+    a.CREATED_BY,
+    a.UPDATED_AT,
+    a.UPDATED_BY`;
+
   static convertKeysToSnakeCase(obj) {
     if (obj === null || obj === undefined) return obj;
     if (obj instanceof Date) return obj;
@@ -162,24 +182,7 @@ class EntLookupValueModel {
     try {
       let countQuery = `SELECT COUNT(*) AS total FROM ${this.TABLE_NAME} a`;
       let dataQuery = `SELECT
-        RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
-        a.LOOKUP_ID,
-        a.ENTERPRISE_ID,
-        a.LOOKUP_TYPE_ID,
-        a.LOOKUP_TYPE,
-        a.LOOKUP_CODE,
-        a.MEANING_EN,
-        a.MEANING_AR,
-        a.DESCRIPTION_EN,
-        a.DESCRIPTION_AR,
-        a.DISPLAY_SEQUENCE,
-        a.IS_ENABLED,
-        a.START_DATE,
-        a.END_DATE,
-        a.CREATED_AT,
-        a.CREATED_BY,
-        a.UPDATED_AT,
-        a.UPDATED_BY
+        ${this.LOOKUP_VALUE_SELECT}
       FROM ${this.TABLE_NAME} a`;
 
       const conditions = [];
@@ -255,24 +258,7 @@ class EntLookupValueModel {
       const guidBuffer = hexToRawBuffer(hexGuid);
 
       const query = `SELECT
-        RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
-        a.LOOKUP_ID,
-        a.ENTERPRISE_ID,
-        a.LOOKUP_TYPE_ID,
-        a.LOOKUP_TYPE,
-        a.LOOKUP_CODE,
-        a.MEANING_EN,
-        a.MEANING_AR,
-        a.DESCRIPTION_EN,
-        a.DESCRIPTION_AR,
-        a.DISPLAY_SEQUENCE,
-        a.IS_ENABLED,
-        a.START_DATE,
-        a.END_DATE,
-        a.CREATED_AT,
-        a.CREATED_BY,
-        a.UPDATED_AT,
-        a.UPDATED_BY
+        ${this.LOOKUP_VALUE_SELECT}
       FROM ${this.TABLE_NAME} a
       WHERE a.LOOKUP_GUID = :1`;
 
@@ -294,144 +280,213 @@ class EntLookupValueModel {
     }
   }
 
+  static toDateValue(v) {
+    if (v == null) return null;
+    if (v instanceof Date) return v;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  static normalizeIsEnabled(value, defaultValue = 'Y') {
+    if (value === undefined || value === null) return defaultValue;
+    return value === true || value === 'Y' || value === 1 ? 'Y' : 'N';
+  }
+
+  static resolveDataScope(data) {
+    return {
+      lookupTypeId: data.LOOKUP_TYPE_ID !== undefined && data.LOOKUP_TYPE_ID !== null ? data.LOOKUP_TYPE_ID : null,
+      enterpriseId: data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null
+    };
+  }
+
+  static displaySequenceScopeKey(lookupTypeId, enterpriseId) {
+    return `${lookupTypeId ?? 'null'}:${enterpriseId ?? 'null'}`;
+  }
+
+  static async fetchByLookupId(connection, lookupId) {
+    const selectQuery = `SELECT
+      ${this.LOOKUP_VALUE_SELECT}
+    FROM ${this.TABLE_NAME} a
+    WHERE a.LOOKUP_ID = :1`;
+
+    const selectResult = await connection.execute(selectQuery, [lookupId], {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+
+    if (selectResult.rows?.length) {
+      return this.convertKeysToSnakeCase(selectResult.rows[0]);
+    }
+    throw new DatabaseError('Failed to retrieve created lookup value');
+  }
+
+  static async fetchByGuidBuffer(connection, guidBuffer) {
+    const selectQuery = `SELECT
+      ${this.LOOKUP_VALUE_SELECT}
+    FROM ${this.TABLE_NAME} a
+    WHERE a.LOOKUP_GUID = :1`;
+
+    const selectResult = await connection.execute(selectQuery, [guidBuffer], {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+
+    if (selectResult.rows?.length) {
+      return this.convertKeysToSnakeCase(selectResult.rows[0]);
+    }
+    throw new DatabaseError('Lookup value not found');
+  }
+
+  static async resolveBulkDisplaySequence(connection, data, nextDisplaySequenceByScope) {
+    const { lookupTypeId, enterpriseId } = this.resolveDataScope(data);
+    if (data.DISPLAY_SEQUENCE != null) {
+      return Number(data.DISPLAY_SEQUENCE);
+    }
+
+    const scopeKey = this.displaySequenceScopeKey(lookupTypeId, enterpriseId);
+    if (!nextDisplaySequenceByScope.has(scopeKey)) {
+      nextDisplaySequenceByScope.set(
+        scopeKey,
+        await this.getNextDisplaySequence(connection, lookupTypeId, enterpriseId)
+      );
+    }
+
+    const displaySequence = nextDisplaySequenceByScope.get(scopeKey);
+    nextDisplaySequenceByScope.set(scopeKey, displaySequence + 1);
+    return displaySequence;
+  }
+
+  static rethrowCreateError(error, fallbackMessage) {
+    if (error.errorNum === 1 || error.message?.includes('ORA-00001')) {
+      const conflictError = new DatabaseError(
+        'Lookup value with this LOOKUP_CODE already exists for this type',
+        error
+      );
+      conflictError.code = 'UNIQUE_CONSTRAINT_VIOLATION';
+      throw conflictError;
+    }
+    if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
+      throw new DatabaseError(
+        DatabaseError.getUserFriendlyMessage(error),
+        error
+      );
+    }
+    if (error instanceof DatabaseError) throw error;
+    throw new DatabaseError(fallbackMessage, error);
+  }
+
+  static async insertOne(connection, data, userId, displaySequenceOverride = null) {
+    let lookupId;
+    try {
+      const seqQuery = `SELECT ENT.ENT_LOOKUP_VALUES_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
+      const seqResult = await connection.execute(seqQuery, [], {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      lookupId = seqResult.rows[0].NEXT_ID;
+    } catch (_) {
+      const maxQuery = `SELECT NVL(MAX(LOOKUP_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
+      const maxResult = await connection.execute(maxQuery, [], {
+        outFormat: oracledb.OUT_FORMAT_OBJECT
+      });
+      lookupId = maxResult.rows[0].NEXT_ID;
+    }
+
+    const { lookupTypeId, enterpriseId } = this.resolveDataScope(data);
+    const lookupCode = data.LOOKUP_CODE ?? null;
+
+    await this.assertNoCrossScopeValueCodeConflict(connection, {
+      enterpriseId,
+      lookupTypeId,
+      lookupCode
+    });
+
+    const displaySequence = displaySequenceOverride != null
+      ? displaySequenceOverride
+      : (data.DISPLAY_SEQUENCE != null
+        ? Number(data.DISPLAY_SEQUENCE)
+        : await this.getNextDisplaySequence(connection, lookupTypeId, enterpriseId));
+
+    const { buffer: guidBuffer } = await generateSysGuid(connection);
+    const now = new Date();
+
+    const query = `INSERT INTO ${this.TABLE_NAME} (
+      LOOKUP_GUID,
+      LOOKUP_ID,
+      ENTERPRISE_ID,
+      LOOKUP_TYPE_ID,
+      LOOKUP_TYPE,
+      LOOKUP_CODE,
+      MEANING_EN,
+      MEANING_AR,
+      DESCRIPTION_EN,
+      DESCRIPTION_AR,
+      DISPLAY_SEQUENCE,
+      IS_ENABLED,
+      START_DATE,
+      END_DATE,
+      CREATED_AT,
+      CREATED_BY,
+      UPDATED_AT,
+      UPDATED_BY
+    ) VALUES (
+      :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18
+    )`;
+
+    const bindParams = [
+      guidBuffer,
+      lookupId,
+      bindLookupEnterpriseId(enterpriseId),
+      lookupTypeId,
+      data.LOOKUP_TYPE ?? null,
+      data.LOOKUP_CODE ?? null,
+      data.MEANING_EN ?? null,
+      data.MEANING_AR ?? null,
+      data.DESCRIPTION_EN ?? null,
+      data.DESCRIPTION_AR ?? null,
+      displaySequence,
+      this.normalizeIsEnabled(data.IS_ENABLED),
+      this.toDateValue(data.START_DATE),
+      this.toDateValue(data.END_DATE),
+      now,
+      userId || 'SYSTEM',
+      now,
+      userId || 'SYSTEM'
+    ];
+
+    await connection.execute(query, bindParams, {
+      outFormat: oracledb.OUT_FORMAT_OBJECT
+    });
+
+    return this.fetchByLookupId(connection, lookupId);
+  }
+
   static async create(data, userId) {
     try {
       return await this.executeWithTransaction(async (connection) => {
-        let lookupId;
-        try {
-          const seqQuery = `SELECT ENT.ENT_LOOKUP_VALUES_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
-          const seqResult = await connection.execute(seqQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          lookupId = seqResult.rows[0].NEXT_ID;
-        } catch (_) {
-          const maxQuery = `SELECT NVL(MAX(LOOKUP_ID), 0) + 1 AS NEXT_ID FROM ${this.TABLE_NAME}`;
-          const maxResult = await connection.execute(maxQuery, [], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          lookupId = maxResult.rows[0].NEXT_ID;
-        }
-
-        const lookupTypeId = data.LOOKUP_TYPE_ID !== undefined && data.LOOKUP_TYPE_ID !== null ? data.LOOKUP_TYPE_ID : null;
-        const enterpriseId = data.ENTERPRISE_ID !== undefined && data.ENTERPRISE_ID !== null ? data.ENTERPRISE_ID : null;
-        const lookupCode = data.LOOKUP_CODE ?? null;
-
-        await this.assertNoCrossScopeValueCodeConflict(connection, {
-          enterpriseId,
-          lookupTypeId,
-          lookupCode
-        });
-
-        const displaySequence = await this.getNextDisplaySequence(connection, lookupTypeId, enterpriseId);
-
-        const { buffer: guidBuffer } = await generateSysGuid(connection);
-        const now = new Date();
-
-        const toDate = (v) => {
-          if (v == null) return null;
-          if (v instanceof Date) return v;
-          const d = new Date(v);
-          return isNaN(d.getTime()) ? null : d;
-        };
-
-        const query = `INSERT INTO ${this.TABLE_NAME} (
-          LOOKUP_GUID,
-          LOOKUP_ID,
-          ENTERPRISE_ID,
-          LOOKUP_TYPE_ID,
-          LOOKUP_TYPE,
-          LOOKUP_CODE,
-          MEANING_EN,
-          MEANING_AR,
-          DESCRIPTION_EN,
-          DESCRIPTION_AR,
-          DISPLAY_SEQUENCE,
-          IS_ENABLED,
-          START_DATE,
-          END_DATE,
-          CREATED_AT,
-          CREATED_BY,
-          UPDATED_AT,
-          UPDATED_BY
-        ) VALUES (
-          :1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18
-        )`;
-
-        const bindParams = [
-          guidBuffer,
-          lookupId,
-          bindLookupEnterpriseId(enterpriseId),
-          lookupTypeId,
-          data.LOOKUP_TYPE ?? null,
-          data.LOOKUP_CODE ?? null,
-          data.MEANING_EN ?? null,
-          data.MEANING_AR ?? null,
-          data.DESCRIPTION_EN ?? null,
-          data.DESCRIPTION_AR ?? null,
-          displaySequence,
-          data.IS_ENABLED !== undefined && data.IS_ENABLED !== null
-            ? (data.IS_ENABLED === true || data.IS_ENABLED === 'Y' || data.IS_ENABLED === 1 ? 'Y' : 'N')
-            : 'Y',
-          toDate(data.START_DATE),
-          toDate(data.END_DATE),
-          now,
-          userId || 'SYSTEM',
-          now,
-          userId || 'SYSTEM'
-        ];
-
-        await connection.execute(query, bindParams, {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        const selectQuery = `SELECT
-          RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
-          a.LOOKUP_ID,
-          a.ENTERPRISE_ID,
-          a.LOOKUP_TYPE_ID,
-          a.LOOKUP_TYPE,
-          a.LOOKUP_CODE,
-          a.MEANING_EN,
-          a.MEANING_AR,
-          a.DESCRIPTION_EN,
-          a.DESCRIPTION_AR,
-          a.DISPLAY_SEQUENCE,
-          a.IS_ENABLED,
-          a.START_DATE,
-          a.END_DATE,
-          a.CREATED_AT,
-          a.CREATED_BY,
-          a.UPDATED_AT,
-          a.UPDATED_BY
-        FROM ${this.TABLE_NAME} a
-        WHERE a.LOOKUP_ID = :1`;
-
-        const selectResult = await connection.execute(selectQuery, [lookupId], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-
-        if (selectResult.rows && selectResult.rows.length > 0) {
-          return this.convertKeysToSnakeCase(selectResult.rows[0]);
-        }
-        throw new DatabaseError('Failed to retrieve created lookup value');
+        return await this.insertOne(connection, data, userId);
       });
     } catch (error) {
-      if (error.errorNum === 1 || error.message?.includes('ORA-00001')) {
-        const conflictError = new DatabaseError(
-          'Lookup value with this LOOKUP_CODE already exists for this type',
-          error
-        );
-        conflictError.code = 'UNIQUE_CONSTRAINT_VIOLATION';
-        throw conflictError;
-      }
-      if (error.errorNum !== undefined || error.message?.includes('ORA-')) {
-        throw new DatabaseError(
-          DatabaseError.getUserFriendlyMessage(error),
-          error
-        );
-      }
-      if (error instanceof DatabaseError) throw error;
-      throw new DatabaseError('Failed to create lookup value', error);
+      this.rethrowCreateError(error, 'Failed to create lookup value');
+    }
+  }
+
+  static async createBulk(dataArray, userId) {
+    try {
+      return await this.executeWithTransaction(async (connection) => {
+        const created = [];
+        const nextDisplaySequenceByScope = new Map();
+
+        for (const data of dataArray) {
+          const displaySequenceOverride = await this.resolveBulkDisplaySequence(
+            connection,
+            data,
+            nextDisplaySequenceByScope
+          );
+          created.push(await this.insertOne(connection, data, userId, displaySequenceOverride));
+        }
+
+        return created;
+      });
+    } catch (error) {
+      this.rethrowCreateError(error, 'Failed to create lookup values');
     }
   }
 
@@ -525,34 +580,7 @@ class EntLookupValueModel {
         const existing = existingResult.rows[0];
 
         if (updateFields.length === 0) {
-          const selectQuery = `SELECT
-            RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
-            a.LOOKUP_ID,
-            a.ENTERPRISE_ID,
-            a.LOOKUP_TYPE_ID,
-            a.LOOKUP_TYPE,
-            a.LOOKUP_CODE,
-            a.MEANING_EN,
-            a.MEANING_AR,
-            a.DESCRIPTION_EN,
-            a.DESCRIPTION_AR,
-            a.DISPLAY_SEQUENCE,
-            a.IS_ENABLED,
-            a.START_DATE,
-            a.END_DATE,
-            a.CREATED_AT,
-            a.CREATED_BY,
-            a.UPDATED_AT,
-            a.UPDATED_BY
-          FROM ${this.TABLE_NAME} a
-          WHERE a.LOOKUP_GUID = :1`;
-          const selectResult = await connection.execute(selectQuery, [guidBuffer], {
-            outFormat: oracledb.OUT_FORMAT_OBJECT
-          });
-          if (selectResult.rows && selectResult.rows.length > 0) {
-            return this.convertKeysToSnakeCase(selectResult.rows[0]);
-          }
-          throw new DatabaseError('Lookup value not found');
+          return this.fetchByGuidBuffer(connection, guidBuffer);
         }
 
         const effectiveEnterpriseId =
@@ -588,34 +616,7 @@ class EntLookupValueModel {
           throw new DatabaseError('Lookup value not found');
         }
 
-        const selectQuery = `SELECT
-          RAWTOHEX(a.LOOKUP_GUID) AS LOOKUP_GUID,
-          a.LOOKUP_ID,
-          a.ENTERPRISE_ID,
-          a.LOOKUP_TYPE_ID,
-          a.LOOKUP_TYPE,
-          a.LOOKUP_CODE,
-          a.MEANING_EN,
-          a.MEANING_AR,
-          a.DESCRIPTION_EN,
-          a.DESCRIPTION_AR,
-          a.DISPLAY_SEQUENCE,
-          a.IS_ENABLED,
-          a.START_DATE,
-          a.END_DATE,
-          a.CREATED_AT,
-          a.CREATED_BY,
-          a.UPDATED_AT,
-          a.UPDATED_BY
-        FROM ${this.TABLE_NAME} a
-        WHERE a.LOOKUP_GUID = :1`;
-        const selectResult = await connection.execute(selectQuery, [guidBuffer], {
-          outFormat: oracledb.OUT_FORMAT_OBJECT
-        });
-        if (selectResult.rows && selectResult.rows.length > 0) {
-          return this.convertKeysToSnakeCase(selectResult.rows[0]);
-        }
-        throw new DatabaseError('Failed to retrieve updated lookup value');
+        return this.fetchByGuidBuffer(connection, guidBuffer);
       });
     } catch (error) {
       if (error.message?.includes('must be a 32-character hex GUID')) throw error;
