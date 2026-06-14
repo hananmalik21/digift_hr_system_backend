@@ -142,7 +142,8 @@ export function maybeMulterUpdateAllInOne(req, res, next) {
  * PUT /api/update-employee/:idOrGuid
  * :idOrGuid = employee_id (number) or employee_guid (32-char hex).
  * Body: JSON or multipart/form-data. Required: enterprise_id. All document fields optional.
- *   first_name_ar, middle_name_ar, last_name_ar (Arabic names) are optional.
+ *   first_name_ar, middle_name_ar, last_name_ar, fourth_name_ar (Arabic names) are optional.
+ *   fourth_name_en is optional.
  *   doc_action: 'ADD' | 'REPLACE' (default 'ADD')
  *   replace_document_id: number (optional; when REPLACE, target specific doc row)
  *   document_type_code, doc_file_name, doc_mime_type, doc_access_url, doc_hash_sha256, doc_file_content: optional

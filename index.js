@@ -3,16 +3,6 @@ import 'dotenv/config';
 
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
 import { createPool, closePool } from './config/db.js';
 import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
 import companyController from './feature/enterprise_structure/companies/controller/companyController.js';
@@ -122,7 +112,6 @@ app.use(cors());
 const bulkAdjustJsonLimit = process.env.BULK_ADJUST_JSON_LIMIT || '10mb';
 app.use('/api/compensation/bulk-adjustments', express.json({ limit: bulkAdjustJsonLimit }));
 app.use(express.json());
-app.use('/uploads', express.static(UPLOADS_DIR));
 app.use('/documents', documentsDownloadRouter);
 
 // ==========================================
