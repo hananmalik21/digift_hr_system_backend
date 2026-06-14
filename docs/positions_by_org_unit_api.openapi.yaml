@@ -1,0 +1,280 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Positions by Organization Unit API
+  version: 1.0.0
+  description: |
+    Returns active positions for a selected organization unit within a tenant.
+
+    Reads from Oracle view `ENT.V_POSITIONS_BY_ORG_UNIT`.
+
+    **Authentication:** JWT Bearer token required (global `requireAuth` middleware).
+
+    **Tenant isolation:** When the JWT includes `enterprise_id`, the supplied `tenant_id`
+    must match; cross-tenant access is rejected with HTTP 403.
+
+    **Usage:** Employee creation, assignment, requisition creation, recruiting, workforce
+    structure transactions, and manager self-service — drives the Position dropdown when
+    an Organization Unit is selected.
+servers:
+  - url: /
+    description: Application base URL
+tags:
+  - name: Positions
+    description: Enterprise structure positions
+paths:
+  /api/positions/by-org-unit:
+    get:
+      tags: [Positions]
+      summary: Get active positions by organization unit
+      operationId: getPositionsByOrgUnit
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: query
+          required: true
+          description: Tenant / enterprise identifier
+          schema:
+            type: integer
+            minimum: 1
+          example: 1
+        - name: org_unit_id
+          in: query
+          required: true
+          description: Organization unit GUID as 32-character RAW hex string (no hyphens)
+          schema:
+            type: string
+            pattern: '^[0-9A-Fa-f]{32}$'
+          example: 4C7F674DA958F58FE0633519000AB699
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Positions retrieved successfully (empty array when none found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PositionsByOrgUnitListResponse'
+              examples:
+                withData:
+                  summary: Positions found
+                  value:
+                    success: true
+                    meta:
+                      pagination:
+                        page: 1
+                        page_size: 10
+                        total_pages: 1
+                        has_next: false
+                        has_previous: false
+                    data:
+                      - position_id: 4C9AE41B6429D374E0633519000AAFC0
+                        position_code: HR-SBP-005
+                        position_title_en: Senior HR Business Partner
+                        position_title_ar: شريك عمل موارد بشرية أقدم
+                        org_unit_id: 4C7F674DA958F58FE0633519000AB699
+                        org_unit_code: HR
+                        org_unit_name_en: Human Resources
+                        org_unit_name_ar: الموارد البشرية
+                        job_family_id: 2
+                        job_level_id: 3
+                        grade_id: 15
+                        status: ACTIVE
+                empty:
+                  summary: No positions
+                  value:
+                    success: true
+                    meta:
+                      pagination:
+                        page: 1
+                        page_size: 10
+                        total_pages: 0
+                        has_next: false
+                        has_previous: false
+                    data: []
+        '400':
+          description: Missing or invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+              examples:
+                missingTenantId:
+                  value:
+                    success: false
+                    error: tenant_id is required
+                missingOrgUnitId:
+                  value:
+                    success: false
+                    error: org_unit_id is required
+        '401':
+          description: Missing or invalid JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthErrorResponse'
+        '403':
+          description: Cross-tenant access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+              example:
+                success: false
+                message: 'Access denied: tenant_id does not match authenticated enterprise'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerErrorResponse'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by FNDSEC auth login endpoint
+  schemas:
+    PositionByOrgUnit:
+      type: object
+      description: Row from ENT.V_POSITIONS_BY_ORG_UNIT (snake_case keys)
+      properties:
+        position_id:
+          type: string
+          description: 32-char uppercase hex GUID
+        position_code:
+          type: string
+        position_title_en:
+          type: string
+        position_title_ar:
+          type: string
+        org_unit_id:
+          type: string
+        org_unit_code:
+          type: string
+        org_unit_name_en:
+          type: string
+        org_unit_name_ar:
+          type: string
+        org_structure_id:
+          type: string
+        job_family_id:
+          type: integer
+        job_level_id:
+          type: integer
+        grade_id:
+          type: integer
+        location:
+          type: string
+          nullable: true
+        cost_center:
+          type: string
+          nullable: true
+        employment_type:
+          type: string
+          nullable: true
+        number_of_positions:
+          type: integer
+          nullable: true
+        filled_positions:
+          type: integer
+          nullable: true
+        reports_to_position_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+        salary_amount:
+          type: number
+          nullable: true
+        step_no:
+          type: integer
+          nullable: true
+        step_nos_json:
+          type: string
+          nullable: true
+        tenant_id:
+          type: integer
+    PaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        page_size:
+          type: integer
+          minimum: 1
+        total_pages:
+          type: integer
+          minimum: 0
+        has_next:
+          type: boolean
+        has_previous:
+          type: boolean
+    PositionsByOrgUnitListResponse:
+      type: object
+      required: [success, meta, data]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+        meta:
+          type: object
+          required: [pagination]
+          properties:
+            pagination:
+              $ref: '#/components/schemas/PaginationMeta'
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PositionByOrgUnit'
+    ValidationErrorResponse:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+        error_details:
+          type: object
+          properties:
+            message:
+              type: string
+            code:
+              type: string
+            type:
+              type: string
+            validation_errors:
+              type: array
+              items:
+                type: string
+    AuthErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string
+    ServerErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: string

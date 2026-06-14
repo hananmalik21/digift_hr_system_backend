@@ -3,7 +3,7 @@ import { executeStatsQuery, rowCount } from '../../../../utils/statsUtils.js';
 
 const COUNTS_SQL = `
   SELECT
-    (SELECT COUNT(*) FROM ENT.POSITIONS WHERE TENANT_ID = :1) AS TOTAL_POSITIONS,
+    (SELECT COUNT(*) FROM ENT.POSITIONS WHERE TENANT_ID = :1) AS POSITION_RECORDS,
     (SELECT COUNT(*) FROM ENT.JOB_LEVELS WHERE TENANT_ID = :1) AS TOTAL_JOB_LEVELS,
     (SELECT COUNT(*) FROM ENT.JOB_FAMILIES WHERE TENANT_ID = :1) AS TOTAL_JOB_FAMILIES,
     (SELECT COUNT(*) FROM ENT.GRADES WHERE TENANT_ID = :1) AS TOTAL_GRADES
@@ -24,7 +24,7 @@ class WorkforceStatsModel {
     const row = countsResult.rows?.[0] || {};
 
     return {
-      total_positions: rowCount(row, 'TOTAL_POSITIONS'),
+      position_records: rowCount(row, 'POSITION_RECORDS'),
       total_job_levels: rowCount(row, 'TOTAL_JOB_LEVELS'),
       total_job_families: rowCount(row, 'TOTAL_JOB_FAMILIES'),
       total_grades: rowCount(row, 'TOTAL_GRADES'),
