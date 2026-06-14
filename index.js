@@ -67,6 +67,7 @@ import workforceStatsController from './feature/enterprise_structure/workforce_s
 import enterpriseStatsController from './feature/enterprise_structure/enterprise_stats/controller/enterpriseStatsController.js';
 import activeStructureStatsController from './feature/enterprise_structure/active_structure_stats/controller/activeStructureStatsController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
+import positionStatsController from './feature/enterprise_structure/position_stats/controller/positionStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import { requireAuth } from './middleware/authMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
@@ -159,6 +160,9 @@ app.use('/api/hr-org-structures', hrOrgStructureController);
 
 // Structure Level routes (mounted BEFORE orgUnitController to avoid route conflicts)
 app.use('/api/structure-levels', structureLevelController);
+
+// Position Stats routes (must be BEFORE /api/positions so /stats is not matched as :id)
+app.use('/api/positions/stats', positionStatsController);
 
 // Mount specific routes BEFORE catch-all routes to avoid conflicts
 app.use('/api/grades', gradeController);

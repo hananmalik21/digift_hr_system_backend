@@ -1,5 +1,4 @@
-import db from '../../../../config/db.js';
-import oracledb from 'oracledb';
+import { executeStatsQuery, rowCount } from '../../../../utils/statsUtils.js';
 
 const STATS_SQL = `
   SELECT
@@ -10,37 +9,20 @@ const STATS_SQL = `
   FROM DUAL
 `;
 
-function toCount(value) {
-  return Number(value ?? 0) || 0;
-}
-
 class TimeManagementStatsModel {
-  static async executeQuery(query, bindParams = [], options = {}) {
-    return db.executeQuery(query, bindParams, {
-      outFormat: oracledb.OUT_FORMAT_OBJECT,
-      ...options,
-    });
-  }
-
   /**
    * Get time management statistics for an enterprise/tenant.
    * @param {number} enterpriseId - Enterprise/tenant ID (validated by controller)
-   * @returns {Promise<{
-   *   total_shifts: number,
-   *   total_work_patterns: number,
-   *   total_work_schedules: number,
-   *   total_schedule_assignments: number
-   * }>}
    */
   static async getStats(enterpriseId) {
-    const result = await this.executeQuery(STATS_SQL, [enterpriseId]);
+    const result = await executeStatsQuery(STATS_SQL, [enterpriseId]);
     const row = result.rows?.[0] || {};
 
     return {
-      total_shifts: toCount(row.TOTAL_SHIFTS),
-      total_work_patterns: toCount(row.TOTAL_WORK_PATTERNS),
-      total_work_schedules: toCount(row.TOTAL_WORK_SCHEDULES),
-      total_schedule_assignments: toCount(row.TOTAL_SCHEDULE_ASSIGNMENTS),
+      total_shifts: rowCount(row, 'TOTAL_SHIFTS'),
+      total_work_patterns: rowCount(row, 'TOTAL_WORK_PATTERNS'),
+      total_work_schedules: rowCount(row, 'TOTAL_WORK_SCHEDULES'),
+      total_schedule_assignments: rowCount(row, 'TOTAL_SCHEDULE_ASSIGNMENTS'),
     };
   }
 }
