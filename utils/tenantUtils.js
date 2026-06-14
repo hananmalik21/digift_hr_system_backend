@@ -94,8 +94,11 @@ export function parseEnterpriseId(raw, missingMessage = 'enterprise_id is requir
  */
 export function requireEnterpriseIdFromQuery(req) {
   return parseEnterpriseId(
-    req.query?.enterprise_id ?? req.query?.enterpriseId,
-    'enterprise_id is required'
+    req.query?.enterprise_id
+      ?? req.query?.enterpriseId
+      ?? req.query?.tenant_id
+      ?? req.query?.tenantId,
+    'enterprise_id or tenant_id is required'
   );
 }
 
