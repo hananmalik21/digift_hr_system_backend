@@ -40,7 +40,7 @@ export function parsePagination(query) {
  * @returns {{ page: number, pageSize: number, total: number, totalPages: number, hasNext: boolean, hasPrevious: boolean }}
  */
 export function buildPaginationMeta(page, pageSize, totalCount) {
-  const totalPages = Math.ceil(totalCount / pageSize);
+  const totalPages = Math.ceil(totalCount / pageSize) || 0;
   return {
     page,
     pageSize,
@@ -48,5 +48,42 @@ export function buildPaginationMeta(page, pageSize, totalCount) {
     totalPages,
     hasNext: page < totalPages,
     hasPrevious: page > 1
+  };
+}
+
+/**
+ * Parse page/limit pagination (supports `limit` or `page_size`).
+ * @param {object} query
+ * @param {{ defaultPage?: number, defaultLimit?: number, maxLimit?: number }} [options]
+ * @returns {{ page: number, limit: number, offset: number }}
+ */
+export function parsePageLimit(query = {}, options = {}) {
+  const defaultPage = options.defaultPage ?? 1;
+  const defaultLimit = options.defaultLimit ?? 20;
+  const maxLimit = options.maxLimit ?? 100;
+
+  let page = defaultPage;
+  if (query.page !== undefined) {
+    const parsedPage = parseInt(query.page, 10);
+    if (Number.isNaN(parsedPage) || parsedPage < 1) {
+      throw new Error('Invalid page number. Must be a positive integer.');
+    }
+    page = parsedPage;
+  }
+
+  const limitRaw = query.limit ?? query.page_size ?? query.pageSize;
+  let limit = defaultLimit;
+  if (limitRaw !== undefined) {
+    const parsedLimit = parseInt(limitRaw, 10);
+    if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
+      throw new Error('Invalid limit. Must be a positive integer.');
+    }
+    limit = Math.min(maxLimit, parsedLimit);
+  }
+
+  return {
+    page,
+    limit,
+    offset: (page - 1) * limit
   };
 }

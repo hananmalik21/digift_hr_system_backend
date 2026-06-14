@@ -34,6 +34,15 @@ import {
   logSecuredAccess
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
+import {
+  buildEmployeeAssignmentsListFromClause,
+  buildSearchKeyCondition,
+  EMPL_EMPLOYEE_ASSIGNMENTS_LIST_VIEW,
+  normalizeEmployeeListRowWithPosition,
+  parseOrgStructureListFromRow,
+  rowRawToHex
+} from '../../../../utils/employeeAssignmentViewUtils.js';
+import { buildPaginationMeta, parsePagination } from '../../../../utils/paginationUtils.js';
 
 const router = express.Router();
 
@@ -92,41 +101,6 @@ function getUserId(req) {
   return getActingUsername(req) ?? 'SYSTEM';
 }
 
-function parsePagination(query) {
-  let page = 1;
-  let pageSize = 10;
-
-  if (query.page !== undefined) {
-    const parsedPage = parseInt(query.page, 10);
-    if (isNaN(parsedPage) || parsedPage < 1) {
-      throw new Error('Invalid page number. Must be a positive integer.');
-    }
-    page = parsedPage;
-  }
-
-  if (query.page_size !== undefined) {
-    const parsedPageSize = parseInt(query.page_size, 10);
-    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-      throw new Error('Invalid page_size. Must be a positive integer.');
-    }
-    pageSize = Math.min(100, parsedPageSize);
-  }
-
-  return { page, pageSize };
-}
-
-function buildPaginationMeta(page, pageSize, totalCount) {
-  const totalPages = Math.ceil(totalCount / pageSize) || 0;
-  return {
-    page,
-    pageSize,
-    total: totalCount,
-    totalPages,
-    hasNext: page < totalPages,
-    hasPrevious: page > 1
-  };
-}
-
 function buildEmployeeListWhereAndBinds(filters) {
   const hasJsonFilter = filters.org_unit_id_hex != null && filters.org_unit_id_hex !== '';
   const hasLevelCode = hasJsonFilter && filters.level_code != null && filters.level_code !== '';
@@ -182,7 +156,7 @@ function buildEmployeeListWhereAndBinds(filters) {
   }
 
   if (searchTrimmed) {
-    conditions.push("v.SEARCH_KEY LIKE '%' || UPPER(:search_key) || '%'");
+    conditions.push(buildSearchKeyCondition('search_key'));
     sharedBinds.search_key = searchTrimmed;
   }
 
@@ -192,8 +166,7 @@ function buildEmployeeListWhereAndBinds(filters) {
   if (filters.bypassEmployeeAccess) {
     conditions.push(employeeAccessBypassBindClause(':user_id'));
   }
-  const baseFrom = `EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
-    ${employeeAccessJoin('v.ENTERPRISE_ID', 'v.EMPLOYEE_ID', ':user_id', accessOptions)}`;
+  const baseFrom = buildEmployeeAssignmentsListFromClause(accessOptions);
 
   const whereClause = conditions.join(' AND ');
   const countSql = `SELECT COUNT(*) AS total_records FROM ${baseFrom} WHERE ${whereClause}`;
@@ -206,106 +179,22 @@ function buildEmployeeListWhereAndBinds(filters) {
   return { countSql, dataSql, countBinds: sharedBinds, dataBinds };
 }
 
-function hexToBuffer(hex) {
-  if (hex == null || typeof hex !== 'string') return null;
-  const s = hex.trim().replace(/-/g, '');
-  if (!/^[0-9A-Fa-f]{32}$/.test(s)) return null;
-  return Buffer.from(s, 'hex');
-}
-
-function rowRawToHex(row) {
-  if (row === null || row === undefined) return row;
-  if (row instanceof Buffer) return row.toString('hex').toUpperCase();
-  if (typeof row !== 'object') return row;
-  const out = {};
-  for (const [k, v] of Object.entries(row)) {
-    out[k] = v instanceof Buffer ? v.toString('hex').toUpperCase() : (typeof v === 'object' && v !== null && !(v instanceof Date) ? rowRawToHex(v) : v);
-  }
-  return out;
-}
-
-function safeJson(v) {
-  if (v == null) return null;
-  if (typeof v === 'object') return v;
-  if (typeof v === 'string') {
-    try {
-      return JSON.parse(v);
-    } catch {
-      return v;
-    }
-  }
-  return v;
+function normalizeEmployeeListRow(row) {
+  return normalizeEmployeeListRowWithPosition(row);
 }
 
 function parseOrgStructureList(value) {
   if (value == null) return [];
   if (Array.isArray(value)) return value;
-  if (typeof value === 'string') {
-    const s = value.trim();
-    if (s === '' || s.toLowerCase() === 'null') return [];
-    try {
-      const parsed = JSON.parse(s);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
+  const parsed = parseOrgStructureListFromRow({ org_structure_list: value, ORG_STRUCTURE_LIST: value });
+  return Array.isArray(parsed) ? parsed : [];
 }
 
-function isPositionObjEmpty(obj) {
-  if (!obj || typeof obj !== 'object') return true;
-  return Object.values(obj).every(v => v == null || v === '');
-}
-
-function toMinimalPosition(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  const id = obj.position_id ?? obj.POSITION_ID ?? obj.positionId;
-  if (id == null) return null;
-  return {
-    position_id: id,
-    position_code: obj.position_code ?? obj.POSITION_CODE ?? obj.positionCode ?? null,
-    status: obj.status ?? obj.STATUS ?? obj.position_status ?? obj.POSITION_STATUS ?? null,
-    position_title_en: obj.position_title_en ?? obj.POSITION_TITLE_EN ?? obj.position_name_en ?? obj.POSITION_NAME_EN ?? obj.positionTitleEn ?? null
-  };
-}
-
-function buildPositionFromRow(r) {
-  const positionId = r.POSITION_ID ?? r.position_id;
-  if (positionId == null) return null;
-  return toMinimalPosition({
-    position_id: positionId,
-    position_code: r.POSITION_CODE ?? r.position_code,
-    status: r.POSITION_STATUS ?? r.position_status,
-    position_title_en: r.POSITION_NAME_EN ?? r.POSITION_TITLE_EN ?? r.position_name_en ?? r.position_title_en
-  });
-}
-
-function normalizeEmployeeListRow(row) {
-  const r = rowRawToHex(row);
-  delete r.ORG_STRUCTURE_LIST_JSON;
-  delete r.org_structure_list_json;
-
-  const listRaw = r.ORG_STRUCTURE_LIST ?? r.org_structure_list ?? r.ORG_STRUCTURE_LIST_JSON ?? r.org_structure_list_json;
-  let org_structure_list = safeJson(listRaw);
-  if (!Array.isArray(org_structure_list)) org_structure_list = [];
-  r.org_structure_list = org_structure_list;
-  delete r.ORG_STRUCTURE_LIST;
-  if ('ORG_STRUCTURE_LIST_JSON' in r) delete r.ORG_STRUCTURE_LIST_JSON;
-
-  const posRaw = r.POSITION_OBJ ?? r.position_obj ?? r.POSITION_OBJ_JSON ?? r.position_obj_json;
-  let posObj = safeJson(posRaw);
-  if (typeof posObj === 'object' && posObj !== null && isPositionObjEmpty(posObj)) posObj = null;
-  const rawPosition = (typeof posObj === 'object' && posObj !== null) ? posObj : buildPositionFromRow(r);
-  r.position = toMinimalPosition(rawPosition);
-  delete r.POSITION_OBJ;
-  delete r.POSITION_OBJ_JSON;
-  delete r.position_obj_json;
-  delete r.position_obj;
-  delete r.SEARCH_KEY;
-  delete r.search_key;
-
-  return r;
+function hexToBuffer(hex) {
+  if (hex == null || typeof hex !== 'string') return null;
+  const s = hex.trim().replace(/-/g, '');
+  if (!/^[0-9A-Fa-f]{32}$/.test(s)) return null;
+  return Buffer.from(s, 'hex');
 }
 
 function toHex(val) {
@@ -354,8 +243,8 @@ function dateToIso(val) {
 
 const EMPLOYEE_TABLE_COLUMNS = new Set([
   'EMPLOYEE_ID', 'EMPLOYEE_GUID', 'ENTERPRISE_ID',
-  'FIRST_NAME_EN', 'MIDDLE_NAME_EN', 'LAST_NAME_EN',
-  'FIRST_NAME_AR', 'MIDDLE_NAME_AR', 'LAST_NAME_AR', 'FAMILY_NAME_AR',
+  'FIRST_NAME_EN', 'MIDDLE_NAME_EN', 'LAST_NAME_EN', 'FOURTH_NAME_EN',
+  'FIRST_NAME_AR', 'MIDDLE_NAME_AR', 'LAST_NAME_AR', 'FOURTH_NAME_AR', 'FAMILY_NAME_AR',
   'EMAIL', 'PHONE_NUMBER', 'MOBILE_NUMBER', 'DATE_OF_BIRTH',
   'STATUS', 'IS_ACTIVE', 'CREATED_BY', 'CREATION_DATE', 'LAST_UPDATED_BY', 'LAST_UPDATE_DATE',
   'EMPLOYEE_STATUS', 'EMPLOYEE_IS_ACTIVE'
@@ -731,7 +620,7 @@ export async function getEmployeeById(req, res) {
 }
 
 const SQL_ONE_ASSIGNMENT_ROW_BY_EMPLOYEE_ID = `
-  SELECT v.* FROM EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST v
+  SELECT v.* FROM ${EMPL_EMPLOYEE_ASSIGNMENTS_LIST_VIEW} v
   WHERE v.EMPLOYEE_ID = :employee_id
   ORDER BY v.ASSIGNMENT_ID DESC NULLS LAST
   FETCH FIRST 1 ROW ONLY

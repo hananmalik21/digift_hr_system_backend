@@ -8,6 +8,7 @@ import { updateEmployeeAllInOne, validateUpdateBody } from '../services/emplEmpl
 import { deleteEmployee } from '../services/emplEmployeeDeleteService.js';
 import { getConnection } from '../config/db.js';
 import { getEmplEmployeesList } from '../services/emplEmployeeListService.js';
+import { getEmplEmployeeAssignmentsList } from '../services/emplEmployeeAssignmentsListService.js';
 import { getEmployeeListRowByEmployeeId } from '../feature/employee_management/employees/controller/employeeController.js';
 import EmployeeModel from '../feature/employee_management/employees/model/employeeModel.js';
 import { requireActingUserId, logSecuredAccess, employeeAccessOptionsFromReq } from '../utils/userContext.js';
@@ -15,6 +16,48 @@ import { IS_DEV_MODE } from '../utils/env.js';
 
 const ORA_ERROR_REGEX = /ORA-\d{5}|-20001/;
 const ROUTE_TAG_LIST = 'GET /api/empl/employees';
+const ROUTE_TAG_ASSIGNMENTS = 'GET /api/empl/employee-assignments';
+
+function requireEnterpriseIdFromQuery(query, res, { includeErrorField = false } = {}) {
+  const enterpriseId = query.enterprise_id ?? query.enterpriseId;
+  if (enterpriseId == null || enterpriseId === '') {
+    const payload = {
+      success: false,
+      message: 'enterprise_id is required',
+      ...(includeErrorField ? { error: 'enterprise_id is required' } : { code: 'VALIDATION_ERROR' })
+    };
+    res.status(400).json(payload);
+    return null;
+  }
+  return enterpriseId;
+}
+
+function handleEmplListError(res, err, {
+  routeTag,
+  actingUserId,
+  enterpriseId,
+  fallbackMessage,
+  includeErrorField = false
+}) {
+  const msg = err?.message ?? String(err);
+  const isValidation = err?.code === 'VALIDATION_ERROR';
+  if (IS_DEV_MODE && !isValidation) {
+    console.error('[%s][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+      routeTag, actingUserId, enterpriseId, msg);
+  }
+  if (isValidation) {
+    return res.status(400).json({
+      success: false,
+      message: msg,
+      ...(includeErrorField ? { error: msg } : { code: 'VALIDATION_ERROR' })
+    });
+  }
+  return res.status(500).json({
+    success: false,
+    message: fallbackMessage,
+    ...(includeErrorField ? { error: msg } : { code: 'INTERNAL_ERROR' })
+  });
+}
 
 function extractOracleFriendlyMessage(err) {
   const raw = String(err?.message ?? err ?? '').trim();
@@ -43,6 +86,51 @@ function getUploadedFile(req) {
 }
 
 /**
+ * GET /api/empl/employee-assignments
+ * Offset pagination. Query: enterprise_id (required), search, employee_id, status, page (default 1), limit (default 20).
+ * Source: EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST only.
+ * 200: { success, data, pagination: { page, limit, total, totalPages } }
+ */
+export async function getEmplEmployeeAssignmentsListHandler(req, res) {
+  const q = req.query || {};
+  const enterpriseId = requireEnterpriseIdFromQuery(q, res, { includeErrorField: true });
+  if (enterpriseId == null) return;
+
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  try {
+    const { data, pagination } = await getEmplEmployeeAssignmentsList({
+      enterprise_id: enterpriseId,
+      user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
+      search: q.search,
+      employee_id: q.employee_id ?? q.employeeId,
+      status: q.status ?? q.employee_status ?? q.employeeStatus,
+      page: q.page,
+      limit: q.limit
+    });
+
+    logSecuredAccess(ROUTE_TAG_ASSIGNMENTS, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      returned: Array.isArray(data) ? data.length : 0,
+      total: pagination.total
+    });
+
+    return res.status(200).json({ success: true, data, pagination });
+  } catch (err) {
+    return handleEmplListError(res, err, {
+      routeTag: ROUTE_TAG_ASSIGNMENTS,
+      actingUserId,
+      enterpriseId,
+      fallbackMessage: 'Unable to fetch employee assignment list',
+      includeErrorField: true
+    });
+  }
+}
+
+/**
  * GET /api/empl/employees
  * Cursor-based pagination. Query: enterprise_id (required), limit, cursor, sort_by, sort_dir, filters (org_unit_id, position_id, job_family_id, job_level_id, grade_id, employment_status, contract_type_code, work_location_id, search).
  * Rows are normalized in service: org_structure_list and a single position (from view or flat columns) are returned.
@@ -51,17 +139,11 @@ function getUploadedFile(req) {
  */
 export async function getEmplEmployeesListHandler(req, res) {
   const q = req.query || {};
-  const enterpriseId = q.enterprise_id ?? q.enterpriseId;
-  if (enterpriseId == null || enterpriseId === '') {
-    return res.status(400).json({
-      success: false,
-      message: 'enterprise_id is required',
-      code: 'VALIDATION_ERROR'
-    });
-  }
+  const enterpriseId = requireEnterpriseIdFromQuery(q, res);
+  if (enterpriseId == null) return;
 
   const actingUserId = requireActingUserId(req, res);
-  if (actingUserId == null) return; // 401 already sent
+  if (actingUserId == null) return;
 
   try {
     const { data, next_cursor, has_next } = await getEmplEmployeesList({
@@ -105,16 +187,11 @@ export async function getEmplEmployeesListHandler(req, res) {
       data
     });
   } catch (err) {
-    const msg = err?.message ?? String(err);
-    const isValidation = err?.code === 'VALIDATION_ERROR' || msg.includes('enterprise_id') || msg.includes('user_id');
-    if (IS_DEV_MODE && !isValidation) {
-      console.error('[%s][FNDSEC] user_id=%s enterprise_id=%s error=%s',
-        ROUTE_TAG_LIST, actingUserId, enterpriseId, msg);
-    }
-    return res.status(isValidation ? 400 : 500).json({
-      success: false,
-      message: isValidation ? msg : 'Failed to fetch employees',
-      code: isValidation ? 'VALIDATION_ERROR' : 'INTERNAL_ERROR'
+    return handleEmplListError(res, err, {
+      routeTag: ROUTE_TAG_LIST,
+      actingUserId,
+      enterpriseId,
+      fallbackMessage: 'Failed to fetch employees'
     });
   }
 }

@@ -6,8 +6,19 @@
 import oracledb from 'oracledb';
 import { getConnection } from '../config/db.js';
 import { employeeAccessJoin, employeeAccessBypassBindClause } from '../utils/userContext.js';
+import {
+  EMPL_EMPLOYEE_ASSIGNMENTS_LIST_VIEW,
+  EMPL_ASSIGNMENTS_SEARCH_KEY_CONDITION,
+  assertPositiveEnterpriseId,
+  assertPositiveUserId,
+  normalizeEmployeeListRowWithPosition,
+  safeJson,
+  safeJsonParse
+} from '../utils/employeeAssignmentViewUtils.js';
 
-const VIEW = 'EMPL.V_EMPLOYEE_ASSIGNMENTS_LIST';
+export { safeJson, safeJsonParse };
+
+const VIEW = EMPL_EMPLOYEE_ASSIGNMENTS_LIST_VIEW;
 
 const SORT_BY_WHITELIST = new Set(['employee_id', 'employee_number', 'last_update_date', 'effective_start_date']);
 const SORT_COLUMN_SQL = {
@@ -26,40 +37,6 @@ const MAX_LIMIT = 100;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Parse JSON safely. Returns nested object/array when input is string; leaves objects as-is.
- * Use for org_structure_list, position_obj_json, position_obj so response never returns escaped JSON strings.
- * @param {*} v - value from driver (string, object, or null)
- * @returns {*} parsed object/array, or original value, or null
- */
-export function safeJson(v) {
-  if (v == null) return null;
-  if (typeof v === 'object') return v;
-  if (typeof v === 'string') {
-    try {
-      return JSON.parse(v);
-    } catch {
-      return v;
-    }
-  }
-  return v;
-}
-
-/** @deprecated Use safeJson. Kept for compatibility. */
-export function safeJsonParse(value, fallback = null) {
-  if (value == null) return fallback;
-  if (typeof value === 'object' && !(value instanceof Date)) return value;
-  if (typeof value !== 'string') return fallback;
-  const s = value.trim();
-  if (!s || s.toLowerCase() === 'null') return fallback;
-  try {
-    const parsed = JSON.parse(s);
-    return parsed != null ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 /**
  * Encode cursor payload to base64 string.
@@ -104,90 +81,6 @@ function normalizeHex(hex) {
   const s = String(hex).replace(/-/g, '').trim().toUpperCase();
   return s.length === 32 && /^[0-9A-F]+$/.test(s) ? s : null;
 }
-
-/**
- * Convert row RAW/Buffer columns to hex string for JSON. Mutates row.
- * @param {Object} row
- * @returns {Object}
- */
-function rowRawToHex(row) {
-  if (!row || typeof row !== 'object') return row;
-  const out = {};
-  for (const [k, v] of Object.entries(row)) {
-    out[k] = v != null && Buffer.isBuffer(v) ? v.toString('hex').toUpperCase() : v;
-  }
-  return out;
-}
-
-function isPositionObjEmpty(obj) {
-  if (!obj || typeof obj !== 'object') return true;
-  return Object.values(obj).every(v => v == null || v === '');
-}
-
-/** Minimal position shape for all employee list APIs: position_id, position_code, status, position_title_en */
-function toMinimalPosition(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  const id = obj.position_id ?? obj.POSITION_ID ?? obj.positionId;
-  if (id == null) return null;
-  return {
-    position_id: id,
-    position_code: obj.position_code ?? obj.POSITION_CODE ?? obj.positionCode ?? null,
-    status: obj.status ?? obj.STATUS ?? obj.position_status ?? obj.POSITION_STATUS ?? null,
-    position_title_en: obj.position_title_en ?? obj.POSITION_TITLE_EN ?? obj.position_name_en ?? obj.POSITION_NAME_EN ?? obj.positionTitleEn ?? null
-  };
-}
-
-function buildPositionFromRow(r) {
-  const positionId = r.POSITION_ID ?? r.position_id;
-  if (positionId == null) return null;
-  return toMinimalPosition({
-    position_id: positionId,
-    position_code: r.POSITION_CODE ?? r.position_code,
-    status: r.POSITION_STATUS ?? r.position_status,
-    position_title_en: r.POSITION_NAME_EN ?? r.POSITION_TITLE_EN ?? r.position_name_en ?? r.position_title_en
-  });
-}
-
-/**
- * Normalize a list row: RAW→hex, parse JSON fields via safeJson.
- * Returns a single position: from view position_obj when non-empty, else from flat view columns, else null.
- * @param {Object} row
- * @returns {Object}
- */
-function normalizeRow(row) {
-  if (!row) return row;
-  const r = rowRawToHex(row);
-  const listRaw = r.ORG_STRUCTURE_LIST ?? r.org_structure_list ?? r.ORG_STRUCTURE_LIST_JSON ?? r.org_structure_list_json;
-  let org_structure_list = safeJson(listRaw);
-  if (!Array.isArray(org_structure_list)) org_structure_list = [];
-
-  const position_obj_json = safeJson(r.POSITION_OBJ_JSON ?? r.position_obj_json);
-  const position_obj = safeJson(r.POSITION_OBJ ?? r.position_obj);
-  let positionObj = (typeof position_obj === 'object' && position_obj !== null)
-    ? position_obj
-    : (typeof position_obj_json === 'object' && position_obj_json !== null)
-      ? position_obj_json
-      : null;
-  if (positionObj !== null && isPositionObjEmpty(positionObj)) positionObj = null;
-
-  const out = {};
-  for (const [key, value] of Object.entries(r)) {
-    const lower = key.toLowerCase();
-    out[lower] = value;
-  }
-  out.org_structure_list = org_structure_list;
-  const rawPosition = (typeof positionObj === 'object' && positionObj !== null) ? positionObj : buildPositionFromRow(r);
-  out.position = toMinimalPosition(rawPosition);
-  delete out.org_structure_list_json;
-  delete out.position_obj_json;
-  delete out.position_obj;
-  delete out.search_key;
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// SQL builder
-// ---------------------------------------------------------------------------
 
 /**
  * Build WHERE conditions and bind object for list query.
@@ -248,23 +141,8 @@ function buildWhereAndBinds(params) {
 
   const search = params.search != null && String(params.search).trim() !== '' ? String(params.search).trim() : null;
   if (search) {
-    const pct = `%${search}%`;
-    whereParts.push(`(
-      UPPER(NVL(v.EMPLOYEE_NUMBER,'')) LIKE UPPER(:search_1)
-      OR UPPER(NVL(v.FIRST_NAME_EN,'')) LIKE UPPER(:search_2)
-      OR UPPER(NVL(v.MIDDLE_NAME_EN,'')) LIKE UPPER(:search_3)
-      OR UPPER(NVL(v.LAST_NAME_EN,'')) LIKE UPPER(:search_4)
-      OR UPPER(NVL(v.EMAIL,'')) LIKE UPPER(:search_5)
-      OR UPPER(NVL(v.PHONE_NUMBER,'')) LIKE UPPER(:search_6)
-      OR UPPER(NVL(v.MOBILE_NUMBER,'')) LIKE UPPER(:search_7)
-    )`);
-    binds.search_1 = pct;
-    binds.search_2 = pct;
-    binds.search_3 = pct;
-    binds.search_4 = pct;
-    binds.search_5 = pct;
-    binds.search_6 = pct;
-    binds.search_7 = pct;
+    whereParts.push(EMPL_ASSIGNMENTS_SEARCH_KEY_CONDITION);
+    binds.search = search;
   }
 
   return { whereParts, binds };
@@ -325,19 +203,8 @@ function buildCursorAndOrder(cursor, binds) {
  * @returns {Promise<{ data: Object[], next_cursor: string|null, has_next: boolean }>}
  */
 export async function getEmplEmployeesList(params) {
-  const enterpriseId = params.enterprise_id != null ? Number(params.enterprise_id) : NaN;
-  if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
-    const err = new Error('enterprise_id is required and must be a positive number');
-    err.code = 'VALIDATION_ERROR';
-    throw err;
-  }
-
-  const userId = params.user_id != null && params.user_id !== '' ? Number(params.user_id) : NaN;
-  if (!Number.isFinite(userId) || userId < 1) {
-    const err = new Error('user_id is required and must be a positive number');
-    err.code = 'VALIDATION_ERROR';
-    throw err;
-  }
+  const enterpriseId = assertPositiveEnterpriseId(params.enterprise_id);
+  const userId = assertPositiveUserId(params.user_id);
 
   const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(params.limit, 10) || DEFAULT_LIMIT));
   const cursor = decodeCursor(params.cursor) || { sort_by: params.sort_by || DEFAULT_SORT_BY, sort_dir: params.sort_dir || DEFAULT_SORT_DIR };
@@ -367,7 +234,7 @@ export async function getEmplEmployeesList(params) {
     const rows = result.rows || [];
     const hasNext = rows.length > limit;
     const pageRows = hasNext ? rows.slice(0, limit) : rows;
-    const data = pageRows.map(normalizeRow);
+    const data = pageRows.map(normalizeEmployeeListRowWithPosition);
 
     let next_cursor = null;
     if (hasNext && pageRows.length > 0) {
