@@ -13,6 +13,7 @@ import {
 import { parseSalaryStructurePageLimit } from '../../salary_structures/utils/parseSalaryStructurePageLimit.js';
 import { parseRequiredEnterpriseId } from '../../salary_structures/utils/parseSalaryStructureEnterpriseId.js';
 import { rowKeysUpper } from '../../salary_structures/utils/rowKeysUpper.js';
+import { normalizePlanComponentForGetResponse } from '../utils/planComponentAdvancedSettings.js';
 
 const JSON_COLUMN_NAMES_UPPER = new Set([
   'OWNER_OBJ',
@@ -154,13 +155,23 @@ function oracleKeyToSnake(k) {
   return String(k).toLowerCase();
 }
 
+function normalizePlanComponentsJsonValue(val) {
+  const parsed = parseJsonFromDbVal(val);
+  if (!Array.isArray(parsed)) return parsed;
+  return parsed.map(normalizePlanComponentForGetResponse);
+}
+
 export function mapPlansFullViewDetailRow(row) {
   const r = rowKeysUpper(row);
   const out = {};
   for (const [k, val] of Object.entries(r)) {
     const apiKey = oracleKeyToSnake(k);
     if (JSON_COLUMN_NAMES_UPPER.has(k)) {
-      out[apiKey] = parseJsonFromDbVal(val);
+      if (k === 'PLAN_COMPONENTS_JSON') {
+        out[apiKey] = normalizePlanComponentsJsonValue(val);
+      } else {
+        out[apiKey] = parseJsonFromDbVal(val);
+      }
       continue;
     }
     if (k === 'PLAN_GUID') {

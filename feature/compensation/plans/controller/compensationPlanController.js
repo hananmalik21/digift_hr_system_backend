@@ -1,5 +1,24 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+/**
+ * Compensation plan write/read APIs.
+ * OpenAPI: docs/compensation_plans_api.openapi.yaml
+ *
+ * @swagger
+ * components:
+ *   schemas:
+ *     PlanComponentAdvancedSettings:
+ *       type: object
+ *       description: Advanced settings (COMP.COMP_PLAN_COMP_ADV_SETTINGS). Y/N flags default to N when omitted on write.
+ *       properties:
+ *         recurring_flag:
+ *           type: string
+ *           enum: [Y, N]
+ *           description: Optional. Y = recurring component; N = non-recurring. Default N.
+ *         pay_basis:
+ *           type: string
+ *           description: Optional pay basis code (e.g. MONTHLY)
+ */
 import {
   createCompensationPlan,
   updateCompensationPlan,
@@ -13,6 +32,7 @@ import {
   EMPLOYEE_GUID_VALIDATION_MESSAGE,
   PLAN_GUID_VALIDATION_MESSAGE
 } from '../planGuid.js';
+import { collectComponentAdvancedFlagValidationErrors } from '../utils/planComponentAdvancedSettings.js';
 
 const EMPLOYEE_GUID_REQUIRED = 'employee_guid is required';
 /** Same wording as ORACLE_PLAN_ERROR_MAP.ORA_20002 for consistent client handling */
@@ -121,13 +141,6 @@ function normalizeFrequencyCode(value) {
   return s.toUpperCase();
 }
 
-function isValidYnFlag(value) {
-  if (value === undefined || value === null) return true; // treated as default by service layer
-  const s = String(value).trim().toUpperCase();
-  if (!s) return true; // treated as default
-  return s === 'Y' || s === 'N';
-}
-
 /**
  * @param {object} payload
  * @param {{ requirePlanGuid: boolean }} options
@@ -182,20 +195,7 @@ function collectPlanJsonValidationErrors(payload, options) {
           }
         }
 
-        const advancedFlags = [
-          'prorated_flag',
-          'taxable_flag',
-          'pensionable_flag',
-          'statutory_flag',
-          'include_in_ctc_flag',
-          'optional_flag',
-          'amortizable_flag'
-        ];
-        advancedFlags.forEach((flag) => {
-          if (hasKey(c, flag) && !isValidYnFlag(c[flag])) {
-            errors.push(`components[${idx}].${flag} must be "Y" or "N"`);
-          }
-        });
+        errors.push(...collectComponentAdvancedFlagValidationErrors(c, idx));
       });
     }
   }
@@ -240,6 +240,31 @@ router.get('/eligible-for-employee', asyncHandler(async (req, res) => {
   }
 }));
 
+/**
+ * @swagger
+ * /api/compensation/plans/create:
+ *   post:
+ *     tags: [Compensation Plans]
+ *     summary: Create compensation plan
+ *     description: |
+ *       Persists via COMP.CREATE_COMPENSATION_PLAN_PKG.CREATE_PLAN.
+ *       Each component may include optional advanced flags (e.g. recurring_flag Y/N, default N).
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               components:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     recurring_flag:
+ *                       type: string
+ *                       enum: [Y, N]
+ *                       description: Optional. Default N when omitted.
+ */
 router.post('/create', asyncHandler(async (req, res) => {
   const payload = req.body || {};
   const validation = validatePlanRequestPayload(payload, { requirePlanGuid: false });
@@ -274,6 +299,16 @@ router.post('/create', asyncHandler(async (req, res) => {
   }
 }));
 
+/**
+ * @swagger
+ * /api/compensation/plans/update:
+ *   put:
+ *     tags: [Compensation Plans]
+ *     summary: Update compensation plan
+ *     description: |
+ *       Persists via COMP.UPDATE_COMPENSATION_PLAN_PKG.UPDATE_PLAN.
+ *       Component advanced flags including recurring_flag are optional (Y/N, default N).
+ */
 router.put('/update', asyncHandler(async (req, res) => {
   const payload = req.body || {};
   const validation = validatePlanRequestPayload(payload, { requirePlanGuid: true });

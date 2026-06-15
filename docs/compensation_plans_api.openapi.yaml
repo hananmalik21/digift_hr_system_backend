@@ -1,0 +1,313 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Compensation Plans API
+  version: 1.1.0
+  description: |
+    Create, update, and retrieve compensation plans.
+    Plan components support advanced settings stored in `COMP.COMP_PLAN_COMP_ADV_SETTINGS`,
+    including the optional `recurring_flag` (Y/N, default N).
+servers:
+  - url: /
+    description: Application base URL (configure `{{baseUrl}}` in clients)
+tags:
+  - name: Compensation Plans
+    description: Compensation plan lifecycle and retrieval
+paths:
+  /api/compensation/plans/create:
+    post:
+      tags:
+        - Compensation Plans
+      summary: Create compensation plan
+      operationId: createCompensationPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompensationPlanWriteRequest'
+            examples:
+              withRecurringFlag:
+                summary: Component with recurring_flag Y
+                value:
+                  enterprise_id: 1
+                  plan_code: HOUSING_PLAN
+                  plan_name: Housing Plan
+                  plan_type_code: ALLOWANCE
+                  components:
+                    - component_id: 97
+                      display_sequence: 1
+                      mandatory_flag: Y
+                      active_flag: Y
+                      recurring_flag: Y
+                      taxable_flag: Y
+                      pay_basis: MONTHLY
+      responses:
+        '200':
+          description: Plan created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompensationPlanWriteSuccess'
+        '400':
+          description: Validation error
+        '500':
+          description: Server error
+  /api/compensation/plans/update:
+    put:
+      tags:
+        - Compensation Plans
+      summary: Update compensation plan
+      operationId: updateCompensationPlan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CompensationPlanWriteRequest'
+                - type: object
+                  required:
+                    - plan_guid
+                  properties:
+                    plan_guid:
+                      type: string
+                      description: 32-character hexadecimal plan GUID
+            example:
+              plan_guid: 544E5F594ABB050BE0631718000ADADC
+              components:
+                - component_id: 97
+                  recurring_flag: N
+      responses:
+        '200':
+          description: Plan updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompensationPlanWriteSuccess'
+        '400':
+          description: Validation error
+        '500':
+          description: Server error
+  /api/compensation/plans/{planGuid}/components:
+    get:
+      tags:
+        - Compensation Plans
+      summary: Get plan components by plan GUID
+      operationId: getCompensationPlanComponents
+      parameters:
+        - name: planGuid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 32-character hexadecimal plan GUID
+      responses:
+        '200':
+          description: Plan components fetched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompensationPlanDetailResponse'
+        '404':
+          description: Plan not found
+  /api/comp/plans/{planId}:
+    get:
+      tags:
+        - Compensation Plans
+      summary: Get compensation plan full detail by plan id or GUID
+      operationId: getCompPlanByKey
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Numeric plan_id or 32-character hexadecimal plan_guid
+      responses:
+        '200':
+          description: Plan detail from COMP.COMP_PLANS_FULL_V
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompPlansFullViewDetailResponse'
+  /api/comp/plans-details:
+    get:
+      tags:
+        - Compensation Plans
+      summary: List compensation plan full details
+      operationId: listCompPlansFullDetails
+      parameters:
+        - name: enterprise_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Paginated plan details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompPlansFullViewListResponse'
+components:
+  schemas:
+    YnFlag:
+      type: string
+      enum:
+        - Y
+        - N
+      description: Oracle Y/N flag
+    PlanComponentAdvancedSettings:
+      type: object
+      description: |
+        Advanced settings for a plan-component line (COMP.COMP_PLAN_COMP_ADV_SETTINGS).
+        All Y/N flags default to N when omitted on create/update.
+      properties:
+        prorated_flag:
+          $ref: '#/components/schemas/YnFlag'
+        taxable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        pensionable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        statutory_flag:
+          $ref: '#/components/schemas/YnFlag'
+        include_in_ctc_flag:
+          $ref: '#/components/schemas/YnFlag'
+        optional_flag:
+          $ref: '#/components/schemas/YnFlag'
+        amortizable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        recurring_flag:
+          allOf:
+            - $ref: '#/components/schemas/YnFlag'
+          description: |
+            Optional. Y = recurring component; N = non-recurring. Defaults to N when omitted.
+        pay_basis:
+          type: string
+          description: Optional pay basis code (e.g. MONTHLY)
+          example: MONTHLY
+    PlanComponentWrite:
+      type: object
+      required:
+        - component_id
+      properties:
+        component_id:
+          type: integer
+        display_sequence:
+          type: integer
+        mandatory_flag:
+          $ref: '#/components/schemas/YnFlag'
+        active_flag:
+          $ref: '#/components/schemas/YnFlag'
+        frequency_code:
+          type: string
+        prorated_flag:
+          $ref: '#/components/schemas/YnFlag'
+        taxable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        pensionable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        statutory_flag:
+          $ref: '#/components/schemas/YnFlag'
+        include_in_ctc_flag:
+          $ref: '#/components/schemas/YnFlag'
+        optional_flag:
+          $ref: '#/components/schemas/YnFlag'
+        amortizable_flag:
+          $ref: '#/components/schemas/YnFlag'
+        recurring_flag:
+          allOf:
+            - $ref: '#/components/schemas/YnFlag'
+          description: Optional. Defaults to N when omitted.
+        pay_basis:
+          type: string
+        advanced_settings:
+          $ref: '#/components/schemas/PlanComponentAdvancedSettings'
+    PlanComponentRead:
+      type: object
+      properties:
+        component_id:
+          type: integer
+        component_name:
+          type: string
+        advanced_settings:
+          $ref: '#/components/schemas/PlanComponentAdvancedSettings'
+    CompensationPlanWriteRequest:
+      type: object
+      properties:
+        enterprise_id:
+          type: integer
+        plan_code:
+          type: string
+        plan_name:
+          type: string
+        plan_type_code:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanComponentWrite'
+    CompensationPlanWriteSuccess:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        plan_id:
+          type: integer
+        plan_guid:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanComponentRead'
+    CompensationPlanDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        plan_guid:
+          type: string
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanComponentRead'
+    CompPlansFullViewDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            plan_components_json:
+              type: array
+              items:
+                $ref: '#/components/schemas/PlanComponentRead'
+    CompPlansFullViewListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              plan_components_json:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlanComponentRead'

@@ -5,6 +5,16 @@ import {
   normalizePlanGuidHex,
   PLAN_GUID_VALIDATION_MESSAGE
 } from '../planGuid.js';
+import {
+  normalizeAdvancedComponentFlags,
+  normalizePlanComponentForGetResponse
+} from '../utils/planComponentAdvancedSettings.js';
+
+export {
+  ADVANCED_COMPONENT_FLAG_KEYS,
+  normalizeAdvancedComponentFlags,
+  normalizePlanComponentForGetResponse
+} from '../utils/planComponentAdvancedSettings.js';
 
 /* After CREATE_PLAN, sync plan ↔ employees (all five criteria incl. BU / BUSINESS_UNIT
    node in org_structure_list per PKG_PLAN_EMPLOYEES). Avoid AFTER INSERT alone. */
@@ -56,48 +66,9 @@ BEGIN
 END;
 `;
 
-const ADVANCED_COMPONENT_FLAG_KEYS = [
-  'prorated_flag',
-  'taxable_flag',
-  'pensionable_flag',
-  'statutory_flag',
-  'include_in_ctc_flag',
-  'optional_flag',
-  'amortizable_flag'
-];
-
-function normalizeYnFlag(value) {
-  if (value === undefined || value === null) return 'N';
-  const s = String(value).trim().toUpperCase();
-  if (!s) return 'N';
-  if (s === 'Y' || s.startsWith('Y')) return 'Y';
-  if (s === 'N' || s.startsWith('N')) return 'N';
-  return 'N';
-}
-
-/** Optional plan-component pay_basis; trim + uppercase for storage. */
-function normalizePayBasisForPlanJson(value) {
-  if (value === undefined || value === null) return undefined;
-  const s = String(value).trim();
-  if (!s) return undefined;
-  return s.toUpperCase();
-}
-
-function normalizeAdvancedComponentFlags(component) {
-  if (component == null || typeof component !== 'object' || Array.isArray(component)) return component;
-  const out = { ...component };
-  ADVANCED_COMPONENT_FLAG_KEYS.forEach((k) => {
-    out[k] = normalizeYnFlag(component[k]);
-  });
-  const pb = normalizePayBasisForPlanJson(component.pay_basis);
-  if (pb !== undefined) out.pay_basis = pb;
-  else delete out.pay_basis;
-  return out;
-}
-
 /**
  * Normalizes each `components[]` row before JSON.stringify for P_PLAN_JSON (CLOB).
- * `amortizable_flag` defaults to N; `pay_basis` is trimmed + uppercased when present.
+ * Advanced flags (incl. recurring_flag) default to N; `pay_basis` is trimmed + uppercased when present.
  * Plan-component advanced settings (COMP.COMP_PLAN_COMP_ADV_SETTINGS) are supplied only via this JSON, not separate binds.
  */
 function normalizePayloadComponentsAdvancedFlags(payload) {
@@ -815,7 +786,20 @@ function sqlPlanComponentsJsonSubquery(enterpriseSqlExpr, planIdSqlExpr) {
                'max_value' VALUE c.max_value,
                'display_sequence' VALUE pc.display_sequence,
                'mandatory_flag' VALUE pc.mandatory_flag,
-               'active_flag' VALUE pc.active_flag
+               'active_flag' VALUE pc.active_flag,
+               'advanced_settings' VALUE JSON_OBJECT(
+                 'prorated_flag'       VALUE NVL(adv.prorated_flag, 'N'),
+                 'taxable_flag'        VALUE NVL(adv.taxable_flag, 'N'),
+                 'pensionable_flag'    VALUE NVL(adv.pensionable_flag, 'N'),
+                 'statutory_flag'      VALUE NVL(adv.statutory_flag, 'N'),
+                 'include_in_ctc_flag' VALUE NVL(adv.include_in_ctc_flag, 'N'),
+                 'optional_flag'       VALUE NVL(adv.optional_flag, 'N'),
+                 'amortizable_flag'    VALUE NVL(adv.amortizable_flag, 'N'),
+                 'recurring_flag'      VALUE NVL(adv.recurring_flag, 'N'),
+                 'pay_basis'           VALUE adv.pay_basis NULL ON NULL
+                 RETURNING CLOB
+               )
+               RETURNING CLOB
              )
              ORDER BY NVL(pc.display_sequence, 999999), pc.plan_component_id
              RETURNING CLOB
@@ -871,7 +855,9 @@ function parsePlanComponentsJson(raw) {
 }
 
 function normalizedPlanComponentsFromRow(rawJson) {
-  return parsePlanComponentsJson(rawJson).map(normalizeComponentForGetResponse);
+  return parsePlanComponentsJson(rawJson)
+    .map(normalizeComponentForGetResponse)
+    .map(normalizePlanComponentForGetResponse);
 }
 
 /**
