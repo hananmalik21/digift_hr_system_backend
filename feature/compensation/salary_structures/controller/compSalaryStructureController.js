@@ -19,6 +19,11 @@ import {
   listSalaryStructureDetailEndpointPaginated,
   getSalaryStructureDetail
 } from '../service/compSalaryStructureJsonViewService.js';
+import {
+  normalizeOrgScopeLegacy,
+  resolveEmploymentTypes,
+  validateEmploymentTypesList
+} from '../utils/salaryStructureOrgScope.js';
 import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
@@ -28,6 +33,7 @@ const HTTP = { BAD_REQUEST: 400, OK: 200, CREATED: 201, NOT_FOUND: 404, CONFLICT
 const ERROR_CODE_VALIDATION = 'VALIDATION';
 const MSG_INVALID_STRUCTURE_GUID = 'structure_guid must be a 32-character hexadecimal string';
 const MSG_SALARY_STRUCTURE_NOT_FOUND = 'Salary structure not found';
+const MSG_CREATE_SUCCESS = 'Salary structure created successfully';
 const MSG_DELETE_SUCCESS = 'Salary structure deleted successfully';
 const MSG_LIST_SUCCESS = 'Salary structures fetched successfully';
 const MSG_DETAIL_SUCCESS = 'Salary structure fetched successfully';
@@ -47,7 +53,7 @@ const ORACLE_CONFLICT_MAP = [
       raw.includes('COMP_SALARY_ORG_SCOPE_UK1') ||
       (raw.includes('ORA-00001') && raw.includes('COMP_SALARY_ORG_SCOPE') && raw.toLowerCase().includes('already exists')),
     message:
-      'This org scope is already used by another salary structure for this enterprise (same country, business unit, and employee category). Change org_scope or update the existing structure.'
+      'This org scope is already used by another salary structure for this enterprise (same country and business unit). Change org_scope or update the existing structure.'
   }
 ];
 
@@ -69,6 +75,14 @@ function mapOracleError(err) {
     }
   }
   return null;
+}
+
+function sendCreateOk(res, data) {
+  res.status(HTTP.CREATED).json({
+    success: true,
+    message: MSG_CREATE_SUCCESS,
+    data
+  });
 }
 
 function sendOk(res, statusCode, data) {
@@ -183,16 +197,6 @@ function validateHex32List(arr, fieldLabel) {
   return null;
 }
 
-function validateStringList(arr, fieldLabel) {
-  if (!Array.isArray(arr)) return `${fieldLabel} must be an array`;
-  for (const item of arr) {
-    if (item != null && typeof item !== 'string' && typeof item !== 'number') {
-      return `${fieldLabel} entries must be strings or numbers`;
-    }
-  }
-  return null;
-}
-
 function assertValidJsonSerializable(label, value) {
   try {
     JSON.stringify(value);
@@ -207,10 +211,11 @@ function pushOrgScopeErrors(body, errors) {
     if (m) errors.push(m);
     assertValidJsonSerializable('org_scope.business_units', body.org_scope.business_units);
   }
-  if (body.org_scope?.employee_categories != null) {
-    const m = validateStringList(body.org_scope.employee_categories, 'org_scope.employee_categories');
+  const employmentTypes = resolveEmploymentTypes(body.org_scope);
+  if (employmentTypes != null) {
+    const m = validateEmploymentTypesList(employmentTypes, 'org_scope.employment_types');
     if (m) errors.push(m);
-    assertValidJsonSerializable('org_scope.employee_categories', body.org_scope.employee_categories);
+    assertValidJsonSerializable('org_scope.employment_types', employmentTypes);
   }
 }
 
@@ -260,7 +265,7 @@ function runValidation(body, validator) {
 }
 
 export const postSalaryStructure = asyncHandler(async (req, res) => {
-  const body = req.body || {};
+  const body = normalizeOrgScopeLegacy(req.body || {});
   const validation = runValidation(body, validateCreateBody);
   if (!validation.valid) {
     return sendFail(res, HTTP.BAD_REQUEST, validation.errors.join('; '), ERROR_CODE_VALIDATION);
@@ -269,7 +274,7 @@ export const postSalaryStructure = asyncHandler(async (req, res) => {
   const createdBy = resolveActor(req);
   try {
     const data = await createSalaryStructure(body, createdBy);
-    return sendOk(res, HTTP.CREATED, {
+    return sendCreateOk(res, {
       structure_id: data.structure_id,
       structure_guid: data.structure_guid
     });
@@ -282,7 +287,7 @@ export const putSalaryStructure = asyncHandler(async (req, res) => {
   const structureGuid = readStructureGuidParam(req, res);
   if (structureGuid == null) return;
 
-  const body = req.body || {};
+  const body = normalizeOrgScopeLegacy(req.body || {});
   const validation = runValidation(body, validateUpdateBody);
   if (!validation.valid) {
     return sendFail(res, HTTP.BAD_REQUEST, validation.errors.join('; '), ERROR_CODE_VALIDATION);
@@ -322,7 +327,7 @@ function queryHasStructureKey(query) {
 /**
  * GET /api/comp/salary-structures-details
  * - With structure_id and/or structure_guid: one row from COMP.COMP_SALARY_STRUCTURE_JSON_V (nested JSON).
- * - Without both: paginated list, full view JSON per row (same 14 keys as single-detail).
+ * - Without both: paginated list, full view JSON per row (same 15 keys as single-detail).
  */
 export const getSalaryStructureDetailHandler = asyncHandler(async (req, res) => {
   if (!queryHasStructureKey(req.query)) {

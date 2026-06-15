@@ -4,6 +4,10 @@
 
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
+import { STRUCTURE_GUID_REGEX, normalizeStructureGuid } from '../utils/salaryStructureGuid.js';
+import { resolveEmploymentTypes } from '../utils/salaryStructureOrgScope.js';
+
+export { STRUCTURE_GUID_REGEX, normalizeStructureGuid } from '../utils/salaryStructureGuid.js';
 
 const EXECUTE_OPTS = { autoCommit: true, outFormat: oracledb.OUT_FORMAT_OBJECT };
 
@@ -34,7 +38,7 @@ BEGIN
     :p_country_code,
     :p_components_json,
     :p_business_units_json,
-    :p_employee_categories_json,
+    :p_employment_types_json,
     :p_job_families_json,
     :p_positions_json,
     :p_grade_ranges_json,
@@ -73,7 +77,7 @@ BEGIN
     :p_country_code,
     :p_components_json,
     :p_business_units_json,
-    :p_employee_categories_json,
+    :p_employment_types_json,
     :p_job_families_json,
     :p_positions_json,
     :p_grade_ranges_json,
@@ -90,8 +94,6 @@ BEGIN
   );
 END;
 `;
-
-export const STRUCTURE_GUID_REGEX = /^[0-9A-Fa-f]{32}$/;
 
 function optNum(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -117,13 +119,6 @@ function optDate(v) {
 function normalizeYn(value, defaultVal = 'N') {
   if (value == null || String(value).trim() === '') return defaultVal;
   return String(value).trim().toUpperCase().slice(0, 1) === 'Y' ? 'Y' : 'N';
-}
-
-export function normalizeStructureGuid(guid) {
-  if (guid == null || typeof guid !== 'string') return null;
-  const s = String(guid).trim();
-  if (s.length !== 32 || !STRUCTURE_GUID_REGEX.test(s)) return null;
-  return s.toUpperCase();
 }
 
 /**
@@ -184,20 +179,24 @@ function componentsToJson(components) {
   return JSON.stringify(components);
 }
 
-function stringArrayToJson(arr) {
-  if (arr == null) return null;
+/** null / missing / empty array → null; otherwise JSON string (never "[]"). */
+function nonEmptyArrayToJson(arr) {
+  if (arr == null || !Array.isArray(arr) || arr.length === 0) return null;
   return JSON.stringify(arr);
 }
 
-/** undefined / null / non-array → null; any array (including []) → JSON.stringify(arr). */
-function optionalArrayToJsonString(arr) {
+/**
+ * Partial update: omitted key → null (unchanged); explicit [] → '[]' (clear child rows).
+ * @param {unknown} arr
+ * @returns {string|null}
+ */
+function updateArrayToJson(arr) {
   if (arr == null || !Array.isArray(arr)) return null;
   return JSON.stringify(arr);
 }
 
 function gradeRangesToJson(gradeRanges) {
-  if (gradeRanges == null || !Array.isArray(gradeRanges)) return null;
-  if (gradeRanges.length === 0) return JSON.stringify([]);
+  if (gradeRanges == null || !Array.isArray(gradeRanges) || gradeRanges.length === 0) return null;
   const normalized = gradeRanges.map((row) => ({
     grade_id: row.grade_id,
     active_flag:
@@ -251,12 +250,11 @@ function buildCreateBinds(payload, createdBy) {
 
     p_country_code: optStr(org.country_code),
     p_components_json: componentsToJson(payload.components),
-    p_business_units_json: org.business_units != null ? stringArrayToJson(org.business_units) : null,
-    p_employee_categories_json:
-      org.employee_categories != null ? stringArrayToJson(org.employee_categories) : null,
+    p_business_units_json: nonEmptyArrayToJson(org.business_units),
+    p_employment_types_json: nonEmptyArrayToJson(resolveEmploymentTypes(org)),
 
-    p_job_families_json: optionalArrayToJsonString(payload.job_family_ids),
-    p_positions_json: optionalArrayToJsonString(payload.position_ids),
+    p_job_families_json: nonEmptyArrayToJson(payload.job_family_ids),
+    p_positions_json: nonEmptyArrayToJson(payload.position_ids),
     p_grade_ranges_json: gradeRangesToJson(payload.grade_ranges),
 
     p_created_by: optStr(createdBy) ?? 'SYSTEM',
@@ -309,12 +307,18 @@ function pickUpdate(body) {
 
     p_country_code: hasKey(org, 'country_code') ? optStr(org.country_code) : null,
     p_components_json: has('components') ? componentsToJson(body.components) : null,
-    p_business_units_json: hasKey(org, 'business_units') ? stringArrayToJson(org.business_units) : null,
-    p_employee_categories_json: hasKey(org, 'employee_categories') ? stringArrayToJson(org.employee_categories) : null,
+    p_business_units_json: hasKey(org, 'business_units') ? updateArrayToJson(org.business_units) : null,
+    p_employment_types_json: hasKey(org, 'employment_types')
+      ? updateArrayToJson(org.employment_types)
+      : null,
 
-    p_job_families_json: has('job_family_ids') ? optionalArrayToJsonString(body.job_family_ids) : null,
-    p_positions_json: has('position_ids') ? optionalArrayToJsonString(body.position_ids) : null,
-    p_grade_ranges_json: has('grade_ranges') ? gradeRangesToJson(body.grade_ranges) : null
+    p_job_families_json: has('job_family_ids') ? updateArrayToJson(body.job_family_ids) : null,
+    p_positions_json: has('position_ids') ? updateArrayToJson(body.position_ids) : null,
+    p_grade_ranges_json: has('grade_ranges')
+      ? Array.isArray(body.grade_ranges) && body.grade_ranges.length === 0
+        ? '[]'
+        : gradeRangesToJson(body.grade_ranges)
+      : null
   };
 }
 

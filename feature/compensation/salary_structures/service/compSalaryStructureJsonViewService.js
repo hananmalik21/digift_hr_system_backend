@@ -19,6 +19,17 @@ import { normalizeStructureGuid } from './compSalaryStructureService.js';
 /** Duplicated at response root; stripped from nested `structure` in details. */
 const PROMOTED_STRUCTURE_HEADER_KEYS = ['structure_type_code', 'location_obj'];
 
+/** View CLOB/JSON array columns → API detail keys (keep in sync with buildJsonViewDetailSelectSql). */
+const DETAIL_JSON_ARRAY_SECTIONS = [
+  ['ORG_SCOPES_JSON', 'org_scopes'],
+  ['FINANCIAL_DETAILS_JSON', 'financial_details'],
+  ['GRADE_RANGES_JSON', 'grade_ranges'],
+  ['JOB_FAMILIES_JSON', 'job_families'],
+  ['POSITIONS_JSON', 'positions'],
+  ['EMPLOYMENT_TYPES_JSON', 'employment_types'],
+  ['COMPONENTS_JSON', 'components']
+];
+
 function parseOptionalStructureIdFromQuery(query) {
   if (query.structure_id === undefined || query.structure_id === null || String(query.structure_id).trim() === '') {
     return null;
@@ -255,12 +266,9 @@ export function mapJsonViewDetailRowToResponse(row) {
     location_obj,
     structure: structureWithoutPromotedHeaderFields(structureParsed),
     advanced_settings: normalizeObjectJson(r.ADVANCED_SETTINGS_OBJ),
-    org_scopes: normalizeArrayJson(r.ORG_SCOPES_JSON),
-    financial_details: normalizeArrayJson(r.FINANCIAL_DETAILS_JSON),
-    grade_ranges: normalizeArrayJson(r.GRADE_RANGES_JSON),
-    job_families: normalizeArrayJson(r.JOB_FAMILIES_JSON),
-    positions: normalizeArrayJson(r.POSITIONS_JSON),
-    components: normalizeArrayJson(r.COMPONENTS_JSON)
+    ...Object.fromEntries(
+      DETAIL_JSON_ARRAY_SECTIONS.map(([col, key]) => [key, normalizeArrayJson(r[col])])
+    )
   };
 }
 

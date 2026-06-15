@@ -1,5 +1,6 @@
 /**
  * COMP.COMP_SALARY_STRUCTURE_JSON_V — list (header columns) and detail (full JSON row).
+ * View DDL: sql/create_view_comp_salary_structure_json_v.sql
  * Dynamic WHERE + typed binds only (no optional NULL bind OR-patterns).
  */
 
@@ -11,6 +12,7 @@ import {
   readScalarCount,
   wrapSalaryStructureViewDbError
 } from '../utils/oracleListHelpers.js';
+import { normalizeStructureGuid } from '../utils/salaryStructureGuid.js';
 
 const VIEW_NAME = 'COMP.COMP_SALARY_STRUCTURE_JSON_V';
 const LOG_TAG = 'compSalaryStructureJsonViewModel';
@@ -154,6 +156,7 @@ export function buildJsonViewDetailSelectSql() {
   GRADE_RANGES_JSON,
   JOB_FAMILIES_JSON,
   POSITIONS_JSON,
+  EMPLOYMENT_TYPES_JSON,
   COMPONENTS_JSON
 `
     .replace(/\s+/g, ' ')
@@ -240,8 +243,8 @@ export function buildJsonViewListFilterValues(input) {
 
   let structure_guid_hex = null;
   if (input.structure_guid != null && String(input.structure_guid).trim() !== '') {
-    const g = String(input.structure_guid).trim().toUpperCase();
-    if (!/^[0-9A-F]{32}$/.test(g)) {
+    const g = normalizeStructureGuid(String(input.structure_guid).trim());
+    if (!g) {
       throw new Error('structure_guid must be a 32-character hexadecimal string');
     }
     structure_guid_hex = g;
