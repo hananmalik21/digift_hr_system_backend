@@ -1,0 +1,37 @@
+---
+description: ENT enterprise-structure Oracle packages — domain split, compile order, ORDS
+globs: feature/enterprise_structure/**/*.sql
+alwaysApply: false
+---
+
+# ENT enterprise DB packages
+
+Node calls **one package per domain** via `ENT_MODULE_PACKAGES` in `shared/entDbClient.js`.
+
+Package and view DDL live in **Oracle** (not in repo). Org units package SQL remains in `org_units/sql/`.
+
+## Package map
+
+| Module | Package |
+|--------|---------|
+| Shared JSON | `ENT_JSON_UTIL_PKG` |
+| Stats | `ENT_STATS_PKG` |
+| Enterprises | `ENT_ENTERPRISES_PKG` |
+| Structure levels | `ENT_STRUCTURE_LEVELS_PKG` |
+| Org units | `ORG_UNITS_PKG` |
+| Job families | `ENT_JOB_FAMILIES_PKG` |
+| Grades | `ENT_GRADES_PKG` |
+| Job levels | `ENT_JOB_LEVELS_PKG` |
+| Positions | `ENT_POSITIONS_PKG` |
+| HR structures | `ENT_HR_ORG_STRUCTURES_PKG` |
+| HR hierarchy | `ENT_HR_ORG_HIERARCHY_LEVELS_PKG` |
+
+Read views: `shared/entViews.js` (`ENT.V_*`)
+
+## Repo SQL
+
+`org_units/sql/ENT_ORG_UNITS_PKG_*.sql` only.
+
+## Node layer
+
+See `.cursor/rules/ent-enterprise-node-thin.mdc`

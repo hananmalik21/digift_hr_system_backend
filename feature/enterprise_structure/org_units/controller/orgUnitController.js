@@ -16,8 +16,12 @@ import {
   sendNotFound,
   sendConflict,
   sendOrgUnitHierarchySuccess,
-  sendOrgUnitHierarchyNotFound
+  sendOrgUnitHierarchyNotFound,
+  sendOrgUnitExport
 } from '../view/orgUnitView.js';
+import { buildOrgUnitsExcelBuffer } from '../service/orgUnitExportService.js';
+import { fetchOrgUnitExportPayload, mapOrgUnitExportDbError } from '../service/orgUnitExportDbService.js';
+import { toSnakeCaseDeep } from '../../shared/entDbClient.js';
 import { sendActiveStructureLevels } from '../../hr_org_structures/view/hrOrgStructureView.js';
 
 const router = express.Router();
@@ -259,6 +263,65 @@ router.get('/:structureId/levels', async (req, res) => {
     sendOrgUnitList(res, req, resolver.levelsOrdered);
   } catch (error) {
     handleOrgUnitRouteError(res, req, error, 'Failed to fetch levels');
+  }
+});
+
+/**
+ * @route   GET /hr-org-structures/:structureId/org-units/export
+ * @desc    Export org units to Excel (all matching rows, no pagination)
+ * @query   level (optional) - Level code (e.g., 'COMPANY'). Omit to export all levels (one sheet per level).
+ * @query   parentId (optional) - Filter by parent org unit ID
+ * @query   search (optional) - Search in org_unit_code, org_unit_name_en, org_unit_name_ar
+ * @query   is_active (optional) - Filter by active status ('Y'/'N' or 'true'/'false')
+ */
+router.get('/:structureId/org-units/export', async (req, res) => {
+  try {
+    const structureId = parseStructureId(req.params.structureId);
+    const level = req.query.level ? String(req.query.level).trim() : null;
+
+    const payload = await fetchOrgUnitExportPayload({
+      structureIdHex: structureId,
+      level,
+      parentId: req.query.parentId,
+      search: req.query.search,
+      isActive: req.query.is_active,
+      allowDraft: true
+    });
+
+    const exportData = toSnakeCaseDeep(payload) ?? {};
+    const sheets = (exportData.sheets ?? []).map((sheet) => ({
+      name: sheet.name,
+      orgUnits: sheet.org_units ?? []
+    }));
+
+    const { buffer, filename, rowCount } = await buildOrgUnitsExcelBuffer({
+      levelCode: level,
+      structureName: exportData.structure_name ?? 'structure',
+      sheets
+    });
+
+    if (rowCount === 0) {
+      return sendNotFound(res, req, 'No org units found to export');
+    }
+
+    sendOrgUnitExport(res, buffer, filename);
+  } catch (error) {
+    if (error?.statusCode) {
+      if (error.statusCode === 404) return sendNotFound(res, req, error.message);
+      if (error.statusCode >= 500) {
+        return sendServerError(res, req, error.userMessage ?? error.message, error);
+      }
+      return sendBadRequest(res, req, error.message);
+    }
+    if (error?.errorNum != null) {
+      const mapped = mapOrgUnitExportDbError(error);
+      if (mapped.statusCode === 404) return sendNotFound(res, req, mapped.message);
+      if (mapped.statusCode >= 500) {
+        return sendServerError(res, req, mapped.userMessage ?? mapped.message, mapped);
+      }
+      return sendBadRequest(res, req, mapped.message);
+    }
+    handleOrgUnitRouteError(res, req, error, 'Failed to export org units');
   }
 });
 

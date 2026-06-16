@@ -1,34 +1,25 @@
-import PositionStatsModel from '../../position_stats/model/positionStatsModel.js';
-import { executeStatsQuery, rowCount } from '../../../../utils/statsUtils.js';
-
-const COUNTS_SQL = `
-  SELECT
-    (SELECT COUNT(*) FROM ENT.POSITIONS WHERE TENANT_ID = :1) AS POSITION_RECORDS,
-    (SELECT COUNT(*) FROM ENT.JOB_LEVELS WHERE TENANT_ID = :1) AS TOTAL_JOB_LEVELS,
-    (SELECT COUNT(*) FROM ENT.JOB_FAMILIES WHERE TENANT_ID = :1) AS TOTAL_JOB_FAMILIES,
-    (SELECT COUNT(*) FROM ENT.GRADES WHERE TENANT_ID = :1) AS TOTAL_GRADES
-  FROM DUAL
-`;
+import { entInvokeWithConnection, toSnakeCaseDeep } from '../../shared/entDbClient.js';
 
 class WorkforceStatsModel {
   /**
-   * Get workforce structure statistics for an enterprise/tenant.
-   * @param {number} enterpriseId - Enterprise/tenant ID (validated by controller)
+   * @param {number} enterpriseId
    */
   static async getStats(enterpriseId) {
-    const [countsResult, positionsStats] = await Promise.all([
-      executeStatsQuery(COUNTS_SQL, [enterpriseId]),
-      PositionStatsModel.getStats(enterpriseId),
-    ]);
-
-    const row = countsResult.rows?.[0] || {};
-
+    const { data } = await entInvokeWithConnection('STATS', 'GET_WORKFORCE', {
+      enterprise_id: Number(enterpriseId)
+    });
+    const row = toSnakeCaseDeep(data) ?? {};
     return {
-      position_records: rowCount(row, 'POSITION_RECORDS'),
-      total_job_levels: rowCount(row, 'TOTAL_JOB_LEVELS'),
-      total_job_families: rowCount(row, 'TOTAL_JOB_FAMILIES'),
-      total_grades: rowCount(row, 'TOTAL_GRADES'),
-      positions_stats: positionsStats,
+      position_records: Number(row.position_records ?? 0) || 0,
+      total_job_levels: Number(row.total_job_levels ?? 0) || 0,
+      total_job_families: Number(row.total_job_families ?? 0) || 0,
+      total_grades: Number(row.total_grades ?? 0) || 0,
+      positions_stats: toSnakeCaseDeep(row.positions_stats) ?? {
+        total_positions: 0,
+        filled_positions: 0,
+        vacant_positions: 0,
+        fill_rate_pct: 0
+      }
     };
   }
 }

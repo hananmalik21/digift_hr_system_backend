@@ -1,0 +1,37 @@
+---
+description: Thin Node models for enterprise_structure — delegate to Oracle packages/views
+globs: feature/enterprise_structure/**/model/*.js
+alwaysApply: false
+---
+
+# Enterprise structure — thin Node models
+
+Node is a **transport + shaping layer**. Business logic and SQL live in Oracle.
+
+## Do
+
+- Route all CRUD/list via `shared/entModelBridge.js`:
+  - `entGetRecord`, `entListRecords`, `entListEnvelope`, `entCreateRecord`, `entUpdateRecord`, `entDeleteRecord`, `entInvokeAction`
+- Map HTTP payloads with `entActorPayload` / `toPackagePayload` (lowercase snake_case keys).
+- Keep **response shaping** in model or view (`shape()`, `attachParentUnit()`, tree builders).
+- Keep **controller validation** in controllers; only enforce DB constraints in packages.
+
+## Do not
+
+- Add `db.executeQuery`, `SELECT ... FROM ENT.*`, or `oracledb` in models for domains that have packages.
+- Duplicate `convertKeysToSnakeCase` — use `toSnakeCaseDeep` from `shared/entDbClient.js`.
+- Re-implement pagination/filter SQL in Node when package LIST supports it.
+- Use `shared/entControllerHelpers.js` for list pagination and mutation error mapping.
+
+## Package map
+
+See `.cursor/rules/ent-enterprise-db-packages.mdc` for `ENT_MODULE_PACKAGES` → package names.
+
+## Example (thin model method)
+
+```javascript
+static async findById(id, tenantId) {
+  const row = await entGetRecord('GRADES', { grade_id: id, tenant_id: tenantId });
+  return row ?? null;
+}
+```

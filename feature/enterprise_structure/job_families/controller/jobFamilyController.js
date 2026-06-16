@@ -5,6 +5,11 @@ import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtil
 import { getUserId } from '../../../../utils/requestUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
+  parseListPagination,
+  buildListPaginationMeta,
+  handleEntMutationError
+} from '../../shared/entControllerHelpers.js';
+import {
   sendJobFamilyList,
   sendJobFamily,
   sendCreated,
@@ -53,12 +58,14 @@ function validateJobFamilyData(data, isUpdate = false) {
     }
   }
 
-  // Validate DESCRIPTION length if provided
-  if (data.DESCRIPTION !== undefined && data.DESCRIPTION !== null) {
-    if (String(data.DESCRIPTION).length > 500) {
-      errors.push('DESCRIPTION must be 500 characters or less');
+  // Validate field lengths if provided
+  const checkLen = (field, label, max) => {
+    if (data[field] !== undefined && data[field] !== null && String(data[field]).length > max) {
+      errors.push(`${label} must be ${max} characters or less`);
     }
-  }
+  };
+  checkLen('JOB_FAMILY_CODE', 'JOB_FAMILY_CODE', 30);
+  checkLen('DESCRIPTION', 'DESCRIPTION', 500);
 
   return errors;
 }
@@ -117,38 +124,20 @@ router.get('/', async (req, res) => {
     }
 
     // Parse pagination parameters
-    let page = 1;
-    let pageSize = 10;
-
-    if (req.query.page !== undefined) {
-      const parsedPage = parseInt(req.query.page);
-      if (isNaN(parsedPage) || parsedPage < 1) {
-        return sendBadRequest(res, req, 'Invalid page number. Must be a positive integer.');
-      }
-      page = parsedPage;
+    const pagination = parseListPagination(req.query);
+    if (pagination.errors.length > 0) {
+      return sendBadRequest(res, req, pagination.errors);
     }
-
-    if (req.query.page_size !== undefined || req.query.limit !== undefined) {
-      const parsedPageSize = parseInt(req.query.page_size || req.query.limit);
-      if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-        return sendBadRequest(res, req, 'Invalid page_size. Must be a positive integer.');
-      }
-      pageSize = Math.min(100, parsedPageSize); // Cap at 100
-    }
-
+    const { page, pageSize } = pagination;
     filters.pagination = { page, pageSize };
 
     const result = await JobFamilyModel.findAll(filters);
 
-    const totalCount = result.total || result.length;
-    const totalPages = Math.ceil(totalCount / pageSize);
-    const hasNext = page < totalPages;
-    const hasPrevious = page > 1;
-
+    const totalCount = result.total ?? result.length;
     sendJobFamilyList(res, req, result.job_families || result, {
       filters: Object.keys(appliedFilters).length > 0 ? appliedFilters : undefined,
       total: totalCount,
-      pagination: { page, pageSize, totalPages, hasNext, hasPrevious }
+      pagination: buildListPaginationMeta(totalCount, page, pageSize)
     });
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
@@ -198,13 +187,8 @@ router.post('/', async (req, res) => {
     const created = await JobFamilyModel.create(data, userId);
     sendCreated(res, req, created);
   } catch (error) {
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    sendServerError(res, req, 'Failed to create job family', error);
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+    return handleEntMutationError(res, req, error, { sendBadRequest, sendConflict, sendServerError }, 'Failed to create job family');
   }
 });
 
@@ -238,13 +222,7 @@ router.put('/:id', async (req, res) => {
     sendUpdated(res, req, updated);
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    sendServerError(res, req, 'Failed to update job family', error);
+    return handleEntMutationError(res, req, error, { sendBadRequest, sendConflict, sendServerError }, 'Failed to update job family');
   }
 });
 
@@ -278,13 +256,7 @@ router.patch('/:id', async (req, res) => {
     sendUpdated(res, req, updated);
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
-    if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
-      return sendConflict(res, req, error.userMessage || error.message, {
-        constraint: error.constraint,
-        columns: error.columns
-      });
-    }
-    sendServerError(res, req, 'Failed to update job family', error);
+    return handleEntMutationError(res, req, error, { sendBadRequest, sendConflict, sendServerError }, 'Failed to update job family');
   }
 });
 
