@@ -35,8 +35,9 @@ import { AppError, ValidationError, NotFoundError } from './errors/index.js';
 import { executeQuery } from '../config/db.js';
 import { bypassesEmployeeDataAccess } from './adminAccess.js';
 
-const EMPLOYEE_ACCESS_BYPASS_BIND = (userIdBind) =>
-  `(${userIdBind} IS NULL OR ${userIdBind} IS NOT NULL)`;
+// Single reference to userIdBind — duplicate placeholders (e.g. :2 twice) make
+// node-oracledb positional binds expect one array entry per occurrence (ORA-01008).
+const EMPLOYEE_ACCESS_BYPASS_BIND = (userIdBind) => `${userIdBind} IS NOT NULL`;
 
 function isEmployeeAccessBypassed(options) {
   return options?.bypass === true;
