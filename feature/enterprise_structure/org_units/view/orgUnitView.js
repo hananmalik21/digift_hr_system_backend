@@ -299,6 +299,23 @@ export function sendOrgUnitHierarchySuccess(res, data) {
   });
 }
 
+/**
+ * Stream an org units Excel export.
+ * @param {Object} res - Express response
+ * @param {Buffer} buffer - XLSX file buffer
+ * @param {string} filename - Download filename
+ */
+export function sendOrgUnitExport(res, buffer, filename) {
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  res.setHeader('Content-Length', String(buffer.length));
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.send(buffer);
+}
+
 export function sendOrgUnitHierarchyNotFound(res) {
   res.json({
     success: false,

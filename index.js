@@ -5,10 +5,6 @@ import express from 'express';
 import cors from 'cors';
 import { createPool, closePool } from './config/db.js';
 import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
-import companyController from './feature/enterprise_structure/companies/controller/companyController.js';
-import divisionController from './feature/enterprise_structure/divisions/controller/divisionController.js';
-import businessUnitController from './feature/enterprise_structure/business_units/controller/businessUnitController.js';
-import departmentController from './feature/enterprise_structure/departments/controller/departmentController.js';
 import hrOrgHierarchyLevelController from './feature/enterprise_structure/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
 import hrOrgStructureController from './feature/enterprise_structure/hr_org_structures/controller/hrOrgStructureController.js';
 import orgUnitController from './feature/enterprise_structure/org_units/controller/orgUnitController.js';
@@ -122,18 +118,6 @@ app.use('/documents', documentsDownloadRouter);
 // payload (user_id, user_guid, enterprise_id, username).
 // ==========================================
 app.use(requireAuth);
-
-// Company routes
-app.use('/api/companies', companyController);
-
-// Division routes
-app.use('/api/divisions', divisionController);
-
-// Business Unit routes
-app.use('/api/business-units', businessUnitController);
-
-// Department routes
-app.use('/api/departments', departmentController);
 
 // Enterprise routes
 app.use('/api/enterprises', enterpriseController);

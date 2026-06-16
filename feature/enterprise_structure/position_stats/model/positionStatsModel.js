@@ -1,31 +1,20 @@
-import PositionsModel from '../../positions/model/positions_model.js';
-import {
-  buildPositionFillStats,
-  executeStatsQuery,
-  rowCount,
-} from '../../../../utils/statsUtils.js';
-
-const STATS_SQL = `
-  SELECT
-    NVL(SUM(NUMBER_OF_POSITIONS), 0) AS TOTAL_POSITIONS,
-    NVL(SUM(FILLED_POSITIONS), 0) AS FILLED_POSITIONS
-  FROM ${PositionsModel.TABLE_NAME}
-  WHERE TENANT_ID = :1
-`;
+import { entInvokeWithConnection, toSnakeCaseDeep } from '../../shared/entDbClient.js';
 
 class PositionStatsModel {
   /**
-   * Get position statistics for an enterprise/tenant.
-   * @param {number} enterpriseId - Enterprise/tenant ID (validated by controller)
+   * @param {number} enterpriseId
    */
   static async getStats(enterpriseId) {
-    const result = await executeStatsQuery(STATS_SQL, [enterpriseId]);
-    const row = result.rows?.[0] || {};
-
-    return buildPositionFillStats(
-      rowCount(row, 'TOTAL_POSITIONS'),
-      rowCount(row, 'FILLED_POSITIONS')
-    );
+    const { data } = await entInvokeWithConnection('STATS', 'GET_WORKFORCE', {
+      enterprise_id: Number(enterpriseId)
+    });
+    const row = toSnakeCaseDeep(data) ?? {};
+    return row.positions_stats ?? {
+      total_positions: 0,
+      filled_positions: 0,
+      vacant_positions: 0,
+      fill_rate_pct: 0
+    };
   }
 }
 

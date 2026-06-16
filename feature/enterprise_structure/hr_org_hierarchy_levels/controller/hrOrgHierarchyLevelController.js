@@ -222,11 +222,7 @@ router.post('/bulk', async (req, res) => {
     }
 
     const userId = getUserId(req);
-    
-    // Use executeWithTransaction to create all levels
-    const createdLevels = await HrOrgHierarchyLevelModel.executeWithTransaction(async (connection) => {
-      return await HrOrgHierarchyLevelModel.createBulk(connection, structureId, levels, userId);
-    });
+    const createdLevels = await HrOrgHierarchyLevelModel.createBulk(structureId, levels, userId);
 
     const startTime = req._startTime || Date.now();
     const executionTime = Date.now() - startTime;
