@@ -15,7 +15,9 @@ import {
   rejectOfferViaPackage,
   withdrawOfferViaPackage
 } from '../model/recJobOffersModel.js';
-import { getJobOfferByGuid, jobOfferExists, listJobOffersFromView } from '../model/recJobOfferViewModel.js';
+import { getJobOfferByGuid, jobOfferExists, listJobOffersFromView, listJobOffersForExport } from '../model/recJobOfferViewModel.js';
+import { buildJobOffersExcelBuffer } from '../service/jobOfferExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { MUTATION_ERROR_MESSAGE, READ_ERROR_MESSAGE } from '../utils/recJobOfferConstants.js';
 import {
   sendCreateJobOfferResponse,
@@ -43,6 +45,35 @@ router.get(
     try {
       const { rows, total, page, limit } = await listJobOffersFromView(req.query);
       return sendJobOfferListResponse(res, rows, { page, limit, total });
+    } catch (err) {
+      return handleReadError(res, err, READ_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
+ * GET /api/rec/job-offers/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const { rows } = await listJobOffersForExport(req.query);
+      const enterpriseId = req.query?.enterprise_id;
+      const { buffer, filename, rowCount } = await buildJobOffersExcelBuffer({
+        rows,
+        enterpriseId
+      });
+
+      if (rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'No job offers found to export'
+        });
+      }
+
+      return sendExcelExport(res, buffer, filename);
     } catch (err) {
       return handleReadError(res, err, READ_ERROR_MESSAGE);
     }

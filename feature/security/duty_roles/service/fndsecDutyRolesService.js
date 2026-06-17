@@ -4,7 +4,11 @@ import {
   updateDutyRole
 } from '../model/fndsecDutyRolesModel.js';
 
-export { getDutyRoleByGuidFromView, listDutyRolesFromView } from '../model/fndsecDutyRolesViewModel.js';
+export {
+  getDutyRoleByGuidFromView,
+  listDutyRolesFromView,
+  listDutyRolesForExport
+} from '../model/fndsecDutyRolesViewModel.js';
 
 export async function createDutyRoleService(body) {
   return createDutyRole(body);

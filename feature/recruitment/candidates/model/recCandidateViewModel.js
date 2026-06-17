@@ -9,6 +9,7 @@ import {
   withConnection
 } from '../../shared/recViewModelUtils.js';
 import { parseEnterpriseIdFromQuery, parseListPagination } from '../../shared/recViewQueryValidators.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 import { mapCandidateViewRow } from '../utils/recCandidateViewMapper.js';
 import {
   pickQueryFilterValue,
@@ -203,6 +204,23 @@ export async function listCandidatesFromView(query) {
   } catch (err) {
     rethrowUnlessOperational(err, `${LOG_TAG} listCandidatesFromView`, FETCH_ERROR_MESSAGE);
   }
+}
+
+/**
+ * Fetch all candidates matching filters for Excel export (paginates internally).
+ * @param {Record<string, unknown>} query
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function listCandidatesForExport(query, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listCandidatesFromView({
+      ...query,
+      page,
+      page_size: pageSize,
+      limit: pageSize
+    })
+  });
 }
 
 /**

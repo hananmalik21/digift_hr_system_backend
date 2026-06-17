@@ -8,7 +8,9 @@ import {
   classifyEmployeeCompOracleError,
   EMP_COMP_MAX_EDIT_DOCUMENTS
 } from '../service/employeeCompensationService.js';
-import { getEmployeePlanFullDetails } from '../service/employeePlanFullDetailsService.js';
+import { getEmployeePlanFullDetails, getEmployeePlanFullDetailsForExport } from '../service/employeePlanFullDetailsService.js';
+import { buildEmployeeCompensationExcelBuffer } from '../service/employeeCompensationExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { parsePlanFullDetailsQuery } from '../validation/employeePlanFullDetailsQuery.js';
 import {
   requireActingUserId,
@@ -23,6 +25,7 @@ const router = express.Router();
 const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
 
 const ROUTE_TAG_LIST = 'GET /api/comp/employee-compensation';
+const ROUTE_TAG_EXPORT = 'GET /api/comp/employee-compensation/export';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -509,6 +512,71 @@ function validateEditMultipart(req) {
     documentDescriptions: descriptions
   };
 }
+
+/**
+ * GET /api/comp/employee-compensation/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    const actingUserId = requireActingUserId(req, res);
+    if (actingUserId == null) return undefined;
+
+    const parsed = parsePlanFullDetailsQuery(req.query);
+    if (!parsed.ok) {
+      return res.status(HTTP.BAD_REQUEST).json({
+        status: false,
+        message: parsed.message,
+        data: null
+      });
+    }
+
+    try {
+      const { enterprise_id, employee_id, plan_id, employee_guid_hex, plan_guid_hex } = parsed.data;
+      const { rows } = await getEmployeePlanFullDetailsForExport({
+        enterprise_id,
+        user_id: actingUserId,
+        bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
+        employee_id,
+        plan_id,
+        employee_guid_hex,
+        plan_guid_hex
+      });
+
+      const { buffer, filename, rowCount } = await buildEmployeeCompensationExcelBuffer({
+        rows,
+        enterpriseId: enterprise_id
+      });
+
+      if (rowCount === 0) {
+        return res.status(404).json({
+          status: false,
+          message: 'No employee compensation records found to export',
+          data: null
+        });
+      }
+
+      logSecuredAccess(ROUTE_TAG_EXPORT, {
+        user_id: actingUserId,
+        enterprise_id,
+        exported: rowCount,
+        security: EMPLOYEE_ACCESS_SECURITY_LABEL
+      });
+
+      return sendExcelExport(res, buffer, filename);
+    } catch (error) {
+      if (IS_DEV_MODE) {
+        console.error(`[${ROUTE_TAG_EXPORT}] error:`, error);
+      }
+      return res.status(HTTP.SERVER_ERROR).json({
+        status: false,
+        message: 'Failed to export employee compensation',
+        data: null
+      });
+    }
+  })
+);
 
 /**
  * GET /api/comp/employee-compensation

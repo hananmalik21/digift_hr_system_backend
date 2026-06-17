@@ -13,6 +13,7 @@ import {
   READ_ERROR_MESSAGE,
   REC_JOB_OFFER_MANAGEMENT_VIEW
 } from '../utils/recJobOfferConstants.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 import { buildJobOfferManagementListFilters } from '../utils/recJobOfferManagementListFilters.js';
 import { mapJobOfferManagementListRow } from '../utils/recJobOfferManagementMappers.js';
 import {
@@ -49,6 +50,23 @@ export async function listJobOffersFromView(query) {
   } catch (err) {
     rethrowUnlessOperational(err, `${LOG_TAG} listJobOffersFromView`, READ_ERROR_MESSAGE);
   }
+}
+
+/**
+ * Fetch all job offers matching filters for Excel export (paginates internally).
+ * @param {Record<string, unknown>|undefined} query
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function listJobOffersForExport(query, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listJobOffersFromView({
+      ...query,
+      page,
+      page_size: pageSize,
+      limit: pageSize
+    })
+  });
 }
 
 /**

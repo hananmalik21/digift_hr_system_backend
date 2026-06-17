@@ -17,8 +17,11 @@ import {
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 import {
   getCandidateByGuidFromView,
-  listCandidatesFromView
+  listCandidatesFromView,
+  listCandidatesForExport
 } from '../model/recCandidateViewModel.js';
+import { buildCandidatesExcelBuffer } from '../service/candidateExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { getCandidateResumeByGuid } from '../model/recCandidateResumeModel.js';
 import {
   createAssessmentViaPackage,
@@ -144,6 +147,35 @@ router.get(
       });
     } catch (err) {
       return handleReadError(res, err, 'Unable to fetch candidates. Please try again.');
+    }
+  })
+);
+
+/**
+ * GET /api/rec/candidates/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const query = normalizeCandidateListQuery(req.query);
+      const { rows } = await listCandidatesForExport(query);
+      const { buffer, filename, rowCount } = await buildCandidatesExcelBuffer({
+        rows,
+        enterpriseId: query.enterprise_id
+      });
+
+      if (rowCount === 0) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: 'No candidates found to export'
+        });
+      }
+
+      return sendExcelExport(res, buffer, filename);
+    } catch (err) {
+      return handleReadError(res, err, 'Unable to export candidates. Please try again.');
     }
   })
 );

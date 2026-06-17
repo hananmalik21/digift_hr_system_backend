@@ -4,6 +4,7 @@ import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
 import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
 import { bindRawGuid16, withDbSession, ORACLE_OBJECT_ROW } from '../utils/dbUtils.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const VIEW = 'FNDSEC.FNDSEC_FUNCTION_ROLES_JSON_V';
 
@@ -213,6 +214,20 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_size ROWS ONLY`;
       pagination: buildPaginationMeta(page, pageSize, total)
     };
   });
+}
+
+export async function listFunctionRolesForExport(query, fixedModuleId, exportOptions = {}) {
+  const { rows, total } = await paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listFunctionRolesFromView(
+      { ...query, page, page_size: pageSize },
+      fixedModuleId
+    ),
+    getRows: (result) => result.data ?? [],
+    getTotal: (result) => result.pagination?.total ?? 0
+  });
+
+  return { data: rows, total };
 }
 
 export async function getFunctionRoleByGuidFromView(functionRoleGuid, enterpriseIdRaw) {

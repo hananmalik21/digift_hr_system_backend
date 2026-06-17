@@ -10,9 +10,12 @@ import {
   parsePlansFullViewListRequest,
   listPlansHeadersEndpoint,
   listPlansFullDetailEndpoint,
+  listPlansFullDetailsForExport,
   getPlanFullViewByPlanId,
   getPlanFullViewByPlanGuidHex
 } from '../service/compPlansFullViewService.js';
+import { buildPlanDetailsExcelBuffer } from '../service/planDetailExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const router = express.Router();
 const HTTP = { BAD_REQUEST: 400, OK: 200, NOT_FOUND: 404, SERVER_ERROR: 500 };
@@ -198,6 +201,43 @@ export const getCompPlanByPathKey = asyncHandler(async (req, res) => {
 });
 
 router.get('/plans/:planId', getCompPlanByPathKey);
+
+export const getCompPlansFullDetailExport = asyncHandler(async (req, res) => {
+  let parsed;
+  try {
+    validatePlansDetailsListQuery(req.query);
+    parsed = parsePlansFullViewListRequest(req.query);
+  } catch (e) {
+    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
+  }
+
+  if (wantsPlansDetailsHeadersOnly(req.query)) {
+    return sendFail(
+      res,
+      HTTP.BAD_REQUEST,
+      'Export is not supported with headers_only or list_mode=header. Omit those params for full plan details export.',
+      ERROR_CODE_VALIDATION
+    );
+  }
+
+  try {
+    const { data } = await listPlansFullDetailsForExport(parsed.filterInput, parsed.sort);
+    const { buffer, filename, rowCount } = await buildPlanDetailsExcelBuffer({
+      rows: data,
+      enterpriseId: parsed.filterInput.enterprise_id
+    });
+
+    if (rowCount === 0) {
+      return sendFail(res, HTTP.NOT_FOUND, 'No compensation plans found to export', HTTP.NOT_FOUND);
+    }
+
+    return sendExcelExport(res, buffer, filename);
+  } catch (err) {
+    return sendPlansListDatabaseError(res, err, LIST_FULL_ERR);
+  }
+});
+
+router.get('/plans-details/export', getCompPlansFullDetailExport);
 router.get('/plans-details', getCompPlansFullDetailList);
 router.get('/plans', getCompPlansHeadersList);
 

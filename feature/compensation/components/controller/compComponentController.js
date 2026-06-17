@@ -24,6 +24,7 @@ import {
 } from '../model/compComponentModel.js';
 import {
   listComponentsFromView,
+  listComponentsForExport,
   getComponentByIdFromView,
   COMPONENTS_VIEW_SORT_COLUMNS
 } from '../model/compComponentsViewModel.js';
@@ -35,6 +36,8 @@ import {
   sendListSuccess,
   sendError
 } from '../view/compComponentView.js';
+import { buildComponentsExcelBuffer } from '../service/componentExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
 
 const router = express.Router();
@@ -469,6 +472,39 @@ router.get('/', asyncHandler(async (req, res) => {
     const { rows, total } = await listComponentsFromView(parsed.filters, pageData, sort);
     const meta = buildPaginationMeta(pageData.page, pageData.pageSize, total);
     return sendListSuccess(res, rows, meta);
+  } catch (err) {
+    if (err instanceof DatabaseError) {
+      return sendError(res, 500, ERROR_TITLE.LIST, err.message || 'Unexpected error');
+    }
+    return sendError(res, 500, ERROR_TITLE.LIST, 'Unexpected error');
+  }
+}));
+
+/**
+ * GET /comp/components/export
+ * Same filters as list (tenant_id required). Returns all matching rows as Excel.
+ */
+router.get('/export', asyncHandler(async (req, res) => {
+  const parsed = buildComponentsViewListFilters(req.query);
+  if (parsed.error) {
+    return sendError(res, 400, ERROR_TITLE.LIST, parsed.error);
+  }
+  const sort = parseComponentsViewSort(req.query);
+  if (sort.error) {
+    return sendError(res, 400, ERROR_TITLE.LIST, sort.error);
+  }
+  try {
+    const { rows } = await listComponentsForExport(parsed.filters, sort);
+    const { buffer, filename, rowCount } = await buildComponentsExcelBuffer({
+      rows,
+      tenantId: parsed.filters.tenant_id
+    });
+
+    if (rowCount === 0) {
+      return sendError(res, 404, ERROR_TITLE.LIST, 'No compensation components found to export');
+    }
+
+    return sendExcelExport(res, buffer, filename);
   } catch (err) {
     if (err instanceof DatabaseError) {
       return sendError(res, 500, ERROR_TITLE.LIST, err.message || 'Unexpected error');

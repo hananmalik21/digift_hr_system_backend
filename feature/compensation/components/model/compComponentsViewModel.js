@@ -7,6 +7,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { normalizeComponentForGetResponse } from '../normalizeComponentGetResponse.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const SCHEMA = 'COMP';
 
@@ -298,6 +299,22 @@ export async function listComponentsFromView(filters, pagination, sort) {
   } catch (err) {
     throw wrapDbError(err, 'listComponentsFromView');
   }
+}
+
+export async function listComponentsForExport(filters, sort = {}, exportOptions = {}) {
+  const sortBy = sort.sortBy && COMPONENTS_VIEW_SORT_COLUMNS[sort.sortBy]
+    ? sort.sortBy
+    : 'component_id';
+  const sortOrder = sort.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listComponentsFromView(
+      filters,
+      { page, pageSize },
+      { sortBy, sortOrder }
+    )
+  });
 }
 
 export async function getComponentByIdFromView(componentId, tenantId) {

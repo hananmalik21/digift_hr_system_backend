@@ -3,7 +3,9 @@
  * Returns rows from TM.V_ATTENDANCE_ACTUALS_EMP with filters (enterprise_id required; optional date/employee/org/level/status).
  */
 import express from 'express';
-import { getAttendanceSummary } from '../model/attendanceSummaryModel.js';
+import { getAttendanceSummary, getAttendanceSummaryForExport } from '../model/attendanceSummaryModel.js';
+import { buildAttendanceSummaryExcelBuffer } from '../services/attendanceSummaryExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { sendValidationError, sendDatabaseError, sendError } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
@@ -12,6 +14,7 @@ import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const router = express.Router();
 const ROUTE_TAG_SUMMARY = 'GET /api/tm/attendance-summary';
+const ROUTE_TAG_EXPORT = 'GET /api/tm/attendance-summary/export';
 
 function optNum(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -88,6 +91,65 @@ router.get('/', asyncHandler(async (req, res) => {
       return sendDatabaseError(res, req, new DatabaseError('Failed to fetch attendance summary'));
     }
     return sendError(res, req, new Error('Failed to fetch attendance summary'));
+  }
+}));
+
+function buildSummaryFilters(req, actingUserId) {
+  const enterpriseId = optNum(req.query.enterprise_id);
+  return {
+    enterprise_id: enterpriseId,
+    user_id: actingUserId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
+    from_date: req.query.from_date ?? req.query.date_from ?? null,
+    to_date: req.query.to_date ?? req.query.date_to ?? null,
+    attendance_date: req.query.attendance_date ?? null,
+    employee_id: req.query.employee_id ?? null,
+    org_unit_id: req.query.org_unit_id ?? null,
+    level_code: req.query.level_code ?? null,
+    attendance_status: req.query.attendance_status ?? null
+  };
+}
+
+/**
+ * GET /api/tm/attendance-summary/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get('/export', asyncHandler(async (req, res) => {
+  req._startTime = Date.now();
+  const enterpriseId = optNum(req.query.enterprise_id);
+  if (enterpriseId == null || enterpriseId <= 0) {
+    return sendValidationError(res, req, new ValidationError('Validation failed', ['enterprise_id is required and must be a positive number']));
+  }
+
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  try {
+    const { rows } = await getAttendanceSummaryForExport(buildSummaryFilters(req, actingUserId));
+    const { buffer, filename, rowCount } = await buildAttendanceSummaryExcelBuffer({
+      rows,
+      enterpriseId
+    });
+
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'No attendance summary records found to export' });
+    }
+
+    logSecuredAccess(ROUTE_TAG_EXPORT, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      exported: rowCount
+    });
+
+    return sendExcelExport(res, buffer, filename);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        ROUTE_TAG_EXPORT, actingUserId, enterpriseId, error?.message ?? String(error));
+    }
+    if (error instanceof DatabaseError) return sendDatabaseError(res, req, new DatabaseError('Failed to export attendance summary'));
+    return sendError(res, req, new Error('Failed to export attendance summary'));
   }
 }));
 

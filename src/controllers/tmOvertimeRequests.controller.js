@@ -7,7 +7,10 @@ import {
   cancelRequest,
   getOneRequest,
   listRequests,
+  listOvertimeRequestsForExport,
 } from '../services/tmOvertimeRequests.service.js';
+import { buildOvertimeRequestsExcelBuffer } from '../services/overtimeRequestExportService.js';
+import { sendExcelExport } from '../../utils/excel/index.js';
 import {
   createSchema,
   updateDraftSchema,
@@ -27,6 +30,7 @@ import {
 } from '../../utils/userContext.js';
 
 const ROUTE_TAG_LIST = 'GET /api/tm/overtime/requests';
+const ROUTE_TAG_EXPORT = 'GET /api/tm/overtime/requests/export';
 
 function parseBody(req) {
   const body = req.body || {};
@@ -99,6 +103,53 @@ export const list = asyncHandler(async (req, res) => {
       pagination: { page, pageSize, total, totalPages, hasNext, hasPrevious },
     },
   });
+});
+
+/** GET /api/tm/overtime/requests/export - same filters as list; returns Excel */
+export const listExport = asyncHandler(async (req, res) => {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  const query = { ...req.query };
+  if (query.tenant_id !== undefined) query.tenant_id = Number(query.tenant_id);
+  const data = validate(listQuerySchema, query);
+
+  let rows;
+  try {
+    ({ rows } = await listOvertimeRequestsForExport(data.tenant_id, {
+      user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass,
+      status: data.status,
+      date_from: data.date_from,
+      date_to: data.date_to,
+      search: data.search,
+      org_unit_id: data.org_unit_id,
+      level_code: data.level_code
+    }));
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_EXPORT,
+      friendlyMessage: 'Failed to export overtime requests. Please try again later.',
+      context: { user_id: actingUserId, tenant_id: data.tenant_id }
+    });
+  }
+
+  const { buffer, filename, rowCount } = await buildOvertimeRequestsExcelBuffer({
+    rows,
+    tenantId: data.tenant_id
+  });
+
+  if (rowCount === 0) {
+    return res.status(404).json({ success: false, message: 'No overtime requests found to export' });
+  }
+
+  logSecuredAccess(ROUTE_TAG_EXPORT, {
+    user_id: actingUserId,
+    tenant_id: data.tenant_id,
+    exported: rowCount
+  });
+
+  return sendExcelExport(res, buffer, filename);
 });
 
 /** GET /api/tm/overtime/requests/:ot_request_guid - get one (query: tenant_id) */

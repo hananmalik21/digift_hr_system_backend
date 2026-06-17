@@ -19,8 +19,11 @@ import { getRequisitionAttachment } from '../model/recRequisitionQueryModel.js';
 import {
   getRequisitionByGuidFromView,
   getRequisitionSummaryCounts,
-  listRequisitionsFromView
+  listRequisitionsFromView,
+  listRequisitionsForExport
 } from '../model/recRequisitionViewModel.js';
+import { buildRequisitionsExcelBuffer } from '../service/requisitionExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import {
   applyRequisitionDefaults,
   parseRequisitionGuidParam,
@@ -157,6 +160,36 @@ async function respondWithList(req, res, listFn) {
 router.get(
   '/',
   asyncHandler(async (req, res) => respondWithList(req, res, listRequisitionsFromView))
+);
+
+/**
+ * GET /api/rec/requisitions/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const query = normalizeListQuery(req.query);
+      const { rows } = await listRequisitionsForExport(query);
+      const enterpriseId = query.enterprise_id;
+      const { buffer, filename, rowCount } = await buildRequisitionsExcelBuffer({
+        rows,
+        enterpriseId
+      });
+
+      if (rowCount === 0) {
+        return sendPackageResponse(res, 404, {
+          success: false,
+          message: 'No requisitions found to export'
+        });
+      }
+
+      return sendExcelExport(res, buffer, filename);
+    } catch (err) {
+      return handleReadError(res, err, 'Unable to export requisitions. Please try again.');
+    }
+  })
 );
 
 /**

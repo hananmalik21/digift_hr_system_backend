@@ -4,6 +4,7 @@ import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
 import { parseDataRoleGuidOrThrow, parseEnterpriseId } from './fndsecDataRolesModel.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const VIEW = process.env.FNDSEC_DATA_ROLES_FULL_V || 'FNDSEC.FNDSEC_DATA_ROLES_FULL_V';
 const LOG_TAG = 'fndsecDataRolesViewModel';
@@ -250,6 +251,20 @@ OFFSET :row_offset ROWS FETCH NEXT :fetch_limit ROWS ONLY`;
   } catch (err) {
     rethrowUnlessOperational(err, 'listDataRolesFromView');
   }
+}
+
+export async function listDataRolesForExport(query, exportOptions = {}) {
+  const { rows, total } = await paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listDataRolesFromView({
+      ...query,
+      page,
+      page_size: pageSize
+    }),
+    getRows: (result) => result.data ?? []
+  });
+
+  return { data: rows, total };
 }
 
 /**

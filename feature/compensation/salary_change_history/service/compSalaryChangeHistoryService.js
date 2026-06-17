@@ -1,6 +1,7 @@
 import { executeQuery } from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 import {
   formatOracleDateToIsoDay,
   oracleTextToString,
@@ -234,6 +235,23 @@ export async function fetchSalaryChangeHistory(params) {
     total,
     rows: data
   };
+}
+
+export async function fetchSalaryChangeHistoryForExport(params, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => {
+      const offset = (page - 1) * pageSize;
+      return fetchSalaryChangeHistory({
+        ...params,
+        page,
+        page_size: pageSize,
+        limit: pageSize,
+        offset
+      });
+    },
+    getRows: (result) => result.rows ?? []
+  });
 }
 
 export const __test__ = {

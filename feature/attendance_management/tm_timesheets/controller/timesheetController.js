@@ -11,6 +11,7 @@ import {
   getTimesheetByIdFromView,
   getTimesheetIdAndStatusByGuid,
   listTimesheetsFromView,
+  listTimesheetsForExport,
   getTimesheetStats,
   STATUS_CODES_LIST,
   DEFAULT_PAGE_SIZE,
@@ -25,11 +26,14 @@ import {
   handleSecuredQueryError,
   employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
+import { buildTimesheetsExcelBuffer } from '../services/timesheetExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const router = express.Router();
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ROUTE_TAG_LIST = 'GET /api/tm/timesheets';
+const ROUTE_TAG_EXPORT = 'GET /api/tm/timesheets/export';
 
 // In-memory cache for list endpoint (short TTL to improve response time on repeated requests)
 const LIST_CACHE_TTL_MS = 30 * 1000; // 30 seconds
@@ -356,6 +360,73 @@ function buildListMeta(result) {
   };
 }
 
+function buildTimesheetListFilters(req, actingUserId) {
+  const enterpriseId = req.query.enterpriseId ?? req.query.enterprise_id;
+  return {
+    enterpriseId,
+    userId: actingUserId,
+    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
+    search: req.query.search,
+    status: req.query.status ?? req.query.status_code,
+    isActive: req.query.isActive ?? req.query.is_active,
+    employeeId: req.query.employeeId ?? req.query.employee_id,
+    weekStartFrom: req.query.weekStartFrom ?? req.query.week_start_from,
+    weekStartTo: req.query.weekStartTo ?? req.query.week_start_to,
+    submittedFrom: req.query.submittedFrom ?? req.query.submitted_from,
+    submittedTo: req.query.submittedTo ?? req.query.submitted_to,
+    levelCode: req.query.levelCode ?? req.query.level_code,
+    orgUnitId: req.query.orgUnitId ?? req.query.org_unit_id,
+    sortBy: req.query.sortBy ?? req.query.sort_by ?? 'creation_date',
+    sortOrder: req.query.sortOrder ?? req.query.sort_order ?? req.query.sortDir ?? 'desc'
+  };
+}
+
+/**
+ * GET /api/tm/timesheets/export
+ * Same filters as list (enterpriseId required). Returns all matching rows as Excel.
+ */
+router.get('/export', asyncHandler(async (req, res) => {
+  const enterpriseId = req.query.enterpriseId ?? req.query.enterprise_id;
+  if (enterpriseId == null || String(enterpriseId).trim() === '') {
+    throw new ValidationError('enterpriseId is required');
+  }
+
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  const filters = buildTimesheetListFilters(req, actingUserId);
+
+  try {
+    const { rows } = await listTimesheetsForExport(filters);
+    const { buffer, filename, rowCount } = await buildTimesheetsExcelBuffer({
+      rows,
+      enterpriseId
+    });
+
+    if (rowCount === 0) {
+      return res.status(404).json({
+        status: false,
+        message: 'No timesheets found to export',
+        data: null
+      });
+    }
+
+    logSecuredAccess(ROUTE_TAG_EXPORT, {
+      user_id: actingUserId,
+      enterprise_id: enterpriseId,
+      exported: rowCount
+    });
+
+    return sendExcelExport(res, buffer, filename);
+  } catch (err) {
+    handleSecuredQueryError(err, {
+      route: ROUTE_TAG_EXPORT,
+      friendlyMessage: 'Failed to export timesheets. Please try again later.',
+      context: { user_id: actingUserId, enterprise_id: enterpriseId }
+    });
+  }
+}));
+
 /**
  * GET /api/tm/timesheets — list from V_TIMESHEETS_WITH_LINES_JSON (pagination, filters, sort).
  * Required: enterpriseId. Optional: page, limit, search, status, isActive, employeeId,
@@ -373,23 +444,9 @@ router.get('/', asyncHandler(async (req, res) => {
   if (actingUserId == null) return; // 401 already sent
 
   const filters = {
-    enterpriseId,
-    userId: actingUserId,
-    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
+    ...buildTimesheetListFilters(req, actingUserId),
     page: req.query.page ?? 1,
-    limit: req.query.limit ?? 10,
-    search: req.query.search,
-    status: req.query.status ?? req.query.status_code,
-    isActive: req.query.isActive ?? req.query.is_active,
-    employeeId: req.query.employeeId ?? req.query.employee_id,
-    weekStartFrom: req.query.weekStartFrom ?? req.query.week_start_from,
-    weekStartTo: req.query.weekStartTo ?? req.query.week_start_to,
-    submittedFrom: req.query.submittedFrom ?? req.query.submitted_from,
-    submittedTo: req.query.submittedTo ?? req.query.submitted_to,
-    levelCode: req.query.levelCode ?? req.query.level_code,
-    orgUnitId: req.query.orgUnitId ?? req.query.org_unit_id,
-    sortBy: req.query.sortBy ?? req.query.sort_by ?? 'creation_date',
-    sortOrder: req.query.sortOrder ?? req.query.sort_order ?? req.query.sortDir ?? 'desc'
+    limit: req.query.limit ?? 10
   };
 
   const key = listCacheKey(filters);

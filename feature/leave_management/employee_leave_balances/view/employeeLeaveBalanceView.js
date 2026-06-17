@@ -7,6 +7,7 @@
  * - Internal numeric IDs (employee_id, leave_type_id, tenant_id) may remain for now but should be removed from public API
  * - This is a future enhancement to improve API consistency
  */
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const API_VERSION = '1.0.0';
 
@@ -618,4 +619,14 @@ export function sendAccrualRunSuccess(res, req, data) {
     message: message,
     data: responseData
   });
+}
+
+/**
+ * Stream a leave balances Excel export.
+ * @param {import('express').Response} res
+ * @param {Buffer} buffer
+ * @param {string} filename
+ */
+export function sendLeaveBalanceExport(res, buffer, filename) {
+  return sendExcelExport(res, buffer, filename);
 }

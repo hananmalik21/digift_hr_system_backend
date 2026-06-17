@@ -8,6 +8,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const VIEW = 'TM.V_ATTENDANCE_ACTUALS_EMP';
 
@@ -230,4 +231,20 @@ export async function getAttendanceSummary(filters) {
       } catch (_) {}
     }
   }
+}
+
+/**
+ * Fetch all attendance summary rows for Excel export (paginates internally).
+ * @param {Object} filters
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function getAttendanceSummaryForExport(filters, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => getAttendanceSummary({
+      ...filters,
+      page,
+      page_size: pageSize
+    })
+  });
 }

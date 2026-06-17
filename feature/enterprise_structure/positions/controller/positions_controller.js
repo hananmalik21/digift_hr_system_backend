@@ -15,7 +15,8 @@ import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtil
 import { getUserId } from '../../../../utils/requestUtils.js';
 import { parsePagination, buildSnakeListMeta } from '../../../../utils/paginationUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { validateGetPositionsByOrgUnit } from '../validators/positionValidator.js';
+import { validateGetPositionsByOrgUnit, parsePositionListFilters, parseReportingRelationshipsQuery } from '../validators/positionValidator.js';
+import { buildPositionsExcelBuffer, buildReportingRelationshipsExcelBuffer } from '../service/positionExportService.js';
 import {
   sendPositionList,
   sendPosition,
@@ -27,6 +28,8 @@ import {
   sendServerError,
   sendConflict,
   sendReportingRelationships,
+  sendPositionExport,
+  sendNotFound,
 } from '../view/position_view.js';
 
 const router = express.Router();
@@ -187,28 +190,10 @@ async function handleUpdate(req, res) {
 router.get('/', async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    const filters = { tenant_id: tenantId };
+    const { filters, errors } = parsePositionListFilters(req.query);
+    if (errors.length) return sendBadRequest(res, req, errors);
 
-    if (req.query.status) filters.status = String(req.query.status).toUpperCase();
-    if (req.query.search) filters.search = String(req.query.search);
-
-    // GUID filters
-    for (const k of ['org_structure_id', 'org_unit_id']) {
-      if (req.query[k] !== undefined && req.query[k] !== null && String(req.query[k]).trim() !== '') {
-        const v = normalizeGuidString(req.query[k]);
-        if (!isNormalizedHex32Guid(v)) return sendBadRequest(res, req, `${k} must be a valid GUID (32-hex or UUID)`);
-        filters[k] = v;
-      }
-    }
-
-    // numeric filters
-    for (const k of ['job_family_id', 'job_level_id', 'grade_id']) {
-      if (req.query[k] !== undefined && req.query[k] !== null && String(req.query[k]).trim() !== '') {
-        const v = parseInt(req.query[k], 10);
-        if (isNaN(v)) return sendBadRequest(res, req, `${k} must be a valid number`);
-        filters[k] = v;
-      }
-    }
+    filters.tenant_id = tenantId;
 
     let page;
     let pageSize;
@@ -230,6 +215,36 @@ router.get('/', async (req, res) => {
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
     return sendServerError(res, req, 'Failed to fetch positions', error);
+  }
+});
+
+/**
+ * GET /api/positions/export
+ * Query: tenant_id (required), status?, search?, org_structure_id?, org_unit_id?, org_unit_scope?, job_family_id?, job_level_id?, grade_id?
+ * Returns all matching positions as Excel (no pagination).
+ */
+router.get('/export', async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { filters, errors } = parsePositionListFilters(req.query);
+    if (errors.length) return sendBadRequest(res, req, errors);
+
+    filters.tenant_id = tenantId;
+
+    const result = await PositionsModel.findAllForExport(filters);
+    const { buffer, filename, rowCount } = await buildPositionsExcelBuffer({
+      positions: result.positions ?? [],
+      tenantId
+    });
+
+    if (rowCount === 0) {
+      return sendNotFound(res, req, 'No positions found to export');
+    }
+
+    return sendPositionExport(res, buffer, filename);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+    return sendServerError(res, req, 'Failed to export positions', error);
   }
 });
 
@@ -262,24 +277,55 @@ router.get('/by-org-unit', async (req, res) => {
 });
 
 /**
+ * GET /api/positions/reporting-relationships/export
+ * Query: tenant_id (required), position_id?, hierarchy?
+ * Returns reporting relationships as Excel (tree flattened by level).
+ */
+router.get('/reporting-relationships/export', async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    const { positionId, includeHierarchy, errors } = parseReportingRelationshipsQuery(req.query);
+    if (errors.length) return sendBadRequest(res, req, errors);
+
+    const relationships = await PositionsModel.findReportingRelationships(
+      tenantId,
+      positionId,
+      includeHierarchy
+    );
+
+    const { buffer, filename, rowCount } = await buildReportingRelationshipsExcelBuffer({
+      relationships,
+      tenantId,
+      positionId,
+      includeHierarchy
+    });
+
+    if (rowCount === 0) {
+      return sendNotFound(res, req, 'No reporting relationships found to export');
+    }
+
+    return sendPositionExport(res, buffer, filename);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+    return sendServerError(res, req, 'Failed to export reporting relationships', error);
+  }
+});
+
+/**
  * GET /api/positions/reporting-relationships
  * Query: tenant_id (required), position_id?, hierarchy?
  */
 router.get('/reporting-relationships', async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    let positionId = null;
-    if ('position_id' in req.query) {
-      const v = String(req.query.position_id || '').trim();
-      if (v) {
-        const norm = normalizeGuidString(v);
-        if (!isNormalizedHex32Guid(norm)) return sendBadRequest(res, req, 'position_id must be a valid GUID (32-hex or UUID)');
-        positionId = norm;
-      }
-    }
+    const { positionId, includeHierarchy, errors } = parseReportingRelationshipsQuery(req.query);
+    if (errors.length) return sendBadRequest(res, req, errors);
 
-    const includeHierarchy = req.query.hierarchy !== 'false' && req.query.hierarchy !== '0';
-    const relationships = await PositionsModel.findReportingRelationships(tenantId, positionId, includeHierarchy);
+    const relationships = await PositionsModel.findReportingRelationships(
+      tenantId,
+      positionId,
+      includeHierarchy
+    );
     return sendReportingRelationships(res, req, relationships);
   } catch (error) {
     if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);

@@ -4,6 +4,7 @@ import { guidToBuffer } from '../../../../src/utils/oracleGuid.js';
 import { normalizeHex32 } from '../../../../utils/guidUtils.js';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const PKG_CREATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.CREATE_JOB_ROLE';
 const PKG_UPDATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.UPDATE_JOB_ROLE';
@@ -623,5 +624,20 @@ export async function getJobRolesFromJsonView(filters = {}) {
     if (err instanceof ValidationError) throw err;
     throw new DatabaseError(err?.message || 'Database error', err);
   }
+}
+
+export async function getJobRolesForExport(filters = {}, exportOptions = {}) {
+  const { rows, total } = await paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => getJobRolesFromJsonView({
+      ...filters,
+      page,
+      page_size: pageSize
+    }),
+    getRows: (result) => result.data ?? [],
+    getTotal: (result) => result.meta?.total ?? result.meta?.pagination?.total ?? 0
+  });
+
+  return { data: rows, meta: { total } };
 }
 
