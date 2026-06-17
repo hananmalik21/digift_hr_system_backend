@@ -8,8 +8,11 @@ import {
   deleteDutyRoleService,
   getDutyRoleByGuidFromView,
   listDutyRolesFromView,
+  listDutyRolesForExport,
   updateDutyRoleService
 } from '../service/fndsecDutyRolesService.js';
+import { buildDutyRolesExcelBuffer } from '../service/dutyRoleExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const router = express.Router();
 
@@ -101,6 +104,31 @@ router.get(
           }
         }
       });
+    } catch (err) {
+      return sendError(res, err);
+    }
+  })
+);
+
+/**
+ * GET /api/security/duty-roles/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const { data } = await listDutyRolesForExport(req.query || {});
+      const { buffer, filename, rowCount } = await buildDutyRolesExcelBuffer({
+        roles: data,
+        enterpriseId: req.query?.enterprise_id
+      });
+
+      if (rowCount === 0) {
+        return send(res, { success: false, message: 'No duty roles found to export', data: {} }, 404);
+      }
+
+      return sendExcelExport(res, buffer, filename);
     } catch (err) {
       return sendError(res, err);
     }

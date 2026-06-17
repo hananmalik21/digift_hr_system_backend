@@ -6,9 +6,12 @@ import {
   createJobRole,
   deleteJobRole,
   getJobRolesFromJsonView,
+  getJobRolesForExport,
   parseJobRoleGuidOrThrow,
   updateJobRole
 } from '../model/fndsecJobRolesModel.js';
+import { buildJobRolesExcelBuffer } from '../service/jobRoleExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const router = express.Router();
 
@@ -59,6 +62,34 @@ router.get(
         data: result?.data || [],
         meta: result?.meta || {}
       });
+    } catch (err) {
+      return sendError(res, err);
+    }
+  })
+);
+
+/**
+ * GET /api/security/job-roles/export
+ * Same filters as list (enterprise_id, role_code, role_name, status, etc.). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await getJobRolesForExport(req.query || {});
+      const { buffer, filename, rowCount } = await buildJobRolesExcelBuffer({
+        roles: result.data ?? [],
+        enterpriseId: req.query?.enterprise_id
+      });
+
+      if (rowCount === 0) {
+        return res.status(404).json({
+          status: false,
+          message: 'No job roles found to export'
+        });
+      }
+
+      return sendExcelExport(res, buffer, filename);
     } catch (err) {
       return sendError(res, err);
     }

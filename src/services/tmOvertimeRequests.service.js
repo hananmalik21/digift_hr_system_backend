@@ -4,6 +4,7 @@ import { safeJson } from '../../services/emplEmployeeListService.js';
 import { DatabaseError, NotFoundError } from '../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../utils/userContext.js';
 import { guidToBuffer, bufferToGuidHex } from '../utils/oracleGuid.js';
+import { paginateForExport } from '../../utils/excel/index.js';
 
 const SCHEMA = 'TM';
 
@@ -308,6 +309,23 @@ export async function listRequests(tenantId, filters = {}) {
     const result = await connection.execute(dataSql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
     const rows = (result.rows || []).map(mapViewRequestRow);
     return { rows, total, page, pageSize };
+  });
+}
+
+/**
+ * Fetch all overtime requests for Excel export (paginates internally).
+ * @param {number} tenantId
+ * @param {Parameters<typeof listRequests>[1]} filters
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function listOvertimeRequestsForExport(tenantId, filters = {}, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listRequests(tenantId, {
+      ...filters,
+      page,
+      page_size: pageSize
+    })
   });
 }
 

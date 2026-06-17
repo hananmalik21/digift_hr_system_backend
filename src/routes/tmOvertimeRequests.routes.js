@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   list,
+  listExport,
   getOne,
   create,
   updateDraftHandler,
@@ -12,6 +13,7 @@ import {
 
 const router = express.Router({ mergeParams: true });
 
+router.get('/export', listExport);
 router.get('/', list);
 router.get('/:ot_request_guid', getOne);
 router.post('/', create);

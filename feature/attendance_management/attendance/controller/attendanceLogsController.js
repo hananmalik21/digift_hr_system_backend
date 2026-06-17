@@ -6,7 +6,9 @@
 import express from 'express';
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { getAttendanceLogsList, getAttendanceLogById } from '../model/attendanceLogsModel.js';
+import { getAttendanceLogsList, getAttendanceLogById, getAttendanceLogsForExport } from '../model/attendanceLogsModel.js';
+import { buildAttendanceLogsExcelBuffer } from '../services/attendanceLogsExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { sendLogsListSuccess, sendLogDetailSuccess, sendValidationError, sendDatabaseError, sendError } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
@@ -30,20 +32,9 @@ function optStr(v) {
   return s === '' ? null : s;
 }
 
-/**
- * @route   GET /api/tm/attendance/logs
- * @query   enterpriseId (required), fromDate, toDate, employeeNumber, employeeId,
- *          attendanceStatus, dayCategory, inState, outState, sourceType, levelCode, orgUnitId,
- *          page, pageSize, sortBy, sortDir
- */
-router.get('/', asyncHandler(async (req, res) => {
-  const q = req.query || {};
+function buildLogsFilters(q) {
   const enterpriseId = optNum(q.enterpriseId);
-  if (enterpriseId == null || enterpriseId <= 0) {
-    return sendValidationError(res, req, new ValidationError('enterpriseId is required and must be a positive number', ['enterpriseId is required']));
-  }
-
-  const filters = {
+  return {
     enterpriseId,
     fromDate: optStr(q.fromDate),
     toDate: optStr(q.toDate),
@@ -57,13 +48,32 @@ router.get('/', asyncHandler(async (req, res) => {
     levelCode: optStr(q.levelCode ?? q.level_code),
     orgUnitId: optStr(q.orgUnitId ?? q.org_unit_id)
   };
+}
 
-  const page = Math.max(1, optNum(q.page) ?? 1);
-  const pageSize = Math.min(100, Math.max(1, optNum(q.pageSize) ?? 25));
-  const sort = {
+function buildLogsSort(q) {
+  return {
     sortBy: (q.sortBy === 'employee_number') ? 'employee_number' : 'attendance_date',
     sortDir: String(q.sortDir || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC'
   };
+}
+
+/**
+ * @route   GET /api/tm/attendance/logs
+ * @query   enterpriseId (required), fromDate, toDate, employeeNumber, employeeId,
+ *          attendanceStatus, dayCategory, inState, outState, sourceType, levelCode, orgUnitId,
+ *          page, pageSize, sortBy, sortDir
+ */
+router.get('/', asyncHandler(async (req, res) => {
+  const q = req.query || {};
+  const enterpriseId = optNum(q.enterpriseId);
+  if (enterpriseId == null || enterpriseId <= 0) {
+    return sendValidationError(res, req, new ValidationError('enterpriseId is required and must be a positive number', ['enterpriseId is required']));
+  }
+
+  const filters = buildLogsFilters(q);
+  const page = Math.max(1, optNum(q.page) ?? 1);
+  const pageSize = Math.min(100, Math.max(1, optNum(q.pageSize) ?? 25));
+  const sort = buildLogsSort(q);
 
   try {
     const { rows, total } = await getAttendanceLogsList(filters, { page, pageSize }, sort);
@@ -77,6 +87,36 @@ router.get('/', asyncHandler(async (req, res) => {
       has_previous: page > 1
     };
     return sendLogsListSuccess(res, req, enterpriseId, pagination, rows);
+  } catch (error) {
+    if (error instanceof ValidationError) return sendValidationError(res, req, error);
+    if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);
+    return sendError(res, req, error);
+  }
+}));
+
+/**
+ * @route   GET /api/tm/attendance/logs/export
+ * @desc    Same filters as list. Returns all matching rows as Excel.
+ */
+router.get('/export', asyncHandler(async (req, res) => {
+  const q = req.query || {};
+  const enterpriseId = optNum(q.enterpriseId);
+  if (enterpriseId == null || enterpriseId <= 0) {
+    return sendValidationError(res, req, new ValidationError('enterpriseId is required and must be a positive number', ['enterpriseId is required']));
+  }
+
+  try {
+    const { rows } = await getAttendanceLogsForExport(buildLogsFilters(q), buildLogsSort(q));
+    const { buffer, filename, rowCount } = await buildAttendanceLogsExcelBuffer({
+      rows,
+      enterpriseId
+    });
+
+    if (rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'No attendance logs found to export' });
+    }
+
+    return sendExcelExport(res, buffer, filename);
   } catch (error) {
     if (error instanceof ValidationError) return sendValidationError(res, req, error);
     if (error instanceof DatabaseError) return sendDatabaseError(res, req, error);

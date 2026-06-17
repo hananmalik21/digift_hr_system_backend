@@ -1,6 +1,8 @@
 import express from 'express';
 import EmployeeLeaveBalanceModel from '../model/employeeLeaveBalanceModel.js';
 import { adjustLeaveBalance } from '../services/leaveBalance.service.js';
+import { parseLeaveBalanceListQuery } from '../services/leaveBalanceListQueryService.js';
+import { buildLeaveBalancesExcelBuffer } from '../services/leaveBalanceExportService.js';
 import {
   sendLeaveBalanceList,
   sendLeaveBalanceSummaryList,
@@ -14,7 +16,8 @@ import {
   sendNotFound,
   sendServerError,
   sendConflictError,
-  sendAccrualRunSuccess
+  sendAccrualRunSuccess,
+  sendLeaveBalanceExport
 } from '../view/employeeLeaveBalanceView.js';
 import { ensureHex32 } from '../../../../utils/guidUtils.js';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
@@ -30,6 +33,7 @@ import { IS_DEV_MODE } from '../../../../utils/env.js';
 
 const ROUTE_TAG_EMP_BALANCES = 'GET /api/abs/employees/:employeeGuid/leave-balances';
 const ROUTE_TAG_BALANCES_LIST = 'GET /api/abs/leave-balances';
+const ROUTE_TAG_BALANCES_EXPORT = 'GET /api/abs/leave-balances/export';
 
 const router = express.Router();
 
@@ -475,10 +479,8 @@ router.get('/leave-balances/list', async (req, res) => {
  * GET /api/abs/leave-balances?tenant_id=1&name=john&employeeNumber=EMP001
  */
 router.get('/leave-balances', async (req, res) => {
-  // FNDSEC: acting user_id comes strictly from the verified JWT — any
-  // ?user_id= query / header value is ignored for the access decision.
   const actingUserId = requireActingUserId(req, res);
-  if (actingUserId == null) return; // 401 already sent
+  if (actingUserId == null) return;
 
   try {
     const tenantId = req.tenantId;
@@ -488,15 +490,17 @@ router.get('/leave-balances', async (req, res) => {
       return sendBadRequest(res, req, 'page and pageSize must be positive numbers');
     }
 
+    const listQuery = parseLeaveBalanceListQuery(req.query);
+
     const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryPaginated({
       tenantId,
       userId: actingUserId,
       bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
       page,
       pageSize,
-      search: req.query.search ?? null,
-      name: req.query.name ?? null,
-      employeeNumber: req.query.employeeNumber ?? null
+      search: listQuery.search,
+      name: listQuery.name,
+      employeeNumber: listQuery.employeeNumber
     });
 
     logSecuredAccess(ROUTE_TAG_BALANCES_LIST, {
@@ -515,8 +519,64 @@ router.get('/leave-balances', async (req, res) => {
       console.error('[%s][FNDSEC] user_id=%s error=%s',
         ROUTE_TAG_BALANCES_LIST, actingUserId, error?.message ?? String(error));
     }
-    // Hide raw Oracle / library errors behind a friendly message.
     sendServerError(res, req, 'Failed to fetch leave balance summary');
+  }
+});
+
+/**
+ * @route   GET /api/abs/leave-balances/export
+ * @desc    Export leave balances from ABS.VW_EMPLOYEE_LEAVE_BALANCES as Excel (no pagination)
+ * @query   tenant_id - Required tenant ID
+ * @query   search - Optional; matches employee name OR employee number
+ * @query   name - Optional; partial match on employee name
+ * @query   employeeNumber - Optional; partial match on employee number
+ *
+ * @example
+ * GET /api/abs/leave-balances/export?tenant_id=1
+ * GET /api/abs/leave-balances/export?tenant_id=1&search=john
+ */
+router.get('/leave-balances/export', async (req, res) => {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  try {
+    const tenantId = req.tenantId;
+    const listQuery = parseLeaveBalanceListQuery(req.query);
+
+    const result = await EmployeeLeaveBalanceModel.getLeaveBalanceSummaryForExport({
+      tenantId,
+      userId: actingUserId,
+      bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
+      search: listQuery.search,
+      name: listQuery.name,
+      employeeNumber: listQuery.employeeNumber
+    });
+
+    const { buffer, filename, rowCount } = await buildLeaveBalancesExcelBuffer({
+      rows: result.rows ?? [],
+      tenantId
+    });
+
+    if (rowCount === 0) {
+      return sendNotFound(res, req, 'No leave balances found to export');
+    }
+
+    logSecuredAccess(ROUTE_TAG_BALANCES_EXPORT, {
+      user_id: actingUserId,
+      tenant_id: tenantId,
+      exported: rowCount
+    });
+
+    return sendLeaveBalanceExport(res, buffer, filename);
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      return sendBadRequest(res, req, error.message);
+    }
+    if (IS_DEV_MODE) {
+      console.error('[%s][FNDSEC] user_id=%s error=%s',
+        ROUTE_TAG_BALANCES_EXPORT, actingUserId, error?.message ?? String(error));
+    }
+    return sendServerError(res, req, 'Failed to export leave balances');
   }
 });
 

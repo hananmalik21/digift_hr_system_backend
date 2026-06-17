@@ -16,6 +16,7 @@ import {
   entUpdateRecord,
 } from '../../shared/entModelBridge.js';
 import { entInvokeWithConnection, toSnakeCaseDeep } from '../../shared/entDbClient.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 /** @returns {Error & { code: string, statusCode: number }} */
 function validationError(message) {
@@ -239,6 +240,42 @@ class PositionsModel {
 
     const shaped = this.shapeMany(rows.map((r) => this.mapViewRowForShape(r)));
     return { positions: shaped, total };
+  }
+
+  /**
+   * Fetch all positions matching filters for Excel export (paginates internally).
+   * @param {Record<string, unknown>} filters
+   * @param {{ pageSize?: number, maxRows?: number }} [options]
+   */
+  static async findAllForExport(filters = {}, options = {}) {
+    const tenantIdNum = this.assertPositiveTenantId(filters.tenant_id ?? filters.tenantId);
+    const basePayload = {
+      tenant_id: tenantIdNum,
+      search: filters.search,
+      status: filters.status,
+      org_structure_id: filters.org_structure_id
+        ? this.normalizeGuidHex32(filters.org_structure_id)
+        : undefined,
+      org_unit_id: filters.org_unit_id ? this.normalizeGuidHex32(filters.org_unit_id) : undefined,
+      org_unit_scope: filters.org_unit_scope,
+      job_family_id: filters.job_family_id,
+      job_level_id: filters.job_level_id,
+      grade_id: filters.grade_id,
+    };
+
+    const { rows, total } = await paginateForExport({
+      exportOptions: options,
+      fetchPage: (page, pageSize) => entListEnvelope('POSITIONS', {
+        ...basePayload,
+        page,
+        page_size: pageSize,
+      }),
+      getRows: (result) => this.shapeMany(
+        (result.rows ?? []).map((r) => this.mapViewRowForShape(r))
+      )
+    });
+
+    return { positions: rows, total };
   }
 
   /**

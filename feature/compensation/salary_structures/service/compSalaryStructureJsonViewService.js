@@ -15,6 +15,7 @@ import { parseSalaryStructurePageLimit } from '../utils/parseSalaryStructurePage
 import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 import { rowKeysUpper } from '../utils/rowKeysUpper.js';
 import { normalizeStructureGuid } from './compSalaryStructureService.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 /** Duplicated at response root; stripped from nested `structure` in details. */
 const PROMOTED_STRUCTURE_HEADER_KEYS = ['structure_type_code', 'location_obj'];
@@ -285,6 +286,25 @@ export async function listSalaryStructureDetailEndpointPaginated(filterInput, pa
     data: rows.map(mapJsonViewDetailRowToResponse),
     total
   };
+}
+
+export async function listSalaryStructureDetailsForExport(filterInput, sort = {}, exportOptions = {}) {
+  const sortBy = sort.sortBy && SALARY_STRUCTURE_JSON_V_LIST_SORT_COLUMNS[sort.sortBy]
+    ? sort.sortBy
+    : 'structure_id';
+  const sortOrder = sort.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+  const { rows, total } = await paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listSalaryStructureDetailEndpointPaginated(
+      filterInput,
+      { page, pageSize },
+      { sortBy, sortOrder }
+    ),
+    getRows: (result) => result.data ?? []
+  });
+
+  return { data: rows, total };
 }
 
 /** Grid list for GET …/salary-structures — header columns + audit fields. */

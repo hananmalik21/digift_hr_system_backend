@@ -1,7 +1,11 @@
 import { createDataRole, softDeleteDataRole, updateDataRole } from '../model/fndsecDataRolesModel.js';
 import { getDataRoleByGuidFromView, listDataRolesFromView } from '../model/fndsecDataRolesViewModel.js';
 
-export { getDataRoleByGuidFromView, listDataRolesFromView };
+export {
+  getDataRoleByGuidFromView,
+  listDataRolesFromView,
+  listDataRolesForExport
+} from '../model/fndsecDataRolesViewModel.js';
 
 /** @param {Record<string, unknown>} body */
 export async function createDataRoleService(body) {

@@ -14,6 +14,7 @@ import { parseSalaryStructurePageLimit } from '../../salary_structures/utils/par
 import { parseRequiredEnterpriseId } from '../../salary_structures/utils/parseSalaryStructureEnterpriseId.js';
 import { rowKeysUpper } from '../../salary_structures/utils/rowKeysUpper.js';
 import { normalizePlanComponentForGetResponse } from '../utils/planComponentAdvancedSettings.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const JSON_COLUMN_NAMES_UPPER = new Set([
   'OWNER_OBJ',
@@ -201,6 +202,23 @@ export async function listPlansFullDetailEndpoint(filterInput, pagination, sort)
     data: rows.map(mapPlansFullViewDetailRow),
     total
   };
+}
+
+export async function listPlansFullDetailsForExport(filterInput, sort = {}, exportOptions = {}) {
+  const sortBy = sort.sortBy && PLANS_FULL_V_SORT_COLUMNS[sort.sortBy] ? sort.sortBy : 'plan_id';
+  const sortOrder = sort.sortOrder === 'ASC' ? 'ASC' : 'DESC';
+
+  const { rows, total } = await paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listPlansFullDetailEndpoint(
+      filterInput,
+      { page, pageSize },
+      { sortBy, sortOrder }
+    ),
+    getRows: (result) => result.data ?? []
+  });
+
+  return { data: rows, total };
 }
 
 export async function getPlanFullViewByPlanId(planId) {

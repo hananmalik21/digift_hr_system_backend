@@ -2,6 +2,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const SCHEMA = 'TM';
 const STATUS_CODES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN'];
@@ -1036,6 +1037,23 @@ export async function listTimesheetsFromView(filters) {
     if (err instanceof DatabaseError) throw err;
     throw new DatabaseError('Failed to list timesheets.', err);
   }
+}
+
+/**
+ * Fetch all timesheets for Excel export (paginates internally).
+ * @param {Parameters<typeof listTimesheetsFromView>[0]} filters
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function listTimesheetsForExport(filters, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listTimesheetsFromView({
+      ...filters,
+      page,
+      limit: pageSize
+    }),
+    getRows: (result) => result.data ?? []
+  });
 }
 
 /**

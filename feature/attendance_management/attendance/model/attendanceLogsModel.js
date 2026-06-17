@@ -6,6 +6,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 const VIEW = 'TM.V_ATTENDANCE_FULL';
 
 /**
@@ -211,6 +212,23 @@ export async function getAttendanceLogsList(filters, pagination, sort) {
       } catch (_) {}
     }
   }
+}
+
+/**
+ * Fetch all attendance logs for Excel export (paginates internally).
+ * @param {Object} filters
+ * @param {Object} sort
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function getAttendanceLogsForExport(filters, sort = {}, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => getAttendanceLogsList(
+      filters,
+      { page, pageSize },
+      sort
+    )
+  });
 }
 
 /**

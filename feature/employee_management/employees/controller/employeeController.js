@@ -21,7 +21,8 @@ import {
   sendDeleted,
   sendBadRequest,
   sendServerError,
-  sendNotFound
+  sendNotFound,
+  sendEmployeeExport
 } from '../view/employeeView.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
@@ -35,14 +36,18 @@ import {
 } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 import {
-  buildEmployeeAssignmentsListFromClause,
-  buildSearchKeyCondition,
   EMPL_EMPLOYEE_ASSIGNMENTS_LIST_VIEW,
   normalizeEmployeeListRowWithPosition,
   parseOrgStructureListFromRow,
   rowRawToHex
 } from '../../../../utils/employeeAssignmentViewUtils.js';
 import { buildPaginationMeta, parsePagination } from '../../../../utils/paginationUtils.js';
+import {
+  parseEmployeeListQuery,
+  fetchEmployeeListPage,
+  fetchEmployeesForExport
+} from '../services/employeeListQueryService.js';
+import { buildEmployeesExcelBuffer } from '../services/employeeExportService.js';
 
 const router = express.Router();
 
@@ -99,84 +104,6 @@ function getEnterpriseIdForEmployee(req) {
  */
 function getUserId(req) {
   return getActingUsername(req) ?? 'SYSTEM';
-}
-
-function buildEmployeeListWhereAndBinds(filters) {
-  const hasJsonFilter = filters.org_unit_id_hex != null && filters.org_unit_id_hex !== '';
-  const hasLevelCode = hasJsonFilter && filters.level_code != null && filters.level_code !== '';
-  const employeeStatusTrimmed = filters.employee_status != null && String(filters.employee_status).trim() !== ''
-    ? String(filters.employee_status).trim().toUpperCase()
-    : null;
-  const searchTrimmed = filters.search != null && String(filters.search).trim() !== ''
-    ? String(filters.search).trim()
-    : null;
-
-  const conditions = [
-    'v.ENTERPRISE_ID = :enterprise_id',
-    '(:position_id IS NULL OR v.POSITION_ID = :position_id)',
-    '(:job_family_id IS NULL OR v.JOB_FAMILY_ID = :job_family_id)',
-    '(:job_level_id IS NULL OR v.JOB_LEVEL_ID = :job_level_id)',
-    '(:grade_id IS NULL OR v.GRADE_ID = :grade_id)'
-  ];
-
-  const sharedBinds = {
-    user_id: filters.userId,
-    enterprise_id: filters.enterpriseId,
-    // position_id is a RAW(16) column; bind explicitly so a null value does not
-    // default to STRING and trigger an ORA-00932 (inconsistent datatypes).
-    position_id: {
-      val: filters.positionId ?? null,
-      dir: oracledb.BIND_IN,
-      type: oracledb.DB_TYPE_RAW,
-      maxSize: 16
-    },
-    job_family_id: filters.jobFamilyId ?? null,
-    job_level_id: filters.jobLevelId ?? null,
-    grade_id: filters.gradeId ?? null
-  };
-
-  if (hasJsonFilter) {
-    if (hasLevelCode) {
-      conditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.level_code == $lvl && @.org_unit_id == $oid)' PASSING :org_unit_id_hex AS "oid", :level_code AS "lvl")`
-      );
-      sharedBinds.org_unit_id_hex = filters.org_unit_id_hex;
-      sharedBinds.level_code = filters.level_code;
-    } else {
-      conditions.push(
-        `JSON_EXISTS(v.ORG_STRUCTURE_LIST_JSON, '$[*]?(@.org_unit_id == $oid)' PASSING :org_unit_id_hex AS "oid")`
-      );
-      sharedBinds.org_unit_id_hex = filters.org_unit_id_hex;
-    }
-  }
-
-  if (employeeStatusTrimmed) {
-    conditions.push('v.EMPLOYEE_STATUS = :employee_status');
-    sharedBinds.employee_status = employeeStatusTrimmed;
-  }
-
-  if (searchTrimmed) {
-    conditions.push(buildSearchKeyCondition('search_key'));
-    sharedBinds.search_key = searchTrimmed;
-  }
-
-  // FNDSEC DB-level data access: only rows the acting user is authorized to see
-  // are returned (see FNDSEC.FNDSEC_DATA_ACCESS_PKG.CAN_ACCESS_EMPLOYEE).
-  const accessOptions = filters.bypassEmployeeAccess ? { bypass: true } : undefined;
-  if (filters.bypassEmployeeAccess) {
-    conditions.push(employeeAccessBypassBindClause(':user_id'));
-  }
-  const baseFrom = buildEmployeeAssignmentsListFromClause(accessOptions);
-
-  const whereClause = conditions.join(' AND ');
-  const countSql = `SELECT COUNT(*) AS total_records FROM ${baseFrom} WHERE ${whereClause}`;
-
-  const dataBinds = { ...sharedBinds, offset: filters.offset, page_size: filters.pageSize };
-  const dataSql = `SELECT v.* FROM ${baseFrom} WHERE ${whereClause}
-  ORDER BY v.EMPLOYEE_ID NULLS LAST
-  OFFSET :offset ROWS FETCH NEXT :page_size ROWS ONLY`;
-
-  return { countSql, dataSql, countBinds: sharedBinds, dataBinds };
 }
 
 function normalizeEmployeeListRow(row) {
@@ -673,93 +600,90 @@ export async function getEmployees(req, res) {
     return sendBadRequest(res, req, paginationError.message);
   }
 
-  const q = req.query;
-  const enterpriseIdRaw = q.enterpriseId ?? q.enterprise_id;
-  const enterpriseId = enterpriseIdRaw != null && enterpriseIdRaw !== '' ? Number(enterpriseIdRaw) : NaN;
-  if (!Number.isFinite(enterpriseId) || enterpriseId < 1) {
-    return sendBadRequest(res, req, 'enterpriseId (or enterprise_id) is required and must be a positive number');
-  }
-
   const actingUserId = requireActingUserId(req, res);
-  if (actingUserId == null) return; // 401 already sent
+  if (actingUserId == null) return;
 
-  const orgUnitIdHexRaw = (q.org_unit_id ?? q.orgUnitId) != null && String(q.org_unit_id ?? q.orgUnitId).trim() !== '' ? String(q.org_unit_id ?? q.orgUnitId).trim() : null;
-  const levelCodeRaw = (q.level_code ?? q.levelCode) != null && String(q.level_code ?? q.levelCode).trim() !== '' ? String(q.level_code ?? q.levelCode).trim() : null;
-  if (levelCodeRaw != null && (orgUnitIdHexRaw == null || orgUnitIdHexRaw === '')) {
-    return sendBadRequest(res, req, 'level_code requires org_unit_id');
-  }
-  const orgUnitIdHexForJson = orgUnitIdHexRaw ? orgUnitIdHexRaw.replace(/-/g, '').trim().toUpperCase() : null;
-  if (orgUnitIdHexRaw && (!/^[0-9A-Fa-f]{32}$/.test(orgUnitIdHexForJson))) {
-    return sendBadRequest(res, req, 'org_unit_id must be a 32-character hex string');
-  }
-
-  const positionIdHex = (q.positionId ?? q.position_id) != null && String(q.positionId ?? q.position_id).trim() !== '' ? String(q.positionId ?? q.position_id).trim() : null;
-  const jobFamilyIdRaw = q.jobFamilyId ?? q.job_family_id;
-  const jobLevelIdRaw = q.jobLevelId ?? q.job_level_id;
-  const gradeIdRaw = q.gradeId ?? q.grade_id;
-  const jobFamilyId = jobFamilyIdRaw != null && jobFamilyIdRaw !== '' ? parseInt(jobFamilyIdRaw, 10) : null;
-  const jobLevelId = jobLevelIdRaw != null && jobLevelIdRaw !== '' ? parseInt(jobLevelIdRaw, 10) : null;
-  const gradeId = gradeIdRaw != null && gradeIdRaw !== '' ? parseInt(gradeIdRaw, 10) : null;
-
-  const positionIdBuf = hexToBuffer(positionIdHex);
-  if (positionIdHex != null && positionIdBuf == null) {
-    return sendBadRequest(res, req, 'positionId must be a 32-character hex string');
-  }
-
-  const offset = (page - 1) * pageSize;
-  const searchRaw = q.search != null && String(q.search).trim() !== '' ? String(q.search).trim() : null;
-  const employeeStatusRaw = (q.employee_status ?? q.employeeStatus) != null && String(q.employee_status ?? q.employeeStatus).trim() !== ''
-    ? String(q.employee_status ?? q.employeeStatus).trim()
-    : null;
-  const filters = {
-    userId: actingUserId,
-    enterpriseId,
-    bypassEmployeeAccess: employeeAccessOptionsFromReq(req).bypass,
-    org_unit_id_hex: orgUnitIdHexForJson,
-    level_code: levelCodeRaw ?? null,
-    positionId: positionIdBuf,
-    jobFamilyId: Number.isFinite(jobFamilyId) ? jobFamilyId : null,
-    jobLevelId: Number.isFinite(jobLevelId) ? jobLevelId : null,
-    gradeId: Number.isFinite(gradeId) ? gradeId : null,
-    offset,
-    pageSize,
-    search: searchRaw,
-    employee_status: employeeStatusRaw
-  };
-  const { countSql, dataSql, countBinds, dataBinds } = buildEmployeeListWhereAndBinds(filters);
+  const { filters, errors } = parseEmployeeListQuery(req, actingUserId);
+  if (errors.length) return sendBadRequest(res, req, errors);
 
   let connection;
   try {
     connection = await getConnection();
 
-    const [countResult, dataResult] = await Promise.all([
-      connection.execute(countSql, countBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
-      connection.execute(dataSql, dataBinds, { outFormat: oracledb.OUT_FORMAT_OBJECT })
-    ]);
+    const { rows, total } = await fetchEmployeeListPage(connection, {
+      ...filters,
+      offset: (page - 1) * pageSize,
+      pageSize
+    });
 
-    const totalRecords = countResult.rows && countResult.rows[0] ? Number(countResult.rows[0].TOTAL_RECORDS) : 0;
-    const paginationMeta = buildPaginationMeta(page, pageSize, totalRecords);
-    const rows = dataResult.rows || [];
-    const data = rows.map(row => normalizeEmployeeListRow(row));
+    const paginationMeta = buildPaginationMeta(page, pageSize, total);
 
     logSecuredAccess('GET /api/employees', {
       user_id: actingUserId,
-      enterprise_id: enterpriseId,
-      returned: data.length,
-      total: totalRecords
+      enterprise_id: filters.enterpriseId,
+      returned: rows.length,
+      total
     });
 
-    sendEmployeeList(res, req, data, {
-      total: totalRecords,
+    sendEmployeeList(res, req, rows, {
+      total,
       pagination: paginationMeta
     });
   } catch (err) {
     if (IS_DEV_MODE) {
       console.error('[GET /api/employees][FNDSEC] user_id=%s enterprise_id=%s error=%s',
-        actingUserId, enterpriseId, err?.message ?? String(err));
+        actingUserId, filters.enterpriseId, err?.message ?? String(err));
     }
-    // Do not expose raw Oracle errors to frontend.
     sendServerError(res, req, 'Failed to fetch employees');
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (_) {}
+    }
+  }
+}
+
+/**
+ * GET /api/employees/export
+ * Query: enterprise_id (required), search?, employee_status?, org_unit_id?, level_code?,
+ *        position_id?, job_family_id?, job_level_id?, grade_id?
+ * Returns all matching employees as Excel (no pagination).
+ */
+export async function getEmployeesExport(req, res) {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return;
+
+  const { filters, errors } = parseEmployeeListQuery(req, actingUserId);
+  if (errors.length) return sendBadRequest(res, req, errors);
+
+  let connection;
+  try {
+    connection = await getConnection();
+
+    const { employees } = await fetchEmployeesForExport(connection, filters);
+    const { buffer, filename, rowCount } = await buildEmployeesExcelBuffer({
+      employees,
+      enterpriseId: filters.enterpriseId
+    });
+
+    if (rowCount === 0) {
+      return sendNotFound(res, req, 'No employees found to export');
+    }
+
+    logSecuredAccess('GET /api/employees/export', {
+      user_id: actingUserId,
+      enterprise_id: filters.enterpriseId,
+      exported: rowCount
+    });
+
+    return sendEmployeeExport(res, buffer, filename);
+  } catch (err) {
+    if (IS_DEV_MODE) {
+      console.error('[GET /api/employees/export][FNDSEC] user_id=%s enterprise_id=%s error=%s',
+        actingUserId, filters.enterpriseId, err?.message ?? String(err));
+    }
+    return sendServerError(res, req, 'Failed to export employees');
   } finally {
     if (connection) {
       try {
@@ -879,6 +803,7 @@ function validateEmployeeData(data, isUpdate = false) {
 }
 
 router.get('/', asyncHandler(getEmployees));
+router.get('/export', asyncHandler(getEmployeesExport));
 
 router.get('/by-guid/:guid', asyncHandler(async (req, res) => {
   try {

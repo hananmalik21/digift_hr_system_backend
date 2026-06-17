@@ -1,3 +1,5 @@
+import { sendExcelExport } from '../../../../utils/excel/index.js';
+
 const API_VERSION = '1.0.0';
 
 function convertKeysToSnakeCase(obj) {
@@ -172,4 +174,14 @@ export function sendNotFound(res, req, message = 'Employee not found') {
       type: 'NotFoundError'
     }
   });
+}
+
+/**
+ * Stream an employees Excel export.
+ * @param {import('express').Response} res
+ * @param {Buffer} buffer
+ * @param {string} filename
+ */
+export function sendEmployeeExport(res, buffer, filename) {
+  return sendExcelExport(res, buffer, filename);
 }

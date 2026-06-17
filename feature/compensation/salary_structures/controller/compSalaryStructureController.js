@@ -17,8 +17,11 @@ import {
   parseSalaryStructureDetailRequest,
   listSalaryStructureHeaders,
   listSalaryStructureDetailEndpointPaginated,
+  listSalaryStructureDetailsForExport,
   getSalaryStructureDetail
 } from '../service/compSalaryStructureJsonViewService.js';
+import { buildSalaryStructureDetailsExcelBuffer } from '../service/salaryStructureDetailExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import {
   normalizeOrgScopeLegacy,
   resolveEmploymentTypes,
@@ -422,6 +425,31 @@ export const getSalaryStructuresList = asyncHandler(async (req, res) => {
     return sendSalaryStructureListDatabaseError(res, err, LIST_ERROR_TITLE);
   }
 });
+
+router.get('/salary-structures-details/export', asyncHandler(async (req, res) => {
+  let parsed;
+  try {
+    parsed = parseSalaryStructureListRequest(req.query);
+  } catch (e) {
+    return sendFail(res, HTTP.BAD_REQUEST, e.message || 'Invalid query', ERROR_CODE_VALIDATION);
+  }
+
+  try {
+    const { data } = await listSalaryStructureDetailsForExport(parsed.filterInput, parsed.sort);
+    const { buffer, filename, rowCount } = await buildSalaryStructureDetailsExcelBuffer({
+      rows: data,
+      enterpriseId: parsed.filterInput.enterprise_id
+    });
+
+    if (rowCount === 0) {
+      return sendFail(res, HTTP.NOT_FOUND, 'No salary structures found to export', HTTP.NOT_FOUND);
+    }
+
+    return sendExcelExport(res, buffer, filename);
+  } catch (err) {
+    return sendSalaryStructureListDatabaseError(res, err, LIST_ERROR_TITLE);
+  }
+}));
 
 router.get('/salary-structures-details/:structureKey', getSalaryStructureDetailByPathKeyHandler);
 router.get('/salary-structures-details', getSalaryStructureDetailHandler);

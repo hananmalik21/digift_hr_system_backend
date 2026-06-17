@@ -11,9 +11,12 @@ import {
   createDataRoleService,
   getDataRoleByGuidFromView,
   listDataRolesFromView,
+  listDataRolesForExport,
   softDeleteDataRoleService,
   updateDataRoleService
 } from '../service/fndsecDataRolesService.js';
+import { buildDataRolesExcelBuffer } from '../service/dataRoleExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 
 const router = express.Router();
 
@@ -104,6 +107,27 @@ router.get(
         }
       }
     });
+  })
+);
+
+/**
+ * GET /api/data-roles/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  route(async (req, res) => {
+    const { data } = await listDataRolesForExport(req.query || {});
+    const { buffer, filename, rowCount } = await buildDataRolesExcelBuffer({
+      roles: data,
+      enterpriseId: req.query?.enterprise_id
+    });
+
+    if (rowCount === 0) {
+      return send(res, { success: false, message: 'No data roles found to export', data: {} }, 404);
+    }
+
+    return sendExcelExport(res, buffer, filename);
   })
 );
 

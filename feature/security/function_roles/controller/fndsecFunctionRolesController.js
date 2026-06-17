@@ -8,8 +8,11 @@ import {
 } from '../model/fndsecFunctionRolesModel.js';
 import {
   listFunctionRolesFromView,
+  listFunctionRolesForExport,
   getFunctionRoleByGuidFromView
 } from '../model/fndsecFunctionRolesViewModel.js';
+import { buildFunctionRolesExcelBuffer } from '../service/functionRoleExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { parseEnterpriseIdFrom, resolveActor } from '../../functions/utils/requestParsers.js';
 
 const router = express.Router();
@@ -61,6 +64,31 @@ router.get(
     try {
       const { data, pagination } = await listFunctionRolesFromView(req.query || {}, null);
       return res.status(200).json({ success: true, data, pagination });
+    } catch (err) {
+      return handleViewQueryError(res, err);
+    }
+  })
+);
+
+/**
+ * GET /api/security/function-roles/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req, res) => {
+    try {
+      const { data } = await listFunctionRolesForExport(req.query || {}, null);
+      const { buffer, filename, rowCount } = await buildFunctionRolesExcelBuffer({
+        roles: data,
+        enterpriseId: req.query?.enterprise_id
+      });
+
+      if (rowCount === 0) {
+        return sendViewFail(res, 'No function roles found to export', 404);
+      }
+
+      return sendExcelExport(res, buffer, filename);
     } catch (err) {
       return handleViewQueryError(res, err);
     }

@@ -2,6 +2,8 @@
  * HTTP responses for the positions router (shape, status codes, meta envelope).
  * @module feature/enterprise_structure/positions/view/position_view
  */
+import { sendExcelExport } from '../../../../utils/excel/index.js';
+
 const API_VERSION = '1.0.0';
 
 function meta(req, extra = {}) {
@@ -133,4 +135,28 @@ export function sendForbidden(res, message) {
       type: 'ForbiddenError',
     },
   });
+}
+
+/** @param {import('express').Response} res @param {import('express').Request} req @param {string} [message] */
+export function sendNotFound(res, req, message = 'Resource not found') {
+  res.status(404).json({
+    success: false,
+    error: message,
+    error_details: {
+      message,
+      code: 'NOT_FOUND',
+      type: 'NotFoundError',
+    },
+    meta: meta(req),
+  });
+}
+
+/**
+ * Stream a positions Excel export.
+ * @param {import('express').Response} res
+ * @param {Buffer} buffer
+ * @param {string} filename
+ */
+export function sendPositionExport(res, buffer, filename) {
+  return sendExcelExport(res, buffer, filename);
 }

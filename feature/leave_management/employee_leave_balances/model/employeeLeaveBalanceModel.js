@@ -3,6 +3,7 @@ import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
 import { ensureHex32, generateSysGuid, hexToRawBuffer } from '../../../../utils/guidUtils.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 /**
  * Employee Leave Balance Model
@@ -3542,6 +3543,17 @@ END;`;
         conn2?.close?.().catch(() => {})
       ]);
     }
+  }
+
+  static async getLeaveBalanceSummaryForExport(options = {}, exportOptions = {}) {
+    return paginateForExport({
+      exportOptions,
+      fetchPage: (page, pageSize) => this.getLeaveBalanceSummaryPaginated({
+        ...options,
+        page,
+        pageSize
+      })
+    });
   }
 
   /** Return trimmed string or null for optional params. */

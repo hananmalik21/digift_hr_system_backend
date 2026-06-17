@@ -11,7 +11,9 @@ import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
-import { fetchSalaryChangeHistory } from '../service/compSalaryChangeHistoryService.js';
+import { fetchSalaryChangeHistory, fetchSalaryChangeHistoryForExport } from '../service/compSalaryChangeHistoryService.js';
+import { buildSalaryChangeHistoryExcelBuffer } from '../service/salaryChangeHistoryExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import { parseSalaryChangeHistoryQuery } from '../utils/parseSalaryChangeHistoryQuery.js';
 import {
   requireActingUserId,
@@ -26,6 +28,7 @@ const router = express.Router();
 const HTTP = { BAD_REQUEST: 400, OK: 200, SERVER_ERROR: 500 };
 
 const ROUTE_TAG_LIST = 'GET /api/compensation/salary-change-history';
+const ROUTE_TAG_EXPORT = 'GET /api/compensation/salary-change-history/export';
 
 function sendFail(res, statusCode, message) {
   return res.status(statusCode).json({ success: false, message: String(message || 'Request failed') });
@@ -90,6 +93,54 @@ export const getSalaryChangeHistory = asyncHandler(async (req, res) => {
   }
 });
 
+/**
+ * GET /api/compensation/salary-change-history/export
+ * Same filters as list (enterprise_id required). Returns all matching rows as Excel.
+ */
+export const getSalaryChangeHistoryExport = asyncHandler(async (req, res) => {
+  const actingUserId = requireActingUserId(req, res);
+  if (actingUserId == null) return undefined;
+
+  let parsed;
+  try {
+    parsed = parseSalaryChangeHistoryQuery(req.query || {});
+  } catch (err) {
+    return sendFail(res, HTTP.BAD_REQUEST, err?.message || 'Invalid query');
+  }
+
+  try {
+    const { rows } = await fetchSalaryChangeHistoryForExport({
+      ...parsed,
+      user_id: actingUserId,
+      bypass_employee_access: employeeAccessOptionsFromReq(req).bypass
+    });
+
+    const { buffer, filename, rowCount } = await buildSalaryChangeHistoryExcelBuffer({
+      rows,
+      enterpriseId: parsed.enterprise_id
+    });
+
+    if (rowCount === 0) {
+      return sendFail(res, HTTP.BAD_REQUEST, 'No salary change history records found to export');
+    }
+
+    logSecuredAccess(ROUTE_TAG_EXPORT, {
+      user_id: actingUserId,
+      enterprise_id: parsed.enterprise_id,
+      exported: rowCount,
+      security: EMPLOYEE_ACCESS_SECURITY_LABEL
+    });
+
+    return sendExcelExport(res, buffer, filename);
+  } catch (err) {
+    if (IS_DEV_MODE) {
+      console.error(`[${ROUTE_TAG_EXPORT}] error:`, err);
+    }
+    return sendFail(res, HTTP.SERVER_ERROR, safeDatabaseMessageForApi(err, 'Unable to export salary change history.'));
+  }
+});
+
+router.get('/salary-change-history/export', getSalaryChangeHistoryExport);
 router.get('/salary-change-history', getSalaryChangeHistory);
 
 export default router;

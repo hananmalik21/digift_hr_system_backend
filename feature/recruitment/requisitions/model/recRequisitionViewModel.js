@@ -10,6 +10,7 @@ import {
   parseOrgUnitHierarchyFilter,
   resolveStatusTabClause
 } from '../utils/recRequisitionViewValidators.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 const VIEW = process.env.REC_REQUISITION_LIST_V || 'REC.V_REQUISITION_LIST';
 const LOG_TAG = 'recRequisitionViewModel';
@@ -273,6 +274,18 @@ export async function listRequisitionsFromView(query) {
   } catch (err) {
     rethrowUnlessOperational(err, 'listRequisitionsFromView');
   }
+}
+
+/**
+ * Fetch all requisitions matching filters for Excel export (paginates internally).
+ * @param {Record<string, unknown>} query
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ */
+export async function listRequisitionsForExport(query, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => listRequisitionsFromView({ ...query, page, page_size: pageSize })
+  });
 }
 
 /**

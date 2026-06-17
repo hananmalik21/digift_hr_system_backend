@@ -3,6 +3,7 @@ import { ValidationError } from '../../../../utils/errors/index.js';
 import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 
 function buildPlanFullDetailsSql(accessOptions) {
   const employeePredicate = employeeAccessFunctionPredicate(
@@ -157,4 +158,11 @@ export async function getEmployeePlanFullDetails(filters, pagination = { page: 1
       : 0;
   const rows = await Promise.all(rawRows.map((row) => mapRowWithParsedOrgStructure(row)));
   return { rows, total };
+}
+
+export async function getEmployeePlanFullDetailsForExport(filters, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) => getEmployeePlanFullDetails(filters, { page, limit: pageSize })
+  });
 }
