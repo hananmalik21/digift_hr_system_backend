@@ -11,6 +11,8 @@
  * }
  */
 
+import { NotFoundError } from './errors/index.js';
+
 /**
  * Send success response
  * @param {Object} res - Express response object
@@ -87,5 +89,38 @@ export function sendList(res, { message = 'Fetched successfully', data = [], met
   }
   
   sendSuccess(res, { message, data, meta, statusCode: 200 });
+}
+
+/**
+ * @template T
+ * @param {T|null|undefined} data
+ * @param {string} message
+ * @returns {T}
+ */
+export function requireEntity(data, message) {
+  if (!data) throw new NotFoundError(message);
+  return data;
+}
+
+/**
+ * Send paginated list using buildPaginationMeta-shaped pagination objects.
+ */
+export function sendPaginatedList(res, { pagination, data }, message = 'Fetched successfully') {
+  const pageSize = pagination.pageSize ?? pagination.limit;
+  return sendSuccess(res, {
+    message,
+    data,
+    meta: {
+      total: pagination.total,
+      pagination: {
+        page: pagination.page,
+        page_size: pageSize,
+        total: pagination.total,
+        total_pages: pagination.totalPages,
+        has_next: pagination.hasNext,
+        has_previous: pagination.hasPrevious
+      }
+    }
+  });
 }
 

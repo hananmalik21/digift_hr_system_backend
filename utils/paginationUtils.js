@@ -108,3 +108,22 @@ export function parsePageLimit(query = {}, options = {}) {
     offset: (page - 1) * limit
   };
 }
+
+/** Higher page-size cap for modules that use limit-based pagination (e.g. GRC). */
+export const LARGE_PAGE_LIMIT_OPTS = { defaultLimit: 10, maxLimit: 500 };
+
+/**
+ * Build model list payload from Oracle rows with COUNT(*) OVER() AS TOTAL_COUNT.
+ * @param {Record<string, unknown>[]} rows
+ * @param {number} page
+ * @param {number} limit
+ * @param {(row: Record<string, unknown>) => unknown|Promise<unknown>} mapRow
+ */
+export async function buildListResponse(rows, page, limit, mapRow) {
+  const totalCount = rows.length > 0 ? Number(rows[0].TOTAL_COUNT ?? rows.length) : 0;
+  const data = await Promise.all(rows.map((row) => mapRow(row)));
+  return {
+    pagination: buildPaginationMeta(page, limit, totalCount),
+    data
+  };
+}

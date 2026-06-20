@@ -96,6 +96,13 @@ import compensationProcessController from './feature/compensation/process/contro
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
 import recLookupValueController from './feature/look_ups/rec/rec_lookup_values/controller/recLookupValueController.js';
+import grcQuestionCategoryController from './feature/grc/question_categories/controller/grcQuestionCategoryController.js';
+import grcQuestionSubcategoryController from './feature/grc/question_subcategories/controller/grcQuestionSubcategoryController.js';
+import grcLookupTypeController from './feature/grc/lookup_types/controller/grcLookupTypeController.js';
+import grcLookupValueController from './feature/grc/lookup_values/controller/grcLookupValueController.js';
+import grcControlController from './feature/grc/controls/controller/grcControlController.js';
+import grcAssetController from './feature/grc/assets/controller/grcAssetController.js';
+import grcQuestionController from './feature/grc/questions/controller/grcQuestionController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -315,6 +322,15 @@ app.use('/api/rec/job-offers', recJobOffersController);
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
 app.use('/api/rec/lookup-types', recLookupTypeController);
 app.use('/api/rec/lookup-values', recLookupValueController);
+
+// GRC — question categories, subcategories, lookups, controls, assets, questions
+app.use('/api/grc/question-categories', grcQuestionCategoryController);
+app.use('/api/grc/question-subcategories', grcQuestionSubcategoryController);
+app.use('/api/grc/lookup-types', grcLookupTypeController);
+app.use('/api/grc/lookup-values', grcLookupValueController);
+app.use('/api/grc/controls', grcControlController);
+app.use('/api/grc/assets', grcAssetController);
+app.use('/api/grc/questions', grcQuestionController);
 
 // Initialize database pool on startup
 await createPool();
