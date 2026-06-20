@@ -32,7 +32,9 @@ const PUBLIC_PATHS = [
   { method: 'POST', pattern: /^\/api\/rec\/job-offers\/[^/]+\/decline\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
-  { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ }
+  { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ },
+  // GRC — no JWT required for now
+  { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ }
 ];
 
 function requestPathname(req) {

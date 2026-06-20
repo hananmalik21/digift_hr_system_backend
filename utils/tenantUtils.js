@@ -69,13 +69,23 @@ export function requireTenantIdInBody(data, missingMessage = 'tenant_id is requi
 /**
  * Parse and validate enterprise_id from a raw value.
  *
- * @param {*} raw - Raw value (number, string, etc.)
- * @param {string} [missingMessage] - Message when value is missing
- * @returns {number} Valid enterprise ID (positive integer)
- * @throws {ValidationError} When value is missing or invalid
+ * @param {*} raw
+ * @param {string|{ required?: boolean, missingMessage?: string }} [options]
+ * @returns {number|null}
+ * @throws {ValidationError}
  */
-export function parseEnterpriseId(raw, missingMessage = 'enterprise_id is required') {
+export function parseEnterpriseId(raw, options = 'enterprise_id is required') {
+  let required = true;
+  let missingMessage = 'enterprise_id is required';
+  if (typeof options === 'string') {
+    missingMessage = options;
+  } else if (options && typeof options === 'object') {
+    required = options.required !== false;
+    missingMessage = options.missingMessage ?? 'enterprise_id is required';
+  }
+
   if (raw === undefined || raw === null || String(raw).trim() === '') {
+    if (!required) return null;
     throw new ValidationError(missingMessage);
   }
   const enterpriseId = parseInt(raw, 10);
@@ -83,6 +93,17 @@ export function parseEnterpriseId(raw, missingMessage = 'enterprise_id is requir
     throw new ValidationError('enterprise_id must be a valid positive number');
   }
   return enterpriseId;
+}
+
+/**
+ * Resolve enterprise_id from request body or query (body takes precedence).
+ * @param {import('express').Request} req
+ * @param {{ required?: boolean, missingMessage?: string }} [options]
+ * @returns {number|null}
+ */
+export function enterpriseIdFromRequest(req, { required = true, missingMessage } = {}) {
+  const raw = req?.body?.enterprise_id ?? req?.query?.enterprise_id;
+  return parseEnterpriseId(raw, { required, missingMessage });
 }
 
 /**

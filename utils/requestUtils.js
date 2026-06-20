@@ -30,3 +30,17 @@ export function getUserId(req) {
     'SYSTEM';
   return toAuditActorId(raw);
 }
+
+/**
+ * Attach audit actor fields for create/update payloads.
+ * @param {Record<string, unknown>|null|undefined} body
+ * @param {import('express').Request} req
+ */
+export function withAuditFields(body, req) {
+  const actor = getUserId(req);
+  return {
+    ...(body ?? {}),
+    created_by: body?.created_by ?? actor,
+    updated_by: body?.updated_by ?? actor
+  };
+}

@@ -360,3 +360,41 @@ export function formatGuidWithHyphens(guid) {
 export function removeHyphensFromGuid(guid) {
   return normalizeHex32(guid);
 }
+
+/**
+ * GRC API helpers — strict string GUID parsing.
+ */
+export function parseHexGuid(value, fieldName = 'guid') {
+  if (!value || typeof value !== 'string') {
+    throw new ValidationError(`${fieldName} is required.`);
+  }
+  return ensureHex32(value, fieldName);
+}
+
+export function parseCategoryGuid(value, fieldName = 'category_guid') {
+  return parseHexGuid(value, fieldName);
+}
+
+export function parseLookupTypeGuid(value) {
+  return parseHexGuid(value, 'lookup_type_guid');
+}
+
+export function parseLookupValueGuid(value) {
+  return parseHexGuid(value, 'lookup_value_guid');
+}
+
+export function parseControlGuid(value) {
+  return parseHexGuid(value, 'control_guid');
+}
+
+export function parseAssetGuid(value) {
+  return parseHexGuid(value, 'asset_guid');
+}
+
+export function parseSubcategoryGuid(value) {
+  return parseHexGuid(value, 'subcategory_guid');
+}
+
+export function parseQuestionGuid(value) {
+  return parseHexGuid(value, 'question_guid');
+}
