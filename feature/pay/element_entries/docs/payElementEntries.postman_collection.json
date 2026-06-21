@@ -1,0 +1,54 @@
+{
+  "info": {
+    "name": "Digify ERP — Payroll Element Entries",
+    "description": "Create, update, and delete payroll element entries via PAY.PAY_ELEMENT_ENTRIES_PKG.\n\nSet {{baseUrl}} and {{jwt}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "element_entry_guid", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Create Element Entry",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 1001,\n  \"payroll_id\": 1,\n  \"component_id\": 10,\n  \"element_classification_code\": \"STANDARD_EARNING\",\n  \"effective_as_of_date\": \"2026-06-21\",\n  \"effective_start_date\": \"2026-06-01\",\n  \"effective_end_date\": null,\n  \"entry_type_code\": \"ELEMENT_ENTRY\",\n  \"source_code\": \"MANUAL_ENTRY\",\n  \"element_processing_type_code\": \"RECURRING\",\n  \"subpriority\": 1,\n  \"creator_type_code\": \"USER\",\n  \"processed_flag\": \"N\",\n  \"retroactive_flag\": \"N\",\n  \"automatic_entry_flag\": \"N\",\n  \"sequence_number\": 1,\n  \"reason_text\": \"Monthly salary\",\n  \"pay_value\": 500,\n  \"amount\": 500,\n  \"currency_code\": \"KWD\",\n  \"cost_allocation_keyflex_id\": \"CC-HR-KWT\",\n  \"costing_type_code\": \"COSTED\",\n  \"account_code\": \"5000-100-100\",\n  \"cost_center_code\": \"HR\",\n  \"context_segment_code\": \"BUSINESS_UNIT\",\n  \"context_value\": \"KUWAIT\",\n  \"approval_status_code\": \"DRAFT\",\n  \"comments\": \"Created manually\",\n  \"source_reference\": null,\n  \"batch_id\": null\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
+      "name": "Update Element Entry",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pay_value\": 600,\n  \"amount\": 600,\n  \"currency_code\": \"KWD\",\n  \"cost_allocation_keyflex_id\": \"CC-HR-KWT\",\n  \"comments\": \"Updated amount\",\n  \"effective_end_date\": \"2026-12-31\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
+      }
+    },
+    {
+      "name": "Delete Element Entry",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
+      }
+    }
+  ]
+}

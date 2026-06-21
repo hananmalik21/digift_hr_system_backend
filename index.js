@@ -103,6 +103,7 @@ import grcLookupValueController from './feature/grc/lookup_values/controller/grc
 import grcControlController from './feature/grc/controls/controller/grcControlController.js';
 import grcAssetController from './feature/grc/assets/controller/grcAssetController.js';
 import grcQuestionController from './feature/grc/questions/controller/grcQuestionController.js';
+import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -331,6 +332,9 @@ app.use('/api/grc/lookup-values', grcLookupValueController);
 app.use('/api/grc/controls', grcControlController);
 app.use('/api/grc/assets', grcAssetController);
 app.use('/api/grc/questions', grcQuestionController);
+
+// Payroll — element entries (PAY.PAY_ELEMENT_ENTRIES_PKG)
+app.use('/api/pay', payElementEntriesRoutes);
 
 // Initialize database pool on startup
 await createPool();
