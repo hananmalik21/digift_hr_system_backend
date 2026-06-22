@@ -4,7 +4,12 @@ import {
   packageStatusIsSuccess,
   updateElementEntryViaPackage
 } from '../model/payElementEntriesModel.js';
+import {
+  getElementEntryFromViewByGuid,
+  listElementEntriesFromView
+} from '../model/payElementEntriesViewModel.js';
 import { validateElementEntryReferences } from '../model/payElementEntryReferencesModel.js';
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Element entry created successfully.';
 const UPDATE_SUCCESS_MESSAGE = 'Element entry updated successfully.';
@@ -65,6 +70,43 @@ export async function updateElementEntry(elementEntryGuid, payload, updatedBy) {
     httpStatus: HTTP_OK,
     message: pkg.message || UPDATE_SUCCESS_MESSAGE
   };
+}
+
+/**
+ * @param {{
+ *   enterprise_id: number,
+ *   employee_id?: number,
+ *   effective_date?: string,
+ *   status?: string,
+ *   component_id?: number,
+ *   classification?: string,
+ *   search?: string,
+ *   page: number,
+ *   limit: number
+ * }} filters
+ */
+export async function listElementEntries(filters) {
+  const { rows, total } = await listElementEntriesFromView(filters);
+  const meta = buildPaginationMeta(filters.page, filters.limit, total);
+  return {
+    data: rows,
+    pagination: {
+      page: meta.page,
+      limit: meta.pageSize,
+      total: meta.total,
+      total_pages: meta.totalPages,
+      has_next: meta.hasNext,
+      has_previous: meta.hasPrevious
+    }
+  };
+}
+
+/**
+ * @param {string} elementEntryGuid
+ * @returns {Promise<object|null>}
+ */
+export async function getElementEntryByGuid(elementEntryGuid) {
+  return getElementEntryFromViewByGuid(elementEntryGuid);
 }
 
 /**

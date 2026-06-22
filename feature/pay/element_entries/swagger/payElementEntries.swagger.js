@@ -71,9 +71,116 @@
  *         cost_allocation_keyflex_id: { type: string, example: CC-HR-KWT }
  *         comments: { type: string, example: Updated amount }
  *         effective_end_date: { type: string, format: date, example: '2026-12-31' }
+ *     PayElementEntryListItem:
+ *       type: object
+ *       properties:
+ *         element_entry_id: { type: integer }
+ *         element_entry_guid: { type: string }
+ *         enterprise_id: { type: integer }
+ *         employee_id: { type: integer }
+ *         payroll_id: { type: integer }
+ *         component_id: { type: integer }
+ *         element_name: { type: string }
+ *         primary_entry_value: { type: number }
+ *         amount: { type: number }
+ *         currency_code: { type: string }
+ *         value_name: { type: string }
+ *         source: { type: string }
+ *         employment_level: { type: string }
+ *         seq: { type: integer }
+ *         reason: { type: string }
+ *         classification: { type: string }
+ *         ldg: { type: string }
+ *         emp_number: { type: string }
+ *         status: { type: string }
+ *         effective_as_of_date: { type: string, format: date }
+ *         effective_start_date: { type: string, format: date }
+ *         effective_end_date: { type: string, format: date, nullable: true }
+ *         entry_type_code: { type: string }
+ *         element_processing_type_code: { type: string }
+ *         processed_flag: { type: string, enum: [Y, N] }
+ *         retroactive_flag: { type: string, enum: [Y, N] }
+ *         automatic_entry_flag: { type: string, enum: [Y, N] }
+ *         created_by: { type: string }
+ *         creation_date: { type: string, format: date-time }
+ *         last_updated_by: { type: string }
+ *         last_update_date: { type: string, format: date-time }
+ *     PayElementEntryListResponse:
+ *       type: object
+ *       required: [success, data, pagination]
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         data:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/PayElementEntryListItem'
+ *         pagination:
+ *           type: object
+ *           properties:
+ *             page: { type: integer, example: 1 }
+ *             limit: { type: integer, example: 20 }
+ *             total: { type: integer, example: 0 }
+ *             total_pages: { type: integer, example: 0 }
+ *             has_next: { type: boolean, example: false }
+ *             has_previous: { type: boolean, example: false }
+ *     PayElementEntryDetailResponse:
+ *       type: object
+ *       required: [success, data]
+ *       properties:
+ *         success: { type: boolean, example: true }
+ *         data:
+ *           $ref: '#/components/schemas/PayElementEntryListItem'
  *
  * @swagger
  * /api/pay/element-entries:
+ *   get:
+ *     tags: [Payroll Element Entries]
+ *     summary: List element entries
+ *     description: |
+ *       Reads from PAY.V_PAY_ELEMENT_ENTRIES for the Manage Element Entries list screen.
+ *       enterprise_id is required. effective_date matches rows where the date falls between
+ *       EFFECTIVE_START_DATE and EFFECTIVE_END_DATE (open-ended when EFFECTIVE_END_DATE is null).
+ *     parameters:
+ *       - in: query
+ *         name: enterprise_id
+ *         required: true
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: employee_id
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: effective_date
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: status
+ *         schema: { type: string }
+ *       - in: query
+ *         name: component_id
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: classification
+ *         schema: { type: string }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *         description: Searches ELEMENT_NAME, EMP_NUMBER, CLASSIFICATION, and STATUS
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+ *     responses:
+ *       '200':
+ *         description: Paginated element entry list (empty array when no rows)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PayElementEntryListResponse'
+ *       '400':
+ *         description: Validation error
+ *       '500':
+ *         description: Unexpected system error
  *   post:
  *     tags: [Payroll Element Entries]
  *     summary: Create element entry
@@ -87,7 +194,7 @@
  *           example:
  *             enterprise_id: 1
  *             employee_id: 1001
- *             payroll_id: 1
+ *             payroll_id: 4
  *             component_id: 10
  *             element_classification_code: STANDARD_EARNING
  *             effective_as_of_date: '2026-06-21'
@@ -119,6 +226,29 @@
  *
  * @swagger
  * /api/pay/element-entries/{guid}:
+ *   get:
+ *     tags: [Payroll Element Entries]
+ *     summary: Get element entry by GUID
+ *     description: Returns one row from PAY.V_PAY_ELEMENT_ENTRIES by element_entry_guid.
+ *     parameters:
+ *       - in: path
+ *         name: guid
+ *         required: true
+ *         schema: { type: string }
+ *         description: 32-character element_entry_guid
+ *     responses:
+ *       '200':
+ *         description: Element entry found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/PayElementEntryDetailResponse'
+ *       '404':
+ *         description: Element entry not found
+ *       '400':
+ *         description: Invalid GUID
+ *       '500':
+ *         description: Unexpected system error
  *   put:
  *     tags: [Payroll Element Entries]
  *     summary: Update element entry

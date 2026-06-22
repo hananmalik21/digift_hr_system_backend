@@ -11,6 +11,41 @@
   ],
   "item": [
     {
+      "name": "List Element Entries",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/element-entries?enterprise_id=1&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "element-entries"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "employee_id", "value": "1001", "disabled": true },
+            { "key": "effective_date", "value": "2026-06-21", "disabled": true },
+            { "key": "status", "value": "", "disabled": true },
+            { "key": "component_id", "value": "", "disabled": true },
+            { "key": "classification", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Element Entry by GUID",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
+      }
+    },
+    {
       "name": "Create Element Entry",
       "request": {
         "method": "POST",
@@ -20,7 +55,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 1001,\n  \"payroll_id\": 1,\n  \"component_id\": 10,\n  \"element_classification_code\": \"STANDARD_EARNING\",\n  \"effective_as_of_date\": \"2026-06-21\",\n  \"effective_start_date\": \"2026-06-01\",\n  \"effective_end_date\": null,\n  \"entry_type_code\": \"ELEMENT_ENTRY\",\n  \"source_code\": \"MANUAL_ENTRY\",\n  \"element_processing_type_code\": \"RECURRING\",\n  \"subpriority\": 1,\n  \"creator_type_code\": \"USER\",\n  \"processed_flag\": \"N\",\n  \"retroactive_flag\": \"N\",\n  \"automatic_entry_flag\": \"N\",\n  \"sequence_number\": 1,\n  \"reason_text\": \"Monthly salary\",\n  \"pay_value\": 500,\n  \"amount\": 500,\n  \"currency_code\": \"KWD\",\n  \"cost_allocation_keyflex_id\": \"CC-HR-KWT\",\n  \"costing_type_code\": \"COSTED\",\n  \"account_code\": \"5000-100-100\",\n  \"cost_center_code\": \"HR\",\n  \"context_segment_code\": \"BUSINESS_UNIT\",\n  \"context_value\": \"KUWAIT\",\n  \"approval_status_code\": \"DRAFT\",\n  \"comments\": \"Created manually\",\n  \"source_reference\": null,\n  \"batch_id\": null\n}"
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 1001,\n  \"payroll_id\": 4,\n  \"component_id\": 10,\n  \"element_classification_code\": \"STANDARD_EARNING\",\n  \"effective_as_of_date\": \"2026-06-21\",\n  \"effective_start_date\": \"2026-06-01\",\n  \"effective_end_date\": null,\n  \"entry_type_code\": \"ELEMENT_ENTRY\",\n  \"source_code\": \"MANUAL_ENTRY\",\n  \"element_processing_type_code\": \"RECURRING\",\n  \"subpriority\": 1,\n  \"creator_type_code\": \"USER\",\n  \"processed_flag\": \"N\",\n  \"retroactive_flag\": \"N\",\n  \"automatic_entry_flag\": \"N\",\n  \"sequence_number\": 1,\n  \"reason_text\": \"Monthly salary\",\n  \"pay_value\": 500,\n  \"amount\": 500,\n  \"currency_code\": \"KWD\",\n  \"cost_allocation_keyflex_id\": \"CC-HR-KWT\",\n  \"costing_type_code\": \"COSTED\",\n  \"account_code\": \"5000-100-100\",\n  \"cost_center_code\": \"HR\",\n  \"context_segment_code\": \"BUSINESS_UNIT\",\n  \"context_value\": \"KUWAIT\",\n  \"approval_status_code\": \"DRAFT\",\n  \"comments\": \"Created manually\",\n  \"source_reference\": null,\n  \"batch_id\": null\n}"
         },
         "url": "{{baseUrl}}/api/pay/element-entries"
       }
