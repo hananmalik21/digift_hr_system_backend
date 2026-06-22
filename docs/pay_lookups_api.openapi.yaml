@@ -1,0 +1,375 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Payroll Lookups API
+  version: 2.0.0
+  description: |
+    Payroll lookup types and values backed by:
+
+    - `PAY.V_PAY_LOOKUP_TYPES` (read)
+    - `PAY.V_PAY_LOOKUP_VALUES` (read)
+    - `PAY.PAY_LOOKUPS_PKG` (mutations)
+
+    **Enterprise scope:** Lookup value reads require `enterprise_id` and return
+    global values (`ENTERPRISE_ID IS NULL`) plus enterprise-specific values in one response.
+
+    **GUIDs only:** APIs expose 32-character hex GUIDs. Numeric IDs are never returned.
+
+    **Auth:** JWT required.
+servers:
+  - url: /
+tags:
+  - name: Payroll Lookup Types
+  - name: Payroll Lookup Values
+paths:
+  /api/pay/lookups/types:
+    get:
+      tags: [Payroll Lookup Types]
+      summary: List lookup types
+      operationId: listPayLookupTypes
+      description: Reads `PAY.V_PAY_LOOKUP_TYPES`.
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: active_flag
+          in: query
+          schema: { type: string, enum: [Y, N] }
+        - name: sort_by
+          in: query
+          schema: { type: string, enum: [type_code, type_name], default: type_code }
+        - name: sort_order
+          in: query
+          schema: { type: string, enum: [ASC, DESC], default: ASC }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated lookup types
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+    post:
+      tags: [Payroll Lookup Types]
+      summary: Create lookup type
+      operationId: createPayLookupType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayLookupTypeCreateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupGuidCreateResponse'
+  /api/pay/lookups/types/{guid}:
+    get:
+      tags: [Payroll Lookup Types]
+      summary: Get lookup type
+      operationId: getPayLookupType
+      parameters:
+        - $ref: '#/components/parameters/LookupTypeGuid'
+      responses:
+        '200':
+          description: Lookup type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupItemResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Payroll Lookup Types]
+      summary: Update lookup type
+      operationId: updatePayLookupType
+      parameters:
+        - $ref: '#/components/parameters/LookupTypeGuid'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayLookupTypeUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupItemResponse'
+    delete:
+      tags: [Payroll Lookup Types]
+      summary: Delete lookup type
+      operationId: deletePayLookupType
+      parameters:
+        - $ref: '#/components/parameters/LookupTypeGuid'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupMessageResponse'
+  /api/pay/lookups/values:
+    get:
+      tags: [Payroll Lookup Values]
+      summary: List lookup values
+      operationId: listPayLookupValues
+      description: |
+        Reads `PAY.V_PAY_LOOKUP_VALUES`. Mandatory `enterprise_id` returns global
+        and enterprise-specific values in one list.
+      parameters:
+        - name: enterprise_id
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: type_code
+          in: query
+          schema: { type: string }
+        - name: active_flag
+          in: query
+          schema: { type: string, enum: [Y, N] }
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Global + enterprise lookup values
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupListResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+    post:
+      tags: [Payroll Lookup Values]
+      summary: Create lookup value
+      operationId: createPayLookupValue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayLookupValueCreateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupValueGuidCreateResponse'
+  /api/pay/lookups/values/{guid}:
+    get:
+      tags: [Payroll Lookup Values]
+      summary: Get lookup value
+      operationId: getPayLookupValue
+      parameters:
+        - $ref: '#/components/parameters/LookupValueGuid'
+        - name: enterprise_id
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Lookup value visible to enterprise
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupItemResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Payroll Lookup Values]
+      summary: Update lookup value
+      operationId: updatePayLookupValue
+      parameters:
+        - $ref: '#/components/parameters/LookupValueGuid'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayLookupValueUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupItemResponse'
+    delete:
+      tags: [Payroll Lookup Values]
+      summary: Delete lookup value
+      operationId: deletePayLookupValue
+      parameters:
+        - $ref: '#/components/parameters/LookupValueGuid'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayLookupMessageResponse'
+components:
+  parameters:
+    LookupTypeGuid:
+      name: guid
+      in: path
+      required: true
+      schema: { type: string, minLength: 32, maxLength: 32 }
+    LookupValueGuid:
+      name: guid
+      in: path
+      required: true
+      schema: { type: string, minLength: 32, maxLength: 32 }
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PayLookupValidationError'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PayLookupErrorResponse'
+  schemas:
+    PayLookupType:
+      type: object
+      properties:
+        lookup_type_guid: { type: string }
+        type_code: { type: string }
+        type_name: { type: string }
+        description: { type: string, nullable: true }
+        active_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+        creation_date: { type: string, format: date-time, nullable: true }
+        last_updated_by: { type: string, nullable: true }
+        last_update_date: { type: string, format: date-time, nullable: true }
+    PayLookupValue:
+      type: object
+      properties:
+        lookup_value_guid: { type: string }
+        lookup_type_guid: { type: string }
+        type_code: { type: string }
+        type_name: { type: string }
+        enterprise_id: { type: integer, nullable: true }
+        lookup_scope: { type: string, enum: [GLOBAL, ENTERPRISE] }
+        value_code: { type: string }
+        value_name: { type: string }
+        display_sequence: { type: integer, nullable: true }
+        active_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+        creation_date: { type: string, format: date-time, nullable: true }
+        last_updated_by: { type: string, nullable: true }
+        last_update_date: { type: string, format: date-time, nullable: true }
+    PayLookupTypeCreateRequest:
+      type: object
+      required: [type_code, type_name]
+      properties:
+        type_code: { type: string }
+        type_name: { type: string }
+        description: { type: string }
+        created_by: { type: string }
+    PayLookupTypeUpdateRequest:
+      type: object
+      properties:
+        type_code: { type: string }
+        type_name: { type: string }
+        description: { type: string }
+        active_flag: { type: string, enum: [Y, N] }
+        updated_by: { type: string }
+    PayLookupValueCreateRequest:
+      type: object
+      required: [type_code, value_code, value_name, enterprise_id]
+      properties:
+        type_code: { type: string }
+        value_code: { type: string }
+        value_name: { type: string }
+        enterprise_id: { type: integer, nullable: true }
+        display_sequence: { type: integer }
+        created_by: { type: string }
+    PayLookupValueUpdateRequest:
+      type: object
+      required: [enterprise_id]
+      properties:
+        value_code: { type: string }
+        value_name: { type: string }
+        enterprise_id: { type: integer, nullable: true }
+        display_sequence: { type: integer }
+        active_flag: { type: string, enum: [Y, N] }
+        updated_by: { type: string }
+    PayLookupListResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: array
+          items: { type: object }
+        meta:
+          type: object
+          properties:
+            pagination: { type: object }
+    PayLookupItemResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { type: object }
+    PayLookupGuidCreateResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            lookup_type_guid: { type: string }
+    PayLookupValueGuidCreateResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            lookup_value_guid: { type: string }
+    PayLookupMessageResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { type: object }
+    PayLookupValidationError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errors:
+          type: array
+          items: { type: string }
+    PayLookupErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errors:
+          type: array
+          items: { type: string }
