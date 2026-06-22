@@ -9,11 +9,14 @@ import { getActingUsername } from '../../../../utils/userContext.js';
 import {
   createElementEntry,
   deleteElementEntry,
+  getElementEntryByGuid,
+  listElementEntries,
   updateElementEntry
 } from '../services/payElementEntries.service.js';
 import {
   parseElementEntryGuidParam,
   validateCreateElementEntryBody,
+  validateListElementEntriesQuery,
   validateUpdateElementEntryBody
 } from '../validations/payElementEntries.validation.js';
 
@@ -53,6 +56,62 @@ function logAudit(action, req, extra = {}) {
   const user = req.user?.username ?? 'SYSTEM';
   console.info(`[${ROUTE_TAG}]`, JSON.stringify({ action, user, ...extra }));
 }
+
+/**
+ * GET /api/pay/element-entries
+ */
+export const getElementEntriesList = asyncHandler(async (req, res) => {
+  try {
+    const filters = validateListElementEntriesQuery(req.query || {});
+    const { data, pagination } = await listElementEntries(filters);
+
+    logAudit('list', req, {
+      enterprise_id: filters.enterprise_id,
+      returned: Array.isArray(data) ? data.length : 0,
+      total: pagination.total
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: data ?? [],
+      pagination
+    });
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendValidationError(res, err);
+    }
+    return sendSystemError(res, err);
+  }
+});
+
+/**
+ * GET /api/pay/element-entries/:guid
+ */
+export const getElementEntry = asyncHandler(async (req, res) => {
+  try {
+    const elementEntryGuid = parseElementEntryGuidParam(req.params.guid);
+    const data = await getElementEntryByGuid(elementEntryGuid);
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: 'Element entry not found'
+      });
+    }
+
+    logAudit('get', req, { element_entry_guid: elementEntryGuid });
+
+    return res.status(200).json({
+      success: true,
+      data
+    });
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendValidationError(res, err);
+    }
+    return sendSystemError(res, err);
+  }
+});
 
 /**
  * POST /api/pay/element-entries
@@ -140,7 +199,7 @@ export const deleteElementEntryHandler = asyncHandler(async (req, res) => {
   {
     "enterprise_id": 1,
     "employee_id": 1001,
-    "payroll_id": 1,
+    "payroll_id": 4,
     "component_id": 10,
     "element_classification_code": "STANDARD_EARNING",
     "effective_as_of_date": "2026-06-21",

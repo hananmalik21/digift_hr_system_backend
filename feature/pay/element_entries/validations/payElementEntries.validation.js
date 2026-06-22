@@ -64,6 +64,10 @@ const ISO_DATE_FIELDS = new Set([
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+export const ELEMENT_ENTRIES_LIST_DEFAULT_PAGE = 1;
+export const ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT = 20;
+export const ELEMENT_ENTRIES_LIST_MAX_LIMIT = 100;
+
 function throwIfErrors(errors) {
   if (errors.length === 0) return;
   throw new ValidationError('Validation failed', errors);
@@ -181,6 +185,133 @@ function validateKnownFieldTypes(errors, body) {
  */
 export function parseElementEntryGuidParam(value) {
   return parseGuid(value, 'element_entry_guid');
+}
+
+function parseOptionalPositiveInteger(raw, fieldName) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return undefined;
+  }
+  const n = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ValidationError('Validation failed', [`${fieldName} must be a positive integer`]);
+  }
+  return n;
+}
+
+function parseRequiredPositiveInteger(raw, fieldName) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    throw new ValidationError('Validation failed', [`${fieldName} is required`]);
+  }
+  const n = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ValidationError('Validation failed', [`${fieldName} must be a positive integer`]);
+  }
+  return n;
+}
+
+function parseOptionalTrimmedString(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return undefined;
+  }
+  return String(raw).trim();
+}
+
+/**
+ * @param {object} query
+ * @returns {{
+ *   enterprise_id: number,
+ *   employee_id?: number,
+ *   effective_date?: string,
+ *   status?: string,
+ *   component_id?: number,
+ *   classification?: string,
+ *   search?: string,
+ *   page: number,
+ *   limit: number
+ * }}
+ */
+export function validateListElementEntriesQuery(query = {}) {
+  const errors = [];
+  const q = query && typeof query === 'object' ? query : {};
+
+  let enterprise_id;
+  try {
+    enterprise_id = parseRequiredPositiveInteger(q.enterprise_id ?? q.enterpriseId, 'enterprise_id');
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
+    } else {
+      errors.push('enterprise_id is required');
+    }
+  }
+
+  let employee_id;
+  try {
+    employee_id = parseOptionalPositiveInteger(q.employee_id ?? q.employeeId, 'employee_id');
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
+    }
+  }
+
+  let component_id;
+  try {
+    component_id = parseOptionalPositiveInteger(q.component_id ?? q.componentId, 'component_id');
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
+    }
+  }
+
+  let effective_date;
+  if (q.effective_date !== undefined && q.effective_date !== null && String(q.effective_date).trim() !== '') {
+    const dateErrors = [];
+    validateIsoDate(dateErrors, { effective_date: q.effective_date }, 'effective_date');
+    if (dateErrors.length > 0) {
+      errors.push(...dateErrors);
+    } else {
+      effective_date = String(q.effective_date).trim().slice(0, 10);
+    }
+  }
+
+  const status = parseOptionalTrimmedString(q.status);
+  const classification = parseOptionalTrimmedString(q.classification);
+  const search = parseOptionalTrimmedString(q.search);
+
+  let page = ELEMENT_ENTRIES_LIST_DEFAULT_PAGE;
+  if (q.page !== undefined && q.page !== null && String(q.page).trim() !== '') {
+    const parsedPage = Number.parseInt(String(q.page), 10);
+    if (!Number.isFinite(parsedPage) || parsedPage < 1) {
+      errors.push('page must be a positive integer');
+    } else {
+      page = parsedPage;
+    }
+  }
+
+  let limit = ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT;
+  const limitRaw = q.limit ?? q.page_size ?? q.pageSize;
+  if (limitRaw !== undefined && limitRaw !== null && String(limitRaw).trim() !== '') {
+    const parsedLimit = Number.parseInt(String(limitRaw), 10);
+    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+      errors.push('limit must be a positive integer');
+    } else {
+      limit = Math.min(ELEMENT_ENTRIES_LIST_MAX_LIMIT, parsedLimit);
+    }
+  }
+
+  throwIfErrors(errors);
+
+  return {
+    enterprise_id,
+    employee_id,
+    effective_date,
+    status,
+    component_id,
+    classification,
+    search,
+    page,
+    limit
+  };
 }
 
 /**

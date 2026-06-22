@@ -45,17 +45,31 @@ async function assertComponentExists(connection, componentId) {
 /**
  * @param {import('oracledb').Connection} connection
  * @param {number} payrollId
+ * @param {number|null} enterpriseId
  */
-async function assertPayrollExists(connection, payrollId) {
-  const result = await connection.execute(
-    `SELECT 1
-       FROM PAY.PAYROLL_DEFINITIONS
-      WHERE PAYROLL_ID = :payroll_id`,
-    { payroll_id: payrollId },
-    { outFormat: oracledb.OUT_FORMAT_OBJECT }
-  );
+async function assertPayrollExists(connection, payrollId, enterpriseId = null) {
+  const sql =
+    enterpriseId != null
+      ? `SELECT 1
+           FROM PAY.PAYROLL_DEFINITIONS
+          WHERE PAYROLL_ID = :payroll_id
+            AND ENTERPRISE_ID = :enterprise_id`
+      : `SELECT 1
+           FROM PAY.PAYROLL_DEFINITIONS
+          WHERE PAYROLL_ID = :payroll_id`;
+
+  const binds =
+    enterpriseId != null
+      ? { payroll_id: payrollId, enterprise_id: enterpriseId }
+      : { payroll_id: payrollId };
+
+  const result = await connection.execute(sql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
   if (!result.rows?.length) {
-    throw new ValidationError('Validation failed', ['Selected payroll does not exist.']);
+    const message =
+      enterpriseId != null
+        ? 'Selected payroll does not exist for the selected enterprise.'
+        : 'Selected payroll does not exist.';
+    throw new ValidationError('Validation failed', [message]);
   }
 }
 
@@ -97,7 +111,7 @@ export async function validateElementEntryReferences(payload) {
     }
 
     if (needsPayroll) {
-      await assertPayrollExists(connection, payrollId);
+      await assertPayrollExists(connection, payrollId, enterpriseId);
     }
   } catch (err) {
     if (err instanceof ValidationError) throw err;

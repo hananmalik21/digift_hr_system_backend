@@ -4,6 +4,7 @@ info:
   version: 2.0.0
   description: |
     Create, update, and delete payroll element entries via `PAY.PAY_ELEMENT_ENTRIES_PKG`.
+    List and read use `PAY.V_PAY_ELEMENT_ENTRIES`.
 
     Update and delete use `element_entry_guid` only (never `element_entry_id`).
 
@@ -22,6 +23,55 @@ tags:
     description: Element entry lifecycle via PAY.PAY_ELEMENT_ENTRIES_PKG
 paths:
   /api/pay/element-entries:
+    get:
+      tags: [Payroll Element Entries]
+      summary: List element entries
+      operationId: listPayElementEntries
+      description: |
+        Reads from `PAY.V_PAY_ELEMENT_ENTRIES` for the Manage Element Entries list screen.
+        `enterprise_id` is required. `effective_date` matches rows where the date falls between
+        `EFFECTIVE_START_DATE` and `EFFECTIVE_END_DATE` (open-ended when `EFFECTIVE_END_DATE` is null).
+      parameters:
+        - name: enterprise_id
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: employee_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: effective_date
+          in: query
+          schema: { type: string, format: date }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: component_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: classification
+          in: query
+          schema: { type: string }
+        - name: search
+          in: query
+          description: Searches ELEMENT_NAME, EMP_NUMBER, CLASSIFICATION, and STATUS
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated element entry list (empty array when no rows)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElementEntryListResponse'
+        '400':
+          description: Validation error
+        '500':
+          description: Unexpected system error
     post:
       tags: [Payroll Element Entries]
       summary: Create element entry
@@ -39,7 +89,7 @@ paths:
                 value:
                   enterprise_id: 1
                   employee_id: 1001
-                  payroll_id: 1
+                  payroll_id: 4
                   component_id: 10
                   element_classification_code: STANDARD_EARNING
                   effective_as_of_date: '2026-06-21'
@@ -88,6 +138,24 @@ paths:
   /api/pay/element-entries/{guid}:
     parameters:
       - $ref: '#/components/parameters/ElementEntryGuidPath'
+    get:
+      tags: [Payroll Element Entries]
+      summary: Get element entry by GUID
+      operationId: getPayElementEntryByGuid
+      description: Returns one row from `PAY.V_PAY_ELEMENT_ENTRIES` by `element_entry_guid`.
+      responses:
+        '200':
+          description: Element entry found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ElementEntryDetailResponse'
+        '400':
+          description: Invalid GUID
+        '404':
+          description: Element entry not found
+        '500':
+          description: Unexpected system error
     put:
       tags: [Payroll Element Entries]
       summary: Update element entry
@@ -235,3 +303,62 @@ components:
       properties:
         success: { type: boolean, example: false }
         message: { type: string }
+    ElementEntryListItem:
+      type: object
+      properties:
+        element_entry_id: { type: integer }
+        element_entry_guid: { type: string }
+        enterprise_id: { type: integer }
+        employee_id: { type: integer }
+        payroll_id: { type: integer }
+        component_id: { type: integer }
+        element_name: { type: string }
+        primary_entry_value: { type: number }
+        amount: { type: number }
+        currency_code: { type: string }
+        value_name: { type: string }
+        source: { type: string }
+        employment_level: { type: string }
+        seq: { type: integer }
+        reason: { type: string }
+        classification: { type: string }
+        ldg: { type: string }
+        emp_number: { type: string }
+        status: { type: string }
+        effective_as_of_date: { type: string, format: date }
+        effective_start_date: { type: string, format: date }
+        effective_end_date: { type: string, format: date, nullable: true }
+        entry_type_code: { type: string }
+        element_processing_type_code: { type: string }
+        processed_flag: { type: string, enum: [Y, N] }
+        retroactive_flag: { type: string, enum: [Y, N] }
+        automatic_entry_flag: { type: string, enum: [Y, N] }
+        created_by: { type: string }
+        creation_date: { type: string, format: date-time }
+        last_updated_by: { type: string }
+        last_update_date: { type: string, format: date-time }
+    ElementEntryListResponse:
+      type: object
+      required: [success, data, pagination]
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ElementEntryListItem'
+        pagination:
+          type: object
+          properties:
+            page: { type: integer, example: 1 }
+            limit: { type: integer, example: 20 }
+            total: { type: integer, example: 0 }
+            total_pages: { type: integer, example: 0 }
+            has_next: { type: boolean, example: false }
+            has_previous: { type: boolean, example: false }
+    ElementEntryDetailResponse:
+      type: object
+      required: [success, data]
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          $ref: '#/components/schemas/ElementEntryListItem'
