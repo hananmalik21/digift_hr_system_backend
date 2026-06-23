@@ -1,6 +1,7 @@
 node_modules/
 .DS_Store
 uploads/
+.env
 
 scripts/seed-admin.local.js
 
