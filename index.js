@@ -104,6 +104,9 @@ import grcControlController from './feature/grc/controls/controller/grcControlCo
 import grcAssetController from './feature/grc/assets/controller/grcAssetController.js';
 import grcQuestionController from './feature/grc/questions/controller/grcQuestionController.js';
 import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
+import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
+import payFlexfieldSegmentValuesRoutes from './feature/pay/flexfield_segment_values/routes/payFlexfieldSegmentValues.routes.js';
+import payElementsRoutes from './feature/pay/elements/routes/payElements.routes.js';
 import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -336,6 +339,15 @@ app.use('/api/grc/questions', grcQuestionController);
 
 // Payroll — element entries (PAY.PAY_ELEMENT_ENTRIES_PKG)
 app.use('/api/pay', payElementEntriesRoutes);
+
+// Payroll — flexfield segments (PAY.PAY_FLEXFIELD_SEGMENTS_PKG)
+app.use('/api/pay', payFlexfieldSegmentsRoutes);
+
+// Payroll — flexfield segment values (PAY.PAY_FLEXFIELD_VALUES_PKG)
+app.use('/api/pay', payFlexfieldSegmentValuesRoutes);
+
+// Payroll — elements (PAY.PAY_ELEMENTS_PKG)
+app.use('/api/pay', payElementsRoutes);
 
 // Payroll — lookups (PAY.PAY_LOOKUPS_PKG / PAY.V_PAY_LOOKUP_VALUES)
 app.use('/api/pay', payLookupsRoutes);

@@ -5,7 +5,7 @@
  * @swagger
  * tags:
  *   - name: Payroll Element Entries
- *     description: Element entry lifecycle via PAY.PAY_ELEMENT_ENTRIES_PKG
+ *     description: Element entry lifecycle via PAY.PAY_ELEMENT_ENTRIES_PKG (uses element_id, not component_id)
  *
  * @swagger
  * components:
@@ -15,7 +15,7 @@
  *       required:
  *         - enterprise_id
  *         - employee_id
- *         - component_id
+ *         - element_id
  *         - effective_as_of_date
  *         - effective_start_date
  *         - pay_value
@@ -24,7 +24,7 @@
  *         enterprise_id: { type: integer, example: 1 }
  *         employee_id: { type: integer, example: 1001 }
  *         payroll_id: { type: integer, example: 1 }
- *         component_id: { type: integer, example: 10 }
+ *         element_id: { type: integer, example: 1001 }
  *         element_classification_code: { type: string, example: STANDARD_EARNING }
  *         effective_as_of_date: { type: string, format: date, example: '2026-06-21' }
  *         effective_start_date: { type: string, format: date, example: '2026-06-01' }
@@ -79,7 +79,7 @@
  *         enterprise_id: { type: integer }
  *         employee_id: { type: integer }
  *         payroll_id: { type: integer }
- *         component_id: { type: integer }
+ *         element_id: { type: integer }
  *         element_name: { type: string }
  *         primary_entry_value: { type: number }
  *         amount: { type: number }
@@ -155,7 +155,7 @@
  *         name: status
  *         schema: { type: string }
  *       - in: query
- *         name: component_id
+ *         name: element_id
  *         schema: { type: integer, minimum: 1 }
  *       - in: query
  *         name: classification
@@ -195,7 +195,7 @@
  *             enterprise_id: 1
  *             employee_id: 1001
  *             payroll_id: 4
- *             component_id: 10
+ *             element_id: 1001
  *             element_classification_code: STANDARD_EARNING
  *             effective_as_of_date: '2026-06-21'
  *             effective_start_date: '2026-06-01'
@@ -225,14 +225,14 @@
  *             batch_id: null
  *
  * @swagger
- * /api/pay/element-entries/{guid}:
+ * /api/pay/element-entries/{elementEntryGuid}:
  *   get:
  *     tags: [Payroll Element Entries]
  *     summary: Get element entry by GUID
  *     description: Returns one row from PAY.V_PAY_ELEMENT_ENTRIES by element_entry_guid.
  *     parameters:
  *       - in: path
- *         name: guid
+ *         name: elementEntryGuid
  *         required: true
  *         schema: { type: string }
  *         description: 32-character element_entry_guid
@@ -255,7 +255,7 @@
  *     description: Calls PAY.PAY_ELEMENT_ENTRIES_PKG.UPDATE_ELEMENT_ENTRY using element_entry_guid only.
  *     parameters:
  *       - in: path
- *         name: guid
+ *         name: elementEntryGuid
  *         required: true
  *         schema: { type: string }
  *         description: 32-character element_entry_guid
@@ -278,7 +278,7 @@
  *     description: Calls PAY.PAY_ELEMENT_ENTRIES_PKG.DELETE_ELEMENT_ENTRY using element_entry_guid only.
  *     parameters:
  *       - in: path
- *         name: guid
+ *         name: elementEntryGuid
  *         required: true
  *         schema: { type: string }
  *         description: 32-character element_entry_guid

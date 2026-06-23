@@ -1,0 +1,112 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Payroll Flexfield Segments API
+  version: 2.0.0
+  description: |
+    Production CRUD APIs for `PAY.PAY_FLEXFIELD_SEGMENTS_PKG` using `SEGMENT_GUID` (RAW(16), 32-char hex) as the primary identifier.
+    Reads from `PAY.V_FLEXFIELD_STRUCTURE_SEGMENTS`.
+
+servers:
+  - url: http://localhost:3000
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    PayFlexfieldSegmentCreateRequest:
+      type: object
+      required: [enterprise_id, segment_name, segment_code, data_type, max_length]
+      properties:
+        enterprise_id: { type: integer, example: 1 }
+        segment_name: { type: string, example: Product Line }
+        segment_code: { type: string, example: PRODUCT_LINE }
+        description: { type: string, example: Product hierarchy segment }
+        data_type: { type: string, enum: [TEXT, NUMBER, DATE, LOV] }
+        max_length: { type: integer, example: 30 }
+        display_sequence: { type: integer, example: 1 }
+        required_flag: { type: string, enum: [Y, N] }
+        enabled_flag: { type: string, enum: [Y, N] }
+
+    PayFlexfieldSegment:
+      type: object
+      properties:
+        segment_id: { type: integer }
+        segment_guid: { type: string, example: A8F4B9D2E6C14A56B7C891D4E3F5A621 }
+        enterprise_id: { type: integer }
+        segment_name: { type: string }
+        segment_code: { type: string }
+        description: { type: string }
+        data_type: { type: string }
+        max_length: { type: integer }
+        display_sequence: { type: integer }
+        required_flag: { type: string }
+        required_flag_display: { type: string }
+        enabled_flag: { type: string }
+        enabled_flag_display: { type: string }
+
+paths:
+  /api/pay/flexfield-segments:
+    get:
+      summary: List segments
+      parameters:
+        - { name: enterprise_id, in: query, required: true, schema: { type: integer } }
+        - { name: segment_guid, in: query, schema: { type: string } }
+        - { name: segment_name, in: query, schema: { type: string } }
+        - { name: segment_code, in: query, schema: { type: string } }
+        - { name: data_type, in: query, schema: { type: string } }
+        - { name: required_flag, in: query, schema: { type: string, enum: [Y, N] } }
+        - { name: enabled_flag, in: query, schema: { type: string, enum: [Y, N] } }
+        - { name: sortBy, in: query, schema: { type: string } }
+        - { name: sortOrder, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated list
+    post:
+      summary: Create segment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayFlexfieldSegmentCreateRequest'
+      responses:
+        '200':
+          description: Created
+
+  /api/pay/flexfield-segments/{segmentGuid}:
+    get:
+      summary: Get segment by GUID
+      parameters:
+        - { name: segmentGuid, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Detail
+    put:
+      summary: Update segment
+      parameters:
+        - { name: segmentGuid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayFlexfieldSegmentCreateRequest'
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete segment
+      parameters:
+        - { name: segmentGuid, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Deleted

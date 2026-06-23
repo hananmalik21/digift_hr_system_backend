@@ -1,21 +1,61 @@
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
 import { parseGuid } from '../../../../utils/guidUtils.js';
+import { getActingEnterpriseId } from '../../../../utils/userContext.js';
+import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
 
-const CREATE_REQUIRED_INTEGER_FIELDS = ['enterprise_id', 'employee_id', 'component_id'];
+export const ELEMENT_ENTRIES_LIST_DEFAULT_PAGE = 1;
+export const ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT = 20;
+export const ELEMENT_ENTRIES_LIST_MAX_LIMIT = 100;
+
+const ALLOWED_SORT_COLUMNS = new Set([
+  'employee_id',
+  'element_id',
+  'effective_start_date',
+  'creation_date'
+]);
+
+const CREATE_REQUIRED_INTEGER_FIELDS = ['enterprise_id', 'employee_id', 'element_id'];
 const CREATE_REQUIRED_DATE_FIELDS = ['effective_as_of_date', 'effective_start_date'];
 const CREATE_REQUIRED_NUMBER_FIELDS = ['pay_value', 'amount'];
 
-const DEPRECATED_FIELDS = new Set([
-  'input_value_id',
-  'text_value',
-  'date_value',
-  'assignment_id'
+const ALLOWED_BODY_FIELDS = new Set([
+  'enterprise_id',
+  'employee_id',
+  'payroll_id',
+  'element_id',
+  'effective_as_of_date',
+  'effective_start_date',
+  'effective_end_date',
+  'entry_type_code',
+  'source_code',
+  'element_classification_code',
+  'element_processing_type_code',
+  'pay_value',
+  'amount',
+  'currency_code',
+  'approval_status_code',
+  'cost_allocation_keyflex_id',
+  'costing_type_code',
+  'account_code',
+  'cost_center_code',
+  'context_segment_code',
+  'context_value',
+  'comments',
+  'subpriority',
+  'creator_type_code',
+  'processed_flag',
+  'retroactive_flag',
+  'automatic_entry_flag',
+  'sequence_number',
+  'reason_text',
+  'source_reference',
+  'batch_id'
 ]);
 
 const POSITIVE_INTEGER_FIELDS = new Set([
   'enterprise_id',
   'employee_id',
-  'component_id',
+  'element_id',
   'payroll_id',
   'subpriority',
   'sequence_number'
@@ -64,10 +104,6 @@ const ISO_DATE_FIELDS = new Set([
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export const ELEMENT_ENTRIES_LIST_DEFAULT_PAGE = 1;
-export const ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT = 20;
-export const ELEMENT_ENTRIES_LIST_MAX_LIMIT = 100;
-
 function throwIfErrors(errors) {
   if (errors.length === 0) return;
   throw new ValidationError('Validation failed', errors);
@@ -75,6 +111,11 @@ function throwIfErrors(errors) {
 
 function isBlank(value) {
   return value == null || String(value).trim() === '';
+}
+
+export function firstValidationMessage(err) {
+  const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
+  return details[0] || err?.message || 'Validation failed';
 }
 
 function validatePositiveInteger(errors, body, field, { required = false } = {}) {
@@ -104,7 +145,7 @@ function validateNumericAmount(errors, body, field, { required = false } = {}) {
 function validateOptionalString(errors, body, field) {
   const raw = body[field];
   if (raw === undefined || raw === null) return;
-  if (typeof raw !== 'string') {
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
     errors.push(`${field} must be a string`);
     return;
   }
@@ -114,13 +155,17 @@ function validateOptionalString(errors, body, field) {
   }
 }
 
-function validateDeprecatedFields(errors, body) {
-  for (const field of DEPRECATED_FIELDS) {
-    if (body[field] !== undefined && body[field] !== null) {
-      if (field === 'assignment_id') {
-        errors.push(`${field} is no longer supported`);
+function validateUnknownFields(errors, body) {
+  for (const key of Object.keys(body)) {
+    if (!ALLOWED_BODY_FIELDS.has(key)) {
+      if (key === 'component_id') {
+        errors.push('component_id is no longer supported; use element_id');
+      } else if (key === 'assignment_id') {
+        errors.push(`${key} is no longer supported`);
+      } else if (['input_value_id', 'text_value', 'date_value'].includes(key)) {
+        errors.push(`${key} is no longer supported; use pay_value and amount instead`);
       } else {
-        errors.push(`${field} is no longer supported; use pay_value and amount instead`);
+        errors.push(`Unknown field: ${key}`);
       }
     }
   }
@@ -179,109 +224,175 @@ function validateKnownFieldTypes(errors, body) {
   }
 }
 
+function parseOptionalPositiveInt(errors, raw, field) {
+  if (isBlank(raw)) return null;
+  const errorsBefore = errors.length;
+  validatePositiveInteger(errors, { [field]: raw }, field);
+  if (errors.length > errorsBefore) return null;
+  return Number(raw);
+}
+
+function parseOptionalIsoDate(errors, raw, field) {
+  if (isBlank(raw)) return null;
+  const errorsBefore = errors.length;
+  validateIsoDate(errors, { [field]: raw }, field);
+  if (errors.length > errorsBefore) return null;
+  return String(raw).trim().slice(0, 10);
+}
+
+function normalizeYnFlag(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  return String(raw).trim().toUpperCase();
+}
+
+function trimOrNull(value) {
+  if (value == null) return null;
+  const s = String(value).trim();
+  return s === '' ? null : s;
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+function buildElementEntryPayload(body) {
+  return {
+    enterprise_id: Number(body.enterprise_id),
+    employee_id: Number(body.employee_id),
+    payroll_id: body.payroll_id != null && body.payroll_id !== '' ? Number(body.payroll_id) : null,
+    element_id: Number(body.element_id),
+    effective_as_of_date: String(body.effective_as_of_date).trim().slice(0, 10),
+    effective_start_date: String(body.effective_start_date).trim().slice(0, 10),
+    effective_end_date:
+      body.effective_end_date != null && String(body.effective_end_date).trim() !== ''
+        ? String(body.effective_end_date).trim().slice(0, 10)
+        : null,
+    entry_type_code: trimOrNull(body.entry_type_code),
+    source_code: trimOrNull(body.source_code),
+    element_classification_code: trimOrNull(body.element_classification_code),
+    element_processing_type_code: trimOrNull(body.element_processing_type_code),
+    pay_value: Number(body.pay_value),
+    amount: Number(body.amount),
+    currency_code: trimOrNull(body.currency_code),
+    approval_status_code: trimOrNull(body.approval_status_code),
+    cost_allocation_keyflex_id: trimOrNull(body.cost_allocation_keyflex_id),
+    costing_type_code: trimOrNull(body.costing_type_code),
+    account_code: trimOrNull(body.account_code),
+    cost_center_code: trimOrNull(body.cost_center_code),
+    context_segment_code: trimOrNull(body.context_segment_code),
+    context_value: trimOrNull(body.context_value),
+    comments: trimOrNull(body.comments),
+    subpriority:
+      body.subpriority != null && body.subpriority !== '' ? Number(body.subpriority) : null,
+    creator_type_code: trimOrNull(body.creator_type_code),
+    processed_flag: normalizeYnFlag(body.processed_flag),
+    retroactive_flag: normalizeYnFlag(body.retroactive_flag),
+    automatic_entry_flag: normalizeYnFlag(body.automatic_entry_flag),
+    sequence_number:
+      body.sequence_number != null && body.sequence_number !== ''
+        ? Number(body.sequence_number)
+        : null,
+    reason_text: trimOrNull(body.reason_text),
+    source_reference: trimOrNull(body.source_reference),
+    batch_id: trimOrNull(body.batch_id)
+  };
+}
+
+function validateRequiredCreateFields(errors, body) {
+  for (const field of CREATE_REQUIRED_INTEGER_FIELDS) {
+    validatePositiveInteger(errors, body, field, { required: true });
+  }
+  for (const field of CREATE_REQUIRED_DATE_FIELDS) {
+    validateIsoDate(errors, body, field, { required: true });
+  }
+  for (const field of CREATE_REQUIRED_NUMBER_FIELDS) {
+    validateNumericAmount(errors, body, field, { required: true });
+  }
+  validateDateRange(errors, body);
+}
+
+function validateDateRange(errors, body) {
+  const start = body.effective_start_date;
+  const end = body.effective_end_date;
+  if (!start || !end) return;
+  const startStr = String(start).trim().slice(0, 10);
+  const endStr = String(end).trim().slice(0, 10);
+  if (ISO_DATE_RE.test(startStr) && ISO_DATE_RE.test(endStr) && endStr < startStr) {
+    errors.push('effective_end_date must be greater than or equal to effective_start_date');
+  }
+}
+
+/**
+ * @param {import('express').Request} req
+ * @param {number} enterpriseId
+ */
+export function assertEnterpriseAccess(req, enterpriseId) {
+  const tokenEnterpriseId = getActingEnterpriseId(req);
+  if (tokenEnterpriseId != null && tokenEnterpriseId !== enterpriseId) {
+    throw new ForbiddenError('Access denied: enterprise_id does not match authenticated enterprise');
+  }
+}
+
 /**
  * @param {unknown} value
  * @returns {string}
  */
 export function parseElementEntryGuidParam(value) {
-  return parseGuid(value, 'element_entry_guid');
+  return parseGuid(value, 'elementEntryGuid');
 }
 
-function parseOptionalPositiveInteger(raw, fieldName) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return undefined;
+function parseEnterpriseIdField(errors, raw, { required = true } = {}) {
+  try {
+    return parseEnterpriseId(raw, { required, missingMessage: 'enterprise_id is required' });
+  } catch (err) {
+    errors.push(err.message);
+    return null;
   }
-  const n = Number.parseInt(String(raw), 10);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ValidationError('Validation failed', [`${fieldName} must be a positive integer`]);
-  }
-  return n;
-}
-
-function parseRequiredPositiveInteger(raw, fieldName) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    throw new ValidationError('Validation failed', [`${fieldName} is required`]);
-  }
-  const n = Number.parseInt(String(raw), 10);
-  if (!Number.isFinite(n) || n <= 0) {
-    throw new ValidationError('Validation failed', [`${fieldName} must be a positive integer`]);
-  }
-  return n;
-}
-
-function parseOptionalTrimmedString(raw) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
-    return undefined;
-  }
-  return String(raw).trim();
 }
 
 /**
- * @param {object} query
- * @returns {{
- *   enterprise_id: number,
- *   employee_id?: number,
- *   effective_date?: string,
- *   status?: string,
- *   component_id?: number,
- *   classification?: string,
- *   search?: string,
- *   page: number,
- *   limit: number
- * }}
+ * @param {Record<string, unknown>} query
  */
 export function validateListElementEntriesQuery(query = {}) {
   const errors = [];
   const q = query && typeof query === 'object' ? query : {};
 
-  let enterprise_id;
-  try {
-    enterprise_id = parseRequiredPositiveInteger(q.enterprise_id ?? q.enterpriseId, 'enterprise_id');
-  } catch (err) {
-    if (err instanceof ValidationError) {
-      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
-    } else {
-      errors.push('enterprise_id is required');
+  const enterprise_id = parseEnterpriseIdField(errors, q.enterprise_id ?? q.enterpriseId, {
+    required: true
+  });
+
+  if (q.component_id !== undefined || q.componentId !== undefined) {
+    errors.push('component_id filter is no longer supported; use element_id');
+  }
+
+  let employee_id = parseOptionalPositiveInt(errors, q.employee_id ?? q.employeeId, 'employee_id');
+  let element_id = parseOptionalPositiveInt(errors, q.element_id ?? q.elementId, 'element_id');
+  let payroll_id = parseOptionalPositiveInt(errors, q.payroll_id ?? q.payrollId, 'payroll_id');
+  const effective_start_date = parseOptionalIsoDate(errors, q.effective_start_date, 'effective_start_date');
+  const effective_end_date = parseOptionalIsoDate(errors, q.effective_end_date, 'effective_end_date');
+
+  const approval_status_code = isBlank(q.approval_status_code ?? q.status)
+    ? null
+    : String(q.approval_status_code ?? q.status).trim();
+
+  const sortByRaw = q.sortBy ?? q.sort_by;
+  if (sortByRaw !== undefined && sortByRaw !== null && String(sortByRaw).trim() !== '') {
+    if (!ALLOWED_SORT_COLUMNS.has(String(sortByRaw).trim().toLowerCase())) {
+      errors.push('sortBy must be one of: employee_id, element_id, effective_start_date, creation_date');
     }
   }
 
-  let employee_id;
-  try {
-    employee_id = parseOptionalPositiveInteger(q.employee_id ?? q.employeeId, 'employee_id');
-  } catch (err) {
-    if (err instanceof ValidationError) {
-      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
+  const sortOrderRaw = q.sortOrder ?? q.sort_order;
+  if (sortOrderRaw !== undefined && sortOrderRaw !== null && String(sortOrderRaw).trim() !== '') {
+    const order = String(sortOrderRaw).trim().toUpperCase();
+    if (order !== 'ASC' && order !== 'DESC') {
+      errors.push('sortOrder must be ASC or DESC');
     }
   }
-
-  let component_id;
-  try {
-    component_id = parseOptionalPositiveInteger(q.component_id ?? q.componentId, 'component_id');
-  } catch (err) {
-    if (err instanceof ValidationError) {
-      errors.push(...(Array.isArray(err.errors) ? err.errors : [err.message]));
-    }
-  }
-
-  let effective_date;
-  if (q.effective_date !== undefined && q.effective_date !== null && String(q.effective_date).trim() !== '') {
-    const dateErrors = [];
-    validateIsoDate(dateErrors, { effective_date: q.effective_date }, 'effective_date');
-    if (dateErrors.length > 0) {
-      errors.push(...dateErrors);
-    } else {
-      effective_date = String(q.effective_date).trim().slice(0, 10);
-    }
-  }
-
-  const status = parseOptionalTrimmedString(q.status);
-  const classification = parseOptionalTrimmedString(q.classification);
-  const search = parseOptionalTrimmedString(q.search);
 
   let page = ELEMENT_ENTRIES_LIST_DEFAULT_PAGE;
-  if (q.page !== undefined && q.page !== null && String(q.page).trim() !== '') {
-    const parsedPage = Number.parseInt(String(q.page), 10);
-    if (!Number.isFinite(parsedPage) || parsedPage < 1) {
+  if (q.page !== undefined) {
+    const parsedPage = parseInt(q.page, 10);
+    if (Number.isNaN(parsedPage) || parsedPage < 1) {
       errors.push('page must be a positive integer');
     } else {
       page = parsedPage;
@@ -290,9 +401,9 @@ export function validateListElementEntriesQuery(query = {}) {
 
   let limit = ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT;
   const limitRaw = q.limit ?? q.page_size ?? q.pageSize;
-  if (limitRaw !== undefined && limitRaw !== null && String(limitRaw).trim() !== '') {
-    const parsedLimit = Number.parseInt(String(limitRaw), 10);
-    if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+  if (limitRaw !== undefined) {
+    const parsedLimit = parseInt(limitRaw, 10);
+    if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
       errors.push('limit must be a positive integer');
     } else {
       limit = Math.min(ELEMENT_ENTRIES_LIST_MAX_LIMIT, parsedLimit);
@@ -304,11 +415,19 @@ export function validateListElementEntriesQuery(query = {}) {
   return {
     enterprise_id,
     employee_id,
-    effective_date,
-    status,
-    component_id,
-    classification,
-    search,
+    element_id,
+    payroll_id,
+    approval_status_code,
+    effective_start_date,
+    effective_end_date,
+    sort_by:
+      sortByRaw != null && String(sortByRaw).trim() !== ''
+        ? String(sortByRaw).trim().toLowerCase()
+        : 'creation_date',
+    sort_order:
+      sortOrderRaw != null && String(sortOrderRaw).trim() !== ''
+        ? String(sortOrderRaw).trim().toUpperCase()
+        : 'DESC',
     page,
     limit
   };
@@ -323,22 +442,12 @@ export function validateCreateElementEntryBody(body) {
   const b = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : {};
 
   validateFlatObject(errors, b);
-  validateDeprecatedFields(errors, b);
-
-  for (const field of CREATE_REQUIRED_INTEGER_FIELDS) {
-    validatePositiveInteger(errors, b, field, { required: true });
-  }
-  for (const field of CREATE_REQUIRED_DATE_FIELDS) {
-    validateIsoDate(errors, b, field, { required: true });
-  }
-  for (const field of CREATE_REQUIRED_NUMBER_FIELDS) {
-    validateNumericAmount(errors, b, field, { required: true });
-  }
-
+  validateUnknownFields(errors, b);
+  validateRequiredCreateFields(errors, b);
   validateKnownFieldTypes(errors, b);
 
   throwIfErrors(errors);
-  return b;
+  return buildElementEntryPayload(b);
 }
 
 /**
@@ -346,18 +455,5 @@ export function validateCreateElementEntryBody(body) {
  * @returns {Record<string, unknown>}
  */
 export function validateUpdateElementEntryBody(body) {
-  const errors = [];
-  const b = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : {};
-
-  validateFlatObject(errors, b);
-  validateDeprecatedFields(errors, b);
-
-  if (Object.keys(b).length === 0) {
-    errors.push('request body must include at least one field to update');
-  }
-
-  validateKnownFieldTypes(errors, b);
-
-  throwIfErrors(errors);
-  return b;
+  return validateCreateElementEntryBody(body);
 }

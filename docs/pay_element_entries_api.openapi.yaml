@@ -11,7 +11,7 @@ info:
     Entry values: numeric `pay_value` and `amount` (NUMBER(18,3)), plus `currency_code`.
     Costing: `cost_allocation_keyflex_id` is VARCHAR2(100).
 
-    Removed/unsupported: `INPUT_VALUE_ID`, `TEXT_VALUE`, `DATE_VALUE`, `ASSIGNMENT_ID`.
+    Uses `element_id` (not `component_id`). Removed/unsupported: `component_id`, `INPUT_VALUE_ID`, `TEXT_VALUE`, `DATE_VALUE`, `ASSIGNMENT_ID`.
 
     **Auth:** JWT required. Audit columns from `req.user.username`.
 
@@ -39,22 +39,27 @@ paths:
         - name: employee_id
           in: query
           schema: { type: integer, minimum: 1 }
-        - name: effective_date
-          in: query
-          schema: { type: string, format: date }
-        - name: status
-          in: query
-          schema: { type: string }
-        - name: component_id
+        - name: element_id
           in: query
           schema: { type: integer, minimum: 1 }
-        - name: classification
+        - name: payroll_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: approval_status_code
           in: query
           schema: { type: string }
-        - name: search
+        - name: effective_start_date
           in: query
-          description: Searches ELEMENT_NAME, EMP_NUMBER, CLASSIFICATION, and STATUS
-          schema: { type: string }
+          schema: { type: string, format: date }
+        - name: effective_end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [employee_id, element_id, effective_start_date, creation_date] }
+        - name: sortOrder
+          in: query
+          schema: { type: string, enum: [asc, desc] }
         - name: page
           in: query
           schema: { type: integer, minimum: 1, default: 1 }
@@ -90,7 +95,7 @@ paths:
                   enterprise_id: 1
                   employee_id: 1001
                   payroll_id: 4
-                  component_id: 10
+                  element_id: 1001
                   element_classification_code: STANDARD_EARNING
                   effective_as_of_date: '2026-06-21'
                   effective_start_date: '2026-06-01'
@@ -135,7 +140,7 @@ paths:
                 $ref: '#/components/schemas/ElementEntryBusinessErrorResponse'
         '500':
           description: Unexpected system error
-  /api/pay/element-entries/{guid}:
+  /api/pay/element-entries/{elementEntryGuid}:
     parameters:
       - $ref: '#/components/parameters/ElementEntryGuidPath'
     get:
@@ -210,7 +215,7 @@ paths:
 components:
   parameters:
     ElementEntryGuidPath:
-      name: guid
+      name: elementEntryGuid
       in: path
       required: true
       description: 32-character hexadecimal element_entry_guid
@@ -223,7 +228,7 @@ components:
       required:
         - enterprise_id
         - employee_id
-        - component_id
+        - element_id
         - effective_as_of_date
         - effective_start_date
         - pay_value
@@ -233,7 +238,7 @@ components:
         enterprise_id: { type: integer, minimum: 1 }
         employee_id: { type: integer, minimum: 1 }
         payroll_id: { type: integer, minimum: 1 }
-        component_id: { type: integer, minimum: 1 }
+        element_id: { type: integer, minimum: 1 }
         element_classification_code: { type: string }
         effective_as_of_date: { type: string, format: date }
         effective_start_date: { type: string, format: date }
@@ -272,7 +277,7 @@ components:
         enterprise_id: { type: integer }
         employee_id: { type: integer }
         payroll_id: { type: integer }
-        component_id: { type: integer }
+        element_id: { type: integer }
         pay_value: { type: number }
         amount: { type: number }
         currency_code: { type: string }
@@ -311,7 +316,7 @@ components:
         enterprise_id: { type: integer }
         employee_id: { type: integer }
         payroll_id: { type: integer }
-        component_id: { type: integer }
+        element_id: { type: integer }
         element_name: { type: string }
         primary_entry_value: { type: number }
         amount: { type: number }

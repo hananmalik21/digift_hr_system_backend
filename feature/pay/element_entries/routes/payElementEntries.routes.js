@@ -5,19 +5,19 @@
 
 import express from 'express';
 import {
+  createElementEntryHandler,
   deleteElementEntryHandler,
-  getElementEntriesList,
-  getElementEntry,
-  postElementEntry,
-  putElementEntry
+  getElementEntriesHandler,
+  getElementEntryByGuidHandler,
+  updateElementEntryHandler
 } from '../controllers/payElementEntries.controller.js';
 
 const router = express.Router();
 
-router.get('/element-entries', getElementEntriesList);
-router.get('/element-entries/:guid', getElementEntry);
-router.post('/element-entries', postElementEntry);
-router.put('/element-entries/:guid', putElementEntry);
-router.delete('/element-entries/:guid', deleteElementEntryHandler);
+router.get('/element-entries', ...getElementEntriesHandler);
+router.get('/element-entries/:elementEntryGuid', ...getElementEntryByGuidHandler);
+router.post('/element-entries', ...createElementEntryHandler);
+router.put('/element-entries/:elementEntryGuid', ...updateElementEntryHandler);
+router.delete('/element-entries/:elementEntryGuid', ...deleteElementEntryHandler);
 
 export default router;
