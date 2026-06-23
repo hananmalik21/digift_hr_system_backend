@@ -1,0 +1,150 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Payroll Elements API
+  version: 1.0.0
+  description: |
+    Production CRUD APIs for `PAY.PAY_ELEMENTS_PKG` using `ELEMENT_GUID` (RAW(16), 32-char hex) as the primary identifier.
+    Reads from `PAY.V_PAY_ELEMENTS`.
+
+servers:
+  - url: http://localhost:3000
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    PayElementCostingValue:
+      type: object
+      required: [segment_id, segment_value_id]
+      properties:
+        segment_id: { type: integer, example: 1 }
+        segment_value_id: { type: integer, example: 10 }
+
+    PayElementCostingValueDetail:
+      type: object
+      properties:
+        segment_id: { type: integer }
+        segment_name: { type: string, example: Cost Center }
+        segment_value_id: { type: integer }
+        segment_value_name: { type: string, example: IT }
+
+    PayElementProcessingControls:
+      type: object
+      properties:
+        recurring_flag: { type: string, enum: [Y, N] }
+        costable_flag: { type: string, enum: [Y, N] }
+        taxable_flag: { type: string, enum: [Y, N] }
+        pensionable_flag: { type: string, enum: [Y, N] }
+        retro_enabled_flag: { type: string, enum: [Y, N] }
+        proration_enabled_flag: { type: string, enum: [Y, N] }
+        priority: { type: integer }
+        processing_frequency: { type: string }
+
+    PayElementCreateRequest:
+      type: object
+      required: [enterprise_id, element_code, element_name]
+      properties:
+        enterprise_id: { type: integer, example: 1 }
+        element_code: { type: string, example: BASIC_SALARY }
+        element_name: { type: string, example: Basic Salary }
+        description: { type: string }
+        category_code: { type: string, example: EARNINGS }
+        classification_code: { type: string, example: STANDARD_EARNINGS }
+        secondary_classification: { type: string }
+        legislative_data_group: { type: string, example: KUWAIT }
+        effective_start_date: { type: string, format: date }
+        effective_end_date: { type: string, format: date, nullable: true }
+        recurring_flag: { type: string, enum: [Y, N] }
+        costable_flag: { type: string, enum: [Y, N] }
+        taxable_flag: { type: string, enum: [Y, N] }
+        pensionable_flag: { type: string, enum: [Y, N] }
+        retro_enabled_flag: { type: string, enum: [Y, N] }
+        proration_enabled_flag: { type: string, enum: [Y, N] }
+        priority: { type: integer }
+        processing_frequency: { type: string, example: MONTHLY }
+        costing_values:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayElementCostingValue'
+
+    PayElement:
+      type: object
+      properties:
+        element_guid: { type: string }
+        element_code: { type: string }
+        element_name: { type: string }
+        processing_controls:
+          $ref: '#/components/schemas/PayElementProcessingControls'
+        costing_values:
+          type: array
+          items:
+            $ref: '#/components/schemas/PayElementCostingValueDetail'
+
+paths:
+  /api/pay/elements:
+    get:
+      summary: List pay elements
+      parameters:
+        - { name: enterprise_id, in: query, required: true, schema: { type: integer } }
+        - { name: element_code, in: query, schema: { type: string } }
+        - { name: element_name, in: query, schema: { type: string } }
+        - { name: category_code, in: query, schema: { type: string } }
+        - { name: classification_code, in: query, schema: { type: string } }
+        - { name: recurring_flag, in: query, schema: { type: string, enum: [Y, N] } }
+        - { name: costable_flag, in: query, schema: { type: string, enum: [Y, N] } }
+        - { name: taxable_flag, in: query, schema: { type: string, enum: [Y, N] } }
+        - { name: sortBy, in: query, schema: { type: string, enum: [element_code, element_name, creation_date] } }
+        - { name: sortOrder, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        '200':
+          description: Paginated list with meta.pagination
+    post:
+      summary: Create pay element
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayElementCreateRequest'
+      responses:
+        '200':
+          description: Element created
+
+  /api/pay/elements/{elementGuid}:
+    get:
+      summary: Get pay element by GUID
+      parameters:
+        - { name: elementGuid, in: path, required: true, schema: { type: string } }
+        - { name: enterprise_id, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: Element details
+    put:
+      summary: Update pay element
+      parameters:
+        - { name: elementGuid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayElementCreateRequest'
+      responses:
+        '200':
+          description: Element updated
+    delete:
+      summary: Delete pay element
+      parameters:
+        - { name: elementGuid, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Element deleted

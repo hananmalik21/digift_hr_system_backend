@@ -2,11 +2,14 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { textClobBind } from '../../../compensation/utils/oracleClobBinds.js';
 import {
+  auditInBind,
+  guidHexInBind,
   normalizeOutNumber,
   normalizeOutString,
   packageStatusIsSuccess
 } from '../../../../utils/oraclePackageUtils.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import { resolvePayElementEntriesUserMessage } from '../utils/payElementEntriesOracleErrors.js';
 
 export { packageStatusIsSuccess };
 
@@ -58,25 +61,6 @@ function statusOutBinds() {
   };
 }
 
-function auditInBind(value) {
-  const s = value == null ? '' : String(value).trim();
-  return {
-    val: s || 'SYSTEM',
-    dir: oracledb.BIND_IN,
-    type: oracledb.STRING,
-    maxSize: 200
-  };
-}
-
-function guidInBind(hex) {
-  return {
-    val: hex,
-    dir: oracledb.BIND_IN,
-    type: oracledb.STRING,
-    maxSize: 32
-  };
-}
-
 function payloadJsonInBind(payload) {
   return textClobBind(JSON.stringify(payload ?? {}));
 }
@@ -86,9 +70,10 @@ function payloadJsonInBind(payload) {
  */
 function parseCreateOut(outBinds) {
   const ob = outBinds || {};
+  const guid = normalizeOutString(ob.element_entry_guid);
   return {
     element_entry_id: normalizeOutNumber(ob.element_entry_id),
-    element_entry_guid: normalizeOutString(ob.element_entry_guid),
+    element_entry_guid: guid ? guid.toUpperCase() : null,
     status: normalizeOutString(ob.status),
     message: normalizeOutString(ob.message) ?? ''
   };
@@ -126,7 +111,11 @@ async function executePackageMutation(plsql, binds, parseOut) {
       await connection.rollback();
     } catch (_) {}
     logOracleError(err);
-    throw new DatabaseError(GENERIC_ERROR_MESSAGE, err);
+    throw new DatabaseError(
+      GENERIC_ERROR_MESSAGE,
+      err,
+      resolvePayElementEntriesUserMessage(null, err)
+    );
   } finally {
     try {
       await connection.close();
@@ -157,7 +146,7 @@ export async function createElementEntryViaPackage(payload, createdBy) {
  */
 export async function updateElementEntryViaPackage(elementEntryGuid, payload, updatedBy) {
   const binds = {
-    element_entry_guid: guidInBind(elementEntryGuid),
+    element_entry_guid: guidHexInBind(elementEntryGuid),
     payload_json: payloadJsonInBind(payload),
     updated_by: auditInBind(updatedBy),
     ...statusOutBinds()
@@ -172,7 +161,7 @@ export async function updateElementEntryViaPackage(elementEntryGuid, payload, up
  */
 export async function deleteElementEntryViaPackage(elementEntryGuid, deletedBy) {
   const binds = {
-    element_entry_guid: guidInBind(elementEntryGuid),
+    element_entry_guid: guidHexInBind(elementEntryGuid),
     deleted_by: auditInBind(deletedBy),
     ...statusOutBinds()
   };

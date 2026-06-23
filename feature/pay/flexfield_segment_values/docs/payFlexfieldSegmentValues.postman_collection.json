@@ -1,0 +1,76 @@
+{
+  "info": {
+    "name": "Digify ERP — Payroll Flexfield Segment Values",
+    "description": "CRUD for PAY.PAY_FLEXFIELD_VALUES_PKG. Clients use enterprise_id + segment_code (never segment_id).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "segment_value_guid", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "List Segment Values",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values?enterprise_id=1&page=1&limit=20&sortBy=value_name&sortOrder=asc"
+      }
+    },
+    {
+      "name": "Get Values By Segment Code",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values/by-segment/COST_CENTER?enterprise_id=1"
+      }
+    },
+    {
+      "name": "Get Segment Value by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values/{{segment_value_guid}}"
+      }
+    },
+    {
+      "name": "Create Segment Value",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"segment_code\": \"COST_CENTER\",\n  \"value_code\": \"IT\",\n  \"value_name\": \"Information Technology\",\n  \"description\": \"IT Cost Center\",\n  \"enabled_flag\": \"Y\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values"
+      }
+    },
+    {
+      "name": "Update Segment Value",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"segment_code\": \"COST_CENTER\",\n  \"value_code\": \"FIN\",\n  \"value_name\": \"Finance\",\n  \"description\": \"Finance Cost Center\",\n  \"enabled_flag\": \"Y\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values/{{segment_value_guid}}"
+      }
+    },
+    {
+      "name": "Delete Segment Value",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segment-values/{{segment_value_guid}}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "info": {
+    "name": "Digify ERP — Payroll Flexfield Segments",
+    "description": "CRUD APIs for PAY.PAY_FLEXFIELD_SEGMENTS_PKG using SEGMENT_GUID as primary identifier.\n\nSet {{baseUrl}}, {{jwt}}, and {{segment_guid}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "segment_guid", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "List Flexfield Segments",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/flexfield-segments?enterprise_id=1&page=1&limit=20&sortBy=display_sequence&sortOrder=asc",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "flexfield-segments"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "segment_guid", "value": "", "disabled": true },
+            { "key": "segment_name", "value": "", "disabled": true },
+            { "key": "segment_code", "value": "PRODUCT_LINE", "disabled": true },
+            { "key": "data_type", "value": "TEXT", "disabled": true },
+            { "key": "enabled_flag", "value": "Y", "disabled": true },
+            { "key": "required_flag", "value": "Y", "disabled": true },
+            { "key": "sortBy", "value": "display_sequence" },
+            { "key": "sortOrder", "value": "asc" },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Flexfield Segment by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segments/{{segment_guid}}"
+      }
+    },
+    {
+      "name": "Create Flexfield Segment",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"segment_name\": \"Product Line\",\n  \"segment_code\": \"PRODUCT_LINE\",\n  \"description\": \"Product hierarchy segment\",\n  \"data_type\": \"TEXT\",\n  \"max_length\": 30,\n  \"display_sequence\": 1,\n  \"required_flag\": \"Y\",\n  \"enabled_flag\": \"Y\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/flexfield-segments"
+      }
+    },
+    {
+      "name": "Update Flexfield Segment",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"segment_name\": \"Product Category\",\n  \"segment_code\": \"PRODUCT_CATEGORY\",\n  \"description\": \"Updated description\",\n  \"data_type\": \"TEXT\",\n  \"max_length\": 50,\n  \"display_sequence\": 2,\n  \"required_flag\": \"Y\",\n  \"enabled_flag\": \"Y\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/flexfield-segments/{{segment_guid}}"
+      }
+    },
+    {
+      "name": "Delete Flexfield Segment",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/flexfield-segments/{{segment_guid}}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "info": {
+    "name": "Digify ERP — Payroll Elements",
+    "description": "CRUD APIs for PAY.PAY_ELEMENTS_PKG using ELEMENT_GUID as primary identifier.\n\nSet {{baseUrl}}, {{jwt}}, and {{element_guid}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "element_guid", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "List Pay Elements",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/elements?enterprise_id=1&page=1&limit=20&sortBy=element_code&sortOrder=asc",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "elements"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "element_code", "value": "BASIC_SALARY", "disabled": true },
+            { "key": "element_name", "value": "", "disabled": true },
+            { "key": "category_code", "value": "EARNINGS", "disabled": true },
+            { "key": "classification_code", "value": "", "disabled": true },
+            { "key": "recurring_flag", "value": "Y", "disabled": true },
+            { "key": "costable_flag", "value": "Y", "disabled": true },
+            { "key": "taxable_flag", "value": "Y", "disabled": true },
+            { "key": "sortBy", "value": "element_code" },
+            { "key": "sortOrder", "value": "asc" },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Pay Element by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/elements/{{element_guid}}"
+      }
+    },
+    {
+      "name": "Create Pay Element",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"element_code\": \"BASIC_SALARY\",\n  \"element_name\": \"Basic Salary\",\n  \"description\": \"Monthly Basic Salary\",\n  \"category_code\": \"EARNINGS\",\n  \"classification_code\": \"STANDARD_EARNINGS\",\n  \"secondary_classification\": \"REGULAR\",\n  \"legislative_data_group\": \"KUWAIT\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": null,\n  \"recurring_flag\": \"Y\",\n  \"costable_flag\": \"Y\",\n  \"taxable_flag\": \"Y\",\n  \"pensionable_flag\": \"Y\",\n  \"retro_enabled_flag\": \"Y\",\n  \"proration_enabled_flag\": \"Y\",\n  \"priority\": 100,\n  \"processing_frequency\": \"MONTHLY\",\n  \"costing_values\": [\n    { \"segment_id\": 1, \"segment_value_id\": 10 },\n    { \"segment_id\": 2, \"segment_value_id\": 25 }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/elements"
+      }
+    },
+    {
+      "name": "Update Pay Element",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"element_code\": \"BASIC_SALARY\",\n  \"element_name\": \"Basic Salary Updated\",\n  \"description\": \"Updated Description\",\n  \"category_code\": \"EARNINGS\",\n  \"classification_code\": \"STANDARD_EARNINGS\",\n  \"secondary_classification\": \"REGULAR\",\n  \"legislative_data_group\": \"KUWAIT\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": null,\n  \"recurring_flag\": \"Y\",\n  \"costable_flag\": \"Y\",\n  \"taxable_flag\": \"Y\",\n  \"pensionable_flag\": \"Y\",\n  \"retro_enabled_flag\": \"Y\",\n  \"proration_enabled_flag\": \"Y\",\n  \"priority\": 100,\n  \"processing_frequency\": \"MONTHLY\",\n  \"costing_values\": [\n    { \"segment_id\": 1, \"segment_value_id\": 15 },\n    { \"segment_id\": 2, \"segment_value_id\": 30 }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/elements/{{element_guid}}"
+      }
+    },
+    {
+      "name": "Delete Pay Element",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": "{{baseUrl}}/api/pay/elements/{{element_guid}}"
+      }
+    }
+  ]
+}
