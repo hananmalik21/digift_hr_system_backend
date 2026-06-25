@@ -4,3 +4,5 @@ uploads/
 
 scripts/seed-admin.local.js
 
+.env.dev
+.env
