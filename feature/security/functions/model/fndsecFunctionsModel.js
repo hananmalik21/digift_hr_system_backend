@@ -2,15 +2,21 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { isHex32, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 import { NotFoundError, ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
-// NOTE: We validate GUIDs locally; packages may compare GUID strings case-sensitively.
+import {
+  normalizeCreateInput,
+  normalizeListFilters,
+  normalizeUpdatePatch
+} from '../utils/functionInputNormalizers.js';
 
 const LOG_TAG = 'fndsecFunctionsModel';
 
-const CREATE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION';
-const UPDATE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION';
-const DELETE_PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION';
+const PKG = 'FNDSEC.FNDSEC_FUNCTIONS_PKG';
+const CREATE_PROC = `${PKG}.CREATE_FUNCTION`;
+const UPDATE_PROC = `${PKG}.UPDATE_FUNCTION`;
+const DELETE_PROC = `${PKG}.DELETE_FUNCTION`;
+const GET_PROC = `${PKG}.GET_FUNCTION`;
+const GET_LIST_PROC = `${PKG}.GET_FUNCTIONS`;
 
-const FUNCTIONS_VIEW = 'FNDSEC.FNDSEC_FUNCTIONS_V';
 const FUNCTIONS_TABLE = 'FNDSEC.FNDSEC_FUNCTIONS';
 const MODULES_TABLE = 'FNDSEC.FNDSEC_MODULES';
 
@@ -18,7 +24,7 @@ function rethrowKnownOrWrapDb(err, context) {
   if (err instanceof NotFoundError || err instanceof ValidationError) throw err;
   if (err instanceof DatabaseError) throw err;
   console.error(`[${LOG_TAG}] ${context}`, err?.errorNum != null ? `ORA-${err.errorNum}` : '', err?.message || err);
-  throw new DatabaseError(err?.message || 'Database error', err, null);
+  throw new DatabaseError(err?.message || 'Database error', err, err?.message || null);
 }
 
 function parseGuidHexOrThrow(fieldName, guid) {
@@ -33,25 +39,7 @@ function parseGuidHexOrThrow(fieldName, guid) {
         : `${fieldName} must be exactly 32 hexadecimal characters (no dashes); received ${len} character(s)`
     ]);
   }
-  // Preserve caller casing (some packages compare string GUIDs case-sensitively).
   return cleaned;
-}
-
-function validateYn(fieldName, v) {
-  if (v === undefined) return;
-  if (v == null) return;
-  const u = String(v).trim().toUpperCase();
-  if (u !== 'Y' && u !== 'N') throw new ValidationError('Validation failed', [`${fieldName} must be Y or N`]);
-}
-
-function optNumberOrNull(fieldName, v) {
-  if (v === undefined) return undefined;
-  if (v == null || String(v).trim() === '') return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) {
-    throw new ValidationError('Validation failed', [`${fieldName} must be a valid number`]);
-  }
-  return n;
 }
 
 async function withConnection(fn) {
@@ -65,11 +53,6 @@ async function withConnection(fn) {
   }
 }
 
-/**
- * Read CLOB OUT bind value (string or Lob) to string. Safe for null/undefined.
- * @param {string|import('oracledb').Lob|null} val
- * @returns {Promise<string|null>}
- */
 async function readClobOut(val) {
   if (val == null) return null;
   if (typeof val === 'string') return val;
@@ -88,41 +71,36 @@ async function readClobOut(val) {
   return null;
 }
 
-async function parseJsonClobOrThrow(clobVal, context) {
+async function parsePackageResponse(clobVal) {
   const jsonStr = await readClobOut(Array.isArray(clobVal) ? clobVal[0] : clobVal);
   if (!jsonStr || !String(jsonStr).trim()) {
-    throw new DatabaseError(`${context} returned empty JSON`, null, `${context} returned empty JSON`);
+    throw new DatabaseError('Package returned empty response', null, 'Package returned empty response');
   }
-  try {
-    return JSON.parse(String(jsonStr));
-  } catch (e) {
-    throw new DatabaseError(`${context} returned invalid JSON`, e, `${context} returned invalid JSON`);
-  }
+  return JSON.parse(String(jsonStr));
 }
 
-function isOraNoDataFound(err) {
-  const msg = String(err?.message || '');
-  const num = Number(err?.errorNum);
-  return num === 1403 || /ORA-01403/.test(msg);
+function bindStr(val, maxSize) {
+  return { val: val ?? null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize };
 }
 
-function requireNonEmptyString(fieldName, v) {
-  if (v == null || String(v).trim() === '') {
-    throw new ValidationError('Validation failed', [`${fieldName} is required`]);
-  }
-  return String(v).trim();
+function bindNum(val) {
+  return { val: val ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER };
 }
 
-/**
- * Resolve numeric FUNCTION_ID for a 32-char hex FUNCTION_GUID.
- * Queries the base table with HEXTORAW so the comparison is binary
- * (case-insensitive on hex chars) regardless of how the view exposes the column.
- * Throws NotFoundError when the GUID does not exist.
- */
+function bindOutClob() {
+  return { dir: oracledb.BIND_OUT, type: oracledb.CLOB };
+}
+
+async function execPackageJson(connection, plsql, binds) {
+  const result = await connection.execute(plsql, binds);
+  const out = result?.outBinds || {};
+  return parsePackageResponse(out.p_response);
+}
+
 async function resolveFunctionIdByGuid(connection, functionGuidHex) {
   const r = await connection.execute(
     `SELECT FUNCTION_ID FROM ${FUNCTIONS_TABLE} WHERE FUNCTION_GUID = HEXTORAW(:function_guid_hex)`,
-    { function_guid_hex: { val: functionGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 } },
+    { function_guid_hex: bindStr(functionGuidHex, 32) },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
   const id = r.rows?.[0]?.FUNCTION_ID;
@@ -130,225 +108,20 @@ async function resolveFunctionIdByGuid(connection, functionGuidHex) {
   return Number(id);
 }
 
-/**
- * Resolve numeric MODULE_ID for a 32-char hex MODULE_GUID using FNDSEC_MODULES.
- * Throws ValidationError when the GUID does not exist.
- */
 async function resolveModuleIdByGuid(connection, moduleGuidHex) {
   const r = await connection.execute(
     `SELECT MODULE_ID FROM ${MODULES_TABLE} WHERE MODULE_GUID = HEXTORAW(:module_guid_hex)`,
-    { module_guid_hex: { val: moduleGuidHex, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 } },
+    { module_guid_hex: bindStr(moduleGuidHex, 32) },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
   const id = r.rows?.[0]?.MODULE_ID;
-  if (id == null) throw new ValidationError('Validation failed', ['module_guid not found']);
+  if (id == null) throw new NotFoundError('module_guid not found');
   return Number(id);
 }
 
-const FUNCTION_JSON_GUID_KEYS = new Set(['function_guid', 'module_guid']);
-
-/**
- * Rewrite known GUID keys in package/view JSON trees (handles Oracle double-encoded hex).
- * @param {unknown} value
- */
-function normalizeFunctionJsonGuidsDeep(value) {
-  if (value == null) return value;
-  if (Buffer.isBuffer(value)) return value;
-  if (value instanceof Date) return value;
-  if (Array.isArray(value)) return value.map((item) => normalizeFunctionJsonGuidsDeep(item));
-  if (typeof value !== 'object') return value;
-  const out = {};
-  for (const [k, v] of Object.entries(value)) {
-    const keyLower = k.toLowerCase();
-    if (FUNCTION_JSON_GUID_KEYS.has(keyLower)) {
-      const n = normalizeApiGuidString(v);
-      out[k] = n != null ? n : v;
-    } else if (v !== null && typeof v === 'object') {
-      out[k] = normalizeFunctionJsonGuidsDeep(v);
-    } else {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-async function execPackageJson(connection, { context, plsql, binds }) {
-  const result = await connection.execute(plsql, binds, { autoCommit: true });
-  const out = result?.outBinds || {};
-  let parsed = await parseJsonClobOrThrow(out.o_response, context);
-  parsed = normalizeFunctionJsonGuidsDeep(parsed);
-  return { out, parsed };
-}
-
-/** Prefer normalized API GUID hex; keep raw if normalization did not yield hex32 */
-function mergeGuidSlot(raw, normalized) {
-  return normalized != null ? normalized : raw;
-}
-
-function safeJsonParseOrNull(v) {
-  if (v == null) return null;
-  if (typeof v === 'object') return v;
-  const s = String(v).trim();
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-function mapViewRow(row) {
-  const moduleObj = safeJsonParseOrNull(row.MODULE_OBJ);
-  const moduleGuidRaw = moduleObj?.module_guid ?? null;
-  const moduleGuidNorm = normalizeApiGuidString(moduleGuidRaw);
-  const module =
-    moduleObj == null
-      ? null
-      : {
-          module_id: moduleObj.module_id != null ? Number(moduleObj.module_id) : (row.MODULE_ID != null ? Number(row.MODULE_ID) : null),
-          module_guid: mergeGuidSlot(moduleGuidRaw, moduleGuidNorm),
-          module_code: moduleObj.module_code ?? null,
-          module_name: moduleObj.module_name ?? null
-        };
-
-  const functionGuidRaw = row.FUNCTION_GUID ?? null;
-  const functionGuidNorm = normalizeApiGuidString(functionGuidRaw);
-
-  return {
-    function_id: row.FUNCTION_ID != null ? Number(row.FUNCTION_ID) : null,
-    function_guid: mergeGuidSlot(functionGuidRaw, functionGuidNorm),
-    module_id: row.MODULE_ID != null ? Number(row.MODULE_ID) : (module?.module_id ?? null),
-    function_code: row.FUNCTION_CODE ?? null,
-    function_name: row.FUNCTION_NAME ?? null,
-    description: row.DESCRIPTION ?? null,
-    function_type: row.FUNCTION_TYPE ?? null,
-    permission_key: row.PERMISSION_KEY ?? null,
-    route_url: row.ROUTE_URL ?? null,
-    display_order: row.DISPLAY_ORDER != null ? Number(row.DISPLAY_ORDER) : null,
-    active_flag: row.ACTIVE_FLAG ?? null,
-    is_system_flag: row.IS_SYSTEM_FLAG ?? null,
-    module
-  };
-}
-
-export async function listFunctions(filters, pagination) {
-  // DB view already handles joins; do not join in API.
-  // Optional filters: function_id, module_id, function_code, active_flag, search
-  const page = Number(pagination?.page || 1);
-  const pageSize = Number(pagination?.pageSize || 20);
-  const offset = (page - 1) * pageSize;
-
-  validateYn('active_flag', filters?.active_flag);
-
-  const searchVal =
-    filters?.search != null && String(filters.search).trim() !== ''
-      ? String(filters.search).trim()
-      : null;
-
-  const binds = {
-    function_id: { val: filters?.function_id ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    module_id: { val: filters?.module_id ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-    function_code: {
-      val: filters?.function_code != null && String(filters.function_code).trim() !== '' ? String(filters.function_code).trim() : null,
-      dir: oracledb.BIND_IN,
-      type: oracledb.STRING,
-      maxSize: 200
-    },
-    active_flag: {
-      val: filters?.active_flag != null ? String(filters.active_flag).trim().toUpperCase() : null,
-      dir: oracledb.BIND_IN,
-      type: oracledb.STRING,
-      maxSize: 1
-    },
-    search: {
-      val: searchVal,
-      dir: oracledb.BIND_IN,
-      type: oracledb.STRING,
-      maxSize: 4000
-    }
-  };
-
-  // INSTR avoids needing LIKE escaping for `%` / `_` in user input.
-  const whereSql = `WHERE (:function_id IS NULL OR FUNCTION_ID = :function_id)
-    AND (:module_id IS NULL OR MODULE_ID = :module_id)
-    AND (:function_code IS NULL OR FUNCTION_CODE = :function_code)
-    AND (:active_flag IS NULL OR ACTIVE_FLAG = :active_flag)
-    AND (
-      :search IS NULL OR (
-        INSTR(UPPER(FUNCTION_NAME),   UPPER(:search)) > 0
-        OR INSTR(UPPER(FUNCTION_CODE),   UPPER(:search)) > 0
-        OR INSTR(UPPER(PERMISSION_KEY),  UPPER(:search)) > 0
-        OR INSTR(UPPER(DESCRIPTION),     UPPER(:search)) > 0
-        OR INSTR(UPPER(ROUTE_URL),       UPPER(:search)) > 0
-      )
-    )`;
-
-  const countSql = `SELECT COUNT(*) AS CNT FROM ${FUNCTIONS_VIEW} ${whereSql}`;
-
-  const dataSql = `
-    SELECT *
-    FROM ${FUNCTIONS_VIEW}
-    ${whereSql}
-    ORDER BY NVL(DISPLAY_ORDER, 999999), FUNCTION_NAME
-    OFFSET :p_offset ROWS FETCH NEXT :p_limit ROWS ONLY
-  `;
-
-  try {
-    return await withConnection(async (connection) => {
-      const c = await connection.execute(countSql, binds, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-      const total = Number(c.rows?.[0]?.CNT ?? 0);
-      const r = await connection.execute(
-        dataSql,
-        { ...binds, p_offset: offset, p_limit: pageSize },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      const rows = (r.rows || []).map(mapViewRow);
-      return { rows, total, page, pageSize };
-    });
-  } catch (err) {
-    rethrowKnownOrWrapDb(err, 'listFunctions');
-  }
-}
-
-export async function getFunctionByGuid(functionGuid) {
-  const fg = parseGuidHexOrThrow('function_guid', functionGuid);
-
-  const sql = `
-    SELECT *
-    FROM ${FUNCTIONS_VIEW}
-    WHERE FUNCTION_GUID = :function_guid
-  `;
-
-  try {
-    return await withConnection(async (connection) => {
-      const r = await connection.execute(
-        sql,
-        {
-          function_guid: { val: fg, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 32 }
-        },
-        { outFormat: oracledb.OUT_FORMAT_OBJECT }
-      );
-      const row = r.rows?.[0];
-      if (!row) throw new NotFoundError('function_guid not found');
-      return mapViewRow(row);
-    });
-  } catch (err) {
-    rethrowKnownOrWrapDb(err, 'getFunctionByGuid');
-  }
-}
-
-export async function createFunction(input, actor) {
-  const moduleGuidHex = parseGuidHexOrThrow('module_guid', input?.module_guid);
-  requireNonEmptyString('function_code', input?.function_code);
-  requireNonEmptyString('function_name', input?.function_name);
-
-  validateYn('active_flag', input?.active_flag);
-  validateYn('is_system_flag', input?.is_system_flag);
-  const displayOrder = optNumberOrNull('display_order', input?.display_order);
-
-  const plsql = `
+const CREATE_PLSQL = `
 BEGIN
-  ${CREATE_PKG}(
+  ${CREATE_PROC}(
     P_MODULE_ID       => :p_module_id,
     P_FUNCTION_CODE   => :p_function_code,
     P_FUNCTION_NAME   => :p_function_name,
@@ -360,65 +133,13 @@ BEGIN
     P_ACTIVE_FLAG     => :p_active_flag,
     P_IS_SYSTEM_FLAG  => :p_is_system_flag,
     P_CREATED_BY      => :p_created_by,
-    P_RESPONSE        => :o_response
+    P_RESPONSE        => :p_response
   );
 END;`;
 
-  try {
-    return await withConnection(async (connection) => {
-      const moduleId = await resolveModuleIdByGuid(connection, moduleGuidHex);
-      const { parsed } = await execPackageJson(connection, {
-        context: 'CREATE_FUNCTION',
-        plsql,
-        binds: {
-          p_module_id: { val: moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_function_code: {
-            val: input?.function_code != null && String(input.function_code).trim() !== '' ? String(input.function_code).trim() : null,
-            dir: oracledb.BIND_IN,
-            type: oracledb.STRING,
-            maxSize: 200
-          },
-          p_function_name: {
-            val: input?.function_name != null && String(input.function_name).trim() !== '' ? String(input.function_name).trim() : null,
-            dir: oracledb.BIND_IN,
-            type: oracledb.STRING,
-            maxSize: 400
-          },
-          p_description: { val: input?.description != null ? String(input.description) : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
-          p_function_type: { val: input?.function_type != null ? String(input.function_type) : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
-          p_permission_key: { val: input?.permission_key != null ? String(input.permission_key) : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
-          p_route_url: { val: input?.route_url != null ? String(input.route_url) : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1000 },
-          p_display_order: { val: displayOrder ?? null, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_active_flag: { val: input?.active_flag != null ? String(input.active_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_is_system_flag: { val: input?.is_system_flag != null ? String(input.is_system_flag).trim().toUpperCase() : null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_created_by: { val: String(input?.created_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
-        }
-      });
-
-      return { function_json: parsed };
-    });
-  } catch (err) {
-    if (isOraNoDataFound(err)) {
-      throw new ValidationError('Validation failed', ['module_guid not found']);
-    }
-    rethrowKnownOrWrapDb(err, 'createFunction');
-  }
-}
-
-export async function updateFunction(functionGuid, patch, actor) {
-  const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
-
-  const moduleGuidHex =
-    patch?.module_guid === undefined ? undefined : (patch.module_guid == null ? null : parseGuidHexOrThrow('module_guid', patch.module_guid));
-  validateYn('active_flag', patch?.active_flag);
-  validateYn('is_system_flag', patch?.is_system_flag);
-  requireNonEmptyString('updated_by', patch?.updated_by ?? patch?.last_updated_by ?? actor);
-  const displayOrder = optNumberOrNull('display_order', patch?.display_order);
-
-  const plsql = `
+const UPDATE_PLSQL = `
 BEGIN
-  ${UPDATE_PKG}(
+  ${UPDATE_PROC}(
     P_FUNCTION_ID     => :p_function_id,
     P_MODULE_ID       => :p_module_id,
     P_FUNCTION_CODE   => :p_function_code,
@@ -431,79 +152,195 @@ BEGIN
     P_ACTIVE_FLAG     => :p_active_flag,
     P_IS_SYSTEM_FLAG  => :p_is_system_flag,
     P_UPDATED_BY      => :p_updated_by,
-    P_RESPONSE        => :o_response
+    P_RESPONSE        => :p_response
   );
 END;`;
+
+const DELETE_PLSQL = `
+BEGIN
+  ${DELETE_PROC}(
+    P_FUNCTION_ID   => :p_function_id,
+    P_DELETED_BY    => :p_deleted_by,
+    P_RESPONSE      => :p_response
+  );
+END;`;
+
+const GET_PLSQL = `
+BEGIN
+  ${GET_PROC}(
+    P_FUNCTION_ID => :p_function_id,
+    P_RESPONSE    => :p_response
+  );
+END;`;
+
+const GET_LIST_PLSQL = `
+BEGIN
+  ${GET_LIST_PROC}(
+    P_MODULE_ID   => :p_module_id,
+    P_ACTIVE_FLAG => :p_active_flag,
+    P_RESPONSE    => :p_response
+  );
+END;`;
+
+function applyListPostFilters(packageResult, filters, pagination) {
+  if (!packageResult || packageResult.status !== true || !Array.isArray(packageResult.data)) {
+    return packageResult;
+  }
+
+  let rows = packageResult.data;
+
+  if (filters.function_id != null) {
+    rows = rows.filter((row) => Number(row.function_id) === Number(filters.function_id));
+  }
+  if (filters.function_code) {
+    const code = String(filters.function_code).toUpperCase();
+    rows = rows.filter((row) => String(row.function_code ?? '').toUpperCase() === code);
+  }
+  if (filters.search) {
+    const term = String(filters.search).toUpperCase();
+    rows = rows.filter((row) =>
+      ['function_name', 'function_code', 'permission_key', 'description', 'route_url'].some((key) =>
+        String(row[key] ?? '').toUpperCase().includes(term)
+      )
+    );
+  }
+
+  const page = Number(pagination?.page || 1);
+  const pageSize = Number(pagination?.pageSize || 20);
+  const total = rows.length;
+  const offset = (page - 1) * pageSize;
+  const totalPages = pageSize > 0 ? Math.ceil(total / pageSize) : 0;
+
+  return {
+    ...packageResult,
+    data: rows.slice(offset, offset + pageSize),
+    pagination: {
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: totalPages,
+      has_next: offset + pageSize < total,
+      has_previous: page > 1
+    }
+  };
+}
+
+export async function listFunctions(filters, pagination) {
+  const normalized = normalizeListFilters(filters);
+
+  try {
+    const result = await withConnection(async (connection) =>
+      execPackageJson(connection, GET_LIST_PLSQL, {
+        p_module_id: bindNum(normalized.module_id),
+        p_active_flag: bindStr(normalized.active_flag, 1),
+        p_response: bindOutClob()
+      })
+    );
+    return applyListPostFilters(result, normalized, pagination);
+  } catch (err) {
+    rethrowKnownOrWrapDb(err, 'listFunctions');
+  }
+}
+
+export async function getFunctionByGuid(functionGuid) {
+  const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
+
+  try {
+    return await withConnection(async (connection) => {
+      const functionId = await resolveFunctionIdByGuid(connection, functionGuidHex);
+      return execPackageJson(connection, GET_PLSQL, {
+        p_function_id: bindNum(functionId),
+        p_response: bindOutClob()
+      });
+    });
+  } catch (err) {
+    rethrowKnownOrWrapDb(err, 'getFunctionByGuid');
+  }
+}
+
+export async function createFunction(input, actor) {
+  const body = normalizeCreateInput(input, actor);
+  const moduleGuidHex = parseGuidHexOrThrow('module_guid', body.module_guid);
+
+  try {
+    return await withConnection(async (connection) => {
+      const moduleId = await resolveModuleIdByGuid(connection, moduleGuidHex);
+      return execPackageJson(connection, CREATE_PLSQL, {
+        p_module_id: bindNum(moduleId),
+        p_function_code: bindStr(body.function_code, 200),
+        p_function_name: bindStr(body.function_name, 400),
+        p_description: bindStr(body.description, 4000),
+        p_function_type: bindStr(body.function_type, 60),
+        p_permission_key: bindStr(body.permission_key, 400),
+        p_route_url: bindStr(body.route_url, 1000),
+        p_display_order: bindNum(body.display_order),
+        p_active_flag: bindStr(body.active_flag, 1),
+        p_is_system_flag: bindStr(body.is_system_flag, 1),
+        p_created_by: bindStr(body.created_by, 200),
+        p_response: bindOutClob()
+      });
+    });
+  } catch (err) {
+    rethrowKnownOrWrapDb(err, 'createFunction');
+  }
+}
+
+export async function updateFunction(functionGuid, patch, actor) {
+  const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
+  const body = normalizeUpdatePatch(patch, actor);
+
+  const moduleGuidHex =
+    body.module_guid === undefined
+      ? undefined
+      : body.module_guid == null
+        ? null
+        : parseGuidHexOrThrow('module_guid', body.module_guid);
 
   try {
     return await withConnection(async (connection) => {
       const functionId = await resolveFunctionIdByGuid(connection, functionGuidHex);
       const moduleId =
-        moduleGuidHex == null ? null : await resolveModuleIdByGuid(connection, moduleGuidHex);
+        moduleGuidHex === undefined
+          ? undefined
+          : moduleGuidHex == null
+            ? null
+            : await resolveModuleIdByGuid(connection, moduleGuidHex);
 
-      const { parsed } = await execPackageJson(connection, {
-        context: 'UPDATE_FUNCTION',
-        plsql,
-        binds: {
-          p_function_id: { val: functionId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_module_id: { val: moduleId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_function_code: { val: patch?.function_code === undefined ? null : (patch.function_code == null ? null : String(patch.function_code).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          p_function_name: { val: patch?.function_name === undefined ? null : (patch.function_name == null ? null : String(patch.function_name).trim()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
-          p_description: { val: patch?.description === undefined ? null : (patch.description == null ? null : String(patch.description)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
-          p_function_type: { val: patch?.function_type === undefined ? null : (patch.function_type == null ? null : String(patch.function_type)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 60 },
-          p_permission_key: { val: patch?.permission_key === undefined ? null : (patch.permission_key == null ? null : String(patch.permission_key)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 400 },
-          p_route_url: { val: patch?.route_url === undefined ? null : (patch.route_url == null ? null : String(patch.route_url)), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1000 },
-          p_display_order: { val: displayOrder === undefined ? null : displayOrder, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_active_flag: { val: patch?.active_flag === undefined ? null : (patch.active_flag == null ? null : String(patch.active_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_is_system_flag: { val: patch?.is_system_flag === undefined ? null : (patch.is_system_flag == null ? null : String(patch.is_system_flag).trim().toUpperCase()), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-          p_updated_by: { val: String(patch?.updated_by ?? patch?.last_updated_by ?? actor ?? 'SYSTEM'), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-          o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
-        }
+      return execPackageJson(connection, UPDATE_PLSQL, {
+        p_function_id: bindNum(functionId),
+        p_module_id: bindNum(moduleId === undefined ? null : moduleId),
+        p_function_code: bindStr(body.function_code === undefined ? null : body.function_code, 200),
+        p_function_name: bindStr(body.function_name === undefined ? null : body.function_name, 400),
+        p_description: bindStr(body.description === undefined ? null : body.description, 4000),
+        p_function_type: bindStr(body.function_type === undefined ? null : body.function_type, 60),
+        p_permission_key: bindStr(body.permission_key === undefined ? null : body.permission_key, 400),
+        p_route_url: bindStr(body.route_url === undefined ? null : body.route_url, 1000),
+        p_display_order: bindNum(body.display_order === undefined ? null : body.display_order),
+        p_active_flag: bindStr(body.active_flag === undefined ? null : body.active_flag, 1),
+        p_is_system_flag: bindStr(body.is_system_flag === undefined ? null : body.is_system_flag, 1),
+        p_updated_by: bindStr(body.updated_by, 200),
+        p_response: bindOutClob()
       });
-      return { function_json: parsed };
     });
   } catch (err) {
-    if (isOraNoDataFound(err)) {
-      throw new NotFoundError('function_guid not found');
-    }
     rethrowKnownOrWrapDb(err, 'updateFunction');
   }
 }
 
 export async function deleteFunction(functionGuid, actor) {
   const functionGuidHex = parseGuidHexOrThrow('function_guid', functionGuid);
-  const deletedBy = requireNonEmptyString('deleted_by', actor);
-
-  const plsql = `
-BEGIN
-  ${DELETE_PKG}(
-    P_FUNCTION_ID => :p_function_id,
-    P_DELETED_BY  => :p_deleted_by,
-    P_RESPONSE    => :o_response
-  );
-END;`;
+  const deletedBy = actor != null ? String(actor).trim() : null;
 
   try {
     return await withConnection(async (connection) => {
       const functionId = await resolveFunctionIdByGuid(connection, functionGuidHex);
-      const binds = {
-        p_function_id: { val: functionId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-        p_deleted_by: { val: deletedBy, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
-        o_response: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
-      };
-
-      const { parsed } = await execPackageJson(connection, {
-        context: 'DELETE_FUNCTION',
-        plsql,
-        binds
+      return execPackageJson(connection, DELETE_PLSQL, {
+        p_function_id: bindNum(functionId),
+        p_deleted_by: bindStr(deletedBy, 200),
+        p_response: bindOutClob()
       });
-      return { function_json: parsed };
     });
   } catch (err) {
-    if (isOraNoDataFound(err)) {
-      throw new NotFoundError('function_guid not found');
-    }
     rethrowKnownOrWrapDb(err, 'deleteFunction');
   }
 }
-

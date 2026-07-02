@@ -1,32 +1,48 @@
 ---
-description: FNDSEC Functions APIs must use package JSON output directly
+description: FNDSEC Functions APIs must use FNDSEC_FUNCTIONS_PKG JSON output directly
 globs: feature/security/functions/**/*
 alwaysApply: false
 ---
 
 # FNDSEC Functions API (FNDSEC_FUNCTIONS_PKG)
 
-## GUIDs
-- Use **only** `function_guid` and `module_guid` in the API layer (no numeric IDs in request/response).
-- Accept GUIDs as **32-char hex strings** (optionally with dashes) and validate them.
-- The package now takes numeric IDs (`P_FUNCTION_ID`, `P_MODULE_ID`). Resolve GUID → ID inside the model:
-  - `function_guid` → `FUNCTION_ID` via `FNDSEC.FNDSEC_FUNCTIONS_V`
-  - `module_guid` → `MODULE_ID` via `FNDSEC.FNDSEC_MODULES` (`MODULE_GUID = HEXTORAW(:hex)`)
-- Treat a missing `module_guid` as a `ValidationError` and a missing `function_guid` as a `NotFoundError`.
+## Package entry points
+Always call:
+- `FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION`
+- `FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION`
+- `FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION`
+- `FNDSEC.FNDSEC_FUNCTIONS_PKG.GET_FUNCTION`
+- `FNDSEC.FNDSEC_FUNCTIONS_PKG.GET_FUNCTIONS`
 
-## No enterprise scoping
-- The package and underlying table no longer carry `ENTERPRISE_ID`. Do not accept `enterprise_id` in any Functions API (body, query, headers) and do not bind it in the PL/SQL call.
+Do not query `FNDSEC_FUNCTIONS_V` from Node for list/get.
 
-## Package JSON OUT contract
-- For `CREATE_FUNCTION`, `UPDATE_FUNCTION`, `DELETE_FUNCTION`, the database returns the full object as **CLOB JSON** (`P_RESPONSE`).
-- Node must:
-  - Bind `P_RESPONSE` as `oracledb.CLOB` **OUT** (placeholder name `:o_response`)
-  - Read the CLOB value and `JSON.parse()` it
-  - Return the parsed object **directly** as API `data` (do not re-map/reshape it)
-- `DELETE_FUNCTION` requires `P_DELETED_BY`; resolve it from the request actor (`resolveActor(req)`).
+## GUID → ID resolution (Node only)
+- Resolve `module_guid` → `MODULE_ID` via `FNDSEC.FNDSEC_MODULES` before CREATE/UPDATE when module is supplied.
+- Resolve path `function_guid` → `FUNCTION_ID` via `FNDSEC.FNDSEC_FUNCTIONS` for GET/UPDATE/DELETE.
+- Return **404** when module or function GUID lookup fails.
 
-## Responses
-- Response shape:
-  - `{ "status": true|false, "message": "...", "data": <parsed_db_json_or_{}> }`
-- `message` should come from DB JSON when present (e.g. `data.message`), otherwise fallback to `"Success"` / the error message.
+## Validation
+- Do **not** duplicate Oracle business rules in Node (no duplicate checks for `function_code` or `permission_key`).
+- Trim strings before bind; optional empty strings → `NULL`.
+- Uppercase `function_code` only; never uppercase `permission_key`; never replace `"*"` with null.
 
+## Required create fields (API)
+`module_guid`, `function_code`, `function_name`, `permission_key`, `created_by`
+
+The package has **no** `P_ENTERPRISE_ID` parameter. Do not bind `enterprise_id` to Oracle.
+
+## Package JSON contract
+- Bind `P_RESPONSE` as CLOB OUT (`:p_response`).
+- Parse with `JSON.parse` and return the object **directly** as the HTTP body.
+- Do not wrap `{ success, data: { status: ... } }`.
+- Preserve package `message` values; do not replace with generic text.
+- No Node `commit` / `rollback` / `autoCommit`; transactions live in the package.
+
+## Response shape
+```json
+{ "status": true|false, "message": "...", "data": { ... } }
+```
+
+HTTP mapping:
+- `status: true` → 200 (201 for create)
+- `status: false` → 400 with package JSON unchanged

@@ -1,0 +1,31 @@
+-- =============================================================================
+-- PAY.V_PAY_ELEMENT_OVERRIDE_RULES — element override rule list/detail view
+-- Sources: PAY.PAY_ELEMENT_OVERRIDE_RULES, PAY.PAY_ELEMENTS
+-- Run as PAY (or ADMIN with privileges on PAY objects).
+-- =============================================================================
+
+CREATE OR REPLACE VIEW PAY.V_PAY_ELEMENT_OVERRIDE_RULES AS
+SELECT
+    O.OVERRIDE_RULE_ID,
+    RAWTOHEX(O.OVERRIDE_RULE_GUID) AS OVERRIDE_RULE_GUID,
+
+    O.ELEMENT_ID,
+    RAWTOHEX(E.ELEMENT_GUID) AS ELEMENT_GUID,
+    E.ELEMENT_CODE,
+    E.ELEMENT_NAME,
+    E.ENTERPRISE_ID,
+    E.CLASSIFICATION_CODE,
+    E.CATEGORY_CODE,
+
+    O.MAX_OVERRIDE_PERCENT,
+    O.MAX_OVERRIDE_AMOUNT,
+    O.APPROVAL_REQUIRED_CODE,
+
+    O.CREATED_BY,
+    O.CREATION_DATE,
+    O.LAST_UPDATED_BY,
+    O.LAST_UPDATE_DATE
+
+FROM PAY.PAY_ELEMENT_OVERRIDE_RULES O
+JOIN PAY.PAY_ELEMENTS E
+  ON E.ELEMENT_ID = O.ELEMENT_ID;

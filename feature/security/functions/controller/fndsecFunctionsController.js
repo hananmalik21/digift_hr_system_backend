@@ -1,6 +1,7 @@
 import express from 'express';
+import '../swagger/fndsecFunctions.swagger.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
 import {
   createFunction,
   listFunctions,
@@ -8,46 +9,50 @@ import {
   updateFunction,
   deleteFunction
 } from '../model/fndsecFunctionsModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
 import { parseFunctionListQuery, parseListPagination, resolveActor } from '../utils/requestParsers.js';
 
 const router = express.Router();
 
-function send(res, { status, message, data = {} }, httpStatus = 200) {
-  return res.status(httpStatus).json({ status, message, data });
-}
-
-function sendSuccess(res, message, data = {}, httpStatus = 200) {
-  return send(res, { status: true, message, data }, httpStatus);
+function sendPackageResult(res, result, successHttpStatus = 200) {
+  const httpStatus = result?.status ? successHttpStatus : 400;
+  return res.status(httpStatus).json(result);
 }
 
 function sendError(res, err) {
-  const httpStatus = err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
+  const httpStatus =
+    err?.statusCode && Number.isFinite(Number(err.statusCode)) ? Number(err.statusCode) : 500;
 
   if (err instanceof ValidationError) {
     const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
     const message =
       details.length > 0 ? details[0] : err.userMessage || err.message || 'Validation failed';
-    const data = details.length > 0 ? { errors: details } : {};
-    return send(res, { status: false, message, data }, httpStatus);
+    const data = details.length > 1 ? { errors: details } : {};
+    return res.status(httpStatus).json({ status: false, message, data });
+  }
+
+  if (err instanceof NotFoundError) {
+    return res.status(404).json({
+      status: false,
+      message: err.userMessage || err.message || 'Not found',
+      data: {}
+    });
+  }
+
+  if (err instanceof DatabaseError) {
+    return res.status(httpStatus).json({
+      status: false,
+      message: err.userMessage || err.message || 'Database error',
+      data: {}
+    });
   }
 
   const msg = err?.userMessage || err?.message || 'Error';
-  return send(res, { status: false, message: msg, data: {} }, httpStatus);
-}
-
-function normalizeData(val) {
-  if (val === undefined) return {};
-  return val;
-}
-
-function sendDbJson(res, { message, data, httpStatus = 200 }) {
-  return sendSuccess(res, message, normalizeData(data), httpStatus);
+  return res.status(httpStatus).json({ status: false, message: msg, data: {} });
 }
 
 /**
  * POST /api/security/functions
- * Create function via FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION
+ * FNDSEC.FNDSEC_FUNCTIONS_PKG.CREATE_FUNCTION
  */
 router.post(
   '/',
@@ -55,8 +60,7 @@ router.post(
     try {
       const actor = resolveActor(req);
       const result = await createFunction(req.body || {}, actor);
-      // Return DB JSON directly as data (no manual construction)
-      return sendDbJson(res, { message: 'Function created successfully', data: result?.function_json, httpStatus: 201 });
+      return sendPackageResult(res, result, 201);
     } catch (err) {
       return sendError(res, err);
     }
@@ -65,7 +69,7 @@ router.post(
 
 /**
  * PUT /api/security/functions/:functionGuid
- * Update function via FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION
+ * FNDSEC.FNDSEC_FUNCTIONS_PKG.UPDATE_FUNCTION
  */
 router.put(
   '/:functionGuid',
@@ -73,7 +77,7 @@ router.put(
     try {
       const actor = resolveActor(req);
       const result = await updateFunction(req.params.functionGuid, req.body || {}, actor);
-      return sendDbJson(res, { message: 'Function updated successfully', data: result?.function_json });
+      return sendPackageResult(res, result, 200);
     } catch (err) {
       return sendError(res, err);
     }
@@ -82,7 +86,7 @@ router.put(
 
 /**
  * DELETE /api/security/functions/:functionGuid
- * Delete via FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION
+ * FNDSEC.FNDSEC_FUNCTIONS_PKG.DELETE_FUNCTION
  */
 router.delete(
   '/:functionGuid',
@@ -90,7 +94,7 @@ router.delete(
     try {
       const actor = resolveActor(req);
       const result = await deleteFunction(req.params.functionGuid, actor);
-      return sendDbJson(res, { message: 'Function deleted successfully', data: result?.function_json });
+      return sendPackageResult(res, result, 200);
     } catch (err) {
       return sendError(res, err);
     }
@@ -98,11 +102,8 @@ router.delete(
 );
 
 /**
- * GET /api/security/functions?page=&page_size=&search=&function_id=&module_id=&function_code=&active_flag=
- * List from FNDSEC_FUNCTIONS_V (includes module_obj).
- * `search` is a case-insensitive partial match across function_name, function_code,
- * permission_key, description, and route_url.
- * Response: { success, data, pagination } (pagination matches other FNDSEC list APIs).
+ * GET /api/security/functions
+ * FNDSEC.FNDSEC_FUNCTIONS_PKG.GET_FUNCTIONS
  */
 router.get(
   '/',
@@ -110,20 +111,8 @@ router.get(
     try {
       const filters = parseFunctionListQuery(req);
       const pagination = parseListPagination(req.query);
-      const { rows, total } = await listFunctions(filters, pagination);
-      const p = buildPaginationMeta(pagination.page, pagination.pageSize, total);
-      return res.status(200).json({
-        success: true,
-        data: rows,
-        pagination: {
-          page: p.page,
-          page_size: p.pageSize,
-          total: p.total,
-          total_pages: p.totalPages,
-          has_next: p.hasNext,
-          has_previous: p.hasPrevious
-        }
-      });
+      const result = await listFunctions(filters, pagination);
+      return sendPackageResult(res, result, 200);
     } catch (err) {
       return sendError(res, err);
     }
@@ -132,14 +121,14 @@ router.get(
 
 /**
  * GET /api/security/functions/:functionGuid
- * Get single from FNDSEC_FUNCTIONS_V.
+ * FNDSEC.FNDSEC_FUNCTIONS_PKG.GET_FUNCTION
  */
 router.get(
   '/:functionGuid',
   asyncHandler(async (req, res) => {
     try {
-      const data = await getFunctionByGuid(req.params.functionGuid);
-      return res.status(200).json({ success: true, data: [data] });
+      const result = await getFunctionByGuid(req.params.functionGuid);
+      return sendPackageResult(res, result, 200);
     } catch (err) {
       return sendError(res, err);
     }
@@ -147,4 +136,3 @@ router.get(
 );
 
 export default router;
-

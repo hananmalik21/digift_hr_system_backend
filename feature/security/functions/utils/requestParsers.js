@@ -61,8 +61,8 @@ export function parseListPagination(query) {
 /**
  * GET /api/security/functions?search=&function_id=&module_id=&function_code=&active_flag=
  *
- * `search` is a case-insensitive partial match against function_name,
- * function_code, permission_key, description, and route_url.
+ * Package filters: module_id, active_flag (GET_FUNCTIONS).
+ * search, function_id, function_code, and pagination are applied in Node on package data.
  */
 export function parseFunctionListQuery(req) {
   const q = req.query || {};
@@ -70,7 +70,7 @@ export function parseFunctionListQuery(req) {
     function_id: parseOptionalNumber(q, 'function_id'),
     module_id: parseOptionalNumber(q, 'module_id'),
     function_code: parseOptionalString(q, 'function_code'),
-    active_flag: parseOptionalYn(q, 'active_flag'),
+    active_flag: parseOptionalString(q, 'active_flag'),
     search: parseOptionalString(q, 'search')
   };
 }

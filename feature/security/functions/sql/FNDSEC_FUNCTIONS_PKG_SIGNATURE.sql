@@ -1,51 +1,26 @@
 -- Run as a user with access to ALL_ARGUMENTS.
 -- Use the result to align Node.js bind names and types for FNDSEC.FNDSEC_FUNCTIONS_PKG.
+-- Note: on Oracle 23+, filter with package_name = 'FNDSEC_FUNCTIONS_PKG' (object_name = procedure).
 
--- CREATE_FUNCTION:
+-- All procedures in the package:
 SELECT
+  a.object_name AS procedure_name,
   a.overload,
-  a.position,
+  a.sequence,
   a.argument_name,
   a.data_type,
-  a.type_name,
   a.in_out
 FROM all_arguments a
 WHERE a.owner = 'FNDSEC'
-  AND a.object_name = 'FNDSEC_FUNCTIONS_PKG'
-  AND a.package_name IS NULL
+  AND a.package_name = 'FNDSEC_FUNCTIONS_PKG'
   AND a.argument_name IS NOT NULL
-  AND a.procedure_name = 'CREATE_FUNCTION'
-ORDER BY a.overload, a.position;
+ORDER BY a.object_name, a.overload, a.sequence;
 
--- UPDATE_FUNCTION:
-SELECT
-  a.overload,
-  a.position,
-  a.argument_name,
-  a.data_type,
-  a.type_name,
-  a.in_out
-FROM all_arguments a
-WHERE a.owner = 'FNDSEC'
-  AND a.object_name = 'FNDSEC_FUNCTIONS_PKG'
-  AND a.package_name IS NULL
-  AND a.argument_name IS NOT NULL
-  AND a.procedure_name = 'UPDATE_FUNCTION'
-ORDER BY a.overload, a.position;
-
--- DELETE_FUNCTION:
-SELECT
-  a.overload,
-  a.position,
-  a.argument_name,
-  a.data_type,
-  a.type_name,
-  a.in_out
-FROM all_arguments a
-WHERE a.owner = 'FNDSEC'
-  AND a.object_name = 'FNDSEC_FUNCTIONS_PKG'
-  AND a.package_name IS NULL
-  AND a.argument_name IS NOT NULL
-  AND a.procedure_name = 'DELETE_FUNCTION'
-ORDER BY a.overload, a.position;
-
+-- Expected signatures (as of last sync):
+-- CREATE_FUNCTION:  P_MODULE_ID, P_FUNCTION_CODE, P_FUNCTION_NAME, P_DESCRIPTION,
+--                   P_FUNCTION_TYPE, P_PERMISSION_KEY, P_ROUTE_URL, P_DISPLAY_ORDER,
+--                   P_ACTIVE_FLAG, P_IS_SYSTEM_FLAG, P_CREATED_BY, P_RESPONSE OUT
+-- UPDATE_FUNCTION:  P_FUNCTION_ID, P_MODULE_ID, ... scalars ..., P_UPDATED_BY, P_RESPONSE OUT
+-- DELETE_FUNCTION:  P_FUNCTION_ID, P_DELETED_BY, P_RESPONSE OUT
+-- GET_FUNCTION:     P_FUNCTION_ID, P_RESPONSE OUT
+-- GET_FUNCTIONS:    P_MODULE_ID, P_ACTIVE_FLAG, P_RESPONSE OUT

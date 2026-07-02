@@ -107,6 +107,14 @@ import payElementEntriesRoutes from './feature/pay/element_entries/routes/payEle
 import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
 import payFlexfieldSegmentValuesRoutes from './feature/pay/flexfield_segment_values/routes/payFlexfieldSegmentValues.routes.js';
 import payElementsRoutes from './feature/pay/elements/routes/payElements.routes.js';
+import payElementInputValuesRoutes from './feature/pay/element_input_values/routes/payElementInputValues.routes.js';
+import payElementProcessingRulesRoutes from './feature/pay/element_processing_rules/routes/payElementProcessingRules.routes.js';
+import payElementEntryControlsRoutes from './feature/pay/element_entry_controls/routes/payElementEntryControls.routes.js';
+import payElementRetroRulesRoutes from './feature/pay/element_retro_rules/routes/payElementRetroRules.routes.js';
+import payElementOverrideRulesRoutes from './feature/pay/element_override_rules/routes/payElementOverrideRules.routes.js';
+import payElementScopeRulesRoutes from './feature/pay/element_scope_rules/routes/payElementScopeRules.routes.js';
+import payElementFrequencyRulesRoutes from './feature/pay/element_frequency_rules/routes/payElementFrequencyRules.routes.js';
+import payElementProrationRulesRoutes from './feature/pay/element_proration_rules/routes/payElementProrationRules.routes.js';
 import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -348,6 +356,30 @@ app.use('/api/pay', payFlexfieldSegmentValuesRoutes);
 
 // Payroll — elements (PAY.PAY_ELEMENTS_PKG)
 app.use('/api/pay', payElementsRoutes);
+
+// Payroll — element input values (PAY.PAY_ELEMENT_INPUT_VALUES_PKG)
+app.use('/api/pay', payElementInputValuesRoutes);
+
+// Payroll — element processing rules (PAY.PAY_ELEMENT_PROCESSING_RULES_PKG)
+app.use('/api/pay', payElementProcessingRulesRoutes);
+
+// Payroll — element entry controls (PAY.PAY_ELEMENT_ENTRY_CONTROLS_PKG)
+app.use('/api/pay', payElementEntryControlsRoutes);
+
+// Payroll — element retro rules (PAY.PAY_ELEMENT_RETRO_RULES_PKG)
+app.use('/api/pay', payElementRetroRulesRoutes);
+
+// Payroll — element override rules (PAY.PAY_ELEMENT_OVERRIDE_RULES_PKG)
+app.use('/api/pay', payElementOverrideRulesRoutes);
+
+// Payroll — element scope rules (PAY.PAY_ELEMENT_SCOPE_RULES_PKG)
+app.use('/api/pay', payElementScopeRulesRoutes);
+
+// Payroll — element frequency rules (PAY.PAY_ELEMENT_FREQUENCY_RULES_PKG)
+app.use('/api/pay', payElementFrequencyRulesRoutes);
+
+// Payroll — element proration rules (PAY.PAY_ELEMENT_PRORATION_RULES_PKG)
+app.use('/api/pay', payElementProrationRulesRoutes);
 
 // Payroll — lookups (PAY.PAY_LOOKUPS_PKG / PAY.V_PAY_LOOKUP_VALUES)
 app.use('/api/pay', payLookupsRoutes);
