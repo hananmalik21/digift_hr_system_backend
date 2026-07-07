@@ -52,9 +52,7 @@
  *             properties:
  *               element_id: { type: integer }
  *               input_value_name: { type: string }
- *               data_type_code:
- *                 type: string
- *                 enum: [TEXT, NUMBER, MONEY, DATE, BOOLEAN, PERCENTAGE, LOOKUP]
+ *               data_type_code: { type: string }
  *               default_value: { type: string }
  *               min_value: { type: number }
  *               max_value: { type: number }

@@ -27,10 +27,7 @@ const PACKAGE_MESSAGE_MAP = Object.freeze([
     pattern: /input\s*value\s*name\s*already\s*exists|unique.*input.*value/i,
     message: 'Input value name already exists for this element.'
   },
-  {
-    pattern: /invalid\s*data\s*type/i,
-    message: 'data_type_code must be one of: TEXT, NUMBER, MONEY, DATE, BOOLEAN, PERCENTAGE, LOOKUP.'
-  }
+  { pattern: /invalid\s*data\s*type/i, message: 'Invalid data type code.' }
 ]);
 
 /**

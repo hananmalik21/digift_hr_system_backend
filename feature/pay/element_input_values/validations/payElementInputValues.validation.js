@@ -7,16 +7,6 @@ export const LIST_DEFAULT_PAGE = 1;
 export const LIST_DEFAULT_LIMIT = 20;
 export const LIST_MAX_LIMIT = 100;
 
-const ALLOWED_DATA_TYPE_CODES = new Set([
-  'TEXT',
-  'NUMBER',
-  'MONEY',
-  'DATE',
-  'BOOLEAN',
-  'PERCENTAGE',
-  'LOOKUP'
-]);
-
 const ALLOWED_STATUS_VALUES = new Set(['ACTIVE', 'INACTIVE']);
 
 const ALLOWED_SORT_COLUMNS = new Set([
@@ -49,13 +39,8 @@ function validateYnFlag(errors, raw, field) {
 }
 
 function validateDataTypeCode(errors, raw, { required = false } = {}) {
-  if (isBlank(raw)) {
-    if (required) errors.push('data_type_code is required');
-    return;
-  }
-  const code = String(raw).trim().toUpperCase();
-  if (!ALLOWED_DATA_TYPE_CODES.has(code)) {
-    errors.push('data_type_code must be one of: TEXT, NUMBER, MONEY, DATE, BOOLEAN, PERCENTAGE, LOOKUP');
+  if (isBlank(raw) && required) {
+    errors.push('data_type_code is required');
   }
 }
 
