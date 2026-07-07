@@ -115,6 +115,8 @@ import payElementOverrideRulesRoutes from './feature/pay/element_override_rules/
 import payElementScopeRulesRoutes from './feature/pay/element_scope_rules/routes/payElementScopeRules.routes.js';
 import payElementFrequencyRulesRoutes from './feature/pay/element_frequency_rules/routes/payElementFrequencyRules.routes.js';
 import payElementProrationRulesRoutes from './feature/pay/element_proration_rules/routes/payElementProrationRules.routes.js';
+import payElementEligibilityRulesRoutes from './feature/pay/element_eligibility_rules/routes/payElementEligibilityRules.routes.js';
+import payElementEligProfilesRoutes from './feature/pay/element_elig_profiles/routes/payElementEligProfiles.routes.js';
 import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -380,6 +382,12 @@ app.use('/api/pay', payElementFrequencyRulesRoutes);
 
 // Payroll — element proration rules (PAY.PAY_ELEMENT_PRORATION_RULES_PKG)
 app.use('/api/pay', payElementProrationRulesRoutes);
+
+// Payroll — element eligibility rules (PAY.PAY_ELEMENT_ELIGIBILITY_RULES_PKG)
+app.use('/api/pay', payElementEligibilityRulesRoutes);
+
+// Payroll — element eligibility profiles (PAY.PAY_ELEMENT_ELIG_PROFILES_PKG)
+app.use('/api/pay', payElementEligProfilesRoutes);
 
 // Payroll — lookups (PAY.PAY_LOOKUPS_PKG / PAY.V_PAY_LOOKUP_VALUES)
 app.use('/api/pay', payLookupsRoutes);
