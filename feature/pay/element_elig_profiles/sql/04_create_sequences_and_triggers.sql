@@ -1,0 +1,61 @@
+-- =============================================================================
+-- 04. Sequences and triggers (PK/GUID only — WHO from API/package)
+-- =============================================================================
+
+SET DEFINE OFF;
+WHENEVER SQLERROR EXIT SQL.SQLCODE;
+
+DECLARE
+  l_count NUMBER;
+BEGIN
+  SELECT COUNT(*) INTO l_count FROM all_sequences
+   WHERE sequence_owner = 'PAY' AND sequence_name = 'PAY_ELEMENT_ELIG_PROFILES_S';
+  IF l_count = 0 THEN
+    EXECUTE IMMEDIATE '
+      CREATE SEQUENCE PAY.PAY_ELEMENT_ELIG_PROFILES_S
+      START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE';
+  END IF;
+
+  SELECT COUNT(*) INTO l_count FROM all_sequences
+   WHERE sequence_owner = 'PAY' AND sequence_name = 'PAY_ELEMENT_ELIG_PROF_RULES_S';
+  IF l_count = 0 THEN
+    EXECUTE IMMEDIATE '
+      CREATE SEQUENCE PAY.PAY_ELEMENT_ELIG_PROF_RULES_S
+      START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE';
+  END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER PAY.PAY_EEL_PROFILES_BIU_TRG
+BEFORE INSERT OR UPDATE ON PAY.PAY_ELEMENT_ELIG_PROFILES
+FOR EACH ROW
+BEGIN
+    IF INSERTING THEN
+        IF :NEW.PROFILE_ID IS NULL THEN
+            :NEW.PROFILE_ID := PAY.PAY_ELEMENT_ELIG_PROFILES_S.NEXTVAL;
+        END IF;
+
+        IF :NEW.PROFILE_GUID IS NULL THEN
+            :NEW.PROFILE_GUID := SYS_GUID();
+        END IF;
+    END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER PAY.PAY_EEL_PROF_RULES_BIU_TRG
+BEFORE INSERT OR UPDATE ON PAY.PAY_ELEMENT_ELIG_PROFILE_RULES
+FOR EACH ROW
+BEGIN
+    IF INSERTING THEN
+        IF :NEW.PROFILE_RULE_ID IS NULL THEN
+            :NEW.PROFILE_RULE_ID := PAY.PAY_ELEMENT_ELIG_PROF_RULES_S.NEXTVAL;
+        END IF;
+
+        IF :NEW.PROFILE_RULE_GUID IS NULL THEN
+            :NEW.PROFILE_RULE_GUID := SYS_GUID();
+        END IF;
+    END IF;
+END;
+/
+
+PROMPT 04_create_sequences_and_triggers.sql completed.
