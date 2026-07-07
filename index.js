@@ -118,6 +118,9 @@ import payElementProrationRulesRoutes from './feature/pay/element_proration_rule
 import payElementEligibilityRulesRoutes from './feature/pay/element_eligibility_rules/routes/payElementEligibilityRules.routes.js';
 import payElementEligProfilesRoutes from './feature/pay/element_elig_profiles/routes/payElementEligProfiles.routes.js';
 import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js';
+import payFormulaRoutes from './feature/pay/formulas/routes/payFormulaRoutes.js';
+import payBalanceRoutes from './feature/pay/balances/routes/payBalanceRoutes.js';
+import payBalanceFeedRoutes from './feature/pay/balance_feeds/routes/payBalanceFeedRoutes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -391,6 +394,15 @@ app.use('/api/pay', payElementEligProfilesRoutes);
 
 // Payroll — lookups (PAY.PAY_LOOKUPS_PKG / PAY.V_PAY_LOOKUP_VALUES)
 app.use('/api/pay', payLookupsRoutes);
+
+// Payroll — formulas (PAY.PAY_FORMULAS_PKG)
+app.use('/api/pay/formulas', payFormulaRoutes);
+
+// Payroll — balances (PAY.PAY_BALANCES_PKG)
+app.use('/api/pay/balances', payBalanceRoutes);
+
+// Payroll — balance feeds (PAY.PAY_BALANCE_FEEDS_PKG)
+app.use('/api/pay/balance-feeds', payBalanceFeedRoutes);
 
 // Initialize database pool on startup
 await createPool();
