@@ -7,6 +7,7 @@ import express from 'express';
 import {
   createLookupTypeHandler,
   createLookupValueHandler,
+  createLookupValuesBulkHandler,
   deleteLookupTypeHandler,
   deleteLookupValueHandler,
   getLookupTypeHandler,
@@ -26,6 +27,7 @@ router.put('/lookups/types/:guid', updateLookupTypeHandler);
 router.delete('/lookups/types/:guid', deleteLookupTypeHandler);
 
 router.get('/lookups/values', listLookupValuesHandler);
+router.post('/lookups/values/bulk', createLookupValuesBulkHandler);
 router.post('/lookups/values', createLookupValueHandler);
 router.get('/lookups/values/:guid', getLookupValueHandler);
 router.put('/lookups/values/:guid', updateLookupValueHandler);

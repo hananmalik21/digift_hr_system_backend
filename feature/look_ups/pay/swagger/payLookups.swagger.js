@@ -91,6 +91,38 @@
  *     summary: Create lookup value
  *
  * @swagger
+ * /api/pay/lookups/values/bulk:
+ *   post:
+ *     tags: [Payroll Lookup Values]
+ *     summary: Bulk create lookup values
+ *     description: |
+ *       Calls PAY.PAY_LOOKUPS_PKG.CREATE_LOOKUP_VALUES_BULK.
+ *       Top-level enterprise_id is the default for rows that omit enterprise_id.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [type_code, enterprise_id, values]
+ *             properties:
+ *               type_code: { type: string }
+ *               enterprise_id: { type: integer, nullable: true }
+ *               values:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [value_code, value_name]
+ *                   properties:
+ *                     value_code: { type: string }
+ *                     value_name: { type: string }
+ *                     enterprise_id: { type: integer, nullable: true }
+ *                     display_sequence: { type: integer }
+ *     responses:
+ *       '201':
+ *         description: Bulk created
+ *
+ * @swagger
  * /api/pay/lookups/values/{guid}:
  *   get:
  *     tags: [Payroll Lookup Values]

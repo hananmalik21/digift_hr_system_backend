@@ -7,6 +7,7 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   createLookupType,
   createLookupValue,
+  createLookupValuesBulk,
   deleteLookupType,
   deleteLookupValue,
   fetchLookupTypeByGuid,
@@ -21,6 +22,7 @@ import {
   parseLookupValueGuidParam,
   validateCreateLookupTypeBody,
   validateCreateLookupValueBody,
+  validateCreateLookupValuesBulkBody,
   validateGetLookupValueQuery,
   validateListLookupTypesQuery,
   validateListLookupValuesQuery,
@@ -122,6 +124,20 @@ export const createLookupValueHandler = asyncHandler(async (req, res) =>
     const createdBy = resolveAuditActor(req);
     const outcome = await createLookupValue(validated, createdBy);
     logAudit('createValue', req, { lookup_value_guid: outcome.data?.lookup_value_guid });
+    return sendSuccess(res, { ...outcome, status: 201 });
+  })
+);
+
+/** POST /api/pay/lookups/values/bulk */
+export const createLookupValuesBulkHandler = asyncHandler(async (req, res) =>
+  withPayLookupErrorHandling(res, async () => {
+    const validated = validateCreateLookupValuesBulkBody(req.body || {});
+    const createdBy = resolveAuditActor(req);
+    const outcome = await createLookupValuesBulk(validated, createdBy);
+    logAudit('createValuesBulk', req, {
+      type_code: validated.type_code,
+      inserted_count: outcome.data?.inserted_count
+    });
     return sendSuccess(res, { ...outcome, status: 201 });
   })
 );

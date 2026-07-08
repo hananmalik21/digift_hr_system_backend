@@ -6,14 +6,17 @@ import {
   codeInBind,
   guidHexInBind,
   normalizeOutGuidHex,
+  normalizeOutNumber,
   outGuidHexBind,
   outNumberBind,
   numberInBind,
   strOrNull,
   varcharInBind,
   wrapOracleDbError,
-  activeFlagInBind
+  activeFlagInBind,
+  clobJsonInBind
 } from '../../../../utils/oraclePackageUtils.js';
+import { parseJsonClobOut } from '../../../compensation/utils/oracleClobBinds.js';
 import { parsePageLimit, buildListResponse } from '../../../../utils/paginationUtils.js';
 import { parseOptionalActiveFlag } from '../../../../utils/validationUtils.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
@@ -111,6 +114,18 @@ BEGIN
   );
 END;`;
 
+const CREATE_VALUES_BULK_PLSQL = `
+BEGIN
+  ${PKG}.CREATE_LOOKUP_VALUES_BULK(
+    P_TYPE_CODE             => :type_code,
+    P_VALUES_JSON           => :values_json,
+    P_DEFAULT_ENTERPRISE_ID => :enterprise_id,
+    P_CREATED_BY            => :created_by,
+    P_INSERTED_COUNT        => :inserted_count,
+    P_RESULT_JSON           => :result_json
+  );
+END;`;
+
 const TYPE_LIST_SQL = `
   SELECT
     LOOKUP_TYPE_GUID,
@@ -193,7 +208,8 @@ async function executePackageMutation(plsql, binds, parseOut) {
   try {
     const result = await connection.execute(plsql, binds);
     await connection.commit();
-    return parseOut ? parseOut(result?.outBinds) : {};
+    if (!parseOut) return {};
+    return await parseOut(result?.outBinds);
   } catch (err) {
     try {
       await connection.rollback();
@@ -483,5 +499,31 @@ export async function deleteLookupValueViaPackage(lookupValueGuidRaw) {
   const lookupValueGuid = parseLookupValueGuid(lookupValueGuidRaw);
   await executePackageMutation(DELETE_VALUE_PLSQL, {
     lookup_value_guid: guidHexInBind(lookupValueGuid)
+  });
+}
+
+/**
+ * @param {Record<string, unknown>} payload
+ * @param {string} createdBy
+ */
+export async function createLookupValuesBulkViaPackage(payload, createdBy) {
+  const enterpriseId = parseEnterpriseId(payload.enterprise_id, { required: false });
+
+  const binds = {
+    type_code: codeInBind(payload.type_code, 100),
+    values_json: clobJsonInBind(payload.values ?? []),
+    enterprise_id: nullableEnterpriseIdBind(enterpriseId),
+    created_by: auditInBind(createdBy),
+    inserted_count: outNumberBind(),
+    result_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
+  };
+
+  return executePackageMutation(CREATE_VALUES_BULK_PLSQL, binds, async (outBinds) => {
+    const parsed = await parseJsonClobOut(outBinds?.result_json);
+    const values = Array.isArray(parsed) ? parsed : [];
+    return {
+      inserted_count: normalizeOutNumber(outBinds?.inserted_count) ?? values.length,
+      values
+    };
   });
 }

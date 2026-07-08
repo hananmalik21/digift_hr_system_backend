@@ -2,6 +2,7 @@ import { NotFoundError } from '../../../../utils/errors/index.js';
 import {
   createLookupTypeViaPackage,
   createLookupValueViaPackage,
+  createLookupValuesBulkViaPackage,
   deleteLookupTypeViaPackage,
   deleteLookupValueViaPackage,
   getLookupTypeByGuid,
@@ -125,6 +126,21 @@ export async function createLookupValue(payload, createdBy) {
     message: 'Lookup value created successfully',
     data: {
       lookup_value_guid: created.lookup_value_guid
+    }
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} payload
+ * @param {string} createdBy
+ */
+export async function createLookupValuesBulk(payload, createdBy) {
+  const created = await createLookupValuesBulkViaPackage(payload, createdBy);
+  return {
+    message: 'Lookup values created successfully',
+    data: {
+      inserted_count: created.inserted_count,
+      values: created.values
     }
   };
 }

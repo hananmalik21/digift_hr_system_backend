@@ -199,6 +199,105 @@ export function validateCreateLookupValueBody(body) {
   };
 }
 
+export const MAX_BULK_LOOKUP_VALUES = 100;
+
+/**
+ * Validates bulk create payload.
+ * Top-level `enterprise_id` is the default for rows that omit it.
+ *
+ * @param {Record<string, unknown>} body
+ */
+export function validateCreateLookupValuesBulkBody(body) {
+  const errors = [];
+  const payload = body || {};
+
+  requireString(errors, payload, 'type_code');
+  requireEnterpriseIdField(errors, payload);
+
+  if (!Array.isArray(payload.values) || payload.values.length === 0) {
+    errors.push('values must be a non-empty array');
+  } else if (payload.values.length > MAX_BULK_LOOKUP_VALUES) {
+    errors.push(`values may include at most ${MAX_BULK_LOOKUP_VALUES} item(s)`);
+  }
+
+  const values = [];
+  const seenByScope = new Map();
+
+  if (Array.isArray(payload.values)) {
+    for (let index = 0; index < payload.values.length; index++) {
+      const row = payload.values[index] || {};
+      const label = `values[${index}]`;
+
+      if (isBlank(row.value_code)) {
+        errors.push(`${label}: value_code is required`);
+      }
+      if (isBlank(row.value_name)) {
+        errors.push(`${label}: value_name is required`);
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(row, 'enterprise_id') &&
+        row.enterprise_id !== undefined &&
+        row.enterprise_id !== null &&
+        row.enterprise_id !== ''
+      ) {
+        try {
+          parseEnterpriseId(row.enterprise_id);
+        } catch (err) {
+          errors.push(`${label}: ${err.message}`);
+        }
+      }
+
+      try {
+        validateDisplaySequence(row.display_sequence);
+      } catch (err) {
+        errors.push(`${label}: ${err.message}`);
+      }
+
+      const valueCode = isBlank(row.value_code) ? null : String(row.value_code).trim().toUpperCase();
+      const rowEnterpriseId = Object.prototype.hasOwnProperty.call(row, 'enterprise_id')
+        ? (row.enterprise_id ?? null)
+        : (payload.enterprise_id ?? null);
+      const scopeKey = `${rowEnterpriseId ?? 'null'}:${valueCode ?? ''}`;
+
+      if (valueCode) {
+        if (!seenByScope.has(scopeKey)) {
+          seenByScope.set(scopeKey, true);
+        } else {
+          errors.push(`${label}: Duplicate value_code "${valueCode}" in request`);
+        }
+      }
+
+      values.push({
+        value_code: isBlank(row.value_code) ? null : String(row.value_code).trim(),
+        value_name: isBlank(row.value_name) ? null : String(row.value_name).trim(),
+        enterprise_id: Object.prototype.hasOwnProperty.call(row, 'enterprise_id')
+          ? (row.enterprise_id ?? null)
+          : undefined,
+        display_sequence: row.display_sequence ?? null
+      });
+    }
+  }
+
+  throwIfErrors(errors);
+
+  return {
+    type_code: String(payload.type_code).trim(),
+    enterprise_id: payload.enterprise_id ?? null,
+    values: values.map((row) => {
+      const item = {
+        value_code: row.value_code,
+        value_name: row.value_name,
+        display_sequence: row.display_sequence
+      };
+      if (row.enterprise_id !== undefined) {
+        item.enterprise_id = row.enterprise_id;
+      }
+      return item;
+    })
+  };
+}
+
 /**
  * @param {Record<string, unknown>} body
  */
