@@ -113,6 +113,7 @@ import payElementEntryControlsRoutes from './feature/pay/element_entry_controls/
 import payElementRetroRulesRoutes from './feature/pay/element_retro_rules/routes/payElementRetroRules.routes.js';
 import payElementOverrideRulesRoutes from './feature/pay/element_override_rules/routes/payElementOverrideRules.routes.js';
 import payElementScopeRulesRoutes from './feature/pay/element_scope_rules/routes/payElementScopeRules.routes.js';
+import payElementRelRulesRoutes from './feature/pay/element_rel_rules/routes/payElementRelRules.routes.js';
 import payElementFrequencyRulesRoutes from './feature/pay/element_frequency_rules/routes/payElementFrequencyRules.routes.js';
 import payElementProrationRulesRoutes from './feature/pay/element_proration_rules/routes/payElementProrationRules.routes.js';
 import payElementEligibilityRulesRoutes from './feature/pay/element_eligibility_rules/routes/payElementEligibilityRules.routes.js';
@@ -379,6 +380,9 @@ app.use('/api/pay', payElementOverrideRulesRoutes);
 
 // Payroll — element scope rules (PAY.PAY_ELEMENT_SCOPE_RULES_PKG)
 app.use('/api/pay', payElementScopeRulesRoutes);
+
+// Payroll — element relationship rules (PAY.PAY_ELEMENT_REL_RULES_PKG)
+app.use('/api/pay', payElementRelRulesRoutes);
 
 // Payroll — element frequency rules (PAY.PAY_ELEMENT_FREQUENCY_RULES_PKG)
 app.use('/api/pay', payElementFrequencyRulesRoutes);
