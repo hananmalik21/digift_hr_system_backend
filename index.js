@@ -118,6 +118,7 @@ import payElementFrequencyRulesRoutes from './feature/pay/element_frequency_rule
 import payElementProrationRulesRoutes from './feature/pay/element_proration_rules/routes/payElementProrationRules.routes.js';
 import payElementEligibilityRulesRoutes from './feature/pay/element_eligibility_rules/routes/payElementEligibilityRules.routes.js';
 import payElementEligProfilesRoutes from './feature/pay/element_elig_profiles/routes/payElementEligProfiles.routes.js';
+import payEligibilityRoutes from './feature/pay/eligibility/routes/payEligibility.routes.js';
 import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js';
 import payFormulaRoutes from './feature/pay/formulas/routes/payFormulaRoutes.js';
 import payBalanceRoutes from './feature/pay/balances/routes/payBalanceRoutes.js';
@@ -395,6 +396,9 @@ app.use('/api/pay', payElementEligibilityRulesRoutes);
 
 // Payroll — element eligibility profiles (PAY.PAY_ELEMENT_ELIG_PROFILES_PKG)
 app.use('/api/pay', payElementEligProfilesRoutes);
+
+// Payroll — eligibility evaluation simulation (PAY.PAY_ELIGIBILITY_EVALUATION_PKG)
+app.use('/api/pay', payEligibilityRoutes);
 
 // Payroll — lookups (PAY.PAY_LOOKUPS_PKG / PAY.V_PAY_LOOKUP_VALUES)
 app.use('/api/pay', payLookupsRoutes);
