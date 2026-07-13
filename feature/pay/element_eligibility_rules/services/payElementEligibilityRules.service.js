@@ -11,6 +11,7 @@ import {
   mapPayElementEligibilityRuleCreateData
 } from '../model/payElementEligibilityRulesViewModel.js';
 import { DEFAULT_STATUS } from '../constants/payElementEligibilityRules.constants.js';
+import { criteriaForPackagePayload } from '../utils/payElementEligibilityCriteriaUtils.js';
 import { assertEnterpriseAccess } from '../validations/payElementEligibilityRules.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Eligibility rule created successfully.';
@@ -38,18 +39,8 @@ function mapPackageOutcome(pkg, { successHttpStatus = HTTP_OK, successMessage = 
   };
 }
 
-function criteriaForPackage(criteria) {
-  if (!Array.isArray(criteria)) return [];
-  return criteria
-    .map((row) => ({
-      criteria_type_code: row?.criteria_type_code,
-      criteria_value: row?.criteria_value
-    }))
-    .filter((row) => row.criteria_type_code && row.criteria_value);
-}
-
 function mergeUpdatePayload(existing, payload) {
-  const criteria = payload.criteria ?? criteriaForPackage(existing.criteria);
+  const criteria = payload.criteria ?? criteriaForPackagePayload(existing.criteria);
 
   return {
     enterprise_id: payload.enterprise_id ?? existing.enterprise_id,
@@ -94,21 +85,24 @@ export async function createElementEligibilityRule(payload, actor) {
   const pkg = await createEligibilityRuleViaPackage(payload, actor);
   if (!pkg.success) return mapPackageOutcome(pkg);
 
-  let data = mapPayElementEligibilityRuleCreateData({
-    eligibility_rule_id: pkg.data?.eligibility_rule_id ?? null,
-    eligibility_rule_guid: pkg.data?.eligibility_rule_guid ?? null,
-    enterprise_id: payload.enterprise_id,
-    rule_name: payload.rule_name,
-    criteria_count: payload.criteria?.length ?? 0,
-    criteria: payload.criteria
-  });
-
+  let data = null;
   if (pkg.data?.eligibility_rule_guid) {
     const row = await getPayElementEligibilityRuleFromViewByGuid(
       pkg.data.eligibility_rule_guid,
       payload.enterprise_id
     );
     if (row) data = mapPayElementEligibilityRuleCreateData(row);
+  }
+
+  if (!data) {
+    data = mapPayElementEligibilityRuleCreateData({
+      eligibility_rule_id: pkg.data?.eligibility_rule_id ?? null,
+      eligibility_rule_guid: pkg.data?.eligibility_rule_guid ?? null,
+      enterprise_id: payload.enterprise_id,
+      rule_name: payload.rule_name,
+      criteria_count: payload.criteria?.length ?? 0,
+      criteria: payload.criteria
+    });
   }
 
   return mapPackageOutcome(pkg, {

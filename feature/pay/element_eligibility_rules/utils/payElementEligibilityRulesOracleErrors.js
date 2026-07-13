@@ -12,12 +12,20 @@ const PACKAGE_MESSAGE_MAP = Object.freeze([
     message: 'Invalid criteria type code.'
   },
   {
+    pattern: /criteria\s*configuration\s*is\s*required/i,
+    message: 'Criteria configuration is required.'
+  },
+  {
     pattern: /criteria\s*value\s*is\s*required|at\s*least\s*one\s*criteria/i,
-    message: 'At least one criteria value is required.'
+    message: 'Criteria value is required.'
   },
   {
     pattern: /duplicate\s*criteria\s*values/i,
     message: 'Duplicate criteria values are not allowed for the same eligibility rule.'
+  },
+  {
+    pattern: /all\s*values\s*cannot\s*be\s*combined/i,
+    message: 'All values cannot be combined with specific values for the same criteria type.'
   },
   { pattern: /eligibility\s*rule\s*was\s*not\s*found|not\s*found/i, message: 'Eligibility rule was not found.' },
   { pattern: /grade.*not\s*valid|invalid\s*grade/i, message: 'Selected grade is not valid.' },

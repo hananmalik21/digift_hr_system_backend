@@ -3,6 +3,10 @@ import db from '../../../../config/db.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { buildPayElementEligibilityRuleListWhereClause } from '../utils/payElementEligibilityRulesFilterBuilder.js';
 import {
+  countCriteriaValues,
+  normalizeCriteriaForApi
+} from '../utils/payElementEligibilityCriteriaUtils.js';
+import {
   normalizeGuidField,
   parseJsonArray,
   readClobValue,
@@ -27,7 +31,6 @@ const LIST_SELECT_COLUMNS = `
   v.EFFECTIVE_END_DATE,
   v.STATUS,
   v.STATUS_NAME,
-  v.CRITERIA_VALUE_COUNT,
   v.CRITERIA_VALUES_JSON,
   v.CREATED_BY,
   v.CREATION_DATE,
@@ -35,39 +38,14 @@ const LIST_SELECT_COLUMNS = `
   v.LAST_UPDATE_DATE
 `.trim();
 
-function mapCriteriaJsonItem(item) {
-  if (item == null || typeof item !== 'object') return null;
-
-  return {
-    eligibility_rule_value_id: toNumberOrNull(
-      item.eligibility_rule_value_id ?? item.ELIGIBILITY_RULE_VALUE_ID
-    ),
-    eligibility_rule_value_guid: normalizeGuidField(
-      item.eligibility_rule_value_guid ?? item.ELIGIBILITY_RULE_VALUE_GUID
-    ),
-    criteria_type_code: toStringOrNull(item.criteria_type_code ?? item.CRITERIA_TYPE_CODE),
-    criteria_value: toStringOrNull(item.criteria_value ?? item.CRITERIA_VALUE),
-    criteria_value_name: toStringOrNull(item.criteria_value_name ?? item.CRITERIA_VALUE_NAME),
-    legal_employer_id: normalizeGuidField(item.legal_employer_id ?? item.LEGAL_EMPLOYER_ID),
-    org_unit_id: normalizeGuidField(item.org_unit_id ?? item.ORG_UNIT_ID),
-    grade_id: toNumberOrNull(item.grade_id ?? item.GRADE_ID),
-    position_id: normalizeGuidField(item.position_id ?? item.POSITION_ID),
-    employment_type_code: toStringOrNull(item.employment_type_code ?? item.EMPLOYMENT_TYPE_CODE),
-    location_code: toStringOrNull(item.location_code ?? item.LOCATION_CODE),
-    created_by: toStringOrNull(item.created_by ?? item.CREATED_BY),
-    creation_date: toIsoDateTimeOrNull(item.creation_date ?? item.CREATION_DATE),
-    last_updated_by: toStringOrNull(item.last_updated_by ?? item.LAST_UPDATED_BY),
-    last_update_date: toIsoDateTimeOrNull(item.last_update_date ?? item.LAST_UPDATE_DATE)
-  };
-}
-
 async function mapPayElementEligibilityRuleViewRow(row) {
   const r = rowKeysUpper(row);
   const g = (key) => r[key];
 
   const criteriaRaw = await readClobValue(g('CRITERIA_VALUES_JSON'));
-  const criteria = parseJsonArray(criteriaRaw).map(mapCriteriaJsonItem).filter(Boolean);
-  const criteriaCount = toNumberOrNull(g('CRITERIA_VALUE_COUNT')) ?? criteria.length;
+  const criteria = normalizeCriteriaForApi(parseJsonArray(criteriaRaw));
+  const criteriaCount = criteria.length;
+  const criteriaValueCount = countCriteriaValues(criteria);
 
   return {
     eligibility_rule_id: toNumberOrNull(g('ELIGIBILITY_RULE_ID')),
@@ -79,7 +57,7 @@ async function mapPayElementEligibilityRuleViewRow(row) {
     status: toStringOrNull(g('STATUS')),
     status_name: toStringOrNull(g('STATUS_NAME')),
     criteria_count: criteriaCount,
-    criteria_value_count: criteriaCount,
+    criteria_value_count: criteriaValueCount,
     criteria,
     created_by: toStringOrNull(g('CREATED_BY')),
     creation_date: toIsoDateTimeOrNull(g('CREATION_DATE')),

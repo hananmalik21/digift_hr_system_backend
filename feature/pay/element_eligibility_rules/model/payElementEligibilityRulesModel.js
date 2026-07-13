@@ -4,7 +4,6 @@ import {
   auditInBind,
   codeInBind,
   guidHexInBind,
-  jsonArrayToClobString,
   normalizeOutGuidHex,
   normalizeOutNumber,
   normalizeOutString,
@@ -14,6 +13,7 @@ import {
 } from '../../../../utils/oraclePackageUtils.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { mapPackageBusinessMessage } from '../utils/payElementEligibilityRulesOracleErrors.js';
+import { criteriaForPackagePayload } from '../utils/payElementEligibilityCriteriaUtils.js';
 
 const PKG = 'PAY.PAY_ELEMENT_ELIGIBILITY_RULES_PKG';
 const CREATE_PROC = `${PKG}.CREATE_RULE`;
@@ -119,9 +119,8 @@ function parsePackageOut(outBinds, { includeCreateFields = false } = {}) {
 }
 
 function criteriaJsonClobBind(criteria) {
-  const json = jsonArrayToClobString(criteria ?? [], { allowEmptyArray: false });
   return {
-    val: json ?? '[]',
+    val: JSON.stringify(criteriaForPackagePayload(criteria)),
     dir: oracledb.BIND_IN,
     type: oracledb.CLOB
   };

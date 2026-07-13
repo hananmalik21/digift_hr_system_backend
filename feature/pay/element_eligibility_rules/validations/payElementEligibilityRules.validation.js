@@ -9,14 +9,15 @@ import {
   DEFAULT_END_DATE,
   DEFAULT_STATUS
 } from '../constants/payElementEligibilityRules.constants.js';
+import {
+  collectDuplicateCriteriaTypeErrors,
+  isAllValuesCriteriaMarker,
+  isBlank
+} from '../utils/payElementEligibilityCriteriaUtils.js';
 
 function throwIfErrors(errors) {
   if (errors.length === 0) return;
   throw new ValidationError('Validation failed', errors);
-}
-
-function isBlank(value) {
-  return value == null || String(value).trim() === '';
 }
 
 export function firstValidationMessage(err) {
@@ -90,7 +91,12 @@ function parseCriteriaValue(errors, raw, { required = false } = {}) {
     if (required) errors.push('criteria_value is required');
     return null;
   }
-  return String(raw).trim();
+  const value = String(raw).trim();
+  if (isAllValuesCriteriaMarker(value)) {
+    errors.push('criteria_value is invalid');
+    return null;
+  }
+  return value;
 }
 
 function parseCriteriaRow(errors, raw, index) {
@@ -106,27 +112,38 @@ function parseCriteriaRow(errors, raw, index) {
     { required: true }
   );
 
-  const criteriaValues = raw.criteria_values ?? raw.criteriaValues;
-  const criteriaValue = raw.criteria_value ?? raw.criteriaValue;
-
   if (criteriaTypeCode == null) return null;
 
-  if (Array.isArray(criteriaValues) && criteriaValues.length > 0) {
-    return criteriaValues.map((value) => ({
+  const criteriaValues = raw.criteria_values ?? raw.criteriaValues;
+  if (Array.isArray(criteriaValues)) {
+    const values = criteriaValues
+      .filter((value) => !isBlank(value) && !isAllValuesCriteriaMarker(value))
+      .map((value) => String(value).trim());
+
+    if (criteriaValues.some((value) => isAllValuesCriteriaMarker(value))) {
+      errors.push(`${prefix}.criteria_values cannot include the all-values marker`);
+      return null;
+    }
+
+    return {
       criteria_type_code: criteriaTypeCode,
-      criteria_value: String(value).trim()
-    }));
+      criteria_values: values
+    };
   }
 
+  const criteriaValue = raw.criteria_value ?? raw.criteriaValue;
   const singleValue = parseCriteriaValue(errors, criteriaValue, { required: true });
   if (singleValue == null) return null;
 
-  return [{ criteria_type_code: criteriaTypeCode, criteria_value: singleValue }];
+  return {
+    criteria_type_code: criteriaTypeCode,
+    criteria_value: singleValue
+  };
 }
 
 function parseCriteriaArray(errors, rawCriteria, { required = false } = {}) {
   if (rawCriteria == null || (Array.isArray(rawCriteria) && rawCriteria.length === 0)) {
-    if (required) errors.push('At least one criteria value is required.');
+    if (required) errors.push('Criteria configuration is required.');
     return [];
   }
   if (!Array.isArray(rawCriteria)) {
@@ -137,11 +154,13 @@ function parseCriteriaArray(errors, rawCriteria, { required = false } = {}) {
   const normalized = [];
   rawCriteria.forEach((row, index) => {
     const parsed = parseCriteriaRow(errors, row, index);
-    if (Array.isArray(parsed)) normalized.push(...parsed);
+    if (parsed) normalized.push(parsed);
   });
 
+  errors.push(...collectDuplicateCriteriaTypeErrors(normalized));
+
   if (required && normalized.length === 0 && errors.length === 0) {
-    errors.push('At least one criteria value is required.');
+    errors.push('Criteria configuration is required.');
   }
 
   return normalized;
