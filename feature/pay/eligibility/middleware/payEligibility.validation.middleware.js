@@ -6,8 +6,11 @@ import {
 import {
   sendForbiddenError,
   sendValidationError
-} from '../controllers/payEligibilityControllerHelpers.js';
+} from '../controller/payEligibilityControllerHelpers.js';
 
+/**
+ * Validate evaluate request body and enforce enterprise access.
+ */
 export function validateEvaluateEligibility(req, res, next) {
   try {
     const body = validateEvaluateEligibilityBody(req.body || {});

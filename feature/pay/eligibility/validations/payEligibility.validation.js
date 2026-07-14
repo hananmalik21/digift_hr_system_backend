@@ -2,10 +2,14 @@ import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.
 import { parseGuid } from '../../../../utils/guidUtils.js';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
+import {
+  ACCESS_DENIED_MESSAGE,
+  VALIDATION_REQUIRED_MESSAGE
+} from '../constants/payEligibility.constants.js';
 
 function throwIfErrors(errors) {
   if (errors.length === 0) return;
-  throw new ValidationError('Validation failed', errors);
+  throw new ValidationError(VALIDATION_REQUIRED_MESSAGE, errors);
 }
 
 function isBlank(value) {
@@ -14,11 +18,22 @@ function isBlank(value) {
 
 export function firstValidationMessage(err) {
   const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
-  return details[0] || err?.message || 'Validation failed';
+  if (details.length === 0) {
+    return err?.message || VALIDATION_REQUIRED_MESSAGE;
+  }
+
+  const allRequired = details.every((msg) => /is required$/i.test(String(msg)));
+  if (allRequired) return VALIDATION_REQUIRED_MESSAGE;
+
+  return details[0];
 }
 
-function parseRequiredNumberField(errors, raw, field) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
+/**
+ * Required positive integer from number or numeric string.
+ * @returns {number|null}
+ */
+function parseRequiredPositiveInt(errors, raw, field) {
+  if (isBlank(raw)) {
     errors.push(`${field} is required`);
     return null;
   }
@@ -26,16 +41,18 @@ function parseRequiredNumberField(errors, raw, field) {
     errors.push(`${field} must be a number`);
     return null;
   }
+
   const n = Number(raw);
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
-    errors.push(`${field} must be a positive integer`);
+    errors.push(`${field} must be a number`);
     return null;
   }
   return n;
 }
 
 function parseEnterpriseIdField(errors, raw) {
-  if (raw === undefined || raw === null || String(raw).trim() === '') {
+  // Reuse shared tenant parser after a light local type/required check.
+  if (isBlank(raw)) {
     errors.push('enterprise_id is required');
     return null;
   }
@@ -43,10 +60,14 @@ function parseEnterpriseIdField(errors, raw) {
     errors.push('enterprise_id must be a number');
     return null;
   }
+
   try {
-    return parseEnterpriseId(raw, { required: true, missingMessage: 'enterprise_id is required' });
-  } catch (err) {
-    errors.push(err.message);
+    return parseEnterpriseId(raw, {
+      required: true,
+      missingMessage: 'enterprise_id is required'
+    });
+  } catch {
+    errors.push('enterprise_id must be a number');
     return null;
   }
 }
@@ -60,14 +81,15 @@ function parseEmployeeGuidField(errors, raw) {
     errors.push('employee_guid must be a string');
     return null;
   }
-  if (raw.trim() === '') {
+  if (isBlank(raw)) {
     errors.push('employee_guid is required');
     return null;
   }
+
   try {
     return parseGuid(raw, 'employee_guid');
-  } catch (err) {
-    errors.push(err.message);
+  } catch {
+    errors.push('employee_guid must be a non-empty string');
     return null;
   }
 }
@@ -79,18 +101,18 @@ function parseEmployeeGuidField(errors, raw) {
 export function assertEnterpriseAccess(req, enterpriseId) {
   const tokenEnterpriseId = getActingEnterpriseId(req);
   if (tokenEnterpriseId != null && tokenEnterpriseId !== enterpriseId) {
-    throw new ForbiddenError('Access denied: enterprise_id does not match authenticated enterprise');
+    throw new ForbiddenError(ACCESS_DENIED_MESSAGE);
   }
 }
 
 /**
- * @param {Record<string, unknown>} body
+ * @param {Record<string, unknown>} [body]
  */
-export function validateEvaluateEligibilityBody(body) {
+export function validateEvaluateEligibilityBody(body = {}) {
   const errors = [];
   const enterpriseId = parseEnterpriseIdField(errors, body.enterprise_id);
   const employeeGuid = parseEmployeeGuidField(errors, body.employee_guid);
-  const elementId = parseRequiredNumberField(errors, body.element_id, 'element_id');
+  const elementId = parseRequiredPositiveInt(errors, body.element_id, 'element_id');
 
   throwIfErrors(errors);
 

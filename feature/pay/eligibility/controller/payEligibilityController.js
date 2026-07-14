@@ -1,14 +1,14 @@
 /**
  * Payroll Eligibility Evaluation API.
- * Simulation only — calls PAY.PAY_ELIGIBILITY_EVALUATION_PKG.
+ * Simulator only — calls PAY.PAY_ELIGIBILITY_EVALUATION_PKG and returns UI-ready JSON as-is.
  */
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { evaluateEmployeeEligibility } from '../services/payEligibility.service.js';
+import { validateEvaluateEligibility } from '../middleware/payEligibility.validation.middleware.js';
+import { evaluateEmployeeEligibility } from '../model/payEligibilityModel.js';
 import {
   sendEvaluateOutcome,
   withPayEligibilityErrorHandling
 } from './payEligibilityControllerHelpers.js';
-import { validateEvaluateEligibility } from '../middleware/payEligibility.validation.middleware.js';
 
 /** POST /api/pay/eligibility/evaluate */
 export const evaluateEmployeeEligibilityHandler = [

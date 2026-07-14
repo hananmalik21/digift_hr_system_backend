@@ -1,29 +1,37 @@
 import { readClobOut } from '../../../compensation/utils/oracleClobBinds.js';
 
 /**
- * Read an Oracle CLOB OUT bind fully and return the text content.
+ * Read an Oracle CLOB OUT bind fully and return text.
+ * Handles string values (fetchAsString) and Lob objects.
  *
- * @param {unknown} val
+ * @param {unknown} clob
  * @returns {Promise<string|null>}
  */
-export async function readClobOutFully(val) {
-  if (val == null) return null;
-  return readClobOut(Array.isArray(val) ? val[0] : val);
+export async function readClob(clob) {
+  if (clob == null) return null;
+
+  const value = Array.isArray(clob) ? clob[0] : clob;
+  if (value == null) return null;
+  if (typeof value === 'string') return value;
+
+  return readClobOut(value);
 }
 
 /**
- * Parse a CLOB OUT bind containing a JSON object.
+ * Parse a CLOB OUT bind as a JSON object. Returns null when empty/invalid.
  *
  * @param {unknown} clobVal
  * @returns {Promise<Record<string, unknown>|null>}
  */
 export async function parseResultJsonClob(clobVal) {
-  const raw = await readClobOutFully(clobVal);
+  const raw = await readClob(clobVal);
   if (raw == null || String(raw).trim() === '') return null;
 
   try {
     const parsed = JSON.parse(String(raw));
-    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;

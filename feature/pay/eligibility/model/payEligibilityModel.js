@@ -10,6 +10,7 @@ import {
   ORACLE_PKG
 } from '../constants/payEligibility.constants.js';
 import { parseResultJsonClob } from '../utils/payEligibilityClobUtils.js';
+import { logTechnicalError } from '../utils/payEligibilityResponseUtils.js';
 
 const EVALUATE_PLSQL = `
 BEGIN
@@ -21,18 +22,12 @@ BEGIN
   );
 END;`;
 
-function resultJsonOutBind() {
-  return {
-    result_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
-  };
-}
-
 function buildEvaluateBinds(payload) {
   return {
     enterprise_id: numberInBind(payload.enterprise_id),
     employee_guid: guidHexInBind(payload.employee_guid),
     element_id: numberInBind(payload.element_id),
-    ...resultJsonOutBind()
+    result_json: { dir: oracledb.BIND_OUT, type: oracledb.CLOB }
   };
 }
 
@@ -47,10 +42,13 @@ async function releaseReadOnlyConnection(connection) {
 }
 
 /**
+ * Call PAY.PAY_ELIGIBILITY_EVALUATION_PKG and return UI-ready package JSON as-is.
+ * Does not re-evaluate eligibility rules in Node.js.
+ *
  * @param {{ enterprise_id: number, employee_guid: string, element_id: number }} payload
  * @returns {Promise<Record<string, unknown>>}
  */
-export async function evaluateEmployeeEligibilityViaPackage(payload) {
+export async function evaluateEmployeeEligibility(payload) {
   let connection;
   try {
     connection = await db.getConnection();
@@ -58,12 +56,14 @@ export async function evaluateEmployeeEligibilityViaPackage(payload) {
     const parsed = await parseResultJsonClob(result?.outBinds?.result_json);
 
     if (parsed == null) {
+      logTechnicalError('empty or invalid result_json CLOB', null);
       throw new DatabaseError(GENERIC_TECHNICAL_ERROR, null, GENERIC_TECHNICAL_ERROR);
     }
 
     return parsed;
   } catch (err) {
     if (err instanceof DatabaseError) throw err;
+    logTechnicalError('package execute failed', err);
     throw new DatabaseError(GENERIC_TECHNICAL_ERROR, err, GENERIC_TECHNICAL_ERROR);
   } finally {
     await releaseReadOnlyConnection(connection);

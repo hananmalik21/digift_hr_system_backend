@@ -1,42 +1,37 @@
 import { DatabaseError, ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
 import {
-  GENERIC_TECHNICAL_ERROR,
   HTTP_BAD_REQUEST,
   HTTP_FORBIDDEN,
   HTTP_INTERNAL_ERROR,
-  HTTP_OK,
-  LOG_TAG
+  HTTP_OK
 } from '../constants/payEligibility.constants.js';
-import { buildSystemErrorPayload } from '../utils/payEligibilityResponseUtils.js';
+import {
+  buildForbiddenErrorPayload,
+  buildSystemErrorPayload,
+  buildValidationErrorPayload,
+  logTechnicalError
+} from '../utils/payEligibilityResponseUtils.js';
 import { firstValidationMessage } from '../validations/payEligibility.validation.js';
 
-export const FALLBACK_ERROR = GENERIC_TECHNICAL_ERROR;
-
 export function sendValidationError(res, err) {
-  return res.status(HTTP_BAD_REQUEST).json({
-    success: false,
-    message: firstValidationMessage(err)
-  });
+  return res
+    .status(HTTP_BAD_REQUEST)
+    .json(buildValidationErrorPayload(firstValidationMessage(err)));
 }
 
 export function sendForbiddenError(res, err) {
-  return res.status(HTTP_FORBIDDEN).json({
-    success: false,
-    message: err.message || 'Access denied'
-  });
+  return res
+    .status(HTTP_FORBIDDEN)
+    .json(buildForbiddenErrorPayload(err.message));
 }
 
 export function sendSystemError(res, err) {
-  console.error(
-    `[${LOG_TAG}] evaluate failed`,
-    err instanceof DatabaseError ? err.oracleError?.message || err.message : err?.message || err
-  );
-
+  logTechnicalError('evaluate failed', err instanceof DatabaseError ? err : err);
   return res.status(HTTP_INTERNAL_ERROR).json(buildSystemErrorPayload());
 }
 
 /**
- * Return package JSON directly. Business outcomes with success=false still use HTTP 200.
+ * Return package JSON directly. Package success=true/false both use HTTP 200.
  *
  * @param {import('express').Response} res
  * @param {Record<string, unknown>} result
