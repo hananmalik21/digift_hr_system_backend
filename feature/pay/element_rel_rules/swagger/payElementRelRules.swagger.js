@@ -5,6 +5,52 @@
  *     description: Element relationship rules via PAY.PAY_ELEMENT_REL_RULES_PKG (reads from PAY.V_PAY_ELEMENT_REL_RULES)
  *
  * @swagger
+ * components:
+ *   schemas:
+ *     PayElementRelRuleOrgUnitHierarchyNode:
+ *       type: object
+ *       properties:
+ *         name: { type: string, example: Software Development }
+ *         level_code: { type: string, example: DEPARTMENT }
+ *     PayElementRelRule:
+ *       type: object
+ *       properties:
+ *         rule_id: { type: integer }
+ *         rule_guid: { type: string }
+ *         element_id: { type: integer }
+ *         element_guid: { type: string }
+ *         element_code: { type: string }
+ *         element_name: { type: string }
+ *         element_description: { type: string, nullable: true }
+ *         category_code: { type: string, nullable: true }
+ *         classification_code: { type: string, nullable: true }
+ *         secondary_classification: { type: string, nullable: true }
+ *         legislative_data_group: { type: string, nullable: true }
+ *         effective_start_date: { type: string, format: date, nullable: true }
+ *         effective_end_date: { type: string, format: date, nullable: true }
+ *         enterprise_id: { type: integer }
+ *         scope_configuration_code: { type: string }
+ *         scope_configuration_name: { type: string, nullable: true }
+ *         payroll_id: { type: integer, nullable: true }
+ *         payroll_display: { type: string }
+ *         org_unit_guid: { type: string, nullable: true, description: Lowercase hex GUID; null when rule applies to all org units }
+ *         org_unit_display: { type: string, description: Org unit name, or "All" when unrestricted }
+ *         org_unit_hierarchy:
+ *           type: array
+ *           description: Parsed parent hierarchy from ORG_UNIT_HIERARCHY_JSON; [] when unrestricted or invalid
+ *           items:
+ *             $ref: '#/components/schemas/PayElementRelRuleOrgUnitHierarchyNode'
+ *         grade_id: { type: integer, nullable: true }
+ *         grade_display: { type: string }
+ *         position_guid: { type: string, nullable: true }
+ *         position_display: { type: string }
+ *         active_flag: { type: string, enum: [Y, N] }
+ *         created_by: { type: string, nullable: true }
+ *         creation_date: { type: string, format: date-time, nullable: true }
+ *         last_updated_by: { type: string, nullable: true }
+ *         last_update_date: { type: string, format: date-time, nullable: true }
+ *
+ * @swagger
  * /api/pay/element-rel-rules:
  *   get:
  *     tags: [Payroll Element Relationship Rules]
@@ -51,6 +97,19 @@
  *       - in: query
  *         name: sort_order
  *         schema: { type: string, enum: [ASC, DESC] }
+ *     responses:
+ *       200:
+ *         description: Paginated relationship rules including org_unit_guid, org_unit_display, and parsed org_unit_hierarchy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/PayElementRelRule'
  *   post:
  *     tags: [Payroll Element Relationship Rules]
  *     summary: Create element relationship rule
@@ -86,6 +145,17 @@
  *       - in: query
  *         name: enterprise_id
  *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Single relationship rule with org-unit hierarchy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string }
+ *                 data:
+ *                   $ref: '#/components/schemas/PayElementRelRule'
  *   put:
  *     tags: [Payroll Element Relationship Rules]
  *     summary: Update element relationship rule by GUID

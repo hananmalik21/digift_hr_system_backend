@@ -4,7 +4,10 @@ import {
   deleteRelRuleViaPackage,
   updateRelRuleViaPackage
 } from '../model/payElementRelRulesModel.js';
-import { listPayElementRelRulesFromView } from '../model/payElementRelRulesViewModel.js';
+import {
+  getPayElementRelRuleFromViewByGuid,
+  listPayElementRelRulesFromView
+} from '../model/payElementRelRulesViewModel.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Relationship rule created successfully.';
 const UPDATE_SUCCESS_MESSAGE = 'Relationship rule updated successfully.';
@@ -15,6 +18,24 @@ const GET_SUCCESS_MESSAGE = 'Element relationship rule fetched successfully';
 
 const HTTP_OK = 200;
 const HTTP_CREATED = 201;
+
+/**
+ * @param {{ httpStatus: number, message: string, data?: object|null }} opts
+ */
+function buildMutationOutcome({ httpStatus, message, data }) {
+  const outcome = {
+    success: true,
+    httpStatus,
+    message
+  };
+  if (data != null) outcome.data = data;
+  return outcome;
+}
+
+async function loadRuleViewRow(ruleGuid, enterpriseId) {
+  if (ruleGuid == null || String(ruleGuid).trim() === '') return null;
+  return getPayElementRelRuleFromViewByGuid(ruleGuid, enterpriseId ?? null);
+}
 
 /**
  * @param {object} filters
@@ -44,16 +65,16 @@ export function buildElementRelRuleGetOutcome(row) {
  */
 export async function createElementRelRule(payload, createdBy) {
   const pkg = await createRelRuleViaPackage(payload, createdBy);
+  const fullRow = await loadRuleViewRow(pkg.rule_guid, payload.enterprise_id);
 
-  return {
-    success: true,
+  return buildMutationOutcome({
     httpStatus: HTTP_CREATED,
     message: CREATE_SUCCESS_MESSAGE,
-    data: {
+    data: fullRow ?? {
       rule_id: pkg.rule_id ?? null,
       rule_guid: pkg.rule_guid ?? null
     }
-  };
+  });
 }
 
 /**
@@ -63,12 +84,13 @@ export async function createElementRelRule(payload, createdBy) {
  */
 export async function updateElementRelRule(ruleGuidHex, payload, updatedBy) {
   await updateRelRuleViaPackage(ruleGuidHex, payload, updatedBy);
+  const fullRow = await loadRuleViewRow(ruleGuidHex, payload.enterprise_id);
 
-  return {
-    success: true,
+  return buildMutationOutcome({
     httpStatus: HTTP_OK,
-    message: UPDATE_SUCCESS_MESSAGE
-  };
+    message: UPDATE_SUCCESS_MESSAGE,
+    data: fullRow
+  });
 }
 
 /**
@@ -79,9 +101,8 @@ export async function updateElementRelRule(ruleGuidHex, payload, updatedBy) {
 export async function deleteElementRelRule(ruleGuidHex, hardDelete, updatedBy) {
   await deleteRelRuleViaPackage(ruleGuidHex, hardDelete, updatedBy);
 
-  return {
-    success: true,
+  return buildMutationOutcome({
     httpStatus: HTTP_OK,
     message: hardDelete === 'Y' ? DELETE_HARD_SUCCESS_MESSAGE : DELETE_SUCCESS_MESSAGE
-  };
+  });
 }
