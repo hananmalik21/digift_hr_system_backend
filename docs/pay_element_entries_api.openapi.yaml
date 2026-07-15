@@ -140,6 +140,57 @@ paths:
                 $ref: '#/components/schemas/ElementEntryBusinessErrorResponse'
         '500':
           description: Unexpected system error
+  /api/pay/element-entries/export:
+    get:
+      tags: [Payroll Element Entries]
+      summary: Export element entries as Excel
+      operationId: exportPayElementEntries
+      description: |
+        Same filters as list (`enterprise_id` required). Returns all matching rows as an Excel
+        download (no pagination). Nested entry/costing/context values are JSON-stringified.
+      parameters:
+        - name: enterprise_id
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: employee_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: element_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: payroll_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: approval_status_code
+          in: query
+          schema: { type: string }
+        - name: effective_start_date
+          in: query
+          schema: { type: string, format: date }
+        - name: effective_end_date
+          in: query
+          schema: { type: string, format: date }
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [employee_id, element_id, effective_start_date, creation_date] }
+        - name: sortOrder
+          in: query
+          schema: { type: string, enum: [asc, desc] }
+      responses:
+        '200':
+          description: Excel workbook (.xlsx) download
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Validation error
+        '404':
+          description: No element entries found to export
+        '500':
+          description: Unexpected system error
   /api/pay/element-entries/{elementEntryGuid}:
     parameters:
       - $ref: '#/components/parameters/ElementEntryGuidPath'

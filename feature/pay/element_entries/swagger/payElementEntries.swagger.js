@@ -181,6 +181,61 @@
  *         description: Validation error
  *       '500':
  *         description: Unexpected system error
+ *
+ * @swagger
+ * /api/pay/element-entries/export:
+ *   get:
+ *     tags: [Payroll Element Entries]
+ *     summary: Export element entries as Excel
+ *     description: |
+ *       Same filters as list (enterprise_id required). Returns all matching rows as an Excel
+ *       download (no pagination). Nested entry/costing/context values are JSON-stringified.
+ *     parameters:
+ *       - in: query
+ *         name: enterprise_id
+ *         required: true
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: employee_id
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: element_id
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: payroll_id
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: approval_status_code
+ *         schema: { type: string }
+ *       - in: query
+ *         name: effective_start_date
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: effective_end_date
+ *         schema: { type: string, format: date }
+ *       - in: query
+ *         name: sortBy
+ *         schema: { type: string, enum: [employee_id, element_id, effective_start_date, creation_date] }
+ *       - in: query
+ *         name: sortOrder
+ *         schema: { type: string, enum: [ASC, DESC] }
+ *     responses:
+ *       '200':
+ *         description: Excel workbook (.xlsx) download
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       '400':
+ *         description: Validation error
+ *       '404':
+ *         description: No element entries found to export
+ *       '500':
+ *         description: Unexpected system error
+ *
+ * @swagger
+ * /api/pay/element-entries:
  *   post:
  *     tags: [Payroll Element Entries]
  *     summary: Create element entry

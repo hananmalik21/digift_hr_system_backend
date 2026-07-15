@@ -7,10 +7,12 @@ import {
 import { validateElementEntryReferences } from '../model/payElementEntryReferencesModel.js';
 import {
   getElementEntryFromViewByGuid,
+  listElementEntriesForExport,
   listElementEntriesFromView
 } from '../model/payElementEntriesViewModel.js';
 import { mapPackageBusinessMessage } from '../utils/payElementEntriesOracleErrors.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildElementEntriesExcelBuffer } from './payElementEntriesExportService.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Element entry created successfully';
 const UPDATE_SUCCESS_MESSAGE = 'Element entry updated successfully';
@@ -96,6 +98,19 @@ export async function listElementEntries(filters) {
     data: rows,
     meta: { pagination }
   };
+}
+
+/**
+ * Export all matching element entries as Excel (same filters as list; no pagination).
+ * @param {object} filters
+ * @returns {Promise<{ buffer: Buffer, filename: string, rowCount: number }>}
+ */
+export async function exportElementEntries(filters) {
+  const { rows } = await listElementEntriesForExport(filters);
+  return buildElementEntriesExcelBuffer({
+    rows,
+    enterpriseId: filters.enterprise_id
+  });
 }
 
 /**

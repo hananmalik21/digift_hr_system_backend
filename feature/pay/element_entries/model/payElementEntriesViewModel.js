@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import { paginateForExport } from '../../../../utils/excel/index.js';
 import { normalizeOutGuidHex } from '../../../../utils/oraclePackageUtils.js';
 import { buildPayElementEntriesListWhereClause } from '../utils/payElementEntriesFilterBuilder.js';
 import { resolvePayElementEntriesUserMessage } from '../utils/payElementEntriesOracleErrors.js';
@@ -173,6 +174,24 @@ SELECT ${VIEW_SELECT_COLUMNS}
       } catch (_) {}
     }
   }
+}
+
+/**
+ * Fetch all matching element entries for Excel export (paginated under the hood).
+ * @param {object} filters
+ * @param {{ pageSize?: number, maxRows?: number }} [exportOptions]
+ * @returns {Promise<{ rows: object[], total: number }>}
+ */
+export async function listElementEntriesForExport(filters, exportOptions = {}) {
+  return paginateForExport({
+    exportOptions,
+    fetchPage: (page, pageSize) =>
+      listElementEntriesFromView({
+        ...filters,
+        page,
+        limit: pageSize
+      })
+  });
 }
 
 /**

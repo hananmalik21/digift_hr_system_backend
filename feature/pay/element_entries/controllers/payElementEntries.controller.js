@@ -7,10 +7,13 @@ import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import {
   createElementEntry,
   deleteElementEntry,
+  exportElementEntries,
   getElementEntryByGuid,
   listElementEntries,
   updateElementEntry
 } from '../services/payElementEntries.service.js';
+import { ELEMENT_ENTRIES_EXPORT_EMPTY_MESSAGE } from '../services/payElementEntriesExportService.js';
+import { sendExcelExport } from '../../../../utils/excel/index.js';
 import {
   logAudit,
   resolveAuditActor,
@@ -22,6 +25,7 @@ import {
 import {
   validateCreateElementEntry,
   validateDeleteElementEntry,
+  validateExportElementEntries,
   validateGetElementEntryByGuid,
   validateListElementEntries,
   validateUpdateElementEntry
@@ -42,6 +46,28 @@ export const getElementEntriesHandler = [
       });
 
       return sendSuccess(res, outcome);
+    })
+  )
+];
+
+/** GET /api/pay/element-entries/export */
+export const exportElementEntriesHandler = [
+  validateExportElementEntries,
+  asyncHandler(async (req, res) =>
+    withPayElementEntryErrorHandling(res, async () => {
+      const filters = req.validated;
+      const { buffer, filename, rowCount } = await exportElementEntries(filters);
+
+      if (rowCount === 0) {
+        return sendNotFoundError(res, ELEMENT_ENTRIES_EXPORT_EMPTY_MESSAGE);
+      }
+
+      logAudit('export', req, {
+        enterprise_id: filters.enterprise_id,
+        exported: rowCount
+      });
+
+      return sendExcelExport(res, buffer, filename);
     })
   )
 ];

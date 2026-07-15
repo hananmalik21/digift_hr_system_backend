@@ -350,10 +350,11 @@ function parseEnterpriseIdField(errors, raw, { required = true } = {}) {
 }
 
 /**
+ * Shared list/export filters (enterprise + optional filters + sort).
  * @param {Record<string, unknown>} query
+ * @param {string[]} errors
  */
-export function validateListElementEntriesQuery(query = {}) {
-  const errors = [];
+function parseElementEntriesSharedFilters(query, errors) {
   const q = query && typeof query === 'object' ? query : {};
 
   const enterprise_id = parseEnterpriseIdField(errors, q.enterprise_id ?? q.enterpriseId, {
@@ -364,9 +365,9 @@ export function validateListElementEntriesQuery(query = {}) {
     errors.push('component_id filter is no longer supported; use element_id');
   }
 
-  let employee_id = parseOptionalPositiveInt(errors, q.employee_id ?? q.employeeId, 'employee_id');
-  let element_id = parseOptionalPositiveInt(errors, q.element_id ?? q.elementId, 'element_id');
-  let payroll_id = parseOptionalPositiveInt(errors, q.payroll_id ?? q.payrollId, 'payroll_id');
+  const employee_id = parseOptionalPositiveInt(errors, q.employee_id ?? q.employeeId, 'employee_id');
+  const element_id = parseOptionalPositiveInt(errors, q.element_id ?? q.elementId, 'element_id');
+  const payroll_id = parseOptionalPositiveInt(errors, q.payroll_id ?? q.payrollId, 'payroll_id');
   const effective_start_date = parseOptionalIsoDate(errors, q.effective_start_date, 'effective_start_date');
   const effective_end_date = parseOptionalIsoDate(errors, q.effective_end_date, 'effective_end_date');
 
@@ -389,6 +390,32 @@ export function validateListElementEntriesQuery(query = {}) {
     }
   }
 
+  return {
+    enterprise_id,
+    employee_id,
+    element_id,
+    payroll_id,
+    approval_status_code,
+    effective_start_date,
+    effective_end_date,
+    sort_by:
+      sortByRaw != null && String(sortByRaw).trim() !== ''
+        ? String(sortByRaw).trim().toLowerCase()
+        : 'creation_date',
+    sort_order:
+      sortOrderRaw != null && String(sortOrderRaw).trim() !== ''
+        ? String(sortOrderRaw).trim().toUpperCase()
+        : 'DESC'
+  };
+}
+
+/**
+ * @param {Record<string, unknown>} query
+ * @param {string[]} errors
+ */
+function parseElementEntriesPagination(query, errors) {
+  const q = query && typeof query === 'object' ? query : {};
+
   let page = ELEMENT_ENTRIES_LIST_DEFAULT_PAGE;
   if (q.page !== undefined) {
     const parsedPage = parseInt(q.page, 10);
@@ -410,27 +437,29 @@ export function validateListElementEntriesQuery(query = {}) {
     }
   }
 
-  throwIfErrors(errors);
+  return { page, limit };
+}
 
-  return {
-    enterprise_id,
-    employee_id,
-    element_id,
-    payroll_id,
-    approval_status_code,
-    effective_start_date,
-    effective_end_date,
-    sort_by:
-      sortByRaw != null && String(sortByRaw).trim() !== ''
-        ? String(sortByRaw).trim().toLowerCase()
-        : 'creation_date',
-    sort_order:
-      sortOrderRaw != null && String(sortOrderRaw).trim() !== ''
-        ? String(sortOrderRaw).trim().toUpperCase()
-        : 'DESC',
-    page,
-    limit
-  };
+/**
+ * @param {Record<string, unknown>} query
+ */
+export function validateListElementEntriesQuery(query = {}) {
+  const errors = [];
+  const filters = parseElementEntriesSharedFilters(query, errors);
+  const pagination = parseElementEntriesPagination(query, errors);
+  throwIfErrors(errors);
+  return { ...filters, ...pagination };
+}
+
+/**
+ * Same filters as list; pagination is ignored (export pages internally).
+ * @param {Record<string, unknown>} query
+ */
+export function validateExportElementEntriesQuery(query = {}) {
+  const errors = [];
+  const filters = parseElementEntriesSharedFilters(query, errors);
+  throwIfErrors(errors);
+  return filters;
 }
 
 /**

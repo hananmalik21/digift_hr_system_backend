@@ -6,6 +6,7 @@ import {
   assertEnterpriseAccess,
   parseElementEntryGuidParam,
   validateCreateElementEntryBody,
+  validateExportElementEntriesQuery,
   validateListElementEntriesQuery,
   validateUpdateElementEntryBody
 } from '../validations/payElementEntries.validation.js';
@@ -18,6 +19,18 @@ import {
 export function validateListElementEntries(req, res, next) {
   try {
     const filters = validateListElementEntriesQuery(req.query || {});
+    assertEnterpriseAccess(req, filters.enterprise_id);
+    req.validated = filters;
+    next();
+  } catch (err) {
+    if (err instanceof ForbiddenError) return sendForbiddenError(res, err);
+    return sendValidationError(res, err);
+  }
+}
+
+export function validateExportElementEntries(req, res, next) {
+  try {
+    const filters = validateExportElementEntriesQuery(req.query || {});
     assertEnterpriseAccess(req, filters.enterprise_id);
     req.validated = filters;
     next();

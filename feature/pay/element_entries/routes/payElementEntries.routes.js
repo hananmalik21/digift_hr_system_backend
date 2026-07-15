@@ -7,17 +7,23 @@ import express from 'express';
 import {
   createElementEntryHandler,
   deleteElementEntryHandler,
+  exportElementEntriesHandler,
   getElementEntriesHandler,
   getElementEntryByGuidHandler,
   updateElementEntryHandler
 } from '../controllers/payElementEntries.controller.js';
 
 const router = express.Router();
+const elementEntriesRouter = express.Router({ mergeParams: true });
 
-router.get('/element-entries', ...getElementEntriesHandler);
-router.get('/element-entries/:elementEntryGuid', ...getElementEntryByGuidHandler);
-router.post('/element-entries', ...createElementEntryHandler);
-router.put('/element-entries/:elementEntryGuid', ...updateElementEntryHandler);
-router.delete('/element-entries/:elementEntryGuid', ...deleteElementEntryHandler);
+// Static paths before :elementEntryGuid
+elementEntriesRouter.get('/', ...getElementEntriesHandler);
+elementEntriesRouter.get('/export', ...exportElementEntriesHandler);
+elementEntriesRouter.get('/:elementEntryGuid', ...getElementEntryByGuidHandler);
+elementEntriesRouter.post('/', ...createElementEntryHandler);
+elementEntriesRouter.put('/:elementEntryGuid', ...updateElementEntryHandler);
+elementEntriesRouter.delete('/:elementEntryGuid', ...deleteElementEntryHandler);
+
+router.use('/element-entries', elementEntriesRouter);
 
 export default router;

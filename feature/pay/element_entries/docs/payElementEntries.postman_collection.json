@@ -34,6 +34,27 @@
       }
     },
     {
+      "name": "Export Element Entries (Excel)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/element-entries/export?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "element-entries", "export"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "employee_id", "value": "292", "disabled": true },
+            { "key": "element_id", "value": "1001", "disabled": true },
+            { "key": "payroll_id", "value": "4", "disabled": true },
+            { "key": "approval_status_code", "value": "DRAFT", "disabled": true },
+            { "key": "sortBy", "value": "creation_date", "disabled": true },
+            { "key": "sortOrder", "value": "desc", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
       "name": "Get Element Entry by GUID",
       "request": {
         "method": "GET",
