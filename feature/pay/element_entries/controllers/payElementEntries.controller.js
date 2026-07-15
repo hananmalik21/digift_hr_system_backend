@@ -127,7 +127,7 @@ export const updateElementEntryHandler = [
 
       logAudit('update', req, {
         element_entry_guid: req.elementEntryGuid,
-        enterprise_id: validated.enterprise_id,
+        enterprise_id: validated.enterprise_id ?? req.enterpriseId,
         status: outcome.success ? 'SUCCESS' : 'ERROR'
       });
 

@@ -52,16 +52,37 @@ export function validateCreateElementEntry(req, res, next) {
   }
 }
 
-export function validateUpdateElementEntry(req, res, next) {
+export async function validateUpdateElementEntry(req, res, next) {
   try {
     const elementEntryGuid = parseElementEntryGuidParam(req.params.elementEntryGuid);
     const body = validateUpdateElementEntryBody(req.body || {});
-    assertEnterpriseAccess(req, Number(body.enterprise_id));
+
+    const enterpriseIdRaw =
+      body.enterprise_id ?? req.query?.enterprise_id ?? getActingEnterpriseId(req);
+
+    let enterpriseId = null;
+    if (enterpriseIdRaw != null && String(enterpriseIdRaw).trim() !== '') {
+      enterpriseId = parseEnterpriseId(enterpriseIdRaw, 'enterprise_id is required');
+    }
+
+    let entry;
+    if (enterpriseId != null) {
+      entry = await assertEntryEnterpriseAccess(req, elementEntryGuid, enterpriseId);
+    } else {
+      entry = await getElementEntryFromViewByGuid(elementEntryGuid);
+      if (!entry) throw new NotFoundError('Element entry not found');
+      assertEnterpriseAccess(req, entry.enterprise_id);
+      enterpriseId = entry.enterprise_id;
+    }
+
     req.elementEntryGuid = elementEntryGuid;
+    req.enterpriseId = enterpriseId;
+    req.elementEntry = entry;
     req.validated = body;
     next();
   } catch (err) {
     if (err instanceof ForbiddenError) return sendForbiddenError(res, err);
+    if (err instanceof NotFoundError) return sendNotFoundError(res, err.message);
     return sendValidationError(res, err);
   }
 }

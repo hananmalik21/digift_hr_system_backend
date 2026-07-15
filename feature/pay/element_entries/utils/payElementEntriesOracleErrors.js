@@ -7,8 +7,8 @@ export const PAY_ELEMENT_ENTRIES_ORACLE_ERROR_MAP = Object.freeze({
   20011: 'Enterprise is required.',
   20012: 'Employee is required.',
   20013: 'Element is required.',
-  20014: 'Pay value is required.',
-  20015: 'Amount is required.',
+  20016: 'Effective As-Of Date is required.',
+  20017: 'Effective Start Date is required.',
   20018: 'Employee does not belong to selected enterprise.',
   20019: 'Selected element does not belong to selected enterprise.'
 });
@@ -19,8 +19,14 @@ const PACKAGE_MESSAGE_MAP = Object.freeze([
   { pattern: /enterprise\s*is\s*required|enterprise\s*id\s*is\s*required/i, message: 'Enterprise is required.' },
   { pattern: /employee\s*is\s*required/i, message: 'Employee is required.' },
   { pattern: /element\s*is\s*required/i, message: 'Element is required.' },
-  { pattern: /pay\s*value\s*is\s*required/i, message: 'Pay value is required.' },
-  { pattern: /amount\s*is\s*required/i, message: 'Amount is required.' },
+  {
+    pattern: /effective\s*as-?of\s*date\s*is\s*required/i,
+    message: 'Effective As-Of Date is required.'
+  },
+  {
+    pattern: /effective\s*start\s*date\s*is\s*required/i,
+    message: 'Effective Start Date is required.'
+  },
   {
     pattern: /employee\s*does\s*not\s*belong/i,
     message: 'Employee does not belong to selected enterprise.'

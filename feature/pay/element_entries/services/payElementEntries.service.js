@@ -57,7 +57,15 @@ export async function createElementEntry(payload, createdBy) {
  * @param {string} updatedBy
  */
 export async function updateElementEntry(elementEntryGuid, payload, updatedBy) {
-  const existing = await getElementEntryFromViewByGuid(elementEntryGuid, Number(payload.enterprise_id));
+  const enterpriseId =
+    payload?.enterprise_id != null && payload.enterprise_id !== ''
+      ? Number(payload.enterprise_id)
+      : null;
+
+  const existing = await getElementEntryFromViewByGuid(
+    elementEntryGuid,
+    Number.isFinite(enterpriseId) ? enterpriseId : null
+  );
   if (!existing) {
     return {
       success: false,
@@ -66,7 +74,10 @@ export async function updateElementEntry(elementEntryGuid, payload, updatedBy) {
     };
   }
 
-  await validateElementEntryReferences(payload);
+  await validateElementEntryReferences({
+    ...payload,
+    enterprise_id: payload.enterprise_id ?? existing.enterprise_id
+  });
 
   const pkg = await updateElementEntryViaPackage(elementEntryGuid, payload, updatedBy);
   const success = packageStatusIsSuccess(pkg.status);

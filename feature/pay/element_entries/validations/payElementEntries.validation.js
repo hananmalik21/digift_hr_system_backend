@@ -16,7 +16,17 @@ const ALLOWED_SORT_COLUMNS = new Set([
 
 const CREATE_REQUIRED_INTEGER_FIELDS = ['enterprise_id', 'employee_id', 'element_id'];
 const CREATE_REQUIRED_DATE_FIELDS = ['effective_as_of_date', 'effective_start_date'];
-const CREATE_REQUIRED_NUMBER_FIELDS = ['pay_value', 'amount'];
+
+/** Optional, nullable string/number fields (explicit null clears on update). */
+const OPTIONAL_NULLABLE_STRING_FIELDS = new Set([
+  'context_segment_code',
+  'context_value',
+  'sub_classification_code',
+  'secondary_classification',
+  'currency_code'
+]);
+
+const OPTIONAL_NULLABLE_NUMBER_FIELDS = new Set(['pay_value', 'amount']);
 
 const ALLOWED_BODY_FIELDS = new Set([
   'enterprise_id',
@@ -30,6 +40,8 @@ const ALLOWED_BODY_FIELDS = new Set([
   'source_code',
   'element_classification_code',
   'element_processing_type_code',
+  'sub_classification_code',
+  'secondary_classification',
   'pay_value',
   'amount',
   'currency_code',
@@ -65,6 +77,8 @@ const NUMERIC_FIELDS = new Set(['pay_value', 'amount']);
 
 const STRING_FIELDS = new Set([
   'element_classification_code',
+  'sub_classification_code',
+  'secondary_classification',
   'entry_type_code',
   'source_code',
   'element_processing_type_code',
@@ -93,7 +107,9 @@ const VARCHAR_MAX = {
   cost_center_code: 100,
   context_value: 500,
   context_segment_code: 100,
-  element_classification_code: 100
+  element_classification_code: 100,
+  sub_classification_code: 100,
+  secondary_classification: 100
 };
 
 const ISO_DATE_FIELDS = new Set([
@@ -113,6 +129,10 @@ function isBlank(value) {
   return value == null || String(value).trim() === '';
 }
 
+function hasOwn(body, field) {
+  return Object.prototype.hasOwnProperty.call(body, field);
+}
+
 export function firstValidationMessage(err) {
   const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
   return details[0] || err?.message || 'Validation failed';
@@ -120,7 +140,7 @@ export function firstValidationMessage(err) {
 
 function validatePositiveInteger(errors, body, field, { required = false } = {}) {
   const raw = body[field];
-  if (isBlank(raw)) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') {
     if (required) errors.push(`${field} is required`);
     return;
   }
@@ -131,8 +151,13 @@ function validatePositiveInteger(errors, body, field, { required = false } = {})
 }
 
 function validateNumericAmount(errors, body, field, { required = false } = {}) {
+  if (!hasOwn(body, field)) {
+    if (required) errors.push(`${field} is required`);
+    return;
+  }
   const raw = body[field];
-  if (isBlank(raw)) {
+  if (raw === null) return;
+  if (raw === undefined || String(raw).trim() === '') {
     if (required) errors.push(`${field} is required`);
     return;
   }
@@ -143,8 +168,9 @@ function validateNumericAmount(errors, body, field, { required = false } = {}) {
 }
 
 function validateOptionalString(errors, body, field) {
+  if (!hasOwn(body, field)) return;
   const raw = body[field];
-  if (raw === undefined || raw === null) return;
+  if (raw === null) return;
   if (typeof raw !== 'string' && typeof raw !== 'number') {
     errors.push(`${field} must be a string`);
     return;
@@ -172,8 +198,9 @@ function validateUnknownFields(errors, body) {
 }
 
 function validateIsoDate(errors, body, field, { required = false } = {}) {
+  if (!hasOwn(body, field) && !required) return;
   const raw = body[field];
-  if (isBlank(raw)) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') {
     if (required) errors.push(`${field} is required`);
     return;
   }
@@ -203,7 +230,22 @@ function validateFlatObject(errors, body, label = 'request body') {
 
 function validateKnownFieldTypes(errors, body) {
   for (const [key, value] of Object.entries(body)) {
-    if (value === undefined || value === null) continue;
+    if (value === undefined) continue;
+    if (value === null) {
+      if (
+        OPTIONAL_NULLABLE_STRING_FIELDS.has(key) ||
+        OPTIONAL_NULLABLE_NUMBER_FIELDS.has(key) ||
+        key === 'effective_end_date' ||
+        key === 'payroll_id' ||
+        key === 'cost_allocation_keyflex_id' ||
+        key === 'comments' ||
+        key === 'source_reference' ||
+        key === 'batch_id' ||
+        key === 'reason_text'
+      ) {
+        continue;
+      }
+    }
 
     if (POSITIVE_INTEGER_FIELDS.has(key)) {
       validatePositiveInteger(errors, body, key);
@@ -215,7 +257,7 @@ function validateKnownFieldTypes(errors, body) {
       validateOptionalString(errors, body, key);
     } else if (ISO_DATE_FIELDS.has(key)) {
       validateIsoDate(errors, body, key);
-    } else if (key.endsWith('_flag') && String(value).trim() !== '') {
+    } else if (key.endsWith('_flag') && value != null && String(value).trim() !== '') {
       const flag = String(value).trim().toUpperCase();
       if (flag !== 'Y' && flag !== 'N') {
         errors.push(`${key} must be Y or N`);
@@ -251,11 +293,20 @@ function trimOrNull(value) {
   return s === '' ? null : s;
 }
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  return Number(value);
+}
+
 /**
+ * Create payload. Optional nullable fields are included only when present on the request
+ * (omit = absent in package JSON; explicit null is passed through).
+ * Never coerce missing numbers to 0 or missing strings to ''.
  * @param {Record<string, unknown>} body
  */
-function buildElementEntryPayload(body) {
-  return {
+function buildCreateElementEntryPayload(body) {
+  /** @type {Record<string, unknown>} */
+  const payload = {
     enterprise_id: Number(body.enterprise_id),
     employee_id: Number(body.employee_id),
     payroll_id: body.payroll_id != null && body.payroll_id !== '' ? Number(body.payroll_id) : null,
@@ -270,16 +321,11 @@ function buildElementEntryPayload(body) {
     source_code: trimOrNull(body.source_code),
     element_classification_code: trimOrNull(body.element_classification_code),
     element_processing_type_code: trimOrNull(body.element_processing_type_code),
-    pay_value: Number(body.pay_value),
-    amount: Number(body.amount),
-    currency_code: trimOrNull(body.currency_code),
     approval_status_code: trimOrNull(body.approval_status_code),
     cost_allocation_keyflex_id: trimOrNull(body.cost_allocation_keyflex_id),
     costing_type_code: trimOrNull(body.costing_type_code),
     account_code: trimOrNull(body.account_code),
     cost_center_code: trimOrNull(body.cost_center_code),
-    context_segment_code: trimOrNull(body.context_segment_code),
-    context_value: trimOrNull(body.context_value),
     comments: trimOrNull(body.comments),
     subpriority:
       body.subpriority != null && body.subpriority !== '' ? Number(body.subpriority) : null,
@@ -295,6 +341,97 @@ function buildElementEntryPayload(body) {
     source_reference: trimOrNull(body.source_reference),
     batch_id: trimOrNull(body.batch_id)
   };
+
+  if (hasOwn(body, 'pay_value')) payload.pay_value = numberOrNull(body.pay_value);
+  if (hasOwn(body, 'amount')) payload.amount = numberOrNull(body.amount);
+  if (hasOwn(body, 'currency_code')) payload.currency_code = trimOrNull(body.currency_code);
+  if (hasOwn(body, 'context_segment_code')) {
+    payload.context_segment_code = trimOrNull(body.context_segment_code);
+  }
+  if (hasOwn(body, 'context_value')) payload.context_value = trimOrNull(body.context_value);
+  if (hasOwn(body, 'sub_classification_code')) {
+    payload.sub_classification_code = trimOrNull(body.sub_classification_code);
+  }
+  if (hasOwn(body, 'secondary_classification')) {
+    payload.secondary_classification = trimOrNull(body.secondary_classification);
+  }
+
+  return payload;
+}
+
+/**
+ * PATCH-style update payload: only keys present on the request body.
+ * Omitted → not included (package preserves DB value).
+ * Explicit null → included as null (package clears DB value).
+ * @param {Record<string, unknown>} body
+ */
+function buildUpdateElementEntryPayload(body) {
+  /** @type {Record<string, unknown>} */
+  const payload = {};
+
+  const assignTrim = (field) => {
+    if (!hasOwn(body, field)) return;
+    payload[field] = body[field] === null ? null : trimOrNull(body[field]);
+  };
+
+  const assignNumber = (field) => {
+    if (!hasOwn(body, field)) return;
+    payload[field] = body[field] === null ? null : numberOrNull(body[field]);
+  };
+
+  const assignPositiveInt = (field) => {
+    if (!hasOwn(body, field)) return;
+    payload[field] = body[field] === null || body[field] === '' ? null : Number(body[field]);
+  };
+
+  const assignIsoDate = (field) => {
+    if (!hasOwn(body, field)) return;
+    payload[field] =
+      body[field] === null || String(body[field]).trim() === ''
+        ? null
+        : String(body[field]).trim().slice(0, 10);
+  };
+
+  const assignFlag = (field) => {
+    if (!hasOwn(body, field)) return;
+    payload[field] = body[field] === null ? null : normalizeYnFlag(body[field]);
+  };
+
+  assignPositiveInt('enterprise_id');
+  assignPositiveInt('employee_id');
+  assignPositiveInt('payroll_id');
+  assignPositiveInt('element_id');
+  assignIsoDate('effective_as_of_date');
+  assignIsoDate('effective_start_date');
+  assignIsoDate('effective_end_date');
+  assignTrim('entry_type_code');
+  assignTrim('source_code');
+  assignTrim('element_classification_code');
+  assignTrim('element_processing_type_code');
+  assignTrim('sub_classification_code');
+  assignTrim('secondary_classification');
+  assignNumber('pay_value');
+  assignNumber('amount');
+  assignTrim('currency_code');
+  assignTrim('approval_status_code');
+  assignTrim('cost_allocation_keyflex_id');
+  assignTrim('costing_type_code');
+  assignTrim('account_code');
+  assignTrim('cost_center_code');
+  assignTrim('context_segment_code');
+  assignTrim('context_value');
+  assignTrim('comments');
+  assignPositiveInt('subpriority');
+  assignTrim('creator_type_code');
+  assignFlag('processed_flag');
+  assignFlag('retroactive_flag');
+  assignFlag('automatic_entry_flag');
+  assignPositiveInt('sequence_number');
+  assignTrim('reason_text');
+  assignTrim('source_reference');
+  assignTrim('batch_id');
+
+  return payload;
 }
 
 function validateRequiredCreateFields(errors, body) {
@@ -304,13 +441,11 @@ function validateRequiredCreateFields(errors, body) {
   for (const field of CREATE_REQUIRED_DATE_FIELDS) {
     validateIsoDate(errors, body, field, { required: true });
   }
-  for (const field of CREATE_REQUIRED_NUMBER_FIELDS) {
-    validateNumericAmount(errors, body, field, { required: true });
-  }
   validateDateRange(errors, body);
 }
 
 function validateDateRange(errors, body) {
+  if (!hasOwn(body, 'effective_start_date') && !hasOwn(body, 'effective_end_date')) return;
   const start = body.effective_start_date;
   const end = body.effective_end_date;
   if (!start || !end) return;
@@ -476,13 +611,30 @@ export function validateCreateElementEntryBody(body) {
   validateKnownFieldTypes(errors, b);
 
   throwIfErrors(errors);
-  return buildElementEntryPayload(b);
+  return buildCreateElementEntryPayload(b);
 }
 
 /**
+ * PATCH-style update body. At least one mutable field required.
  * @param {Record<string, unknown>} body
  * @returns {Record<string, unknown>}
  */
 export function validateUpdateElementEntryBody(body) {
-  return validateCreateElementEntryBody(body);
+  const errors = [];
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : {};
+
+  validateFlatObject(errors, b);
+  if (errors.length) throwIfErrors(errors);
+
+  validateUnknownFields(errors, b);
+  validateKnownFieldTypes(errors, b);
+  validateDateRange(errors, b);
+
+  const payload = buildUpdateElementEntryPayload(b);
+  if (Object.keys(payload).length === 0) {
+    errors.push('At least one field is required for update');
+  }
+
+  throwIfErrors(errors);
+  return payload;
 }

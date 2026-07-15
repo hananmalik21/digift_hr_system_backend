@@ -72,13 +72,28 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"payroll_id\": 4,\n  \"element_id\": 1001,\n  \"effective_as_of_date\": \"2026-01-01\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": null,\n  \"entry_type_code\": \"ELEMENT_ENTRY\",\n  \"source_code\": \"MANUAL_ENTRY\",\n  \"element_classification_code\": \"EARNINGS\",\n  \"element_processing_type_code\": \"RECURRING\",\n  \"pay_value\": 500,\n  \"amount\": 500,\n  \"currency_code\": \"KWD\",\n  \"approval_status_code\": \"DRAFT\",\n  \"cost_allocation_keyflex_id\": \"100\",\n  \"costing_type_code\": \"DEBIT\",\n  \"account_code\": \"5000\",\n  \"cost_center_code\": \"CC100\",\n  \"context_segment_code\": \"PROJECT\",\n  \"context_value\": \"ERP2026\",\n  \"comments\": \"Monthly basic salary\"\n}"
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\"\n}"
         },
         "url": "{{baseUrl}}/api/pay/element-entries"
       }
     },
     {
-      "name": "Update Element Entry",
+      "name": "Create Element Entry (with optional fields)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\",\n  \"context_segment_code\": \"OVERTIME_TYPE\",\n  \"context_value\": \"WEEKEND\",\n  \"sub_classification_code\": \"REGULAR_OVERTIME\",\n  \"currency_code\": \"KWD\",\n  \"pay_value\": 125.5,\n  \"amount\": 125.5\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
+      "name": "Update Element Entry (partial amount)",
       "request": {
         "method": "PUT",
         "header": [
@@ -87,7 +102,22 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"payroll_id\": 4,\n  \"element_id\": 1001,\n  \"effective_as_of_date\": \"2026-01-01\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": null,\n  \"entry_type_code\": \"ELEMENT_ENTRY\",\n  \"source_code\": \"MANUAL_ENTRY\",\n  \"element_classification_code\": \"EARNINGS\",\n  \"element_processing_type_code\": \"RECURRING\",\n  \"pay_value\": 600,\n  \"amount\": 600,\n  \"currency_code\": \"KWD\",\n  \"approval_status_code\": \"DRAFT\",\n  \"cost_allocation_keyflex_id\": \"100\",\n  \"costing_type_code\": \"DEBIT\",\n  \"account_code\": \"5000\",\n  \"cost_center_code\": \"CC100\",\n  \"context_segment_code\": \"PROJECT\",\n  \"context_value\": \"ERP2026\",\n  \"comments\": \"Updated salary\"\n}"
+          "raw": "{\n  \"amount\": 150\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
+      }
+    },
+    {
+      "name": "Update Element Entry (clear optional fields)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"pay_value\": null,\n  \"amount\": null,\n  \"currency_code\": null,\n  \"context_segment_code\": null,\n  \"context_value\": null,\n  \"sub_classification_code\": null\n}"
         },
         "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
       }
