@@ -1,0 +1,135 @@
+{
+  "info": {
+    "name": "Digify ERP — PAY Payroll Definition Management",
+    "description": "CRUD APIs for PAY.PAY_PAYROLL_DEFINITIONS_PKG using PAYROLL_GUID as primary identifier.\n\nCreate assigns STATUS=ACTIVE via the Oracle package (do not send status on create).\n\nSet {{baseUrl}}, {{jwt}}, and {{payroll_guid}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "payroll_guid", "value": "6cbb495127471a6fe0633519000a2708" },
+    { "key": "legal_entity_guid", "value": "4cbb495127471a6fe0633519000a2706" },
+    { "key": "business_unit_guid", "value": "4c9574cc3077b1ffe0633519000a3d4a" },
+    { "key": "payroll_calendar_guid", "value": "5cbb495127471a6fe0633519000a2707" }
+  ],
+  "item": [
+    {
+      "name": "Create Payroll Definition",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_header\": {\n    \"payroll_name\": \"Kuwait Monthly Payroll\",\n    \"payroll_code\": \"PAY-KW-MON\",\n    \"effective_start_date\": \"2026-01-01\",\n    \"effective_end_date\": \"4712-12-31\"\n  },\n  \"organization_assignment\": {\n    \"country_code\": \"KW\",\n    \"legal_entity_guid\": \"{{legal_entity_guid}}\",\n    \"business_unit_guid\": \"{{business_unit_guid}}\"\n  },\n  \"processing_rules\": {\n    \"pay_frequency_code\": \"MONTHLY\",\n    \"default_payroll_calendar_guid\": \"{{payroll_calendar_guid}}\",\n    \"currency_code\": \"KWD\",\n    \"payment_timing\": \"Last working day of month\"\n  },\n  \"compliance_settings\": {\n    \"tax_regime_code\": \"KW_TAX\",\n    \"social_security_system_code\": \"PIFSS\",\n    \"work_week_code\": \"SUNDAY_TO_THURSDAY\",\n    \"language_locale\": \"en-KW\"\n  },\n  \"payment_settings\": {\n    \"payment_method_code\": \"BANK_TRANSFER\",\n    \"compensation_source_code\": \"COMP\",\n    \"time_input_source_code\": \"TM\",\n    \"absence_input_source_code\": \"ABS\"\n  },\n  \"advanced_options\": {\n    \"off_cycle_payment_flag\": \"Y\",\n    \"retro_pay_processing_flag\": \"Y\",\n    \"third_party_payment_flag\": \"Y\"\n  },\n  \"created_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-definitions"
+      }
+    },
+    {
+      "name": "List Payroll Definitions",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions?enterprise_id=1&status=ACTIVE&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "status", "value": "ACTIVE" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "legal_entity_guid", "value": "", "disabled": true },
+            { "key": "business_unit_guid", "value": "", "disabled": true },
+            { "key": "pay_frequency_code", "value": "", "disabled": true },
+            { "key": "currency_code", "value": "", "disabled": true },
+            { "key": "active_flag", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Payroll Definition Summary",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/summary?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "summary"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "status", "value": "", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Payroll Definition Dropdown",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/dropdown?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "dropdown"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "legal_entity_guid", "value": "", "disabled": true },
+            { "key": "business_unit_guid", "value": "", "disabled": true },
+            { "key": "pay_frequency_code", "value": "", "disabled": true },
+            { "key": "currency_code", "value": "", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Payroll Definition by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/{{payroll_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "{{payroll_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    },
+    {
+      "name": "Update Payroll Definition",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_header\": {\n    \"payroll_name\": \"Kuwait Monthly Payroll\",\n    \"payroll_code\": \"PAY-KW-MON\",\n    \"effective_start_date\": \"2026-01-01\",\n    \"effective_end_date\": \"4712-12-31\",\n    \"status\": \"ACTIVE\"\n  },\n  \"organization_assignment\": {\n    \"country_code\": \"KW\",\n    \"legal_entity_guid\": \"{{legal_entity_guid}}\",\n    \"business_unit_guid\": \"{{business_unit_guid}}\"\n  },\n  \"processing_rules\": {\n    \"pay_frequency_code\": \"MONTHLY\",\n    \"default_payroll_calendar_guid\": \"{{payroll_calendar_guid}}\",\n    \"currency_code\": \"KWD\",\n    \"payment_timing\": \"Last working day of month\"\n  },\n  \"compliance_settings\": {\n    \"tax_regime_code\": \"KW_TAX\",\n    \"social_security_system_code\": \"PIFSS\",\n    \"work_week_code\": \"SUNDAY_TO_THURSDAY\",\n    \"language_locale\": \"en-KW\"\n  },\n  \"payment_settings\": {\n    \"payment_method_code\": \"BANK_TRANSFER\",\n    \"compensation_source_code\": \"COMP\",\n    \"time_input_source_code\": \"TM\",\n    \"absence_input_source_code\": \"ABS\"\n  },\n  \"advanced_options\": {\n    \"off_cycle_payment_flag\": \"Y\",\n    \"retro_pay_processing_flag\": \"Y\",\n    \"third_party_payment_flag\": \"Y\"\n  },\n  \"last_updated_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-definitions/{{payroll_guid}}"
+      }
+    },
+    {
+      "name": "Delete Payroll Definition",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/{{payroll_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "{{payroll_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    }
+  ]
+}

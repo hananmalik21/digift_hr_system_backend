@@ -1,0 +1,126 @@
+{
+  "info": {
+    "name": "Digify ERP — PAY Legal Entity Management",
+    "description": "CRUD APIs for PAY.PAY_LEGAL_ENTITIES_PKG using LEGAL_ENTITY_GUID as primary identifier.\n\nSet {{baseUrl}}, {{jwt}}, and {{legal_entity_guid}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "legal_entity_guid", "value": "4cbb495127471a6fe0633519000a2706" }
+  ],
+  "item": [
+    {
+      "name": "Create Legal Entity",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"legal_entity_code\": \"DIGIFY-KW\",\n  \"legal_name\": \"Digify Solutions Company W.L.L.\",\n  \"short_name\": \"Digify Kuwait\",\n  \"country_code\": \"KW\",\n  \"registration_number\": \"CR-123456\",\n  \"tax_registration_number\": \"TAX-123456\",\n  \"legal_employer_flag\": \"Y\",\n  \"payroll_statutory_unit_flag\": \"Y\",\n  \"default_currency_code\": \"KWD\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": \"4712-12-31\",\n  \"status\": \"ACTIVE\",\n  \"created_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/legal-entities"
+      }
+    },
+    {
+      "name": "List Legal Entities",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/legal-entities?enterprise_id=1&status=ACTIVE&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "legal-entities"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "status", "value": "ACTIVE" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "legal_employer_flag", "value": "", "disabled": true },
+            { "key": "payroll_statutory_unit_flag", "value": "", "disabled": true },
+            { "key": "active_flag", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Legal Entity by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/legal-entities/{{legal_entity_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "legal-entities", "{{legal_entity_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    },
+    {
+      "name": "Update Legal Entity",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"legal_entity_code\": \"DIGIFY-KW\",\n  \"legal_name\": \"Digify Solutions Company W.L.L.\",\n  \"short_name\": \"Digify Solutions Kuwait\",\n  \"country_code\": \"KW\",\n  \"registration_number\": \"CR-123456\",\n  \"tax_registration_number\": \"TAX-987654\",\n  \"legal_employer_flag\": \"Y\",\n  \"payroll_statutory_unit_flag\": \"Y\",\n  \"default_currency_code\": \"KWD\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": \"4712-12-31\",\n  \"status\": \"ACTIVE\",\n  \"last_updated_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/legal-entities/{{legal_entity_guid}}"
+      }
+    },
+    {
+      "name": "Update Legal Entity Status",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"status\": \"INACTIVE\",\n  \"last_updated_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/legal-entities/{{legal_entity_guid}}/status"
+      }
+    },
+    {
+      "name": "Delete Legal Entity",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/legal-entities/{{legal_entity_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "legal-entities", "{{legal_entity_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    },
+    {
+      "name": "Legal Entity Dropdown",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/legal-entities/dropdown?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "legal-entities", "dropdown"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "legal_employer_flag", "value": "", "disabled": true },
+            { "key": "payroll_statutory_unit_flag", "value": "", "disabled": true },
+            { "key": "country_code", "value": "", "disabled": true }
+          ]
+        }
+      }
+    }
+  ]
+}

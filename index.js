@@ -123,6 +123,9 @@ import payLookupsRoutes from './feature/look_ups/pay/routes/payLookups.routes.js
 import payFormulaRoutes from './feature/pay/formulas/routes/payFormulaRoutes.js';
 import payBalanceRoutes from './feature/pay/balances/routes/payBalanceRoutes.js';
 import payBalanceFeedRoutes from './feature/pay/balance_feeds/routes/payBalanceFeedRoutes.js';
+import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEntitiesRoute.js';
+import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
+import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -411,6 +414,15 @@ app.use('/api/pay/balances', payBalanceRoutes);
 
 // Payroll — balance feeds (PAY.PAY_BALANCE_FEEDS_PKG)
 app.use('/api/pay/balance-feeds', payBalanceFeedRoutes);
+
+// PAY Legal Entity Management
+app.use('/api/pay/legal-entities', payLegalEntitiesRoute);
+
+// PAY Payroll Calendar Management
+app.use('/api/pay/payroll-calendars', payPayrollCalendarsRoute);
+
+// PAY Payroll Definition Management
+app.use('/api/pay/payroll-definitions', payPayrollDefinitionsRoute);
 
 // Initialize database pool on startup
 await createPool();
