@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "Digify ERP — PAY Payroll Calendar Management",
+    "description": "CRUD APIs for PAY.PAY_PAYROLL_CALENDARS_PKG using PAYROLL_CALENDAR_GUID as primary identifier.\n\nSet {{baseUrl}}, {{jwt}}, and {{payroll_calendar_guid}} in collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "payroll_calendar_guid", "value": "4cbb495127471a6fe0633519000a2706" }
+  ],
+  "item": [
+    {
+      "name": "Create Payroll Calendar",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"calendar_name\": \"Bahrain Bi-Weekly Payroll Calendar\",\n  \"country_code\": \"BH\",\n  \"pay_frequency_code\": \"BI_WEEKLY\",\n  \"calendar_start_date\": \"2026-01-01\",\n  \"cutoff_days_before\": 3,\n  \"approval_days_before\": 2,\n  \"payment_days_after\": 0,\n  \"posting_days_after\": 1,\n  \"status\": \"ACTIVE\",\n  \"created_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-calendars"
+      }
+    },
+    {
+      "name": "List Payroll Calendars",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-calendars?enterprise_id=1&status=ACTIVE&page=1&limit=20",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-calendars"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "status", "value": "ACTIVE" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "pay_frequency_code", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Payroll Calendar Dropdown",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-calendars/dropdown?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-calendars", "dropdown"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "country_code", "value": "", "disabled": true },
+            { "key": "pay_frequency_code", "value": "", "disabled": true }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get Payroll Calendar by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-calendars/{{payroll_calendar_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-calendars", "{{payroll_calendar_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    },
+    {
+      "name": "Update Payroll Calendar",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"calendar_name\": \"Kuwait Monthly Payroll Calendar\",\n  \"country_code\": \"KW\",\n  \"pay_frequency_code\": \"MONTHLY\",\n  \"calendar_start_date\": \"2026-01-01\",\n  \"cutoff_days_before\": 5,\n  \"approval_days_before\": 3,\n  \"payment_days_after\": 0,\n  \"posting_days_after\": 1,\n  \"status\": \"ACTIVE\",\n  \"last_updated_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-calendars/{{payroll_calendar_guid}}"
+      }
+    },
+    {
+      "name": "Update Payroll Calendar Status",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"status\": \"INACTIVE\",\n  \"last_updated_by\": \"KHURAM.SHAHZAD\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-calendars/{{payroll_calendar_guid}}/status"
+      }
+    },
+    {
+      "name": "Delete Payroll Calendar",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-calendars/{{payroll_calendar_guid}}?enterprise_id=1",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-calendars", "{{payroll_calendar_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "1" }]
+        }
+      }
+    }
+  ]
+}
