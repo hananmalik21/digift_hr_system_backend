@@ -1,0 +1,196 @@
+{
+  "info": {
+    "name": "Digify ERP — PAY Payroll Group Management",
+    "description": "CRUD APIs for PAY.PAYROLL_GROUPS_PKG using PAY.V_PAYROLL_GROUPS for reads.\n\nMutations commit only when x_success = 'Y'.\n\nSet {{baseUrl}}, {{jwt}}, and {{payroll_group_guid}} in collection variables.\n\nBase path: /api/pay/payroll-groups",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "enterprise_id", "value": "1" },
+    { "key": "payroll_group_guid", "value": "56bb666b3c43fd15e0631718000a6041" },
+    { "key": "business_unit_guid", "value": "56bb666b3c43fd15e0631718000a6041" },
+    { "key": "payroll_id", "value": "10" }
+  ],
+  "item": [
+    {
+      "name": "Create Payroll Group",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": {{enterprise_id}},\n  \"group_name\": \"Kuwait Full-time Monthly\",\n  \"group_code\": \"GRP-KW-FT\",\n  \"payroll_id\": {{payroll_id}},\n  \"country_code\": \"KW\",\n  \"business_unit_guid\": \"{{business_unit_guid}}\",\n  \"worker_type_code\": \"FULL_TIME\",\n  \"rule_type_code\": \"RULE_BASED\",\n  \"description\": \"Monthly payroll group for Kuwait full-time employees.\",\n  \"status\": \"ACTIVE\",\n  \"created_by\": \"96\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-groups"
+      },
+      "response": [
+        {
+          "name": "201 Created",
+          "status": "Created",
+          "code": 201,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll group created successfully.\",\n  \"data\": {\n    \"payroll_group_id\": 25,\n    \"payroll_group_guid\": \"56bb666b3c43fd15e0631718000a6041\",\n    \"enterprise_id\": 1,\n    \"group_name\": \"Kuwait Full-time Monthly\",\n    \"group_code\": \"GRP-KW-FT\",\n    \"payroll_id\": 10,\n    \"status\": \"ACTIVE\"\n  }\n}"
+        },
+        {
+          "name": "400 Duplicate code",
+          "status": "Bad Request",
+          "code": 400,
+          "body": "{\n  \"success\": false,\n  \"message\": \"A payroll group with code GRP-KW-FT already exists.\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "List Payroll Groups",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-groups?enterprise_id={{enterprise_id}}&country_code=KW&status=ACTIVE&page=1&limit=20&sort_by=group_name&sort_order=ASC",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-groups"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "country_code", "value": "KW" },
+            { "key": "status", "value": "ACTIVE" },
+            { "key": "payroll_id", "value": "", "disabled": true },
+            { "key": "business_unit_guid", "value": "", "disabled": true },
+            { "key": "worker_type_code", "value": "", "disabled": true },
+            { "key": "rule_type_code", "value": "", "disabled": true },
+            { "key": "search", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "limit", "value": "20" },
+            { "key": "sort_by", "value": "group_name" },
+            { "key": "sort_order", "value": "ASC" }
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll groups retrieved successfully.\",\n  \"data\": [\n    {\n      \"payroll_group_id\": 1,\n      \"payroll_group_guid\": \"56bb666b3c43fd15e0631718000a6041\",\n      \"enterprise_id\": 1,\n      \"group_name\": \"Kuwait Full-time Monthly\",\n      \"group_code\": \"GRP-KW-FT\",\n      \"payroll_id\": 10,\n      \"payroll_definition_name\": \"Kuwait Monthly Payroll\",\n      \"country_code\": \"KW\",\n      \"country_name\": \"Kuwait\",\n      \"business_unit_guid\": \"56bb666b3c43fd15e0631718000a6042\",\n      \"business_unit_name\": \"Corporate\",\n      \"worker_type_code\": \"FULL_TIME\",\n      \"worker_type_name\": \"Full Time\",\n      \"employee_count\": 220,\n      \"rule_type_code\": \"RULE_BASED\",\n      \"rule_type_name\": \"Rule Based\",\n      \"status\": \"ACTIVE\",\n      \"description\": \"Monthly payroll group.\",\n      \"created_by\": \"96\",\n      \"creation_date\": \"2026-07-20T08:30:00.000Z\",\n      \"last_updated_by\": \"96\",\n      \"last_update_date\": \"2026-07-20T08:30:00.000Z\"\n    }\n  ],\n  \"pagination\": {\n    \"page\": 1,\n    \"limit\": 20,\n    \"total_records\": 24,\n    \"total_pages\": 2\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Payroll Group Summary",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-groups/summary?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-groups", "summary"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll group summary retrieved successfully.\",\n  \"data\": {\n    \"payroll_groups\": 24,\n    \"employees_assigned\": 968,\n    \"auto_assigned\": 892,\n    \"unassigned_employees\": 0,\n    \"rule_conflicts\": 0,\n    \"inactive_groups\": 3\n  }\n}"
+        }
+      ]
+    },
+    {
+      "name": "Get Payroll Group by GUID",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-groups/{{payroll_group_guid}}?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-groups", "{{payroll_group_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll group retrieved successfully.\",\n  \"data\": {\n    \"payroll_group_id\": 1,\n    \"payroll_group_guid\": \"56bb666b3c43fd15e0631718000a6041\",\n    \"enterprise_id\": 1,\n    \"group_name\": \"Kuwait Full-time Monthly\",\n    \"group_code\": \"GRP-KW-FT\",\n    \"payroll_id\": 10,\n    \"payroll_definition_name\": \"Kuwait Monthly Payroll\",\n    \"country_code\": \"KW\",\n    \"country_name\": \"Kuwait\",\n    \"business_unit_guid\": \"56bb666b3c43fd15e0631718000a6042\",\n    \"business_unit_name\": \"Corporate\",\n    \"worker_type_code\": \"FULL_TIME\",\n    \"worker_type_name\": \"Full Time\",\n    \"employee_count\": 220,\n    \"rule_type_code\": \"RULE_BASED\",\n    \"rule_type_name\": \"Rule Based\",\n    \"status\": \"ACTIVE\",\n    \"description\": \"Monthly payroll group.\"\n  }\n}"
+        },
+        {
+          "name": "404 Not Found",
+          "status": "Not Found",
+          "code": 404,
+          "body": "{\n  \"success\": false,\n  \"message\": \"Payroll group does not exist.\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Update Payroll Group",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": {{enterprise_id}},\n  \"group_name\": \"Kuwait Full-time Monthly\",\n  \"group_code\": \"GRP-KW-FT\",\n  \"payroll_id\": {{payroll_id}},\n  \"country_code\": \"KW\",\n  \"business_unit_guid\": \"{{business_unit_guid}}\",\n  \"worker_type_code\": \"FULL_TIME\",\n  \"rule_type_code\": \"RULE_BASED\",\n  \"description\": \"Updated group description.\",\n  \"status\": \"ACTIVE\",\n  \"last_updated_by\": \"96\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/payroll-groups/{{payroll_group_guid}}"
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll group updated successfully.\",\n  \"data\": {\n    \"payroll_group_guid\": \"56bb666b3c43fd15e0631718000a6041\",\n    \"group_name\": \"Kuwait Full-time Monthly\",\n    \"group_code\": \"GRP-KW-FT\",\n    \"status\": \"ACTIVE\"\n  }\n}"
+        },
+        {
+          "name": "400 Validation",
+          "status": "Bad Request",
+          "code": 400,
+          "body": "{\n  \"success\": false,\n  \"message\": \"Another payroll group with code GRP-KW-FT already exists.\"\n}"
+        },
+        {
+          "name": "404 Not Found",
+          "status": "Not Found",
+          "code": 404,
+          "body": "{\n  \"success\": false,\n  \"message\": \"Payroll group does not exist.\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "Delete Payroll Group",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-groups/{{payroll_group_guid}}?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-groups", "{{payroll_group_guid}}"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      },
+      "response": [
+        {
+          "name": "200 OK",
+          "status": "OK",
+          "code": 200,
+          "body": "{\n  \"success\": true,\n  \"message\": \"Payroll group deleted successfully.\",\n  \"data\": {\n    \"payroll_group_guid\": \"56bb666b3c43fd15e0631718000a6041\"\n  }\n}"
+        },
+        {
+          "name": "404 Not Found",
+          "status": "Not Found",
+          "code": 404,
+          "body": "{\n  \"success\": false,\n  \"message\": \"Payroll group does not exist.\"\n}"
+        },
+        {
+          "name": "409 In Use",
+          "status": "Conflict",
+          "code": 409,
+          "body": "{\n  \"success\": false,\n  \"message\": \"This payroll group cannot be deleted because it is being used by other payroll records.\"\n}"
+        }
+      ]
+    }
+  ]
+}

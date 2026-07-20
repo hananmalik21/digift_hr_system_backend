@@ -126,6 +126,7 @@ import payBalanceFeedRoutes from './feature/pay/balance_feeds/routes/payBalanceF
 import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEntitiesRoute.js';
 import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
+import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -423,6 +424,9 @@ app.use('/api/pay/payroll-calendars', payPayrollCalendarsRoute);
 
 // PAY Payroll Definition Management
 app.use('/api/pay/payroll-definitions', payPayrollDefinitionsRoute);
+
+// PAY Payroll Group Management
+app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
 
 // Initialize database pool on startup
 await createPool();
