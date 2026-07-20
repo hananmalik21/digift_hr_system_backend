@@ -121,6 +121,7 @@ const DETAIL_SELECT_COLUMNS = `
 `.trim();
 
 const DROPDOWN_SELECT_COLUMNS = `
+  v.PAYROLL_ID,
   v.PAYROLL_GUID,
   v.PAYROLL_CODE,
   v.PAYROLL_NAME,
@@ -551,6 +552,7 @@ export function mapPayrollDefinitionDropdownRow(row) {
   const g = (key) => r[key];
 
   return {
+    payroll_id: toNumberOrNull(g('PAYROLL_ID')),
     payroll_guid: normalizeGuidFromView(g('PAYROLL_GUID')),
     payroll_code: toStringOrNull(g('PAYROLL_CODE')),
     payroll_name: toStringOrNull(g('PAYROLL_NAME')),
