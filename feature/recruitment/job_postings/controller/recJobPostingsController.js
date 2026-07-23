@@ -59,15 +59,22 @@ function logAudit(action, req, extra = {}) {
 
 /**
  * GET /api/rec/job-postings — public list
+ * Optional query: candidate_guid — when present, returns APPLIED / NOT_APPLIED per posting.
  */
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     try {
-      const { rows, total, page, limit } = await listJobPostingsFromView(
-        normalizeJobPostingListQuery(req.query)
-      );
-      return sendJobPostingListResponse(res, rows, { page, limit, total });
+      const result = await listJobPostingsFromView(normalizeJobPostingListQuery(req.query), {
+        candidateGuid: req.query?.candidate_guid ?? null
+      });
+      return sendJobPostingListResponse(res, result.rows, {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        authenticated: result.authenticated,
+        candidate_guid: result.candidate_guid
+      });
     } catch (err) {
       return handleReadError(res, err, READ_ERROR_MESSAGE);
     }

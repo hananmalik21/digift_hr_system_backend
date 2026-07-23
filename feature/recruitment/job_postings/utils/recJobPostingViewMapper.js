@@ -40,7 +40,9 @@ export function formatDateOnly(v) {
 
 function normalizeGuidValue(v) {
   if (v == null) return null;
-  return normalizeApiGuidString(v) ?? bufferToHex(v);
+  const hex = normalizeApiGuidString(v, { uppercase: false }) ?? bufferToHex(v);
+  if (hex == null) return null;
+  return String(hex).replace(/-/g, '').toLowerCase();
 }
 
 function normalizeYnFlag(v) {
@@ -117,6 +119,11 @@ export async function mapJobPostingViewRow(row) {
     org_unit_id: normalizeGuidValue(m.org_unit_id),
 
     portal_visible_flag: normalizeYnFlag(m.portal_visible_flag),
+
+    application_status: strOrNull(m.application_status),
+    applied_flag: normalizeYnFlag(m.applied_flag),
+    application_id: safeFiniteNumber(m.application_id),
+    application_guid: normalizeGuidValue(m.application_guid),
 
     created_by: strOrNull(m.created_by),
     creation_date: formatDateOnly(m.creation_date),

@@ -1,14 +1,21 @@
 /** Oracle view for job posting reads. */
 export const REC_JOB_POSTINGS_VIEW = process.env.REC_JOB_POSTINGS_V || 'REC.V_JOB_POSTINGS';
 
+export const REC_CANDIDATES_TABLE = 'REC.CANDIDATES';
+export const REC_APPLICATIONS_TABLE = 'REC.REC_APPLICATIONS';
+
 export const LOG_TAG = 'recJobPostingViewModel';
 
-export const READ_ERROR_MESSAGE = 'Unable to fetch job postings. Please try again.';
+export const READ_ERROR_MESSAGE = 'Unable to retrieve job postings.';
 export const MUTATION_ERROR_MESSAGE = 'Unable to process job posting. Please try again.';
 
 export const LIST_SUCCESS_MESSAGE = 'Job postings fetched successfully';
 export const DETAIL_SUCCESS_MESSAGE = 'Job posting fetched successfully';
 export const NOT_FOUND_MESSAGE = 'Job posting not found.';
+
+export const INVALID_CANDIDATE_GUID_MESSAGE = 'The candidate GUID format is invalid.';
+export const CANDIDATE_NOT_FOUND_MESSAGE =
+  'Candidate profile was not found for the authenticated user.';
 
 /** Columns selected from REC.V_JOB_POSTINGS (keep in sync with mapper). */
 export const JOB_POSTING_VIEW_COLUMNS = [

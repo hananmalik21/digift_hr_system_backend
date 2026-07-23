@@ -12,13 +12,23 @@ import {
 /**
  * @param {import('express').Response} res
  * @param {unknown[]} rows
- * @param {{ page: number, limit: number, total: number }} meta
+ * @param {{
+ *   page?: number,
+ *   limit?: number,
+ *   total: number,
+ *   authenticated?: boolean,
+ *   candidate_guid?: string|null
+ * }} meta
  */
 export function sendJobPostingListResponse(res, rows, meta) {
+  const authenticated = Boolean(meta.authenticated);
   return sendPackageResponse(res, 200, {
     success: true,
+    authenticated,
+    candidate_guid: authenticated ? meta.candidate_guid ?? null : null,
+    count: meta.total,
     message: LIST_SUCCESS_MESSAGE,
-    meta: buildListPaginationMeta(meta.page, meta.limit, meta.total),
+    meta: buildListPaginationMeta(meta.page ?? 1, meta.limit ?? meta.total ?? rows.length, meta.total),
     data: rows
   });
 }

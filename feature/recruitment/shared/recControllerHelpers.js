@@ -1,4 +1,4 @@
-import { DatabaseError, ValidationError } from '../../../utils/errors/index.js';
+import { DatabaseError, NotFoundError, ValidationError } from '../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../utils/paginationUtils.js';
 import { getActingUsername } from '../../../utils/userContext.js';
 
@@ -49,6 +49,12 @@ export function handleReadError(res, err, fallbackMessage) {
   if (err instanceof ValidationError) {
     return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
   }
+  if (err instanceof NotFoundError) {
+    return sendPackageResponse(res, 404, {
+      success: false,
+      message: err.userMessage || err.message || fallbackMessage
+    });
+  }
   if (err instanceof DatabaseError) {
     return sendPackageResponse(res, 500, {
       success: false,
@@ -75,6 +81,12 @@ export function handlePortalError(res, err, fallbackMessage) {
     return sendPackageResponse(res, 400, {
       success: false,
       message: firstValidationMessage(err)
+    });
+  }
+  if (err instanceof NotFoundError) {
+    return sendPackageResponse(res, 404, {
+      success: false,
+      message: err.userMessage || err.message || fallbackMessage
     });
   }
   return sendPackageResponse(res, 500, { success: false, message: fallbackMessage });
