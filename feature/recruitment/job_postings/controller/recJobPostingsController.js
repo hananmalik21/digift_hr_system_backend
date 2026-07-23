@@ -57,6 +57,11 @@ function logAudit(action, req, extra = {}) {
   console.info('[recJobPostings]', JSON.stringify({ action, user, ...extra }));
 }
 
+/** Optional portal candidate context from query (no Authorization). */
+function candidateGuidFromQuery(query) {
+  return query?.candidate_guid ?? null;
+}
+
 /**
  * GET /api/rec/job-postings — public list
  * Optional query: candidate_guid — when present, returns APPLIED / NOT_APPLIED per posting.
@@ -66,15 +71,9 @@ router.get(
   asyncHandler(async (req, res) => {
     try {
       const result = await listJobPostingsFromView(normalizeJobPostingListQuery(req.query), {
-        candidateGuid: req.query?.candidate_guid ?? null
+        candidateGuid: candidateGuidFromQuery(req.query)
       });
-      return sendJobPostingListResponse(res, result.rows, {
-        page: result.page,
-        limit: result.limit,
-        total: result.total,
-        authenticated: result.authenticated,
-        candidate_guid: result.candidate_guid
-      });
+      return sendJobPostingListResponse(res, result.rows, result);
     } catch (err) {
       return handleReadError(res, err, READ_ERROR_MESSAGE);
     }
@@ -223,7 +222,8 @@ router.delete(
 );
 
 /**
- * GET /api/rec/job-postings/:posting_guid — public detail (after lifecycle routes)
+ * GET /api/rec/job-postings/:posting_guid — public detail
+ * Optional query: candidate_guid — when present, returns APPLIED / NOT_APPLIED.
  */
 router.get(
   '/:posting_guid',
@@ -233,11 +233,13 @@ router.get(
         req.params.posting_guid,
         req.query?.enterprise_id
       );
-      const detail = await getJobPostingByGuidFromView(posting_guid, enterprise_id);
-      if (!detail) {
+      const result = await getJobPostingByGuidFromView(posting_guid, enterprise_id, {
+        candidateGuid: candidateGuidFromQuery(req.query)
+      });
+      if (!result?.detail) {
         return sendJobPostingNotFoundResponse(res);
       }
-      return sendJobPostingDetailResponse(res, detail);
+      return sendJobPostingDetailResponse(res, result.detail, result);
     } catch (err) {
       return handleReadError(res, err, READ_ERROR_MESSAGE);
     }

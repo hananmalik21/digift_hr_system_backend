@@ -10,6 +10,17 @@ import {
 } from './recJobPostingConstants.js';
 
 /**
+ * @param {{ authenticated?: boolean, candidate_guid?: string|null }} [meta]
+ */
+function portalAuthFields(meta = {}) {
+  const authenticated = Boolean(meta.authenticated);
+  return {
+    authenticated,
+    candidate_guid: authenticated ? meta.candidate_guid ?? null : null
+  };
+}
+
+/**
  * @param {import('express').Response} res
  * @param {unknown[]} rows
  * @param {{
@@ -21,11 +32,9 @@ import {
  * }} meta
  */
 export function sendJobPostingListResponse(res, rows, meta) {
-  const authenticated = Boolean(meta.authenticated);
   return sendPackageResponse(res, 200, {
     success: true,
-    authenticated,
-    candidate_guid: authenticated ? meta.candidate_guid ?? null : null,
+    ...portalAuthFields(meta),
     count: meta.total,
     message: LIST_SUCCESS_MESSAGE,
     meta: buildListPaginationMeta(meta.page ?? 1, meta.limit ?? meta.total ?? rows.length, meta.total),
@@ -36,10 +45,12 @@ export function sendJobPostingListResponse(res, rows, meta) {
 /**
  * @param {import('express').Response} res
  * @param {Record<string, unknown>} detail
+ * @param {{ authenticated?: boolean, candidate_guid?: string|null }} [meta]
  */
-export function sendJobPostingDetailResponse(res, detail) {
+export function sendJobPostingDetailResponse(res, detail, meta = {}) {
   return sendPackageResponse(res, 200, {
     success: true,
+    ...portalAuthFields(meta),
     message: DETAIL_SUCCESS_MESSAGE,
     data: detail
   });

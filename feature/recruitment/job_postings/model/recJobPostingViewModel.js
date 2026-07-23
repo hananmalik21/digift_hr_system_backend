@@ -1,42 +1,71 @@
 import oracledb from 'oracledb';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
+import { pruneBindsForSql } from '../../shared/recViewListSql.js';
 import {
   mapResultRows,
   readTotalCount,
-  rethrowUnlessOperational,
   ROW_OPTS,
   withConnection
 } from '../../shared/recViewModelUtils.js';
 import { parseEnterpriseIdFromQuery, parseListPagination } from '../../shared/recViewQueryValidators.js';
 import {
   CANDIDATE_NOT_FOUND_MESSAGE,
-  JOB_POSTING_SELECT_SQL,
   LOG_TAG,
-  READ_ERROR_MESSAGE,
-  REC_JOB_POSTINGS_VIEW
+  READ_ERROR_MESSAGE
 } from '../utils/recJobPostingConstants.js';
 import {
-  buildPortalListBinds,
+  buildCandidateAuthMeta,
+  buildPortalBinds,
   invalidCandidateGuidError,
   isInvalidHexOracleError,
   normalizeCandidateGuidBind,
+  PORTAL_JOB_POSTING_DETAIL_SQL,
   PORTAL_JOB_POSTINGS_COUNT_SQL,
   PORTAL_JOB_POSTINGS_SQL,
-  toCandidateGuidResponse,
   VALIDATE_CANDIDATE_SQL
 } from '../utils/recJobPostingPortalSql.js';
 import { mapJobPostingViewRow } from '../utils/recJobPostingViewMapper.js';
 
 /**
  * @param {import('oracledb').Connection} connection
- * @param {ReturnType<typeof buildPortalListBinds>} binds
+ * @param {string} sql
+ * @param {Record<string, import('oracledb').BindParameter>} binds
+ */
+async function executePortalSql(connection, sql, binds) {
+  return connection.execute(sql, pruneBindsForSql(sql, binds), ROW_OPTS);
+}
+
+/**
+ * @param {import('oracledb').Connection} connection
+ * @param {Record<string, import('oracledb').BindParameter>} binds
  */
 async function assertCandidateExists(connection, binds) {
-  const result = await connection.execute(VALIDATE_CANDIDATE_SQL, binds, ROW_OPTS);
+  const result = await executePortalSql(connection, VALIDATE_CANDIDATE_SQL, binds);
   if (!result.rows?.length) {
     throw new NotFoundError(CANDIDATE_NOT_FOUND_MESSAGE);
   }
+}
+
+/**
+ * @param {import('oracledb').Connection} connection
+ * @param {string|null} candidateGuid
+ * @param {Record<string, import('oracledb').BindParameter>} binds
+ */
+async function prepareCandidateContext(connection, candidateGuid, binds) {
+  if (candidateGuid) {
+    await assertCandidateExists(connection, binds);
+  }
+}
+
+/**
+ * @param {unknown} err
+ * @param {string} context
+ */
+function rethrowPortalReadError(err, context) {
+  if (err instanceof ValidationError || err instanceof NotFoundError) throw err;
+  if (isInvalidHexOracleError(err)) throw invalidCandidateGuidError();
+  console.error(`[${LOG_TAG} ${context}]`, err);
+  throw new DatabaseError(READ_ERROR_MESSAGE, err, READ_ERROR_MESSAGE);
 }
 
 /**
@@ -49,76 +78,60 @@ export async function listJobPostingsFromView(query, options = {}) {
     const enterpriseId = parseEnterpriseIdFromQuery(query);
     const { page, limit } = parseListPagination(query);
     const candidateGuid = normalizeCandidateGuidBind(options.candidateGuid ?? null);
-    const binds = buildPortalListBinds(enterpriseId, candidateGuid);
+    const binds = buildPortalBinds(enterpriseId, candidateGuid);
 
     return await withConnection(async (connection) => {
-      if (candidateGuid) {
-        await assertCandidateExists(connection, binds);
-      }
+      await prepareCandidateContext(connection, candidateGuid, binds);
 
-      const countResult = await connection.execute(
-        PORTAL_JOB_POSTINGS_COUNT_SQL,
-        { P_ENTERPRISE_ID: binds.P_ENTERPRISE_ID },
-        ROW_OPTS
-      );
+      const countResult = await executePortalSql(connection, PORTAL_JOB_POSTINGS_COUNT_SQL, binds);
       const total = readTotalCount(countResult);
 
       const offset = (page - 1) * limit;
-      const dataResult = await connection.execute(
-        `${PORTAL_JOB_POSTINGS_SQL}
-OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`,
-        {
-          ...binds,
-          offset: { val: offset, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          limit: { val: limit, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
-        },
-        ROW_OPTS
-      );
-
-      const rows = await mapResultRows(dataResult.rows, mapJobPostingViewRow);
+      const dataSql = `${PORTAL_JOB_POSTINGS_SQL}
+OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
+      const dataResult = await executePortalSql(connection, dataSql, {
+        ...binds,
+        offset: { val: offset, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+        limit: { val: limit, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+      });
 
       return {
-        rows,
+        rows: await mapResultRows(dataResult.rows, mapJobPostingViewRow),
         total,
         page,
         limit,
-        authenticated: Boolean(candidateGuid),
-        candidate_guid: toCandidateGuidResponse(candidateGuid)
+        ...buildCandidateAuthMeta(candidateGuid)
       };
     });
   } catch (err) {
-    if (err instanceof ValidationError || err instanceof NotFoundError) throw err;
-    if (isInvalidHexOracleError(err)) throw invalidCandidateGuidError();
-    console.error(`[${LOG_TAG} listJobPostingsFromView]`, err);
-    throw new DatabaseError(READ_ERROR_MESSAGE, err, READ_ERROR_MESSAGE);
+    rethrowPortalReadError(err, 'listJobPostingsFromView');
   }
 }
 
 /**
+ * Job posting detail with optional per-candidate application status.
  * @param {string} postingGuidHex
  * @param {number} enterpriseId
+ * @param {{ candidateGuid?: string|null }} [options]
  */
-export async function getJobPostingByGuidFromView(postingGuidHex, enterpriseId) {
-  const guidBuf = hexToRawBuffer(postingGuidHex);
-  const sql = `SELECT ${JOB_POSTING_SELECT_SQL} FROM ${REC_JOB_POSTINGS_VIEW} v
-    WHERE v.ENTERPRISE_ID = :p_enterprise_id AND v.POSTING_GUID = :p_posting_guid
-    FETCH FIRST 1 ROWS ONLY`;
-
+export async function getJobPostingByGuidFromView(postingGuidHex, enterpriseId, options = {}) {
   try {
+    const candidateGuid = normalizeCandidateGuidBind(options.candidateGuid ?? null);
+    const binds = buildPortalBinds(enterpriseId, candidateGuid, { postingGuid: postingGuidHex });
+
     return await withConnection(async (connection) => {
-      const r = await connection.execute(
-        sql,
-        {
-          p_enterprise_id: { val: enterpriseId, dir: oracledb.BIND_IN, type: oracledb.NUMBER },
-          p_posting_guid: { val: guidBuf, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 }
-        },
-        ROW_OPTS
-      );
-      const row = r.rows?.[0];
+      await prepareCandidateContext(connection, candidateGuid, binds);
+
+      const result = await executePortalSql(connection, PORTAL_JOB_POSTING_DETAIL_SQL, binds);
+      const row = result.rows?.[0];
       if (!row) return null;
-      return mapJobPostingViewRow(row);
+
+      return {
+        detail: await mapJobPostingViewRow(row),
+        ...buildCandidateAuthMeta(candidateGuid)
+      };
     });
   } catch (err) {
-    rethrowUnlessOperational(err, `${LOG_TAG} getJobPostingByGuidFromView`, READ_ERROR_MESSAGE);
+    rethrowPortalReadError(err, 'getJobPostingByGuidFromView');
   }
 }
