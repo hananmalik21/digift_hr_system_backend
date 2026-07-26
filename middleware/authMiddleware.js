@@ -29,6 +29,9 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
+  // Career portal — candidate detail by GUID (enterprise_id via query)
+  { method: 'GET', pattern: /^\/api\/rec\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
+  { method: 'GET', pattern: /^\/api\/recruitment\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
   // Career portal — applications list/detail reads (candidate_guid via query)
   { method: 'GET', pattern: /^\/api\/recruitment\/applications(\/.*)?\/?$/ },
   // Career portal — candidate job offer response (no JWT)
