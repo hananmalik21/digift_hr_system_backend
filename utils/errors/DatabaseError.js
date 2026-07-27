@@ -272,7 +272,9 @@ export class DatabaseError extends AppError {
 
     // Package body does not exist or is invalid (ORA-04067)
     if (errorNum === 4067 || message.includes('ORA-04067')) {
-      return 'The database package ABS_POLICY_PKG does not exist or its body is invalid. Please verify that the package exists in the ABS schema and is properly compiled. Contact the database administrator to resolve this issue.';
+      const pkgMatch = message.match(/package body\s+"([^"]+)"/i) || message.match(/package\s+"([^"]+)"/i);
+      const packageName = pkgMatch?.[1] || 'requested package';
+      return `The database package ${packageName} does not exist or its body is invalid. Please verify that the package exists and is properly compiled. Contact the database administrator to resolve this issue.`;
     }
 
     // PL/SQL compilation error (ORA-06550)

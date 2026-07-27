@@ -128,6 +128,14 @@ import payBalanceDefinitionRoutes from './feature/pay/balance_definitions/routes
 import payBalanceDimensionRoutes from './feature/pay/balance_dimensions/routes/payBalanceDimensionRoutes.js';
 import payBalanceInitializationRoutes from './feature/pay/balance_initializations/routes/payBalanceInitializationRoutes.js';
 import payEmployeeBalanceInquiryRoutes from './feature/pay/employee_balance_inquiry/routes/payEmployeeBalanceInquiryRoutes.js';
+import payCostingAllocationsRoutes from './feature/pay/costing_allocations/routes/payCostingAllocations.routes.js';
+import payPositionCostingAllocationsRoutes from './feature/pay/position_costing_allocations/routes/payPositionCostingAllocations.routes.js';
+import payEmpElementCostingAllocationsRoutes from './feature/pay/employee_element_costing_allocations/routes/payEmpElementCostingAllocations.routes.js';
+import payElementPositionCostingRoutes from './feature/pay/element_position_costing/routes/payElementPositionCosting.routes.js';
+import payElementDepartmentCostingRoutes from './feature/pay/element_department_costing/routes/payElementDepartmentCosting.routes.js';
+import payDepartmentDefaultCostingRoutes from './feature/pay/department_default_costing/routes/payDepartmentDefaultCosting.routes.js';
+import payElementDefaultCostingRoutes from './feature/pay/element_default_costing/routes/payElementDefaultCosting.routes.js';
+import paySystemDefaultCostingRoutes from './feature/pay/system_default_costing/routes/paySystemDefaultCosting.routes.js';
 import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEntitiesRoute.js';
 import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
@@ -435,6 +443,33 @@ app.use('/api/payroll/balance-initializations', payBalanceInitializationRoutes);
 
 // Payroll — employee balance inquiry (PAY.V_EMPLOYEE_BALANCE_INQUIRY, read-only)
 app.use('/api/payroll/balance-inquiry', payEmployeeBalanceInquiryRoutes);
+
+// Payroll — costing allocations (PAY.PAY_COSTING_ALLOCATIONS_PKG + PAY.V_PAY_COSTING_ALLOCATIONS)
+app.use('/api/pay/costing-allocations', payCostingAllocationsRoutes);
+
+// Payroll — position costing allocations (PAY.PAY_POSITION_COSTING_ALLOCATIONS_PKG + PAY.V_PAY_POSITION_COSTING_ALLOCATIONS)
+app.use(
+  '/api/pay/position-costing-allocations',
+  payPositionCostingAllocationsRoutes
+);
+
+// Payroll — element-employee costing (PAY.PAY_EMP_ELEMENT_COSTING_PKG + PAY.V_PAY_EMP_ELEMENT_COSTING_ALLOCATIONS)
+app.use('/api/pay/employee-element-costing', payEmpElementCostingAllocationsRoutes);
+
+// Payroll — element-position costing (PAY.PAY_ELEMENT_POSITION_COSTING_PKG + PAY.V_PAY_ELEMENT_POSITION_COSTING)
+app.use('/api/pay/element-position-costing', payElementPositionCostingRoutes);
+
+// Payroll — element-department costing (PAY.PAY_ELEMENT_DEPT_COSTING_PKG + PAY.V_PAY_ELEMENT_DEPT_COSTING)
+app.use('/api/pay/element-department-costing', payElementDepartmentCostingRoutes);
+
+// Payroll — department default costing (PAY.PAY_DEPARTMENT_DEFAULT_COSTING_PKG + PAY.V_PAY_DEPARTMENT_DEFAULT_COSTING)
+app.use('/api/pay/department-default-costing', payDepartmentDefaultCostingRoutes);
+
+// Payroll — element default costing (PAY.PAY_ELEMENT_DEFAULT_COSTING_PKG + PAY.V_PAY_ELEMENT_DEFAULT_COSTING)
+app.use('/api/pay/element-default-costing', payElementDefaultCostingRoutes);
+
+// Payroll — system default costing (PAY.PAY_SYSTEM_DEFAULT_COSTING_PKG + PAY.V_PAY_SYSTEM_DEFAULT_COSTING)
+app.use('/api/pay/system-default-costing', paySystemDefaultCostingRoutes);
 
 // PAY Legal Entity Management
 app.use('/api/pay/legal-entities', payLegalEntitiesRoute);
