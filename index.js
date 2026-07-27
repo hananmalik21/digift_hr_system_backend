@@ -127,6 +127,7 @@ import payBalanceCategoryRoutes from './feature/pay/balance_categories/routes/pa
 import payBalanceDefinitionRoutes from './feature/pay/balance_definitions/routes/payBalanceDefinitionRoutes.js';
 import payBalanceDimensionRoutes from './feature/pay/balance_dimensions/routes/payBalanceDimensionRoutes.js';
 import payBalanceInitializationRoutes from './feature/pay/balance_initializations/routes/payBalanceInitializationRoutes.js';
+import payEmployeeBalanceInquiryRoutes from './feature/pay/employee_balance_inquiry/routes/payEmployeeBalanceInquiryRoutes.js';
 import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEntitiesRoute.js';
 import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
@@ -431,6 +432,9 @@ app.use('/api/payroll/balance-dimensions', payBalanceDimensionRoutes);
 
 // Payroll — balance initializations (PAY.PAY_BALANCE_INITIALIZATIONS_PKG)
 app.use('/api/payroll/balance-initializations', payBalanceInitializationRoutes);
+
+// Payroll — employee balance inquiry (PAY.V_EMPLOYEE_BALANCE_INQUIRY, read-only)
+app.use('/api/payroll/balance-inquiry', payEmployeeBalanceInquiryRoutes);
 
 // PAY Legal Entity Management
 app.use('/api/pay/legal-entities', payLegalEntitiesRoute);
