@@ -38,7 +38,13 @@ import {
 } from '../view/compComponentView.js';
 import { buildComponentsExcelBuffer } from '../service/componentExportService.js';
 import { sendExcelExport } from '../../../../utils/excel/index.js';
-import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
+import { DatabaseError, ForbiddenError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
+import { getMappingByComponentGuid } from '../../component_payroll_mappings/model/compComponentPayrollMappingModel.js';
+import {
+  assertEnterpriseAccess,
+  validateComponentGuidParam,
+  validateEnterpriseIdQuery
+} from '../../component_payroll_mappings/validation/compComponentPayrollMappingValidation.js';
 
 const router = express.Router();
 
@@ -48,6 +54,7 @@ const ERROR_TITLE = {
   GET: 'Failed to get compensation component',
   DELETE: 'Failed to delete compensation component',
   LIST: 'Failed to list compensation components',
+  PAYROLL_MAPPING: 'Failed to get component payroll mapping',
   GET_VIEW: 'Failed to get compensation component'
 };
 
@@ -575,6 +582,36 @@ router.put('/:componentGuid', asyncHandler(async (req, res) => {
       return sendError(res, err.statusCode || 400, ERROR_TITLE.UPDATE, message);
     }
     return sendError(res, 500, ERROR_TITLE.UPDATE, err.message || ERROR_TITLE.UPDATE);
+  }
+}));
+
+/**
+ * GET /comp/components/:component_guid/payroll-mapping?enterprise_id=
+ * Whether this compensation component already has a payroll element mapping.
+ */
+router.get('/:component_guid/payroll-mapping', asyncHandler(async (req, res) => {
+  try {
+    const componentGuid = validateComponentGuidParam(req.params.component_guid);
+    const enterpriseId = validateEnterpriseIdQuery(req.query || {});
+    assertEnterpriseAccess(req, enterpriseId);
+    const outcome = await getMappingByComponentGuid(componentGuid, enterpriseId);
+    return res.status(200).json({
+      success: true,
+      mapped: outcome.mapped,
+      data: outcome.data
+    });
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      const details = Array.isArray(err.errors) ? err.errors.filter(Boolean) : [];
+      return sendError(res, 400, ERROR_TITLE.PAYROLL_MAPPING, details[0] || err.message);
+    }
+    if (err instanceof ForbiddenError) {
+      return sendError(res, 403, ERROR_TITLE.PAYROLL_MAPPING, err.message || 'Access denied');
+    }
+    if (err instanceof DatabaseError) {
+      return sendError(res, err.statusCode || 500, ERROR_TITLE.PAYROLL_MAPPING, err.message);
+    }
+    return sendError(res, 500, ERROR_TITLE.PAYROLL_MAPPING, 'Unexpected error');
   }
 }));
 

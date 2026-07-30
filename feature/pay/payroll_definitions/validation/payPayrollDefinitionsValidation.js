@@ -437,6 +437,40 @@ export function validateSummaryPayrollDefinitionsQuery(query = {}) {
 /**
  * @param {Record<string, unknown>} query
  */
+/**
+ * GET /api/pay/payroll-definitions/available-for-transfer
+ */
+export function validateAvailableForTransferQuery(query = {}) {
+  const errors = [];
+  const enterprise_id = validatePositiveEnterpriseId(errors, query.enterprise_id, { required: true });
+  const period_start_date = validateIsoDate(errors, query.period_start_date, 'period_start_date', {
+    required: false,
+    label: 'period_start_date'
+  });
+  const period_end_date = validateIsoDate(errors, query.period_end_date, 'period_end_date', {
+    required: false,
+    label: 'period_end_date'
+  });
+
+  let status = 'ACTIVE';
+  if (!isBlank(query.status)) {
+    status = String(query.status).trim().toUpperCase();
+  }
+
+  if (period_start_date && period_end_date && period_start_date > period_end_date) {
+    errors.push('period_start_date must be on or before period_end_date.');
+  }
+
+  throwIfErrors(errors);
+
+  return {
+    enterprise_id,
+    period_start_date,
+    period_end_date,
+    status
+  };
+}
+
 export function validateDropdownPayrollDefinitionsQuery(query = {}) {
   const errors = [];
   const enterprise_id = validatePositiveEnterpriseId(errors, query.enterprise_id, { required: true });

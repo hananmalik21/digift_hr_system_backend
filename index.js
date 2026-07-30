@@ -45,6 +45,7 @@ import compLookupValueController from './feature/look_ups/comp/comp_lookup_value
 import compComponentController from './feature/compensation/components/controller/compComponentController.js';
 import compSalaryStructureRoutes from './feature/compensation/salary_structures/routes/compSalaryStructures.routes.js';
 import compAdjustmentsRoutes from './feature/compensation/adjustments/routes/compAdjustments.routes.js';
+import compComponentPayrollMappingRoutes from './feature/compensation/component_payroll_mappings/routes/compComponentPayrollMappingRoutes.js';
 import compEmployeeAssignedComponentsRoutes from './feature/compensation/employee_assigned_components/routes/compEmployeeAssignedComponents.routes.js';
 import compEmployeeComponentsJsonRoutes from './feature/compensation/employee_components_json/routes/compEmployeeComponentsJson.routes.js';
 import compEligiblePlansByCriteriaRoutes from './feature/compensation/eligible_plans_by_criteria/routes/compEligiblePlansByCriteria.routes.js';
@@ -140,6 +141,7 @@ import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEn
 import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
 import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
+import payCompensationTransferRoutes from './feature/pay/compensation_transfer/routes/payCompensationTransferRoutes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -278,6 +280,7 @@ app.use('/api/comp/components', compComponentController);
 app.use('/api/comp/employee', employeeLatestComponentHistoryController);
 app.use('/api/comp/employee', employeeCompensationPlanDetailsController);
 app.use('/api/comp/employee-compensation', employeeCompensationController);
+app.use('/api/comp', compComponentPayrollMappingRoutes);
 app.use('/api/comp', compSalaryStructureRoutes);
 app.use('/api/comp', compAdjustmentsRoutes);
 app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
@@ -479,6 +482,9 @@ app.use('/api/pay/payroll-calendars', payPayrollCalendarsRoute);
 
 // PAY Payroll Definition Management
 app.use('/api/pay/payroll-definitions', payPayrollDefinitionsRoute);
+
+// PAY Compensation-to-Payroll Transfer (PAY.PAY_COMPENSATION_TRANSFER_PKG)
+app.use('/api/pay/compensation-transfer', payCompensationTransferRoutes);
 
 // PAY Payroll Group Management
 app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
