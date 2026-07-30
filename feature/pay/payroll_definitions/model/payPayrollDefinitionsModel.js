@@ -12,6 +12,10 @@ import {
   ynInBind
 } from '../../../../utils/oraclePackageUtils.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
+import {
+  AVAILABLE_FOR_TRANSFER_SQL,
+  mapAvailableForTransferPayrollDefinitionRow
+} from '../utils/payPayrollDefinitionsAvailableForTransferSql.js';
 
 const PKG = 'PAY.PAY_PAYROLL_DEFINITIONS_PKG';
 const VIEW = 'PAY.V_PAYROLL_DEFINITIONS';
@@ -897,3 +901,38 @@ export async function deletePayrollDefinitionViaPackage(payload) {
     ({ success, message }) => ({ success, message })
   );
 }
+
+/**
+ * Active Payroll Definitions effective for a compensation processing period.
+ * Used by the frontend before calling compensation-transfer endpoints.
+ *
+ * @param {{
+ *   enterprise_id: number,
+ *   period_start_date?: string|null,
+ *   period_end_date?: string|null,
+ *   status?: string|null
+ * }} filters
+ * @returns {Promise<object[]>}
+ */
+export async function listAvailablePayrollDefinitionsForTransfer(filters) {
+  const binds = {
+    enterprise_id: numberInBind(filters.enterprise_id),
+    period_start_date: varcharInBind(filters.period_start_date, 10),
+    period_end_date: varcharInBind(filters.period_end_date, 10),
+    status: varcharInBind(filters.status || 'ACTIVE', 30)
+  };
+
+  let connection;
+  try {
+    connection = await db.getConnection();
+    const result = await connection.execute(AVAILABLE_FOR_TRANSFER_SQL, binds, ROW_OBJECT);
+    return (result.rows || []).map(mapAvailableForTransferPayrollDefinitionRow);
+  } catch (err) {
+    logOracleError(err, 'listAvailablePayrollDefinitionsForTransfer');
+    throw new DatabaseError(GENERIC_ERROR_MESSAGE, err, GENERIC_ERROR_MESSAGE);
+  } finally {
+    await closeConnection(connection);
+  }
+}
+
+export { mapAvailableForTransferPayrollDefinitionRow };

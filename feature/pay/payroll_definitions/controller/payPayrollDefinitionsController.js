@@ -7,6 +7,7 @@ import {
   GENERIC_ERROR_MESSAGE,
   getPayrollDefinitionFromViewByGuid,
   getPayrollDefinitionSummaryFromView,
+  listAvailablePayrollDefinitionsForTransfer,
   listPayrollDefinitionDropdownFromView,
   listPayrollDefinitionsFromView,
   updatePayrollDefinitionViaPackage
@@ -15,6 +16,7 @@ import {
   assertEnterpriseAccess,
   firstValidationMessage,
   parsePayrollGuidParam,
+  validateAvailableForTransferQuery,
   validateCreatePayrollDefinitionBody,
   validateDeletePayrollDefinitionInput,
   validateDropdownPayrollDefinitionsQuery,
@@ -38,6 +40,8 @@ const GET_SUCCESS_MESSAGE = 'Payroll definition retrieved successfully.';
 const UPDATE_SUCCESS_MESSAGE = 'Payroll definition updated successfully.';
 const DELETE_SUCCESS_MESSAGE = 'Payroll definition deleted successfully.';
 const DROPDOWN_SUCCESS_MESSAGE = 'Payroll definition options retrieved successfully.';
+const AVAILABLE_FOR_TRANSFER_SUCCESS_MESSAGE =
+  'Available payroll definitions retrieved successfully.';
 const NOT_FOUND_MESSAGE = 'Payroll definition was not found.';
 
 function sendValidationError(res, err) {
@@ -186,6 +190,26 @@ export const getPayrollDefinitionSummaryHandler = asyncHandler(async (req, res) 
     return sendSuccess(res, {
       message: SUMMARY_SUCCESS_MESSAGE,
       data
+    });
+  })
+);
+
+/** GET /api/pay/payroll-definitions/available-for-transfer */
+export const listAvailableForTransferHandler = asyncHandler(async (req, res) =>
+  withPayrollDefinitionErrorHandling(res, async () => {
+    const filters = validateAvailableForTransferQuery(req.query || {});
+    assertEnterpriseAccess(req, filters.enterprise_id);
+
+    const rows = await listAvailablePayrollDefinitionsForTransfer(filters);
+
+    logAudit('available_for_transfer', req, {
+      enterprise_id: filters.enterprise_id,
+      returned: rows.length
+    });
+
+    return sendSuccess(res, {
+      message: AVAILABLE_FOR_TRANSFER_SUCCESS_MESSAGE,
+      data: rows
     });
   })
 );
