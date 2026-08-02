@@ -5,7 +5,7 @@ import { AppError } from './AppError.js';
  * Thrown when there's a conflict (e.g., unique constraint violation)
  */
 export class ConflictError extends AppError {
-  constructor(message = 'Conflict occurred', constraint = null, columns = null, technicalMessage = null) {
+  constructor(message = 'Conflict occurred', constraint = null, columns = null, technicalMessage = null, details = null) {
     super(
       message,
       409,
@@ -15,6 +15,7 @@ export class ConflictError extends AppError {
     
     this.constraint = constraint;
     this.columns = columns;
+    this.details = details;
   }
 }
 
