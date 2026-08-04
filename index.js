@@ -142,12 +142,19 @@ import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payP
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
 import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
 import payCompensationTransferRoutes from './feature/pay/compensation_transfer/routes/payCompensationTransferRoutes.js';
+import { resolveExpressTrustProxy } from './utils/tenantConfig.js';
+import {
+  enforceJwtEnterpriseMatch,
+  resolveEnterpriseContext
+} from './middleware/enterpriseContextMiddleware.js';
+import publicEnterpriseContextController from './feature/enterprise_structure/enterprises/controller/publicEnterpriseContextController.js';
+import publicCareerController from './feature/recruitment/public/controller/publicCareerController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy - enables reading X-Forwarded-* headers (for load balancers, reverse proxies)
-// Set to true to trust all proxies, or set to specific proxy IP addresses
-app.set('trust proxy', process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1' || false);
+// Trust proxy — required behind Nginx so Host / X-Forwarded-Host resolve correctly.
+// Prefer TRUST_PROXY=1 (trust one hop). Avoid TRUST_PROXY=true (trust all) on direct exposure.
+app.set('trust proxy', resolveExpressTrustProxy());
 
 // Middleware
 app.use(cors());
@@ -155,6 +162,9 @@ const bulkAdjustJsonLimit = process.env.BULK_ADJUST_JSON_LIMIT || '10mb';
 app.use('/api/compensation/bulk-adjustments', express.json({ limit: bulkAdjustJsonLimit }));
 app.use(express.json());
 app.use('/documents', documentsDownloadRouter);
+
+// Hostname → enterprise context (before auth)
+app.use(resolveEnterpriseContext);
 
 // ==========================================
 // JWT AUTHENTICATION MIDDLEWARE (must run before any protected route)
@@ -164,6 +174,11 @@ app.use('/documents', documentsDownloadRouter);
 // payload (user_id, user_guid, enterprise_id, username).
 // ==========================================
 app.use(requireAuth);
+app.use(enforceJwtEnterpriseMatch);
+
+// Public tenant + career aliases (no JWT)
+app.use('/api/public', publicEnterpriseContextController);
+app.use('/api/public', publicCareerController);
 
 // Enterprise routes
 app.use('/api/enterprises', enterpriseController);

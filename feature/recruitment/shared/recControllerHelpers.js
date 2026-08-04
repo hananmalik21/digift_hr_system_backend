@@ -1,6 +1,14 @@
-import { DatabaseError, NotFoundError, ValidationError } from '../../../utils/errors/index.js';
+import { AppError, DatabaseError, NotFoundError, ValidationError } from '../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../utils/paginationUtils.js';
 import { getActingUsername } from '../../../utils/userContext.js';
+import { isTenantErrorCode, sendTenantError } from '../../../utils/tenantErrors.js';
+
+function handleTenantAppError(res, err) {
+  if (err instanceof AppError && isTenantErrorCode(err.code)) {
+    return sendTenantError(res, err.statusCode, err.code, err.message);
+  }
+  return null;
+}
 
 export function firstValidationMessage(err) {
   const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
@@ -46,6 +54,8 @@ export function buildListPaginationMeta(page, pageSize, total) {
 }
 
 export function handleReadError(res, err, fallbackMessage) {
+  const tenant = handleTenantAppError(res, err);
+  if (tenant) return tenant;
   if (err instanceof ValidationError) {
     return sendPackageResponse(res, 400, { success: false, message: firstValidationMessage(err) });
   }
@@ -65,6 +75,8 @@ export function handleReadError(res, err, fallbackMessage) {
 }
 
 export function handleMutationError(res, err, fallbackMessage) {
+  const tenant = handleTenantAppError(res, err);
+  if (tenant) return tenant;
   if (err instanceof ValidationError) {
     return sendValidationError(res, err);
   }
@@ -77,6 +89,8 @@ export function handleMutationError(res, err, fallbackMessage) {
 
 /** Career portal JSON errors: `{ success, message }` without ERP `status` field. */
 export function handlePortalError(res, err, fallbackMessage) {
+  const tenant = handleTenantAppError(res, err);
+  if (tenant) return tenant;
   if (err instanceof ValidationError) {
     return sendPackageResponse(res, 400, {
       success: false,

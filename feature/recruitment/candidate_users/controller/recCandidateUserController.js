@@ -27,6 +27,10 @@ import {
   LOGIN_GENERIC_ERROR,
   REGISTER_GENERIC_ERROR
 } from '../utils/recCandidatePortalConstants.js';
+import {
+  withResolvedEnterpriseBody,
+  withResolvedEnterpriseQuery
+} from '../../../../utils/requestEnterprise.js';
 
 const router = express.Router();
 
@@ -39,7 +43,7 @@ router.post(
   multerRegisterCandidate,
   asyncHandler(async (req, res) => {
     try {
-      const body = buildRegisterBodyFromRequest(req);
+      const body = withResolvedEnterpriseBody(req, buildRegisterBodyFromRequest(req));
       validateRegisterCandidateUserBody(body);
       const { httpStatus, payload } = await registerCandidateUserService(body);
       return sendPackageResponse(res, httpStatus, payload);
@@ -57,8 +61,9 @@ router.post(
   '/login',
   asyncHandler(async (req, res) => {
     try {
-      validateCandidateLoginBody(req.body);
-      const { httpStatus, payload } = await loginCandidateUserService(req.body);
+      const body = withResolvedEnterpriseBody(req, req.body || {});
+      validateCandidateLoginBody(body);
+      const { httpStatus, payload } = await loginCandidateUserService(body);
       return sendPackageResponse(res, httpStatus, payload);
     } catch (err) {
       return handlePortalError(res, err, LOGIN_GENERIC_ERROR);
@@ -74,8 +79,9 @@ router.get(
   '/offers',
   asyncHandler(async (req, res) => {
     try {
-      validateCandidateOfferPortalQuery(req.query);
-      const { rows, total, page, limit } = await listExtendedOffersForCandidate(req.query);
+      const query = withResolvedEnterpriseQuery(req, req.query);
+      validateCandidateOfferPortalQuery(query);
+      const { rows, total, page, limit } = await listExtendedOffersForCandidate(query);
       return sendCandidateOfferListResponse(res, rows, { page, limit, total });
     } catch (err) {
       return handlePortalError(res, err, PORTAL_READ_ERROR_MESSAGE);
@@ -92,7 +98,8 @@ router.get(
   asyncHandler(async (req, res) => {
     try {
       const offer_guid = parseCandidateOfferGuidParam(req.params.offer_guid);
-      const { enterprise_id, candidate_guid } = validateCandidateOfferPortalQuery(req.query);
+      const query = withResolvedEnterpriseQuery(req, req.query);
+      const { enterprise_id, candidate_guid } = validateCandidateOfferPortalQuery(query);
 
       const detail = await getExtendedOfferForCandidate(offer_guid, enterprise_id, candidate_guid);
       if (!detail) {

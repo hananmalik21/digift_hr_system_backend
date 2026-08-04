@@ -32,6 +32,7 @@ import {
   validateDeclineOfferBody,
   validateOfferActionBody
 } from '../utils/recJobOfferValidators.js';
+import { withResolvedEnterpriseBody } from '../../../../utils/requestEnterprise.js';
 
 const AUDIT_TAG = 'recJobOffers';
 const router = express.Router();
@@ -109,7 +110,7 @@ function registerOfferActionRoute(path, auditAction, packageFn) {
     asyncHandler(async (req, res) => {
       try {
         const offer_guid = parseOfferGuidParam(req.params.offer_guid);
-        const body = { ...(req.body || {}) };
+        const body = withResolvedEnterpriseBody(req, { ...(req.body || {}) });
         body.updated_by = resolveAuditActor(req, body, 'updated_by');
         const validated = validateOfferActionBody(body, offer_guid);
 
@@ -137,7 +138,7 @@ router.post(
   asyncHandler(async (req, res) => {
     try {
       const offer_guid = parseOfferGuidParam(req.params.offer_guid);
-      const body = { ...(req.body || {}) };
+      const body = withResolvedEnterpriseBody(req, { ...(req.body || {}) });
       body.updated_by = resolveAuditActor(req, body, 'updated_by');
       const validated = validateDeclineOfferBody(body, offer_guid);
 

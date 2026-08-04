@@ -49,6 +49,7 @@ import {
   validateDeleteJobPostingParams,
   validateUpdateJobPostingBody
 } from '../utils/recJobPostingValidators.js';
+import { withResolvedEnterpriseBody, withResolvedEnterpriseQuery, resolveRequestEnterpriseId } from '../../../../utils/requestEnterprise.js';
 
 const router = express.Router();
 
@@ -70,8 +71,9 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     try {
-      const result = await listJobPostingsFromView(normalizeJobPostingListQuery(req.query), {
-        candidateGuid: candidateGuidFromQuery(req.query)
+      const query = withResolvedEnterpriseQuery(req, req.query);
+      const result = await listJobPostingsFromView(normalizeJobPostingListQuery(query), {
+        candidateGuid: candidateGuidFromQuery(query)
       });
       return sendJobPostingListResponse(res, result.rows, result);
     } catch (err) {
@@ -132,7 +134,7 @@ router.post(
   asyncHandler(async (req, res) => {
     try {
       const posting_guid = parsePostingGuidParam(req.params.posting_guid);
-      const body = buildApplyJobBodyFromRequest(req);
+      const body = withResolvedEnterpriseBody(req, buildApplyJobBodyFromRequest(req));
       body.created_by = resolveAuditActor(req, body, 'created_by');
       normalizeApplicationResumeFields(body);
       validateApplyJobBody(body, posting_guid);
@@ -229,9 +231,13 @@ router.get(
   '/:posting_guid',
   asyncHandler(async (req, res) => {
     try {
-      const { posting_guid, enterprise_id } = validatePostingGuidEnterpriseParams(
+      const enterprise_id = resolveRequestEnterpriseId(req, {
+        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id,
+        required: true
+      });
+      const { posting_guid } = validatePostingGuidEnterpriseParams(
         req.params.posting_guid,
-        req.query?.enterprise_id
+        enterprise_id
       );
       const result = await getJobPostingByGuidFromView(posting_guid, enterprise_id, {
         candidateGuid: candidateGuidFromQuery(req.query)

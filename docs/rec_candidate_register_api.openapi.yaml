@@ -18,6 +18,14 @@ info:
     - `POST /api/rec/job-offers/{offerGuid}/decline` — decline offer
 
     Passwords on register are hashed server-side (Argon2id) before Oracle storage.
+
+    ## Hostname tenant resolution (preferred)
+
+    Prefer tenant hostnames such as `{tenant}.careers.digifyhr.com`.
+    The API resolves `enterprise_id` via `ENT.ENT_ENTERPRISES_PKG` action `RESOLVE_SUBDOMAIN`.
+    Prefer public aliases under `/api/public/*` (no `enterprise_id` query/body).
+    Client-supplied `enterprise_id` is deprecated when a tenant hostname is present.
+    See `docs/hostname_enterprise_resolution.md`.
 servers:
   - url: /
     description: Application base URL

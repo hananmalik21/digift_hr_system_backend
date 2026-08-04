@@ -57,6 +57,10 @@ import {
   validateRejectApplicationBody,
   validateUpdateApplicationNoteBody
 } from '../utils/recApplicationValidators.js';
+import {
+  resolveRequestEnterpriseId,
+  withResolvedEnterpriseQuery
+} from '../../../../utils/requestEnterprise.js';
 
 const AUDIT_TAG = 'recApplications';
 const router = express.Router();
@@ -68,8 +72,9 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     try {
+      const query = withResolvedEnterpriseQuery(req, req.query);
       const { rows, total, page, limit } = await listApplicationsFromView(
-        normalizeApplicationListQuery(req.query)
+        normalizeApplicationListQuery(query)
       );
       return sendApplicationListResponse(res, rows, { page, limit, total });
     } catch (err) {
@@ -219,9 +224,12 @@ router.get(
   '/:application_guid/stage-history',
   asyncHandler(async (req, res) => {
     try {
-      const { application_guid, enterprise_id } = validateApplicationGuidEnterpriseParams(
+      const enterprise_id = resolveRequestEnterpriseId(req, {
+        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
+      });
+      const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
-        req.query?.enterprise_id
+        enterprise_id
       );
 
       const exists = await applicationExistsInApplicationsView(application_guid, enterprise_id);
@@ -248,9 +256,12 @@ router.get(
   '/:application_guid/resume',
   asyncHandler(async (req, res) => {
     try {
-      const { application_guid, enterprise_id } = validateApplicationGuidEnterpriseParams(
+      const enterprise_id = resolveRequestEnterpriseId(req, {
+        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
+      });
+      const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
-        req.query?.enterprise_id
+        enterprise_id
       );
 
       const exists = await applicationResumeExists(application_guid, enterprise_id);
@@ -294,9 +305,12 @@ router.get(
   '/:application_guid',
   asyncHandler(async (req, res) => {
     try {
-      const { application_guid, enterprise_id } = validateApplicationGuidEnterpriseParams(
+      const enterprise_id = resolveRequestEnterpriseId(req, {
+        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
+      });
+      const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
-        req.query?.enterprise_id
+        enterprise_id
       );
       const detail = await getApplicationByGuidFromView(application_guid, enterprise_id);
       if (!detail) {
