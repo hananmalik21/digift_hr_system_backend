@@ -22,11 +22,21 @@ class EnterpriseModel {
   }
 
   static toPackagePayload(data, userId) {
+    const subdomainRaw = data.SUBDOMAIN_SLUG ?? data.subdomain_slug;
+    const careerFlag = data.CAREER_PORTAL_ENABLED_FLAG ?? data.career_portal_enabled_flag;
     return entActorPayload(data, userId, {
       enterprise_code: data.ENTERPRISE_CODE ?? data.enterprise_code,
       enterprise_name: data.ENTERPRISE_NAME ?? data.enterprise_name,
       is_active: data.IS_ACTIVE ?? data.is_active,
-      last_update_login: data.LAST_UPDATE_LOGIN ?? data.last_update_login
+      last_update_login: data.LAST_UPDATE_LOGIN ?? data.last_update_login,
+      ...(subdomainRaw !== undefined
+        ? { subdomain_slug: subdomainRaw == null || subdomainRaw === ''
+          ? null
+          : String(subdomainRaw).trim().toLowerCase() }
+        : {}),
+      ...(careerFlag !== undefined
+        ? { career_portal_enabled_flag: careerFlag }
+        : {})
     });
   }
 

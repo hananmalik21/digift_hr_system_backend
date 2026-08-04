@@ -1,6 +1,7 @@
 import { AppError } from './AppError.js';
 import { ValidationError } from './ValidationError.js';
 import { DatabaseError } from './DatabaseError.js';
+import { isTenantErrorCode } from '../tenantErrors.js';
 
 /**
  * Centralized Error Handler
@@ -95,6 +96,15 @@ export function sendErrorResponse(err, req, res) {
   // Add stack trace only in non-production
   if (process.env.NODE_ENV !== 'production' && err.stack) {
     errorObject.stack = err.stack;
+  }
+
+  // Tenant / hostname resolution errors use status "E" for public clients
+  if (isTenantErrorCode(err.code)) {
+    return res.status(err.statusCode || 500).json({
+      status: 'E',
+      code: err.code,
+      message: userMessage
+    });
   }
 
   // Build and send response

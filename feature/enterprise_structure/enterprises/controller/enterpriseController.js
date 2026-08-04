@@ -5,6 +5,8 @@ import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '..
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { TENANT_SLUG_RE } from '../../../../utils/tenantHostname.js';
+import { invalidateEnterpriseResolveCacheForSlug } from '../service/resolveEnterpriseBySubdomain.js';
 import {
   buildEnterpriseDeletePayload,
   HARD_DELETE_CONFLICT_MESSAGE,
@@ -23,13 +25,30 @@ router.use((req, res, next) => {
 });
 
 function normalizeEnterpriseBody(data = {}) {
-  return {
+  const subdomainRaw = data.SUBDOMAIN_SLUG ?? data.subdomain_slug;
+  const normalized = {
     ...data,
     ENTERPRISE_CODE: data.ENTERPRISE_CODE ?? data.enterprise_code,
     ENTERPRISE_NAME: data.ENTERPRISE_NAME ?? data.enterprise_name,
     IS_ACTIVE: data.IS_ACTIVE ?? data.is_active,
     LAST_UPDATE_LOGIN: data.LAST_UPDATE_LOGIN ?? data.last_update_login
   };
+
+  if (subdomainRaw !== undefined) {
+    const slug = subdomainRaw == null || String(subdomainRaw).trim() === ''
+      ? null
+      : String(subdomainRaw).trim().toLowerCase();
+    normalized.SUBDOMAIN_SLUG = slug;
+    normalized.subdomain_slug = slug;
+  }
+
+  const careerFlag = data.CAREER_PORTAL_ENABLED_FLAG ?? data.career_portal_enabled_flag;
+  if (careerFlag !== undefined) {
+    normalized.CAREER_PORTAL_ENABLED_FLAG = careerFlag;
+    normalized.career_portal_enabled_flag = careerFlag;
+  }
+
+  return normalized;
 }
 
 function validateEnterpriseData(data, isUpdate = false) {
@@ -61,6 +80,25 @@ function validateEnterpriseData(data, isUpdate = false) {
     errors.push('IS_ACTIVE must be true/false or Y/N');
   }
 
+  if (data.SUBDOMAIN_SLUG !== undefined && data.SUBDOMAIN_SLUG !== null) {
+    const slug = String(data.SUBDOMAIN_SLUG).trim().toLowerCase();
+    if (!TENANT_SLUG_RE.test(slug)) {
+      errors.push(
+        'SUBDOMAIN_SLUG must be a lowercase DNS label (letters, digits, hyphens; 1–63 chars)'
+      );
+    }
+  }
+
+  if (
+    data.CAREER_PORTAL_ENABLED_FLAG !== undefined
+    && data.CAREER_PORTAL_ENABLED_FLAG !== true
+    && data.CAREER_PORTAL_ENABLED_FLAG !== false
+    && data.CAREER_PORTAL_ENABLED_FLAG !== 'Y'
+    && data.CAREER_PORTAL_ENABLED_FLAG !== 'N'
+  ) {
+    errors.push('CAREER_PORTAL_ENABLED_FLAG must be true/false or Y/N');
+  }
+
   return errors;
 }
 
@@ -86,6 +124,12 @@ function sendSoftDeleted(res, result, message) {
   });
 }
 
+function invalidateSlugCaches(...slugs) {
+  for (const slug of slugs) {
+    if (slug) invalidateEnterpriseResolveCacheForSlug(slug);
+  }
+}
+
 async function updateEnterpriseHandler(req, res) {
   const enterpriseId = requireEnterpriseId(req.params.id);
   const data = normalizeEnterpriseBody(req.body);
@@ -96,6 +140,7 @@ async function updateEnterpriseHandler(req, res) {
 
   const existingEnterprise = await requireEnterprise(enterpriseId);
   const existingCode = existingEnterprise.enterprise_code ?? existingEnterprise.ENTERPRISE_CODE;
+  const existingSlug = existingEnterprise.subdomain_slug ?? existingEnterprise.SUBDOMAIN_SLUG;
 
   if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingCode) {
     const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
@@ -106,9 +151,12 @@ async function updateEnterpriseHandler(req, res) {
 
   const actor = resolveEnterpriseActor(req);
   const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, actor);
+  const converted = toLowerCaseKeys(updatedEnterprise);
+  invalidateSlugCaches(existingSlug, data.SUBDOMAIN_SLUG, converted.subdomain_slug);
+
   sendUpdated(res, {
     message: 'Enterprise updated successfully',
-    data: toLowerCaseKeys(updatedEnterprise)
+    data: converted
   });
 }
 
@@ -178,6 +226,8 @@ router.post('/', asyncHandler(async (req, res) => {
   const convertedEnterprise = toLowerCaseKeys(newEnterprise);
   const enterpriseId = convertedEnterprise.enterprise_id ?? convertedEnterprise.ENTERPRISE_ID;
 
+  invalidateSlugCaches(data.SUBDOMAIN_SLUG, convertedEnterprise.subdomain_slug);
+
   const adminUser = await provisionEnterpriseAdminOnEnterpriseCreate({
     enterpriseId,
     enterpriseCode: convertedEnterprise.enterprise_code ?? data.ENTERPRISE_CODE,
@@ -219,7 +269,8 @@ router.patch('/:id', asyncHandler(updateEnterpriseHandler));
  */
 router.delete('/:id', asyncHandler(async (req, res) => {
   const enterpriseId = requireEnterpriseId(req.params.id);
-  await requireEnterprise(enterpriseId);
+  const existing = await requireEnterprise(enterpriseId);
+  const existingSlug = existing.subdomain_slug ?? existing.SUBDOMAIN_SLUG;
 
   const hardDelete = parseHardDeleteQuery(req.query.hard);
   const autoFallback = parseAutoFallbackQuery(req.query.auto_fallback);
@@ -237,12 +288,14 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
   if (!hardDelete) {
     const softResult = await EnterpriseModel.softDelete(enterpriseId, actor);
+    invalidateSlugCaches(existingSlug);
     sendSoftDeleted(res, softResult);
     return;
   }
 
   try {
     const result = await EnterpriseModel.hardDelete(enterpriseId, actor);
+    invalidateSlugCaches(existingSlug);
     sendDeleted(res, {
       message: result.message || 'Enterprise permanently deleted',
       data: {
@@ -256,6 +309,7 @@ router.delete('/:id', asyncHandler(async (req, res) => {
 
     if (autoFallback) {
       const softResult = await EnterpriseModel.softDelete(enterpriseId, actor);
+      invalidateSlugCaches(existingSlug);
       sendSoftDeleted(
         res,
         softResult,
