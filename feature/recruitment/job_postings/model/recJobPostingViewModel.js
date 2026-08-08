@@ -7,24 +7,27 @@ import {
   ROW_OPTS,
   withConnection
 } from '../../shared/recViewModelUtils.js';
-import { parseEnterpriseIdFromQuery, parseListPagination } from '../../shared/recViewQueryValidators.js';
+import { parseListPagination } from '../../shared/recViewQueryValidators.js';
 import {
   CANDIDATE_NOT_FOUND_MESSAGE,
   LOG_TAG,
   READ_ERROR_MESSAGE
 } from '../utils/recJobPostingConstants.js';
+import { buildJobPostingListFilters } from '../utils/recJobPostingListFilters.js';
 import {
   buildCandidateAuthMeta,
+  buildCandidateBinds,
   buildPortalBinds,
+  buildPortalListCountSql,
+  buildPortalListSelectSql,
   invalidCandidateGuidError,
   isInvalidHexOracleError,
   normalizeCandidateGuidBind,
   PORTAL_JOB_POSTING_DETAIL_SQL,
-  PORTAL_JOB_POSTINGS_COUNT_SQL,
-  PORTAL_JOB_POSTINGS_SQL,
   VALIDATE_CANDIDATE_SQL
 } from '../utils/recJobPostingPortalSql.js';
 import { mapJobPostingViewRow } from '../utils/recJobPostingViewMapper.js';
+import { parseJobPostingSort } from '../utils/recJobPostingViewValidators.js';
 
 /**
  * @param {import('oracledb').Connection} connection
@@ -69,25 +72,32 @@ function rethrowPortalReadError(err, context) {
 }
 
 /**
- * Portal-visible job postings with optional per-candidate application status.
+ * Job postings list with query filters + optional per-candidate application status.
  * @param {Record<string, unknown>|undefined} query
  * @param {{ candidateGuid?: string|null }} [options]
  */
 export async function listJobPostingsFromView(query, options = {}) {
   try {
-    const enterpriseId = parseEnterpriseIdFromQuery(query);
     const { page, limit } = parseListPagination(query);
+    const orderSql = parseJobPostingSort(query);
+    const { whereSql, binds: filterBinds } = buildJobPostingListFilters(query);
     const candidateGuid = normalizeCandidateGuidBind(options.candidateGuid ?? null);
-    const binds = buildPortalBinds(enterpriseId, candidateGuid);
+    const binds = {
+      ...filterBinds,
+      ...buildCandidateBinds(candidateGuid)
+    };
+
+    const countSql = buildPortalListCountSql(whereSql);
+    const selectSql = buildPortalListSelectSql(whereSql, { orderBy: orderSql });
 
     return await withConnection(async (connection) => {
       await prepareCandidateContext(connection, candidateGuid, binds);
 
-      const countResult = await executePortalSql(connection, PORTAL_JOB_POSTINGS_COUNT_SQL, binds);
+      const countResult = await executePortalSql(connection, countSql, binds);
       const total = readTotalCount(countResult);
 
       const offset = (page - 1) * limit;
-      const dataSql = `${PORTAL_JOB_POSTINGS_SQL}
+      const dataSql = `${selectSql}
 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
       const dataResult = await executePortalSql(connection, dataSql, {
         ...binds,

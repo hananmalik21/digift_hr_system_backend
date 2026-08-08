@@ -53,6 +53,8 @@ router.get(
   asyncHandler(async (req, res) => {
     try {
       const query = withResolvedEnterpriseQuery(req, req.query, { requireHostname: true });
+      // Career portal only shows portal-visible postings.
+      query.portal_visible_flag = 'Y';
       const result = await listJobPostingsFromView(normalizeJobPostingListQuery(query), {
         candidateGuid: candidateGuidFromQuery(query)
       });
