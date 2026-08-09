@@ -37,6 +37,8 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
+  // Job posting employer branding (career portal / deep links)
+  { method: 'GET', pattern: /^\/api\/job-postings\/[A-Fa-f0-9]{32}\/employer-info\/?$/ },
   // Career portal — candidate detail by GUID (enterprise_id via query / hostname)
   { method: 'GET', pattern: /^\/api\/rec\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
   { method: 'GET', pattern: /^\/api\/recruitment\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
@@ -48,6 +50,8 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ },
+  // Employer logo binary (deep-linkable / <img src> without Bearer header).
+  { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/logo\/?$/ },
   // GRC — no JWT required for now
   { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ }
 ];

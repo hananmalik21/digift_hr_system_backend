@@ -89,10 +89,12 @@ import recRequisitionsController from './feature/recruitment/requisitions/contro
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
+import recJobPostingEmployerInfoController from './feature/recruitment/job_postings/controller/recJobPostingEmployerInfoController.js';
 import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
+import recEmployerInfoController from './feature/recruitment/employer_info/controller/recEmployerInfoController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
@@ -142,6 +144,7 @@ import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payP
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
 import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
 import payCompensationTransferRoutes from './feature/pay/compensation_transfer/routes/payCompensationTransferRoutes.js';
+import payrollRoutes from './feature/payroll/routes/payroll.routes.js';
 import { resolveExpressTrustProxy } from './utils/tenantConfig.js';
 import {
   enforceJwtEnterpriseMatch,
@@ -228,6 +231,12 @@ app.use('/api/time-zones', timeZoneController);
 
 // Data roles (must be BEFORE /api catch-all so /api/data-roles is not matched as org structure :structureId)
 app.use('/api/data-roles', fndsecDataRolesController);
+
+// Employer info (must be BEFORE /api catch-all so /api/employer-info is not matched as org structure :structureId)
+app.use('/api/employer-info', recEmployerInfoController);
+
+// Job posting employer branding (must be BEFORE /api catch-all)
+app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
@@ -503,6 +512,12 @@ app.use('/api/pay/compensation-transfer', payCompensationTransferRoutes);
 
 // PAY Payroll Group Management
 app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
+
+// DigifyHR Payroll — main aggregate router: formula engine, elements nested reads,
+// balances employee/run reads, dashboard, audit, runs, payments, GL, close, recurring
+// entries, element dependencies, retro/arrears, approvals, plus remounted feature/pay
+// CRUD (elements family, eligibility, balances family, formulas, lookups).
+app.use('/api/payroll', payrollRoutes);
 
 // Initialize database pool on startup
 await createPool();
