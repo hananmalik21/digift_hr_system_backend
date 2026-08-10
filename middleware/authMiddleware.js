@@ -50,6 +50,9 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ },
+  // Employer info list / detail reads (no JWT)
+  { method: 'GET', pattern: /^\/api\/employer-info\/?$/ },
+  { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/?$/ },
   // Employer logo binary (deep-linkable / <img src> without Bearer header).
   { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/logo\/?$/ },
   // GRC — no JWT required for now
