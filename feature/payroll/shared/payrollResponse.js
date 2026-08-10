@@ -37,12 +37,13 @@ export function okGet(message, data) {
   };
 }
 
-export function okMutation(message, data = null, httpStatus = 200) {
+export function okMutation(message, data = null, httpStatus = 200, status = null) {
   return {
     success: true,
     httpStatus,
     message,
-    data
+    data,
+    ...(status != null ? { status } : {})
   };
 }
 
@@ -115,6 +116,7 @@ export function sendOutcome(res, outcome) {
     message: outcome.message,
     data: outcome.data ?? (outcome.meta ? [] : null)
   };
+  if (outcome.status != null) payload.status = outcome.status;
   if (outcome.meta) payload.meta = outcome.meta;
   return res.status(outcome.httpStatus ?? 200).json(payload);
 }

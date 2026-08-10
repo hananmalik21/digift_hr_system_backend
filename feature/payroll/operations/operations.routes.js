@@ -49,6 +49,8 @@ router.use('/operations', operationsRouter);
 
 // Run-scoped operations helpers (aliases match DigifyHR payroll contract)
 runOperationsRouter.get('/lock-status', testRunLockHandler);
+runOperationsRouter.post('/controls/test-lock', testRunLockHandler);
+runOperationsRouter.get('/controls/test-lock', testRunLockHandler);
 runOperationsRouter.post('/health-checks', runHealthChecksHandler);
 runOperationsRouter.get('/health-checks', listHealthCheckRunsHandler);
 runOperationsRouter.post('/certification', runCertificationHandler);

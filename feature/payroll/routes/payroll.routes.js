@@ -33,6 +33,7 @@ import payApprovalsRoutes from '../approvals/approvals.routes.js';
 import payStatutoryRoutes from '../statutory/statutory.routes.js';
 import payOperationsRoutes from '../operations/operations.routes.js';
 import payPaymentMethodsRoutes from '../payment_methods/paymentMethods.routes.js';
+import payTmPayrollRoutes from '../time_management/tmPayroll.routes.js';
 
 // --- Existing feature/pay CRUD routers, remounted under /api/payroll ---
 import payElementsRoutes from '../../pay/elements/routes/payElements.routes.js';
@@ -61,6 +62,15 @@ import payBalanceDefinitionRoutes from '../../pay/balance_definitions/routes/pay
 import payBalanceDimensionRoutes from '../../pay/balance_dimensions/routes/payBalanceDimensionRoutes.js';
 import payBalanceInitializationRoutes from '../../pay/balance_initializations/routes/payBalanceInitializationRoutes.js';
 import payEmployeeBalanceInquiryRoutes from '../../pay/employee_balance_inquiry/routes/payEmployeeBalanceInquiryRoutes.js';
+import payPayrollDefinitionsRoute from '../../pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
+import payCostingAllocationsRoutes from '../../pay/costing_allocations/routes/payCostingAllocations.routes.js';
+import payPositionCostingAllocationsRoutes from '../../pay/position_costing_allocations/routes/payPositionCostingAllocations.routes.js';
+import payEmpElementCostingAllocationsRoutes from '../../pay/employee_element_costing_allocations/routes/payEmpElementCostingAllocations.routes.js';
+import payElementPositionCostingRoutes from '../../pay/element_position_costing/routes/payElementPositionCosting.routes.js';
+import payElementDepartmentCostingRoutes from '../../pay/element_department_costing/routes/payElementDepartmentCosting.routes.js';
+import payDepartmentDefaultCostingRoutes from '../../pay/department_default_costing/routes/payDepartmentDefaultCosting.routes.js';
+import payElementDefaultCostingRoutes from '../../pay/element_default_costing/routes/payElementDefaultCosting.routes.js';
+import paySystemDefaultCostingRoutes from '../../pay/system_default_costing/routes/paySystemDefaultCosting.routes.js';
 
 const router = express.Router();
 
@@ -129,6 +139,25 @@ router.use('/', payApprovalsRoutes);
 router.use('/', payStatutoryRoutes);
 router.use('/', payOperationsRoutes);
 router.use('/', payPaymentMethodsRoutes);
+
+// =====================================================================================
+// TM → PAY (hourly rate policies, source mappings, transfer batches/lines)
+// =====================================================================================
+router.use('/', payTmPayrollRoutes);
+
+// =====================================================================================
+// Payroll definitions + costing (remounted from /api/pay for /api/payroll coverage)
+// =====================================================================================
+router.use('/definitions', payPayrollDefinitionsRoute);
+router.use('/payroll-definitions', payPayrollDefinitionsRoute);
+router.use('/costing-allocations', payCostingAllocationsRoutes);
+router.use('/position-costing-allocations', payPositionCostingAllocationsRoutes);
+router.use('/employee-element-costing', payEmpElementCostingAllocationsRoutes);
+router.use('/element-position-costing', payElementPositionCostingRoutes);
+router.use('/element-department-costing', payElementDepartmentCostingRoutes);
+router.use('/department-default-costing', payDepartmentDefaultCostingRoutes);
+router.use('/element-default-costing', payElementDefaultCostingRoutes);
+router.use('/system-default-costing', paySystemDefaultCostingRoutes);
 
 // =====================================================================================
 // Dashboard & audit

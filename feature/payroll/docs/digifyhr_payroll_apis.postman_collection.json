@@ -184,6 +184,26 @@
     {
       "key": "certification_id",
       "value": "2"
+    },
+    {
+      "key": "transfer_batch_id",
+      "value": "22",
+      "type": "string"
+    },
+    {
+      "key": "transfer_line_id",
+      "value": "21",
+      "type": "string"
+    },
+    {
+      "key": "payroll_source_mapping_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "hourly_rate_policy_id",
+      "value": "21",
+      "type": "string"
     }
   ],
   "item": [
@@ -9485,6 +9505,2044 @@
             },
             "description": ""
           }
+        }
+      ]
+    },
+    {
+      "name": "22 TM Payroll Source Mappings",
+      "description": "TM payroll source mappings + production hourly-rate activation.",
+      "item": [
+        {
+          "name": "List source mappings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings?enterprise_id={{enterprise_id}}&payroll_id={{payroll_id}}&source_type_code=OVERTIME_REQUEST&status=ACTIVE&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "payroll_id",
+                  "value": "{{payroll_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "source_type_code",
+                  "value": "OVERTIME_REQUEST",
+                  "description": ""
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "description": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_SOURCE_MAPPINGS (+ HOURLY_RATE_POLICY_ID from table join)."
+          },
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings?enterprise_id={{enterprise_id}}&payroll_id={{payroll_id}}&source_type_code=OVERTIME_REQUEST&status=ACTIVE&page=1&page_size=25",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "source-mappings"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}",
+                      "description": ""
+                    },
+                    {
+                      "key": "payroll_id",
+                      "value": "{{payroll_id}}",
+                      "description": ""
+                    },
+                    {
+                      "key": "source_type_code",
+                      "value": "OVERTIME_REQUEST",
+                      "description": ""
+                    },
+                    {
+                      "key": "status",
+                      "value": "ACTIVE",
+                      "description": ""
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "description": ""
+                    },
+                    {
+                      "key": "page_size",
+                      "value": "25",
+                      "description": ""
+                    }
+                  ]
+                },
+                "description": "GET TM.V_TM_PAYROLL_SOURCE_MAPPINGS (+ HOURLY_RATE_POLICY_ID from table join)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll source mappings retrieved successfully.\",\n  \"data\": [\n    {\n      \"payroll_source_mapping_id\": 1,\n      \"hourly_rate_policy_id\": 21,\n      \"source_type_code\": \"OVERTIME_REQUEST\",\n      \"status_code\": \"ACTIVE\"\n    }\n  ],\n  \"meta\": {\n    \"pagination\": {\n      \"page\": 1,\n      \"pageSize\": 25,\n      \"total\": 1,\n      \"totalPages\": 1,\n      \"hasNext\": false,\n      \"hasPrevious\": false\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get source mapping",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET single mapping from TM.V_TM_PAYROLL_SOURCE_MAPPINGS."
+          },
+          "response": []
+        },
+        {
+          "name": "Create source mapping",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPSERT_SOURCE_MAPPING (create).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update source mapping",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPSERT_SOURCE_MAPPING (update).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch source mapping status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}",
+                "status"
+              ]
+            },
+            "description": "Status change via CREATE_OR_UPSERT_SOURCE_MAPPING (no dedicated SET_STATUS procedure).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status_code\": \"INACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Hourly-rate production readiness",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/hourly-rate/readiness",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}",
+                "hourly-rate",
+                "readiness"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_PRODUCTION_PKG.VALIDATE_PRODUCTION_READINESS",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference_employee_id\": 293,\n  \"hourly_rate_policy_id\": 21,\n  \"effective_date\": \"2026-07-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/hourly-rate/readiness",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "source-mappings",
+                    "{{payroll_source_mapping_id}}",
+                    "hourly-rate",
+                    "readiness"
+                  ]
+                },
+                "description": "TM.TM_PAYROLL_HOURLY_RATE_PRODUCTION_PKG.VALIDATE_PRODUCTION_READINESS",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reference_employee_id\": 293,\n  \"hourly_rate_policy_id\": 21,\n  \"effective_date\": \"2026-07-01\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"READY: production hourly-rate activation prerequisites passed.\",\n  \"data\": {\n    \"ready_flag\": \"Y\",\n    \"hourly_rate_policy_id\": 21,\n    \"resolved_hourly_rate\": 12.69,\n    \"resolved_divisor\": 173.33333333,\n    \"source_base_value\": 2200\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Activate production hourly rate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/hourly-rate/activate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}",
+                "hourly-rate",
+                "activate"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_PRODUCTION_PKG.ACTIVATE_PRODUCTION_HOURLY_RATE_MAPPING",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference_employee_id\": 293,\n  \"hourly_rate_policy_id\": 21,\n  \"effective_date\": \"2026-07-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deactivate production hourly rate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/hourly-rate/deactivate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}",
+                "hourly-rate",
+                "deactivate"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_PRODUCTION_PKG.DEACTIVATE_PRODUCTION_HOURLY_RATE_MAPPING",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Deactivate for test mapping\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Hourly-rate activation history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/source-mappings/{{payroll_source_mapping_id}}/hourly-rate/history?page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "source-mappings",
+                "{{payroll_source_mapping_id}}",
+                "hourly-rate",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_HOURLY_RATE_ACTIVATION_HISTORY"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "23 Hourly Rate Policies",
+      "description": "Hourly rate policy maintenance and database-driven rate resolution.",
+      "item": [
+        {
+          "name": "List hourly rate policies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies?enterprise_id={{enterprise_id}}&payroll_id={{payroll_id}}&status=ACTIVE&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "payroll_id",
+                  "value": "{{payroll_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "description": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_HOURLY_RATE_POLICIES"
+          },
+          "response": []
+        },
+        {
+          "name": "Get hourly rate policy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Create hourly rate policy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.CREATE_OR_UPSERT_HOURLY_RATE_POLICY",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 13,\n  \"policy_code\": \"API_TEST_POLICY\",\n  \"policy_name\": \"API Test Policy\",\n  \"source_payroll_element_id\": 1,\n  \"source_value_code\": \"PAY_VALUE\",\n  \"divisor_method_code\": \"MONTHLY_STANDARD_HOURS\",\n  \"standard_hours_per_week\": 40,\n  \"weeks_per_year\": 52,\n  \"months_per_year\": 12,\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"DRAFT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update hourly rate policy",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payroll_id\": 13,\n  \"policy_code\": \"GENERAL_40H_MONTHLY_RATE\",\n  \"policy_name\": \"General 40h Monthly Rate\",\n  \"source_payroll_element_id\": 1,\n  \"divisor_method_code\": \"MONTHLY_STANDARD_HOURS\",\n  \"standard_hours_per_week\": 40,\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Patch hourly rate policy status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}",
+                "status"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status_code\": \"ACTIVE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resolve / preview employee hourly rate",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}/resolve-rate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}",
+                "resolve-rate"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.PREVIEW_EMPLOYEE_HOURLY_RATE (database-driven; no JS calculation).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"employee_id\": 293,\n  \"effective_date\": \"2026-07-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}/resolve-rate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "hourly-rate-policies",
+                    "{{hourly_rate_policy_id}}",
+                    "resolve-rate"
+                  ]
+                },
+                "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.PREVIEW_EMPLOYEE_HOURLY_RATE (database-driven; no JS calculation).",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"employee_id\": 293,\n  \"effective_date\": \"2026-07-01\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Hourly rate preview resolved successfully.\",\n  \"data\": {\n    \"resolved_hourly_rate\": 12.69,\n    \"resolved_divisor\": 173.33333333,\n    \"source_base_value\": 2200\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Validate hourly rate policy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}",
+                "validate"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.VALIDATE_HOURLY_RATE_POLICY",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effective_date\": \"2026-07-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Apply policy to source mapping",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/hourly-rate-policies/{{hourly_rate_policy_id}}/apply-to-source-mapping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "hourly-rate-policies",
+                "{{hourly_rate_policy_id}}",
+                "apply-to-source-mapping"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.APPLY_POLICY_TO_SOURCE_MAPPING",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payroll_source_mapping_id\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "24 TM Payroll Transfer",
+      "description": "TM → PAY transfer batch lifecycle and line operations.",
+      "item": [
+        {
+          "name": "List transfer batches",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches?enterprise_id={{enterprise_id}}&payroll_id={{payroll_id}}&status=RECONCILED&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "payroll_id",
+                  "value": "{{payroll_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "status",
+                  "value": "RECONCILED",
+                  "description": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_TRANSFER_BATCHES"
+          },
+          "response": []
+        },
+        {
+          "name": "Get transfer batch",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Create transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_TRANSFER_BATCH",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 13,\n  \"period_start_date\": \"2026-07-01\",\n  \"period_end_date\": \"2026-07-31\",\n  \"transfer_batch_number\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Preview transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "preview"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.PREVIEW_TRANSFER_BATCH"
+          },
+          "response": []
+        },
+        {
+          "name": "Validate transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/validate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "validate"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.VALIDATE_TRANSFER_BATCH"
+          },
+          "response": []
+        },
+        {
+          "name": "Transfer batch to payroll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "transfer"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.TRANSFER_BATCH_TO_PAYROLL"
+          },
+          "response": []
+        },
+        {
+          "name": "Reconcile transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/reconcile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "reconcile"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.RECONCILE_TRANSFER_BATCH"
+          },
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/reconcile",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "transfer-batches",
+                    "{{transfer_batch_id}}",
+                    "reconcile"
+                  ]
+                },
+                "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.RECONCILE_TRANSFER_BATCH"
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Transfer reconciliation completed.\",\n  \"data\": {\n    \"payroll_transfer_batch_id\": 22,\n    \"reconciliation_status_code\": \"MATCHED\",\n    \"source_total\": 1,\n    \"payroll_total\": 1,\n    \"variance\": 0\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Lock transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/lock",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "lock"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.LOCK_TRANSFER_BATCH"
+          },
+          "response": []
+        },
+        {
+          "name": "Reverse transfer batch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/reverse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "reverse"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.REVERSE_TRANSFER_BATCH — do not run against certified golden evidence.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reversal_reason\": \"API reverse test — use non-certified batch only\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List transfer batch lines",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/lines?page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "lines"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_TRANSFER_LINES"
+          },
+          "response": []
+        },
+        {
+          "name": "List transfer batch history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/history?page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-batches",
+                "{{transfer_batch_id}}",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "GET TM.V_TM_PAYROLL_TRANSFER_HISTORY"
+          },
+          "response": []
+        },
+        {
+          "name": "Get transfer line",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-lines/{{transfer_line_id}}?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-lines",
+                "{{transfer_line_id}}"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Retry transfer line",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-lines/{{transfer_line_id}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-lines",
+                "{{transfer_line_id}}",
+                "retry"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.RETRY_TRANSFER_LINE"
+          },
+          "response": []
+        },
+        {
+          "name": "Reverse transfer line",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/time-management/transfer-lines/{{transfer_line_id}}/reverse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "time-management",
+                "transfer-lines",
+                "{{transfer_line_id}}",
+                "reverse"
+              ]
+            },
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.REVERSE_TRANSFER_LINE",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reversal_reason\": \"API reverse line — use non-certified line only\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "25 Remaining Payroll Configuration",
+      "description": "Payroll definitions, costing remounts, TEST_RUN_LOCK, TM dashboard/audit extensions.",
+      "item": [
+        {
+          "name": "List payroll definitions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/definitions?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "definitions"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "25",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Remount of PAY.PAY_PAYROLL_DEFINITIONS_PKG + V_PAYROLL_DEFINITIONS under /api/payroll/definitions"
+          },
+          "response": []
+        },
+        {
+          "name": "List element processing rules",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/element-processing-rules?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "element-processing-rules"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Already exposed; documented here for gap-matrix completeness. PAY.PAY_ELEMENT_PROCESSING_RULES_PKG + V_PAY_ELEMENT_PROCESSING_RULES"
+          },
+          "response": []
+        },
+        {
+          "name": "List costing allocations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/costing-allocations?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "costing-allocations"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Remount under /api/payroll from /api/pay. PAY.PAY_COSTING_ALLOCATIONS_PKG"
+          },
+          "response": []
+        },
+        {
+          "name": "List position costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/position-costing-allocations?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "position-costing-allocations"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List employee-element costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/employee-element-costing?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "employee-element-costing"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List element-position costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/element-position-costing?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "element-position-costing"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List department default costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/department-default-costing?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "department-default-costing"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List element default costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/element-default-costing?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "element-default-costing"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "List system default costing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/system-default-costing?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "system-default-costing"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Test run lock (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/controls/test-lock?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "runs",
+                "{{run_id}}",
+                "controls",
+                "test-lock"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "PAY.PAY_PRODUCTION_CERT_PKG.TEST_RUN_LOCK — administrator/testing endpoint."
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard — time-payroll transfers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/dashboard/time-payroll-transfers?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "dashboard",
+                "time-payroll-transfers"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard — transfer exceptions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/dashboard/transfer-exceptions?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "dashboard",
+                "transfer-exceptions"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Dashboard — hourly-rate readiness",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/dashboard/hourly-rate-readiness?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "dashboard",
+                "hourly-rate-readiness"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Audit — time-payroll transfer history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/audit/time-payroll-transfer-history?transfer_batch_id={{transfer_batch_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "audit",
+                "time-payroll-transfer-history"
+              ],
+              "query": [
+                {
+                  "key": "transfer_batch_id",
+                  "value": "{{transfer_batch_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Audit — hourly-rate activation history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/audit/hourly-rate-activation-history?enterprise_id={{enterprise_id}}&mapping_id={{payroll_source_mapping_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "audit",
+                "hourly-rate-activation-history"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                },
+                {
+                  "key": "mapping_id",
+                  "value": "{{payroll_source_mapping_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Audit — run time-payroll",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/audit/run/{{run_id}}/time-payroll?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "audit",
+                "run",
+                "{{run_id}}",
+                "time-payroll"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}",
+                  "description": ""
+                }
+              ]
+            },
+            "description": ""
+          },
+          "response": []
         }
       ]
     }

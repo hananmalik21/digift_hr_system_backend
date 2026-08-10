@@ -13,6 +13,10 @@ import {
   getRunAuditHandler,
   getStatutoryHistoryHandler
 } from '../controllers/payAudit.controller.js';
+import {
+  auditHourlyRateActivationHistoryHandler,
+  auditTransferHistoryHandler
+} from '../../time_management/tmPayroll.controller.js';
 
 const router = express.Router();
 
@@ -22,6 +26,9 @@ router.get('/payroll-close-history', ...getPayrollCloseHistoryHandler);
 router.get('/approval-actions', ...getApprovalActionsHandler);
 router.get('/statutory-history', ...getStatutoryHistoryHandler);
 router.get('/operation-events', ...getOperationEventsHandler);
+router.get('/time-payroll-transfer-history', auditTransferHistoryHandler);
+router.get('/hourly-rate-activation-history', auditHourlyRateActivationHistoryHandler);
 router.get('/run/:runId', ...getRunAuditHandler);
+router.get('/run/:runId/time-payroll', auditTransferHistoryHandler);
 
 export default router;

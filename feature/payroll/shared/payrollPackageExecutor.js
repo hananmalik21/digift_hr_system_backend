@@ -38,6 +38,15 @@ export function outNumber(name) {
   return { [name]: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } };
 }
 
+/** IN/OUT NUMBER bind (create-or-upsert id patterns). */
+export function inoutNumber(value) {
+  return {
+    dir: oracledb.BIND_INOUT,
+    type: oracledb.NUMBER,
+    val: value == null || value === '' ? null : Number(value)
+  };
+}
+
 export function outString(name, maxSize = 4000) {
   return { [name]: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize } };
 }

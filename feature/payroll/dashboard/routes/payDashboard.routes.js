@@ -13,6 +13,11 @@ import {
   getStatutoryStatusHandler,
   getSummaryHandler
 } from '../controllers/payDashboard.controller.js';
+import {
+  dashboardHourlyRateReadinessHandler,
+  dashboardTransferExceptionsHandler,
+  dashboardTransfersHandler
+} from '../../time_management/tmPayroll.controller.js';
 
 const router = express.Router();
 
@@ -24,5 +29,10 @@ router.get('/payment-status', ...getPaymentStatusHandler);
 router.get('/gl-status', ...getGlStatusHandler);
 router.get('/statutory-status', ...getStatutoryStatusHandler);
 router.get('/certification-status', ...getCertificationStatusHandler);
+
+// TM → PAY dashboard extensions (backed by TM transfer / mapping views)
+router.get('/time-payroll-transfers', dashboardTransfersHandler);
+router.get('/transfer-exceptions', dashboardTransferExceptionsHandler);
+router.get('/hourly-rate-readiness', dashboardHourlyRateReadinessHandler);
 
 export default router;
