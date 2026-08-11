@@ -1,6 +1,6 @@
 /**
  * PAY Element Eligibility Profiles API.
- * Reads: PAY.V_PAY_ELEMENT_ELIG_PROFILES | DML: PAY.PAY_ELEMENT_ELIG_PROFILES_PKG
+ * Reads: PAY.V_PAY_ELEMENT_PROFILES | DML: PAY.PAY_ELEMENT_PROFILES_PKG
  */
 import '../swagger/payElementEligProfiles.swagger.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
@@ -152,6 +152,7 @@ export const unlinkElementFromEligProfileHandler = [
         req.profileGuid,
         req.elementGuid,
         req.enterpriseId,
+        resolveAuditActor(req),
         req
       );
       if (outcome.httpStatus === 404) {

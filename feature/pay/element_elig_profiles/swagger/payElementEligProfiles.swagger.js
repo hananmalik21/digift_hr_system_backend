@@ -2,7 +2,7 @@
  * @swagger
  * tags:
  *   - name: Payroll Element Eligibility Profiles
- *     description: Element eligibility profiles via PAY.PAY_ELEMENT_ELIG_PROFILES_PKG
+ *     description: Element eligibility profiles via PAY.PAY_ELEMENT_PROFILES_PKG (UPSERT_PROFILE + LINK_RULE)
  *
  * @swagger
  * /api/pay/element-elig-profiles:
@@ -25,7 +25,7 @@
  *         schema: { type: string }
  *   post:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Create element eligibility profile
+ *     summary: Create/upsert eligibility profile and link rules
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -33,20 +33,28 @@
  *         application/json:
  *           schema:
  *             type: object
- *             required: [enterprise_id, profile_name, eligibility_rules]
+ *             required: [enterprise_id, profile_code, profile_name, eligibility_rules_json]
  *             properties:
  *               enterprise_id: { type: integer }
+ *               profile_code: { type: string }
  *               profile_name: { type: string }
- *               profile_description: { type: string }
+ *               description: { type: string }
+ *               match_logic_code: { type: string, enum: [ANY, ALL], default: ANY }
+ *               effective_start_date: { type: string, format: date }
+ *               effective_end_date: { type: string, format: date }
  *               status: { type: string, enum: [ACTIVE, INACTIVE] }
- *               eligibility_rules:
- *                 type: array
- *                 items:
- *                   oneOf:
- *                     - type: string
- *                     - type: object
+ *               eligibility_rules_json:
+ *                 description: Array or JSON string of rules to LINK_RULE after UPSERT_PROFILE
+ *                 oneOf:
+ *                   - type: array
+ *                     items:
+ *                       type: object
+ *                       required: [eligibility_rule_id]
  *                       properties:
- *                         eligibility_rule_guid: { type: string }
+ *                         eligibility_rule_id: { type: integer }
+ *                         rule_sequence: { type: integer, default: 1 }
+ *                         active_flag: { type: string, enum: [Y, N], default: Y }
+ *                   - type: string
  *
  * @swagger
  * /api/pay/element-elig-profiles/{profileGuid}:
@@ -64,7 +72,7 @@
  *         schema: { type: integer }
  *   put:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Update element eligibility profile
+ *     summary: Update eligibility profile (optional LINK_RULE for provided rules; omitted rules are not unlinked)
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -78,20 +86,26 @@
  *           schema:
  *             type: object
  *             properties:
+ *               profile_code: { type: string }
  *               profile_name: { type: string }
- *               profile_description: { type: string }
+ *               description: { type: string }
+ *               match_logic_code: { type: string, enum: [ANY, ALL] }
+ *               effective_start_date: { type: string, format: date }
+ *               effective_end_date: { type: string, format: date }
  *               status: { type: string, enum: [ACTIVE, INACTIVE] }
- *               eligibility_rules:
- *                 type: array
- *                 items:
- *                   oneOf:
- *                     - type: string
- *                     - type: object
+ *               eligibility_rules_json:
+ *                 oneOf:
+ *                   - type: array
+ *                     items:
+ *                       type: object
  *                       properties:
- *                         eligibility_rule_guid: { type: string }
+ *                         eligibility_rule_id: { type: integer }
+ *                         rule_sequence: { type: integer }
+ *                         active_flag: { type: string, enum: [Y, N] }
+ *                   - type: string
  *   delete:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Delete element eligibility profile
+ *     summary: Soft-delete profile (SET_STATUS INACTIVE)
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -101,15 +115,12 @@
  *       - in: query
  *         name: enterprise_id
  *         schema: { type: integer }
- *       - in: query
- *         name: hard_delete
- *         schema: { type: string, enum: [Y, N] }
  *
  * @swagger
  * /api/pay/element-elig-profiles/{profileGuid}/status:
  *   patch:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Set element eligibility profile status
+ *     summary: Set eligibility profile status
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -130,7 +141,7 @@
  * /api/pay/element-elig-profiles/{profileGuid}/elements:
  *   post:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Link a payroll element to an eligibility profile
+ *     summary: Link an element to a profile
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -143,16 +154,19 @@
  *         application/json:
  *           schema:
  *             type: object
- *             required: [enterprise_id, element_guid]
+ *             required: [element_guid, effective_start_date]
  *             properties:
  *               enterprise_id: { type: integer }
  *               element_guid: { type: string }
+ *               effective_start_date: { type: string, format: date }
+ *               effective_end_date: { type: string, format: date }
+ *               status: { type: string, enum: [ACTIVE, INACTIVE], default: ACTIVE }
  *
  * @swagger
  * /api/pay/element-elig-profiles/{profileGuid}/elements/{elementGuid}:
  *   delete:
  *     tags: [Payroll Element Eligibility Profiles]
- *     summary: Unlink a payroll element from an eligibility profile
+ *     summary: Unlink element from profile (set link INACTIVE)
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -165,5 +179,6 @@
  *         schema: { type: string }
  *       - in: query
  *         name: enterprise_id
+ *         required: true
  *         schema: { type: integer }
  */

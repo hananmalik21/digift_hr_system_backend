@@ -2,15 +2,23 @@ import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.
 import { parseGuid } from '../../../../utils/guidUtils.js';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
-import { ALLOWED_STATUSES, DEFAULT_STATUS } from '../constants/payElementEligProfiles.constants.js';
+import {
+  ALLOWED_MATCH_LOGIC_CODES,
+  ALLOWED_STATUSES,
+  DEFAULT_END_DATE,
+  DEFAULT_MATCH_LOGIC_CODE,
+  DEFAULT_STATUS
+} from '../constants/payElementEligProfiles.constants.js';
+import {
+  isBlank,
+  normalizeEligibilityRules,
+  resolveEligibilityRulesRaw
+} from '../utils/normalizeEligibilityRules.js';
+import { parseOracleDateOnly } from '../utils/oracleDateOnly.js';
 
 function throwIfErrors(errors) {
   if (errors.length === 0) return;
   throw new ValidationError('Validation failed', errors);
-}
-
-function isBlank(value) {
-  return value == null || String(value).trim() === '';
 }
 
 export function firstValidationMessage(err) {
@@ -54,105 +62,69 @@ function parseProfileName(errors, raw, { required = false } = {}) {
   return name;
 }
 
+function parseProfileCode(errors, raw, { required = false } = {}) {
+  if (isBlank(raw)) {
+    if (required) errors.push('profile_code is required');
+    return null;
+  }
+  return String(raw).trim().toUpperCase();
+}
+
 function parseOptionalDescription(raw) {
   if (isBlank(raw)) return null;
   return String(raw).trim();
 }
 
-function parseRuleGuid(errors, raw, index) {
-  if (typeof raw === 'string') {
-    const guid = String(raw).trim();
-    if (!guid) {
-      errors.push(`eligibility_rules[${index}] must be a non-empty GUID string or object`);
-      return null;
-    }
-    try {
-      return parseGuid(guid, `eligibility_rules[${index}]`);
-    } catch (err) {
-      errors.push(err.message);
-      return null;
-    }
+function parseMatchLogicCode(errors, raw, { required = false, defaultValue = null } = {}) {
+  if (isBlank(raw)) {
+    if (required) errors.push('match_logic_code is required');
+    return defaultValue;
   }
-
-  if (raw != null && typeof raw === 'object') {
-    const value = raw.eligibility_rule_guid ?? raw.eligibilityRuleGuid;
-    if (isBlank(value)) {
-      errors.push(`eligibility_rules[${index}].eligibility_rule_guid is required`);
-      return null;
-    }
-    try {
-      return parseGuid(value, `eligibility_rules[${index}].eligibility_rule_guid`);
-    } catch (err) {
-      errors.push(err.message);
-      return null;
-    }
+  const code = String(raw).trim().toUpperCase();
+  if (!ALLOWED_MATCH_LOGIC_CODES.includes(code)) {
+    errors.push(`match_logic_code must be one of: ${ALLOWED_MATCH_LOGIC_CODES.join(', ')}`);
+    return null;
   }
-
-  errors.push(`eligibility_rules[${index}] must be a GUID string or object`);
-  return null;
+  return code;
 }
 
-export function normalizeEligibilityRulesInput(rawRules) {
-  if (rawRules == null) return [];
-
-  let rows = rawRules;
-  if (!Array.isArray(rawRules) && typeof rawRules === 'object') {
-    rows = rawRules.eligibility_rules ?? rawRules.eligibilityRules ?? null;
-  }
-
-  if (!Array.isArray(rows)) return [];
-
-  return rows
-    .map((row) => {
-      if (typeof row === 'string') {
-        return { eligibility_rule_guid: String(row).trim().toUpperCase() };
-      }
-      if (row != null && typeof row === 'object') {
-        const guid = row.eligibility_rule_guid ?? row.eligibilityRuleGuid;
-        if (guid == null) return null;
-        return { eligibility_rule_guid: String(guid).trim().toUpperCase() };
-      }
-      return null;
-    })
-    .filter(Boolean);
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function parseEligibilityRulesArray(errors, rawRules, { required = false } = {}) {
-  if (rawRules == null || (Array.isArray(rawRules) && rawRules.length === 0)) {
-    if (required) errors.push('At least one eligibility rule is required.');
-    return [];
+function parseDateField(errors, raw, field, { required = false } = {}) {
+  if (isBlank(raw)) {
+    if (required) errors.push(`${field} is required`);
+    return null;
   }
+  const normalized = parseOracleDateOnly(raw);
+  if (!normalized) {
+    errors.push(`${field} must be a valid date in YYYY-MM-DD format`);
+    return null;
+  }
+  return normalized;
+}
 
-  let rows = rawRules;
-  if (!Array.isArray(rawRules)) {
-    if (typeof rawRules === 'object') {
-      rows = rawRules.eligibility_rules ?? rawRules.eligibilityRules;
-    }
-    if (!Array.isArray(rows)) {
-      errors.push('eligibility_rules must be an array');
+function parseEligibilityRulesField(errors, raw, { required = false } = {}) {
+  try {
+    return normalizeEligibilityRules(raw, { required });
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      errors.push(firstValidationMessage(err));
       return [];
     }
+    throw err;
   }
+}
 
-  const normalized = [];
-  rows.forEach((row, index) => {
-    const guid = parseRuleGuid(errors, row, index);
-    if (guid) normalized.push({ eligibility_rule_guid: guid });
-  });
-
-  if (required && normalized.length === 0 && errors.length === 0) {
-    errors.push('At least one eligibility rule is required.');
+/** @deprecated Prefer normalizeEligibilityRules — kept for older callers. */
+export function normalizeEligibilityRulesInput(rawRules) {
+  if (rawRules == null) return [];
+  try {
+    return normalizeEligibilityRules(rawRules, { required: false });
+  } catch {
+    return [];
   }
-
-  const seen = new Set();
-  normalized.forEach((row, index) => {
-    if (seen.has(row.eligibility_rule_guid)) {
-      errors.push(`Duplicate eligibility_rule_guid at eligibility_rules[${index}]`);
-    }
-    seen.add(row.eligibility_rule_guid);
-  });
-
-  return normalized;
 }
 
 export function assertEnterpriseAccess(req, enterpriseId) {
@@ -205,21 +177,42 @@ export function validateListElementEligProfilesQuery(query = {}) {
 export function validateCreateElementEligProfileBody(body) {
   const errors = [];
   const enterpriseId = parseEnterpriseIdField(errors, body?.enterprise_id, { required: true });
+  const profileCode = parseProfileCode(errors, body?.profile_code, { required: true });
   const profileName = parseProfileName(errors, body?.profile_name, { required: true });
-  const profileDescription = parseOptionalDescription(body?.profile_description);
-  const eligibilityRules = parseEligibilityRulesArray(errors, body?.eligibility_rules, {
-    required: true
+  const description = parseOptionalDescription(body?.description ?? body?.profile_description);
+  const matchLogicCode = parseMatchLogicCode(errors, body?.match_logic_code, {
+    defaultValue: DEFAULT_MATCH_LOGIC_CODE
   });
+
+  let effectiveStartDate = todayIsoDate();
+  if (!isBlank(body?.effective_start_date)) {
+    effectiveStartDate = parseDateField(errors, body.effective_start_date, 'effective_start_date');
+  }
+
+  let effectiveEndDate = DEFAULT_END_DATE;
+  if (!isBlank(body?.effective_end_date)) {
+    effectiveEndDate = parseDateField(errors, body.effective_end_date, 'effective_end_date');
+  }
+
   const status = parseStatus(errors, body?.status, { defaultValue: DEFAULT_STATUS });
+  const eligibilityRules = parseEligibilityRulesField(
+    errors,
+    resolveEligibilityRulesRaw(body),
+    { required: true }
+  );
 
   throwIfErrors(errors);
 
   return {
     enterprise_id: enterpriseId,
+    profile_code: profileCode,
     profile_name: profileName,
-    profile_description: profileDescription,
-    eligibility_rules: eligibilityRules,
-    status
+    description,
+    match_logic_code: matchLogicCode,
+    effective_start_date: effectiveStartDate,
+    effective_end_date: effectiveEndDate,
+    status,
+    eligibility_rules: eligibilityRules
   };
 }
 
@@ -227,19 +220,46 @@ export function validateUpdateElementEligProfileBody(body) {
   const errors = [];
   const payload = {};
 
+  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'profile_code')) {
+    payload.profile_code = parseProfileCode(errors, body.profile_code, { required: true });
+  }
   if (Object.prototype.hasOwnProperty.call(body ?? {}, 'profile_name')) {
     payload.profile_name = parseProfileName(errors, body.profile_name, { required: true });
   }
-  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'profile_description')) {
-    payload.profile_description = parseOptionalDescription(body.profile_description);
+  if (
+    Object.prototype.hasOwnProperty.call(body ?? {}, 'description') ||
+    Object.prototype.hasOwnProperty.call(body ?? {}, 'profile_description')
+  ) {
+    payload.description = parseOptionalDescription(body.description ?? body.profile_description);
+  }
+  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'match_logic_code')) {
+    payload.match_logic_code = parseMatchLogicCode(errors, body.match_logic_code, {
+      required: true
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'effective_start_date')) {
+    payload.effective_start_date = parseDateField(
+      errors,
+      body.effective_start_date,
+      'effective_start_date',
+      { required: true }
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'effective_end_date')) {
+    payload.effective_end_date = parseDateField(
+      errors,
+      body.effective_end_date,
+      'effective_end_date',
+      { required: true }
+    );
   }
   if (Object.prototype.hasOwnProperty.call(body ?? {}, 'status')) {
     payload.status = parseStatus(errors, body.status, { required: true });
   }
-  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'eligibility_rules')) {
-    payload.eligibility_rules = parseEligibilityRulesArray(errors, body.eligibility_rules, {
-      required: true
-    });
+
+  const rawRules = resolveEligibilityRulesRaw(body);
+  if (rawRules !== undefined) {
+    payload.eligibility_rules = parseEligibilityRulesField(errors, rawRules, { required: true });
   }
 
   throwIfErrors(errors);
@@ -288,11 +308,36 @@ export function validateLinkElementEligProfileBody(body, enterpriseIdFallback = 
     }
   }
 
+  const effectiveStartDate = parseDateField(
+    errors,
+    body?.effective_start_date,
+    'effective_start_date',
+    { required: true }
+  );
+
+  let effectiveEndDate = DEFAULT_END_DATE;
+  if (!isBlank(body?.effective_end_date)) {
+    effectiveEndDate = parseDateField(errors, body.effective_end_date, 'effective_end_date');
+  }
+
+  if (
+    effectiveStartDate &&
+    effectiveEndDate &&
+    effectiveEndDate < effectiveStartDate
+  ) {
+    errors.push('effective_end_date must be on or after effective_start_date');
+  }
+
+  const status = parseStatus(errors, body?.status, { defaultValue: DEFAULT_STATUS });
+
   throwIfErrors(errors);
 
   return {
     enterprise_id: enterpriseId,
-    element_guid: elementGuid
+    element_guid: elementGuid,
+    effective_start_date: effectiveStartDate,
+    effective_end_date: effectiveEndDate,
+    status
   };
 }
 

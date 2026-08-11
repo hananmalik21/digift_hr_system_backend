@@ -11,7 +11,6 @@ import {
   mapPayElementEligibilityRuleCreateData
 } from '../model/payElementEligibilityRulesViewModel.js';
 import { DEFAULT_STATUS } from '../constants/payElementEligibilityRules.constants.js';
-import { criteriaForPackagePayload } from '../utils/payElementEligibilityCriteriaUtils.js';
 import { assertEnterpriseAccess } from '../validations/payElementEligibilityRules.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Eligibility rule created successfully.';
@@ -39,13 +38,22 @@ function mapPackageOutcome(pkg, { successHttpStatus = HTTP_OK, successMessage = 
   };
 }
 
-function mergeUpdatePayload(existing, payload) {
-  const criteria = payload.criteria ?? criteriaForPackagePayload(existing.criteria);
+function parseCriteriaJsonForFallback(criteriaValuesJson) {
+  if (criteriaValuesJson == null || criteriaValuesJson === '') return [];
+  try {
+    const parsed = JSON.parse(criteriaValuesJson);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
+function mergeUpdatePayload(existing, payload) {
   return {
     enterprise_id: payload.enterprise_id ?? existing.enterprise_id,
     rule_name: payload.rule_name ?? existing.rule_name,
-    criteria,
+    criteria_values_json:
+      payload.criteria_values_json ?? JSON.stringify(existing.criteria ?? []),
     effective_start_date: payload.effective_start_date ?? existing.effective_start_date,
     effective_end_date: payload.effective_end_date ?? existing.effective_end_date,
     status: payload.status ?? existing.status ?? DEFAULT_STATUS
@@ -95,13 +103,14 @@ export async function createElementEligibilityRule(payload, actor) {
   }
 
   if (!data) {
+    const criteria = parseCriteriaJsonForFallback(payload.criteria_values_json);
     data = mapPayElementEligibilityRuleCreateData({
       eligibility_rule_id: pkg.data?.eligibility_rule_id ?? null,
       eligibility_rule_guid: pkg.data?.eligibility_rule_guid ?? null,
       enterprise_id: payload.enterprise_id,
       rule_name: payload.rule_name,
-      criteria_count: payload.criteria?.length ?? 0,
-      criteria: payload.criteria
+      criteria_count: criteria.length,
+      criteria
     });
   }
 

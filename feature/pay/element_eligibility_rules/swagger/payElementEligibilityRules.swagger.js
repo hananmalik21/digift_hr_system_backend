@@ -39,11 +39,28 @@
  *             required:
  *               - enterprise_id
  *               - rule_name
- *               - criteria
+ *               - criteria_values_json
  *             properties:
  *               enterprise_id: { type: integer }
  *               rule_name: { type: string }
+ *               criteria_values_json:
+ *                 description: Criteria config for Oracle P_CRITERIA_VALUES_JSON (array/object or JSON string; empty criteria_values means all values for that type)
+ *                 oneOf:
+ *                   - type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         criteria_type_code:
+ *                           type: string
+ *                           enum: [EMPLOYMENT_TYPE, GRADE, POSITION, LEGAL_EMPLOYER, BUSINESS_UNIT, DEPARTMENT, LOCATION]
+ *                         criteria_value: { type: string }
+ *                         criteria_values:
+ *                           type: array
+ *                           items: { type: string }
+ *                   - type: object
+ *                   - type: string
  *               criteria:
+ *                 description: Legacy alias for criteria_values_json
  *                 type: array
  *                 items:
  *                   type: object
@@ -92,7 +109,24 @@
  *             properties:
  *               enterprise_id: { type: integer }
  *               rule_name: { type: string }
+ *               criteria_values_json:
+ *                 description: Criteria config for Oracle P_CRITERIA_VALUES_JSON (array/object or JSON string)
+ *                 oneOf:
+ *                   - type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         criteria_type_code:
+ *                           type: string
+ *                           enum: [EMPLOYMENT_TYPE, GRADE, POSITION, LEGAL_EMPLOYER, BUSINESS_UNIT, DEPARTMENT, LOCATION]
+ *                         criteria_value: { type: string }
+ *                         criteria_values:
+ *                           type: array
+ *                           items: { type: string }
+ *                   - type: object
+ *                   - type: string
  *               criteria:
+ *                 description: Legacy alias for criteria_values_json
  *                 type: array
  *                 items:
  *                   type: object

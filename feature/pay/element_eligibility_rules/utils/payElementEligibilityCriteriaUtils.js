@@ -1,7 +1,48 @@
+import { ValidationError } from '../../../../utils/errors/index.js';
 import { ALL_VALUES_CRITERIA_MARKER } from '../constants/payElementEligibilityRules.constants.js';
 
 export function isBlank(value) {
   return value == null || String(value).trim() === '';
+}
+
+/**
+ * Normalize REST `criteria_values_json` for Oracle P_CRITERIA_VALUES_JSON (CLOB).
+ * Accepts array/object/JSON string; returns a normalized JSON string.
+ * Does not reshape criteria (empty nested arrays stay intact for Oracle all-values).
+ */
+export function normalizeCriteriaValuesJson(value) {
+  if (value === undefined || value === null) {
+    throw new ValidationError('Validation failed', ['criteria_values_json is required']);
+  }
+
+  if (typeof value === 'string' && value.trim() === '') {
+    throw new ValidationError('Validation failed', ['criteria_values_json is required']);
+  }
+
+  let parsed;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new ValidationError('Validation failed', ['criteria_values_json must be valid JSON']);
+    }
+  } else if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    parsed = value;
+  } else {
+    throw new ValidationError('Validation failed', [
+      'criteria_values_json must be a JSON array, object, or JSON string'
+    ]);
+  }
+
+  if (parsed === null) {
+    throw new ValidationError('Validation failed', ['criteria_values_json is required']);
+  }
+
+  try {
+    return JSON.stringify(parsed);
+  } catch {
+    throw new ValidationError('Validation failed', ['criteria_values_json must be valid JSON']);
+  }
 }
 
 export function isAllValuesCriteriaMarker(value) {

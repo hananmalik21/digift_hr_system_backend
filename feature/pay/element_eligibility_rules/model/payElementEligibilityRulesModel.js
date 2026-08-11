@@ -13,7 +13,6 @@ import {
 } from '../../../../utils/oraclePackageUtils.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { mapPackageBusinessMessage } from '../utils/payElementEligibilityRulesOracleErrors.js';
-import { criteriaForPackagePayload } from '../utils/payElementEligibilityCriteriaUtils.js';
 
 const PKG = 'PAY.PAY_ELEMENT_ELIGIBILITY_RULES_PKG';
 const CREATE_PROC = `${PKG}.CREATE_RULE`;
@@ -118,9 +117,9 @@ function parsePackageOut(outBinds, { includeCreateFields = false } = {}) {
   return result;
 }
 
-function criteriaJsonClobBind(criteria) {
+function criteriaJsonClobBind(criteriaValuesJson) {
   return {
-    val: JSON.stringify(criteriaForPackagePayload(criteria)),
+    val: criteriaValuesJson == null ? null : String(criteriaValuesJson),
     dir: oracledb.BIND_IN,
     type: oracledb.CLOB
   };
@@ -130,7 +129,7 @@ function buildRuleBinds(payload) {
   return {
     p_enterprise_id: numberInBind(payload.enterprise_id),
     p_rule_name: varcharInBind(payload.rule_name, 200),
-    p_criteria_values_json: criteriaJsonClobBind(payload.criteria),
+    p_criteria_values_json: criteriaJsonClobBind(payload.criteria_values_json),
     p_effective_start_date: varcharInBind(payload.effective_start_date, 10),
     p_effective_end_date: varcharInBind(payload.effective_end_date, 10),
     p_status: codeInBind(payload.status, 20)
