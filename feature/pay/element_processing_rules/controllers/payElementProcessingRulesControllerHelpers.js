@@ -24,7 +24,7 @@ export function sendForbiddenError(res, err) {
   });
 }
 
-export function sendNotFoundError(res, message = 'Processing rule not found') {
+export function sendNotFoundError(res, message = 'Processing rule not found.') {
   return res.status(404).json({
     success: false,
     message

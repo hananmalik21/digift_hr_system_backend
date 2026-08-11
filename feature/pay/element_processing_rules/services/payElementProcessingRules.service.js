@@ -11,11 +11,16 @@ import {
   listPayElementProcessingRulesFromView
 } from '../model/payElementProcessingRulesViewModel.js';
 import {
+  isProcessingRuleNotFoundMessage,
   mapPackageBusinessMessage,
-  PROCESSING_RULE_ALREADY_EXISTS_MESSAGE
+  PROCESSING_RULE_ALREADY_EXISTS_MESSAGE,
+  PROCESSING_RULE_NOT_FOUND_MESSAGE
 } from '../utils/payElementProcessingRulesOracleErrors.js';
 import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { assertEnterpriseAccess } from '../validations/payElementProcessingRules.validation.js';
+import {
+  assertEnterpriseAccess,
+  hasOwn
+} from '../validations/payElementProcessingRules.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Processing rule created successfully.';
 const UPDATE_SUCCESS_MESSAGE = 'Processing rule updated successfully.';
@@ -24,6 +29,28 @@ const LIST_SUCCESS_MESSAGE = 'Element processing rules fetched successfully';
 const GET_SUCCESS_MESSAGE = 'Element processing rule fetched successfully';
 
 const HTTP_OK = 200;
+const HTTP_BAD_REQUEST = 400;
+const HTTP_NOT_FOUND = 404;
+
+/**
+ * @param {string|null|undefined} packageMessage
+ */
+function mapPackageFailure(packageMessage) {
+  const message =
+    mapPackageBusinessMessage(packageMessage) || 'Unable to process element processing rule.';
+  return {
+    success: false,
+    httpStatus: isProcessingRuleNotFoundMessage(message) ? HTTP_NOT_FOUND : HTTP_BAD_REQUEST,
+    message
+  };
+}
+
+function buildPackagePayload(payload, enterpriseId) {
+  return {
+    ...payload,
+    enterprise_id: enterpriseId
+  };
+}
 
 /**
  * @param {object} filters
@@ -62,25 +89,18 @@ export async function createElementProcessingRule(payload, createdBy, req = null
   if (alreadyExists) {
     return {
       success: false,
-      httpStatus: HTTP_OK,
+      httpStatus: HTTP_BAD_REQUEST,
       message: PROCESSING_RULE_ALREADY_EXISTS_MESSAGE
     };
   }
 
-  const packagePayload = {
-    ...payload,
-    enterprise_id: enterpriseId
-  };
-
-  const pkg = await createProcessingRuleViaPackage(packagePayload, createdBy);
-  const success = packageStatusIsSuccess(pkg.status);
-
-  if (!success) {
-    return {
-      success: false,
-      httpStatus: HTTP_OK,
-      message: mapPackageBusinessMessage(pkg.message) || 'Unable to create processing rule.'
-    };
+  // Pass formula_id unchanged (including explicit null) inside P_PAYLOAD_JSON.
+  const pkg = await createProcessingRuleViaPackage(
+    buildPackagePayload(payload, enterpriseId),
+    createdBy
+  );
+  if (!packageStatusIsSuccess(pkg.status)) {
+    return mapPackageFailure(pkg.message || 'Unable to create processing rule.');
   }
 
   return {
@@ -95,49 +115,51 @@ export async function createElementProcessingRule(payload, createdBy, req = null
 }
 
 /**
+ * Partial update semantics: only keys present in payload are sent to the package.
+ * formula_id absent → unchanged; number → link/change; null → unlink.
+ *
  * @param {string} processingRuleGuidHex
  * @param {Record<string, unknown>} payload
  * @param {string} updatedBy
  * @param {import('express').Request} [req]
  */
 export async function updateElementProcessingRule(processingRuleGuidHex, payload, updatedBy, req = null) {
-  const enterpriseId = await resolveElementEnterpriseId(payload.element_id);
-  if (req) assertEnterpriseAccess(req, enterpriseId);
-
-  const existing = await getPayElementProcessingRuleFromViewByGuid(processingRuleGuidHex, enterpriseId);
+  const existing = await getPayElementProcessingRuleFromViewByGuid(processingRuleGuidHex);
   if (!existing) {
     return {
       success: false,
-      httpStatus: 404,
-      message: 'Processing rule not found'
+      httpStatus: HTTP_NOT_FOUND,
+      message: PROCESSING_RULE_NOT_FOUND_MESSAGE
     };
   }
 
-  if (Number(existing.element_id) !== Number(payload.element_id)) {
+  if (req) assertEnterpriseAccess(req, existing.enterprise_id);
+
+  let enterpriseId = existing.enterprise_id;
+  const elementIdChanging =
+    hasOwn(payload, 'element_id') && Number(existing.element_id) !== Number(payload.element_id);
+
+  if (elementIdChanging) {
+    enterpriseId = await resolveElementEnterpriseId(payload.element_id);
+    if (req) assertEnterpriseAccess(req, enterpriseId);
+
     const targetExists = await existsProcessingRuleForElement(payload.element_id, enterpriseId);
     if (targetExists) {
       return {
         success: false,
-        httpStatus: HTTP_OK,
+        httpStatus: HTTP_BAD_REQUEST,
         message: PROCESSING_RULE_ALREADY_EXISTS_MESSAGE
       };
     }
   }
 
-  const packagePayload = {
-    ...payload,
-    enterprise_id: enterpriseId
-  };
-
-  const pkg = await updateProcessingRuleViaPackage(processingRuleGuidHex, packagePayload, updatedBy);
-  const success = packageStatusIsSuccess(pkg.status);
-
-  if (!success) {
-    return {
-      success: false,
-      httpStatus: HTTP_OK,
-      message: mapPackageBusinessMessage(pkg.message) || 'Unable to update processing rule.'
-    };
+  const pkg = await updateProcessingRuleViaPackage(
+    processingRuleGuidHex,
+    buildPackagePayload(payload, enterpriseId),
+    updatedBy
+  );
+  if (!packageStatusIsSuccess(pkg.status)) {
+    return mapPackageFailure(pkg.message || 'Unable to update processing rule.');
   }
 
   return {
@@ -153,14 +175,8 @@ export async function updateElementProcessingRule(processingRuleGuidHex, payload
  */
 export async function deleteElementProcessingRule(processingRuleGuidHex, deletedBy) {
   const pkg = await deleteProcessingRuleViaPackage(processingRuleGuidHex, deletedBy);
-  const success = packageStatusIsSuccess(pkg.status);
-
-  if (!success) {
-    return {
-      success: false,
-      httpStatus: HTTP_OK,
-      message: mapPackageBusinessMessage(pkg.message) || 'Unable to delete processing rule.'
-    };
+  if (!packageStatusIsSuccess(pkg.status)) {
+    return mapPackageFailure(pkg.message || 'Unable to delete processing rule.');
   }
 
   return {
