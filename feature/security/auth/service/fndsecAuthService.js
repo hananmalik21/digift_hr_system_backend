@@ -1,10 +1,16 @@
 import jwt from 'jsonwebtoken';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { AppError, ValidationError } from '../../../../utils/errors/index.js';
 import { parseTenantId } from '../../../../utils/tenantUtils.js';
 import { verifyUserPassword } from '../../../../utils/passwordVerification.js';
 import { resolveAdminTypeFromUserInfo } from '../../../../utils/adminAccess.js';
 import { fetchPasswordHashForLogin, loginUserViaPackage } from '../repository/fndsecAuthRepository.js';
 import { authDebugEnabled } from '../utils/authDebug.js';
+import { getHostnameEnterpriseId } from '../../../../utils/requestEnterprise.js';
+import {
+  TENANT_ERROR_CODES,
+  TENANT_ERROR_MESSAGES
+} from '../../../../utils/tenantErrors.js';
+import { logDeprecatedEnterpriseId } from '../../../../utils/tenantLogger.js';
 
 const INVALID_CREDS_MSG = 'Invalid username or password.';
 const LOGIN_ID_REQUIRED_MSG = 'Username or email is required.';
@@ -47,12 +53,49 @@ function jwtExpiresIn() {
   return process.env.JWT_EXPIRES_IN || '1d';
 }
 
-function resolveLoginEnterpriseId(body) {
+/**
+ * Prefer hostname enterprise; body enterprise_id only on base domain (deprecated).
+ * @param {import('express').Request|null} req
+ * @param {object} body
+ */
+export function resolveLoginEnterpriseId(req, body) {
   const b = asPlainObject(body);
-  return parseTenantId(b.enterprise_id ?? b.ENTERPRISE_ID, 'enterprise_id is required');
+  const hostId = getHostnameEnterpriseId(req);
+  const clientRaw = b.enterprise_id ?? b.ENTERPRISE_ID;
+
+  if (hostId != null) {
+    if (clientRaw != null && String(clientRaw).trim() !== '') {
+      const clientId = parseTenantId(clientRaw, 'enterprise_id is required');
+      if (clientId !== hostId) {
+        throw new AppError(
+          TENANT_ERROR_MESSAGES.ENTERPRISE_CONTEXT_MISMATCH,
+          403,
+          TENANT_ERROR_CODES.ENTERPRISE_CONTEXT_MISMATCH
+        );
+      }
+      logDeprecatedEnterpriseId('enterprise_id', clientRaw, hostId, req);
+    }
+    return hostId;
+  }
+
+  if (clientRaw != null && String(clientRaw).trim() !== '') {
+    const id = parseTenantId(clientRaw, 'enterprise_id is required');
+    logDeprecatedEnterpriseId('enterprise_id', clientRaw, id, req);
+    return id;
+  }
+
+  throw new AppError(
+    TENANT_ERROR_MESSAGES.TENANT_REQUIRED,
+    400,
+    TENANT_ERROR_CODES.TENANT_REQUIRED
+  );
 }
 
-export function validateLoginBody(body) {
+/**
+ * @param {object} body
+ * @param {import('express').Request|null} [req]
+ */
+export function validateLoginBody(body, req = null) {
   const b = asPlainObject(body);
   const errors = [];
   const effectiveLoginId =
@@ -65,12 +108,16 @@ export function validateLoginBody(body) {
   if (!String(effectiveLoginId ?? '').trim()) errors.push(LOGIN_ID_REQUIRED_MSG);
   if (!password) errors.push('password is required');
   try {
-    resolveLoginEnterpriseId(b);
+    resolveLoginEnterpriseId(req, b);
   } catch (err) {
-    if (err instanceof ValidationError) {
+    if (err instanceof AppError && err.code === TENANT_ERROR_CODES.TENANT_REQUIRED) {
+      errors.push(TENANT_ERROR_MESSAGES.TENANT_REQUIRED);
+    } else if (err instanceof AppError && err.code === TENANT_ERROR_CODES.ENTERPRISE_CONTEXT_MISMATCH) {
+      throw err;
+    } else if (err instanceof ValidationError) {
       errors.push(...(err.errors?.length ? err.errors : [err.message]));
     } else {
-      errors.push('enterprise_id is required');
+      errors.push(TENANT_ERROR_MESSAGES.TENANT_REQUIRED);
     }
   }
   if (errors.length) throw new ValidationError('Validation failed', errors);
@@ -78,11 +125,15 @@ export function validateLoginBody(body) {
 
 export { verifyUserPassword } from '../../../../utils/passwordVerification.js';
 
-export async function loginUserService(body) {
+/**
+ * @param {object} body
+ * @param {import('express').Request|null} [req]
+ */
+export async function loginUserService(body, req = null) {
   const input = asPlainObject(body);
   const login_id = normalizeLoginId(input.login_id ?? input.username ?? input.email);
   const password = String(input.password ?? '');
-  const enterprise_id = resolveLoginEnterpriseId(input);
+  const enterprise_id = resolveLoginEnterpriseId(req, input);
 
   const password_hash = await fetchPasswordHashForLogin(enterprise_id, login_id);
   let password_valid = 'N';
@@ -145,6 +196,12 @@ export async function loginUserService(body) {
     enterprise_id: responseEnterpriseId,
     username: String(responseUsername)
   };
+  if (req?.enterprise?.enterpriseCode) {
+    tokenPayload.enterprise_code = req.enterprise.enterpriseCode;
+  }
+  if (req?.enterprise?.subdomainSlug) {
+    tokenPayload.subdomain_slug = req.enterprise.subdomainSlug;
+  }
   if (adminType) tokenPayload.admin_type = adminType;
 
   const token = jwt.sign(tokenPayload, secret, { expiresIn: jwtExpiresIn() });
@@ -159,6 +216,8 @@ export async function loginUserService(body) {
         user_id: responseUserId,
         user_guid: responseUserGuid,
         enterprise_id: responseEnterpriseId,
+        enterprise_code: tokenPayload.enterprise_code ?? null,
+        subdomain_slug: tokenPayload.subdomain_slug ?? null,
         admin_type: adminType,
         user_code: userObj.user_code ?? userObj.userCode ?? null,
         username: responseUsername,

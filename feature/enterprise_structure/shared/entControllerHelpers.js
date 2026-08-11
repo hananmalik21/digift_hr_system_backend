@@ -57,7 +57,11 @@ export function handleEntMutationError(res, req, error, senders, defaultMessage)
       || error.code === 'FOREIGN_KEY_CONSTRAINT' || error.code === 'NOT_NULL_CONSTRAINT') {
     return sendBadRequest(res, req, message);
   }
-  if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409) {
+  if (
+    error.statusCode === 409
+    || error.code === 'CONFLICT'
+    || (error.code === 'UNIQUE_CONSTRAINT_VIOLATION' && error.statusCode === 409)
+  ) {
     return sendConflict(res, req, message, {
       constraint: error.constraint,
       columns: error.columns

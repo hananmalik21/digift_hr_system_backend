@@ -1,12 +1,19 @@
 /**
  * Shared tenant utilities for request handling.
  * Use for APIs that require tenant_id from body or query.
+ *
+ * When hostname tenant context is present (`req.enterprise`), it takes
+ * precedence over client-supplied enterprise_id / tenant_id.
  */
 import { ValidationError } from './errors/index.js';
 import { getActingEnterpriseId } from './userContext.js';
+import {
+  getHostnameEnterpriseId,
+  resolveRequestEnterpriseId
+} from './requestEnterprise.js';
 
 /**
- * Get tenant_id from request (query, body, header, or user context).
+ * Get tenant_id from request (hostname context, query, body, header, or user context).
  * Use for GET list, GET single, PUT, PATCH, DELETE where tenant is required for filtering.
  *
  * @param {object} req - Express request
@@ -17,6 +24,24 @@ import { getActingEnterpriseId } from './userContext.js';
 export function getTenantId(req, options = {}) {
   const fromBodyOnly = options.fromBodyOnly === true;
   const fromQueryAndBodyOnly = options.fromQueryAndBodyOnly === true;
+
+  const hostId = getHostnameEnterpriseId(req);
+  if (hostId != null && !fromBodyOnly) {
+    return resolveRequestEnterpriseId(req, {
+      clientRaw:
+        req.query?.tenant_id
+        ?? req.body?.tenant_id
+        ?? req.body?.TENANT_ID
+        ?? req.query?.enterprise_id
+        ?? req.body?.enterprise_id
+        ?? (fromQueryAndBodyOnly ? undefined : req.headers?.['x-enterprise-id']),
+      required: true,
+      allowJwtFallback: false,
+      allowClientFallback: false,
+      fieldLabel: 'tenant_id'
+    });
+  }
+
   let raw;
 
   if (fromBodyOnly) {
@@ -96,37 +121,49 @@ export function parseEnterpriseId(raw, options = 'enterprise_id is required') {
 }
 
 /**
- * Resolve enterprise_id from request body or query (body takes precedence).
+ * Resolve enterprise_id from request: hostname → body/query (deprecated on base domain).
  * @param {import('express').Request} req
  * @param {{ required?: boolean, missingMessage?: string }} [options]
  * @returns {number|null}
  */
 export function enterpriseIdFromRequest(req, { required = true, missingMessage } = {}) {
-  const raw = req?.body?.enterprise_id ?? req?.query?.enterprise_id;
-  return parseEnterpriseId(raw, { required, missingMessage });
+  try {
+    return resolveRequestEnterpriseId(req, {
+      clientRaw: req?.body?.enterprise_id ?? req?.query?.enterprise_id,
+      required,
+      fieldLabel: 'enterprise_id'
+    });
+  } catch (err) {
+    if (!required && err?.code === 'TENANT_REQUIRED') return null;
+    if (missingMessage && err?.code === 'TENANT_REQUIRED') {
+      throw new ValidationError(missingMessage);
+    }
+    throw err;
+  }
 }
 
 /**
- * Require enterprise_id from query string (?enterprise_id=).
+ * Require enterprise_id from hostname context or query string (?enterprise_id=).
  *
  * @param {import('express').Request} req
  * @returns {number}
  * @throws {ValidationError}
  */
 export function requireEnterpriseIdFromQuery(req) {
-  return parseEnterpriseId(
-    req.query?.enterprise_id
+  return resolveRequestEnterpriseId(req, {
+    clientRaw: req.query?.enterprise_id
       ?? req.query?.enterpriseId
       ?? req.query?.tenant_id
       ?? req.query?.tenantId,
-    'enterprise_id or tenant_id is required'
-  );
+    required: true,
+    fieldLabel: 'enterprise_id'
+  });
 }
 
 /**
- * Resolve tenant_id with JWT enterprise scoping.
+ * Resolve tenant_id with hostname + JWT enterprise scoping.
  *
- * JWT `enterprise_id` always wins; client-supplied tenant cannot override.
+ * Hostname `req.enterprise` wins; then JWT; client-supplied tenant cannot override either.
  *
  * @param {import('express').Request} req
  * @param {object} [options] - Same options as getTenantId
@@ -134,6 +171,11 @@ export function requireEnterpriseIdFromQuery(req) {
  * @throws {ValidationError}
  */
 export function getScopedTenantId(req, options = {}) {
+  const hostId = getHostnameEnterpriseId(req);
+  if (hostId != null) {
+    return hostId;
+  }
+
   const tokenEnterpriseId = getActingEnterpriseId(req);
   if (tokenEnterpriseId != null) {
     return tokenEnterpriseId;

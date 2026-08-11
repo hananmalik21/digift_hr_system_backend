@@ -45,6 +45,7 @@ import compLookupValueController from './feature/look_ups/comp/comp_lookup_value
 import compComponentController from './feature/compensation/components/controller/compComponentController.js';
 import compSalaryStructureRoutes from './feature/compensation/salary_structures/routes/compSalaryStructures.routes.js';
 import compAdjustmentsRoutes from './feature/compensation/adjustments/routes/compAdjustments.routes.js';
+import compComponentPayrollMappingRoutes from './feature/compensation/component_payroll_mappings/routes/compComponentPayrollMappingRoutes.js';
 import compEmployeeAssignedComponentsRoutes from './feature/compensation/employee_assigned_components/routes/compEmployeeAssignedComponents.routes.js';
 import compEmployeeComponentsJsonRoutes from './feature/compensation/employee_components_json/routes/compEmployeeComponentsJson.routes.js';
 import compEligiblePlansByCriteriaRoutes from './feature/compensation/eligible_plans_by_criteria/routes/compEligiblePlansByCriteria.routes.js';
@@ -88,10 +89,12 @@ import recRequisitionsController from './feature/recruitment/requisitions/contro
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
+import recJobPostingEmployerInfoController from './feature/recruitment/job_postings/controller/recJobPostingEmployerInfoController.js';
 import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
+import recEmployerInfoController from './feature/recruitment/employer_info/controller/recEmployerInfoController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
@@ -140,12 +143,21 @@ import payLegalEntitiesRoute from './feature/pay/legal_entities/route/payLegalEn
 import payPayrollCalendarsRoute from './feature/pay/payroll_calendars/route/payPayrollCalendarsRoute.js';
 import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/payPayrollDefinitionsRoute.js';
 import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
+import payCompensationTransferRoutes from './feature/pay/compensation_transfer/routes/payCompensationTransferRoutes.js';
+import payrollRoutes from './feature/payroll/routes/payroll.routes.js';
+import { resolveExpressTrustProxy } from './utils/tenantConfig.js';
+import {
+  enforceJwtEnterpriseMatch,
+  resolveEnterpriseContext
+} from './middleware/enterpriseContextMiddleware.js';
+import publicEnterpriseContextController from './feature/enterprise_structure/enterprises/controller/publicEnterpriseContextController.js';
+import publicCareerController from './feature/recruitment/public/controller/publicCareerController.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Trust proxy - enables reading X-Forwarded-* headers (for load balancers, reverse proxies)
-// Set to true to trust all proxies, or set to specific proxy IP addresses
-app.set('trust proxy', process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1' || false);
+// Trust proxy — required behind Nginx so Host / X-Forwarded-Host resolve correctly.
+// Prefer TRUST_PROXY=1 (trust one hop). Avoid TRUST_PROXY=true (trust all) on direct exposure.
+app.set('trust proxy', resolveExpressTrustProxy());
 
 // Middleware
 app.use(cors());
@@ -153,6 +165,9 @@ const bulkAdjustJsonLimit = process.env.BULK_ADJUST_JSON_LIMIT || '10mb';
 app.use('/api/compensation/bulk-adjustments', express.json({ limit: bulkAdjustJsonLimit }));
 app.use(express.json());
 app.use('/documents', documentsDownloadRouter);
+
+// Hostname → enterprise context (before auth)
+app.use(resolveEnterpriseContext);
 
 // ==========================================
 // JWT AUTHENTICATION MIDDLEWARE (must run before any protected route)
@@ -162,6 +177,11 @@ app.use('/documents', documentsDownloadRouter);
 // payload (user_id, user_guid, enterprise_id, username).
 // ==========================================
 app.use(requireAuth);
+app.use(enforceJwtEnterpriseMatch);
+
+// Public tenant + career aliases (no JWT)
+app.use('/api/public', publicEnterpriseContextController);
+app.use('/api/public', publicCareerController);
 
 // Enterprise routes
 app.use('/api/enterprises', enterpriseController);
@@ -211,6 +231,12 @@ app.use('/api/time-zones', timeZoneController);
 
 // Data roles (must be BEFORE /api catch-all so /api/data-roles is not matched as org structure :structureId)
 app.use('/api/data-roles', fndsecDataRolesController);
+
+// Employer info (must be BEFORE /api catch-all so /api/employer-info is not matched as org structure :structureId)
+app.use('/api/employer-info', recEmployerInfoController);
+
+// Job posting employer branding (must be BEFORE /api catch-all)
+app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
@@ -278,6 +304,7 @@ app.use('/api/comp/components', compComponentController);
 app.use('/api/comp/employee', employeeLatestComponentHistoryController);
 app.use('/api/comp/employee', employeeCompensationPlanDetailsController);
 app.use('/api/comp/employee-compensation', employeeCompensationController);
+app.use('/api/comp', compComponentPayrollMappingRoutes);
 app.use('/api/comp', compSalaryStructureRoutes);
 app.use('/api/comp', compAdjustmentsRoutes);
 app.use('/api/comp', compEmployeeAssignedComponentsRoutes);
@@ -480,8 +507,17 @@ app.use('/api/pay/payroll-calendars', payPayrollCalendarsRoute);
 // PAY Payroll Definition Management
 app.use('/api/pay/payroll-definitions', payPayrollDefinitionsRoute);
 
+// PAY Compensation-to-Payroll Transfer (PAY.PAY_COMPENSATION_TRANSFER_PKG)
+app.use('/api/pay/compensation-transfer', payCompensationTransferRoutes);
+
 // PAY Payroll Group Management
 app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
+
+// DigifyHR Payroll — main aggregate router: formula engine, elements nested reads,
+// balances employee/run reads, dashboard, audit, runs, payments, GL, close, recurring
+// entries, element dependencies, retro/arrears, approvals, plus remounted feature/pay
+// CRUD (elements family, eligibility, balances family, formulas, lookups).
+app.use('/api/payroll', payrollRoutes);
 
 // Initialize database pool on startup
 await createPool();

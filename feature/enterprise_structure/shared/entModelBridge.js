@@ -4,6 +4,12 @@ import {
   totalFromListEnvelope,
   toSnakeCaseDeep
 } from './entDbClient.js';
+import {
+  AppError,
+  ConflictError,
+  NotFoundError,
+  ValidationError
+} from '../../../utils/errors/index.js';
 
 /** @param {Record<string, unknown>} data @param {string} [userId] @param {Record<string, unknown>} [extra] */
 export function entActorPayload(data, userId, extra = {}) {
@@ -56,11 +62,15 @@ export async function entUpdateRecord(module, payload) {
 
 /** @param {string} module @param {Record<string, unknown>} payload @param {{ hard?: boolean }} [options] */
 export async function entDeleteRecord(module, payload, options = {}) {
-  await entInvokeWithConnection(module, 'DELETE', {
+  const { data, message } = await entInvokeWithConnection(module, 'DELETE', {
     ...payload,
     hard: options.hard ? 1 : 0
   });
-  return options.hard ? { success: true } : true;
+  const shaped = toSnakeCaseDeep(data);
+  if (shaped && typeof shaped === 'object' && !Array.isArray(shaped)) {
+    return { ...shaped, ...(message ? { message } : {}) };
+  }
+  return options.hard ? { success: true, message } : true;
 }
 
 /** @param {string} message */
@@ -71,62 +81,69 @@ function mapEntValidationMessage(message) {
   );
   if (ora12899) {
     const col = ora12899[1].toLowerCase();
-    const e = new Error(`${col} must be ${ora12899[3]} characters or less (got ${ora12899[2]})`);
-    e.statusCode = 400;
-    e.code = 'VALIDATION_ERROR';
-    return e;
+    return new ValidationError(
+      `${col} must be ${ora12899[3]} characters or less (got ${ora12899[2]})`
+    );
   }
   if (/must be \d+ characters or less/i.test(message)) {
-    const e = new Error(message);
-    e.statusCode = 400;
-    e.code = 'VALIDATION_ERROR';
-    return e;
+    return new ValidationError(message);
   }
   if (message.includes('Required field cannot be null') || message.includes('cannot be null')) {
-    const e = new Error(message);
-    e.statusCode = 400;
-    e.code = 'NOT_NULL_CONSTRAINT';
-    return e;
+    return new ValidationError(message, null, message);
   }
   if (message.includes('same grade family') || message.includes('greater than or equal')) {
-    const e = new Error(message);
-    e.statusCode = 400;
-    e.code = 'GRADE_RANGE_INVALID';
-    return e;
+    return new ValidationError(message);
   }
   if (message.includes('does not exist in grades') || message.includes('Referenced record does not exist')
       || message.includes('does not exist')) {
-    const e = new Error(message);
-    e.statusCode = 400;
-    e.code = 'FOREIGN_KEY_CONSTRAINT';
-    return e;
+    return new ValidationError(message);
   }
   if (message.includes('sequence is out of sync')) {
-    const e = new Error(message);
-    e.statusCode = 500;
-    e.code = 'SEQUENCE_OUT_OF_SYNC';
-    return e;
+    return new AppError(message, 500, 'SEQUENCE_OUT_OF_SYNC');
   }
   if (/not found/i.test(message)) {
-    const e = new Error(message);
-    e.statusCode = 404;
-    e.code = 'NOT_FOUND';
-    return e;
+    return new NotFoundError(message);
   }
   return null;
 }
 
+const FK_DELETE_CONFLICT_RE =
+  /referenced by other records|cannot delete.*referenced|use soft delete|cannot be permanently deleted|related records exist/i;
+
 /** @param {Error} error @param {string} fallback */
 export function rethrowEntError(error, fallback) {
-  if (error?.code === 'ENT_API_ERROR') {
-    if (error.message?.includes('already exists')) {
-      const e = new Error(error.message);
-      e.statusCode = 409;
-      e.code = 'UNIQUE_CONSTRAINT_VIOLATION';
-      throw e;
+  if (error instanceof AppError) throw error;
+
+  const message = error?.message || '';
+  const isEntApi = error?.code === 'ENT_API_ERROR';
+  const looksLikeFkConflict = FK_DELETE_CONFLICT_RE.test(message);
+
+  if (isEntApi || looksLikeFkConflict) {
+    if (/already exists/i.test(message)) {
+      throw new ConflictError(message);
     }
-    const validation = mapEntValidationMessage(error.message);
+    if (looksLikeFkConflict) {
+      const conflict = new ConflictError(
+        message || 'Cannot delete: this record is referenced by other records. Use soft delete instead.',
+        null,
+        null,
+        message
+      );
+      conflict.errorNum = 2292;
+      conflict.code = 'FOREIGN_KEY_CONSTRAINT';
+      throw conflict;
+    }
+    const validation = mapEntValidationMessage(message);
     if (validation) throw validation;
   }
-  throw new Error(`${fallback}: ${error.message}`);
+
+  if (error?.statusCode && Number.isFinite(Number(error.statusCode))) {
+    throw new AppError(
+      message || fallback,
+      Number(error.statusCode),
+      error.code || 'INTERNAL_ERROR'
+    );
+  }
+
+  throw new AppError(`${fallback}: ${message || 'Unknown error'}`, 500, 'INTERNAL_ERROR');
 }

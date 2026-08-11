@@ -1,0 +1,142 @@
+{
+  "info": {
+    "name": "PAY Compensation-to-Payroll Transfer",
+    "description": "APIs for transferring compensation pay runs into Payroll Element Entries via PAY.PAY_COMPENSATION_TRANSFER_PKG. payroll_id is a Payroll Definition ID — never the compensation pay_run_id.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "enterprise_id", "value": "1" },
+    { "key": "pay_run_id", "value": "68" },
+    { "key": "pay_run_line_id", "value": "324" },
+    { "key": "payroll_id", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Get transfer setup",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/compensation-transfer/pay-runs/{{pay_run_id}}/setup?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "compensation-transfer", "pay-runs", "{{pay_run_id}}", "setup"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      }
+    },
+    {
+      "name": "Get available Payroll Definitions",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/available-for-transfer?enterprise_id={{enterprise_id}}&period_start_date=2026-07-01&period_end_date=2026-07-31&status=ACTIVE",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "available-for-transfer"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "period_start_date", "value": "2026-07-01" },
+            { "key": "period_end_date", "value": "2026-07-31" },
+            { "key": "status", "value": "ACTIVE" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Transfer one pay-run line",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 1,\n  \"created_by\": \"96\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/compensation-transfer/pay-runs/{{pay_run_id}}/lines/{{pay_run_line_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": [
+            "api",
+            "pay",
+            "compensation-transfer",
+            "pay-runs",
+            "{{pay_run_id}}",
+            "lines",
+            "{{pay_run_line_id}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Transfer complete pay run",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 1,\n  \"created_by\": \"96\",\n  \"stop_on_error\": \"N\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/compensation-transfer/pay-runs/{{pay_run_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "compensation-transfer", "pay-runs", "{{pay_run_id}}"]
+        }
+      }
+    },
+    {
+      "name": "Get transferred entries for pay-run line",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/compensation-transfer/pay-run-lines/{{pay_run_line_id}}/entries?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": [
+            "api",
+            "pay",
+            "compensation-transfer",
+            "pay-run-lines",
+            "{{pay_run_line_id}}",
+            "entries"
+          ],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      }
+    },
+    {
+      "name": "Get transferred entries for pay run",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/compensation-transfer/pay-runs/{{pay_run_id}}/entries?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": [
+            "api",
+            "pay",
+            "compensation-transfer",
+            "pay-runs",
+            "{{pay_run_id}}",
+            "entries"
+          ],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        }
+      }
+    }
+  ]
+}

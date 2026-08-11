@@ -1,6 +1,7 @@
 import { AppError } from './AppError.js';
 import { ValidationError } from './ValidationError.js';
 import { DatabaseError } from './DatabaseError.js';
+import { isTenantErrorCode } from '../tenantErrors.js';
 
 /**
  * Centralized Error Handler
@@ -22,13 +23,18 @@ import { DatabaseError } from './DatabaseError.js';
  * @param {Object} res - Express response object
  */
 export function sendErrorResponse(err, req, res) {
-  // If error is not an AppError, wrap it
+  // If error is not an AppError, wrap it — preserve statusCode/code when present
+  // (some layers annotate plain Errors before throwing).
   if (!(err instanceof AppError)) {
+    const annotatedStatus = Number(err?.statusCode);
+    const hasAnnotatedStatus = Number.isFinite(annotatedStatus) && annotatedStatus >= 400;
     err = new AppError(
-      'An unexpected error occurred. Please try again later.',
-      500,
-      'INTERNAL_ERROR',
-      err.message || 'Unknown error'
+      hasAnnotatedStatus
+        ? (err.message || 'An error occurred')
+        : 'An unexpected error occurred. Please try again later.',
+      hasAnnotatedStatus ? annotatedStatus : 500,
+      (hasAnnotatedStatus && err.code) ? err.code : 'INTERNAL_ERROR',
+      err?.message || 'Unknown error'
     );
   }
 
@@ -46,6 +52,11 @@ export function sendErrorResponse(err, req, res) {
     if (errorArray.length > 0 && (userMessage === 'Validation failed' || !userMessage)) {
       userMessage = errorArray[0];
     }
+  }
+
+  // Preserve explicit details on conflict / annotated AppErrors
+  if (errorDetails == null && err.details != null) {
+    errorDetails = err.details;
   }
 
   // Handle DatabaseError with specific details
@@ -85,6 +96,15 @@ export function sendErrorResponse(err, req, res) {
   // Add stack trace only in non-production
   if (process.env.NODE_ENV !== 'production' && err.stack) {
     errorObject.stack = err.stack;
+  }
+
+  // Tenant / hostname resolution errors use status "E" for public clients
+  if (isTenantErrorCode(err.code)) {
+    return res.status(err.statusCode || 500).json({
+      status: 'E',
+      code: err.code,
+      message: userMessage
+    });
   }
 
   // Build and send response

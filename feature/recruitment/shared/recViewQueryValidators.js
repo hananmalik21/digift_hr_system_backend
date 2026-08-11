@@ -1,11 +1,21 @@
 import { ValidationError } from '../../../utils/errors/index.js';
 import { isBlank } from './recValidationUtils.js';
+import { resolveRequestEnterpriseId } from '../../../utils/requestEnterprise.js';
 
 /**
  * @param {Record<string, unknown>|undefined} query
+ * @param {import('express').Request} [req] - When provided, hostname / JWT enterprise wins
  * @returns {number}
  */
-export function parseEnterpriseIdFromQuery(query) {
+export function parseEnterpriseIdFromQuery(query, req) {
+  if (req) {
+    return resolveRequestEnterpriseId(req, {
+      clientRaw: query?.enterprise_id ?? query?.tenant_id,
+      required: true,
+      fieldLabel: 'enterprise_id'
+    });
+  }
+
   const raw = query?.enterprise_id ?? query?.tenant_id;
   if (isBlank(raw)) {
     throw new ValidationError('Validation failed', ['enterprise_id is required']);

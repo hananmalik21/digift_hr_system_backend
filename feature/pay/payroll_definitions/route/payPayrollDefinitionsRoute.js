@@ -9,6 +9,7 @@ import {
   deletePayrollDefinitionHandler,
   getPayrollDefinitionByGuidHandler,
   getPayrollDefinitionSummaryHandler,
+  listAvailableForTransferHandler,
   listPayrollDefinitionDropdownHandler,
   listPayrollDefinitionsHandler,
   updatePayrollDefinitionHandler
@@ -18,6 +19,7 @@ const router = express.Router();
 
 router.get('/summary', getPayrollDefinitionSummaryHandler);
 router.get('/dropdown', listPayrollDefinitionDropdownHandler);
+router.get('/available-for-transfer', listAvailableForTransferHandler);
 router.get('/', listPayrollDefinitionsHandler);
 router.get('/:payrollGuid', getPayrollDefinitionByGuidHandler);
 router.post('/', createPayrollDefinitionHandler);

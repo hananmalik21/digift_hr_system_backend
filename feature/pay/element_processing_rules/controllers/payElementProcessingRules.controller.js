@@ -26,6 +26,7 @@ import {
   validateListElementProcessingRules,
   validateUpdateElementProcessingRule
 } from '../middleware/payElementProcessingRules.validation.middleware.js';
+import { hasOwn } from '../validations/payElementProcessingRules.validation.js';
 
 /** GET /api/pay/element-processing-rules */
 export const getElementProcessingRulesHandler = [
@@ -56,7 +57,7 @@ export const getElementProcessingRuleByGuidHandler = [
         processing_rule_guid: req.processingRuleGuid,
         enterprise_id: outcome.data.enterprise_id
       });
-      return sendSuccess(res, { ...outcome, data: outcome.data });
+      return sendSuccess(res, outcome);
     })
   )
 ];
@@ -71,6 +72,7 @@ export const createElementProcessingRuleHandler = [
       const outcome = await createElementProcessingRule(validated, createdBy, req);
       logAudit('create', req, {
         element_id: validated.element_id,
+        formula_id: hasOwn(validated, 'formula_id') ? validated.formula_id : undefined,
         processing_type_code: validated.processing_type_code,
         processing_rule_guid: outcome.data?.processing_rule_guid,
         status: outcome.success ? 'SUCCESS' : 'ERROR'
@@ -90,7 +92,8 @@ export const updateElementProcessingRuleHandler = [
       const outcome = await updateElementProcessingRule(req.processingRuleGuid, validated, updatedBy, req);
       logAudit('update', req, {
         processing_rule_guid: req.processingRuleGuid,
-        element_id: validated.element_id,
+        element_id: hasOwn(validated, 'element_id') ? validated.element_id : undefined,
+        formula_id: hasOwn(validated, 'formula_id') ? validated.formula_id : undefined,
         status: outcome.success ? 'SUCCESS' : 'ERROR'
       });
       if (outcome.httpStatus === 404) {

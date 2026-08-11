@@ -104,6 +104,9 @@ export function getActingUserId(req) {
  * @returns {number|null}
  */
 export function getActingEnterpriseId(req) {
+  const hostId = Number(req?.enterprise?.enterpriseId);
+  if (Number.isFinite(hostId) && hostId > 0) return hostId;
+
   return pickPositiveInt([
     req?.user?.enterprise_id,
     req?.user?.enterpriseId

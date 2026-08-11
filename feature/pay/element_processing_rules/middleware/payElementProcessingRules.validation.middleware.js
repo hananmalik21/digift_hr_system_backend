@@ -71,7 +71,7 @@ export async function validateGetElementProcessingRuleByGuid(req, res, next) {
       if (row) assertEnterpriseAccess(req, row.enterprise_id);
     }
 
-    if (!row) throw new NotFoundError('Processing rule not found');
+    if (!row) throw new NotFoundError('Processing rule not found.');
 
     req.processingRuleGuid = processingRuleGuid;
     req.enterpriseId = row.enterprise_id;
@@ -104,7 +104,7 @@ export async function validateDeleteElementProcessingRule(req, res, next) {
       if (row) assertEnterpriseAccess(req, row.enterprise_id);
     }
 
-    if (!row) throw new NotFoundError('Processing rule not found');
+    if (!row) throw new NotFoundError('Processing rule not found.');
 
     req.processingRuleGuid = processingRuleGuid;
     req.enterpriseId = row.enterprise_id;

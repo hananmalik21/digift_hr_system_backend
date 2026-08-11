@@ -191,6 +191,14 @@ export class DatabaseError extends AppError {
       return 'Invalid date format. Please provide a valid date.';
     }
 
+    // PAY.PAY_COMPENSATION_TRANSFER_PKG — invalid Payroll Definition linkage
+    if (errorNum === 20037 || message.includes('ORA-20037')) {
+      return 'The selected Payroll Definition is inactive, invalid, belongs to another enterprise, or is not effective for the compensation period.';
+    }
+    if (errorNum === 20031 || message.includes('ORA-20031')) {
+      return 'The compensation line was already transferred using different payroll information or values.';
+    }
+
     // ORA-01403: no data found — often SELECT INTO in a trigger when validation fails
     if (errorNum === 1403 || message.includes('ORA-01403')) {
       const upper = message.toUpperCase();
@@ -422,6 +430,49 @@ export class DatabaseError extends AppError {
       return 500;
     }
     if (errorNum === 20010 || message.includes('ORA-20010')) return 404; // Current component version not found (GUID + tenant)
+    // PAY.PAY_COMPENSATION_TRANSFER_PKG — invalid / inactive / wrong-enterprise / not-effective payroll definition
+    if (errorNum === 20037 || message.includes('ORA-20037')) return 422;
+    // Compensation transfer not-found
+    if (errorNum === 20021 || message.includes('ORA-20021')) return 404;
+    if (errorNum === 20022 || message.includes('ORA-20022')) return 404;
+    // Compensation transfer unprocessable
+    if (
+      errorNum === 20024 ||
+      errorNum === 20025 ||
+      errorNum === 20026 ||
+      errorNum === 20028 ||
+      errorNum === 20032 ||
+      errorNum === 20033 ||
+      errorNum === 20034 ||
+      message.includes('ORA-20024') ||
+      message.includes('ORA-20025') ||
+      message.includes('ORA-20026') ||
+      message.includes('ORA-20028') ||
+      message.includes('ORA-20032') ||
+      message.includes('ORA-20033') ||
+      message.includes('ORA-20034')
+    ) {
+      return 422;
+    }
+    // Compensation transfer conflict / mismatch
+    if (
+      errorNum === 20027 ||
+      errorNum === 20029 ||
+      errorNum === 20030 ||
+      errorNum === 20031 ||
+      errorNum === 20035 ||
+      errorNum === 20036 ||
+      errorNum === 20040 ||
+      message.includes('ORA-20027') ||
+      message.includes('ORA-20029') ||
+      message.includes('ORA-20030') ||
+      message.includes('ORA-20031') ||
+      message.includes('ORA-20035') ||
+      message.includes('ORA-20036') ||
+      message.includes('ORA-20040')
+    ) {
+      return 409;
+    }
     if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
 
     return 500; // Internal Server Error
@@ -448,6 +499,10 @@ export class DatabaseError extends AppError {
     if (errorNum === 1400 || message.includes('ORA-01400')) return 'NOT_NULL_CONSTRAINT';
     if (errorNum === 2290 || message.includes('ORA-02290')) return 'CHECK_CONSTRAINT_VIOLATION';
     if (errorNum === 20010 || message.includes('ORA-20010')) return 'COMPONENT_VERSION_NOT_FOUND';
+    if (errorNum === 20037 || message.includes('ORA-20037')) return 'INVALID_PAYROLL_DEFINITION';
+    if (errorNum === 20031 || message.includes('ORA-20031')) return 'TRANSFERRED_ENTRY_MISMATCH';
+    if (errorNum === 20021 || message.includes('ORA-20021')) return 'PAY_RUN_NOT_FOUND';
+    if (errorNum === 20022 || message.includes('ORA-20022')) return 'PAY_RUN_LINE_NOT_FOUND';
     if (errorNum === 1403 || message.includes('ORA-01403')) return 'NO_DATA_FOUND';
     if (errorNum === 4088 || message.includes('ORA-04088')) {
       const upper = message.toUpperCase();

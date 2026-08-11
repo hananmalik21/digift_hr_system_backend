@@ -23,13 +23,23 @@ import { isHex32 } from '../utils/guidUtils.js';
 const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
+  // Public enterprise context (hostname → tenant)
+  { method: 'GET', pattern: /^\/api\/public\/enterprise-context\/?$/ },
+  // Enterprise CRUD — no JWT required
+  { method: '*', pattern: /^\/api\/enterprises(\/.*)?\/?$/ },
+  // Public career portal aliases
+  { method: 'GET', pattern: /^\/api\/public\/job-postings\/?$/ },
+  { method: 'GET', pattern: /^\/api\/public\/job-postings\/[^/]+\/?$/ },
+  { method: 'POST', pattern: /^\/api\/public\/job-postings\/[^/]+\/apply\/?$/ },
   // Career portal — token-free (register, login, apply-related public flows)
   { method: '*', pattern: /^\/api\/candidate(\/.*)?\/?$/ },
   { method: '*', pattern: /^\/candidate(\/.*)?\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
-  // Career portal — candidate detail by GUID (enterprise_id via query)
+  // Job posting employer branding (career portal / deep links)
+  { method: 'GET', pattern: /^\/api\/job-postings\/[A-Fa-f0-9]{32}\/employer-info\/?$/ },
+  // Career portal — candidate detail by GUID (enterprise_id via query / hostname)
   { method: 'GET', pattern: /^\/api\/rec\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
   { method: 'GET', pattern: /^\/api\/recruitment\/candidates\/[A-Fa-f0-9]{32}\/?$/ },
   // Career portal — applications list/detail reads (candidate_guid via query)
@@ -40,6 +50,11 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ },
+  // Employer info list / detail reads (no JWT)
+  { method: 'GET', pattern: /^\/api\/employer-info\/?$/ },
+  { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/?$/ },
+  // Employer logo binary (deep-linkable / <img src> without Bearer header).
+  { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/logo\/?$/ },
   // GRC — no JWT required for now
   { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ }
 ];
@@ -140,6 +155,8 @@ function attachUserFromPayload(req, payload) {
       payload.candidate_guid ?? payload.candidateGuid ?? null
     ),
     enterprise_id: payload.enterprise_id ?? payload.enterpriseId ?? null,
+    enterprise_code: payload.enterprise_code ?? payload.enterpriseCode ?? null,
+    subdomain_slug: payload.subdomain_slug ?? payload.subdomainSlug ?? null,
     admin_type: payload.admin_type ?? payload.adminType ?? null,
     username: payload.username ?? payload.userName ?? null,
     iat: payload.iat,

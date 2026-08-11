@@ -29,6 +29,24 @@
       }
     },
     {
+      "name": "Available for Compensation Transfer",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/pay/payroll-definitions/available-for-transfer?enterprise_id=1&period_start_date=2026-07-01&period_end_date=2026-07-31&status=ACTIVE",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "pay", "payroll-definitions", "available-for-transfer"],
+          "query": [
+            { "key": "enterprise_id", "value": "1" },
+            { "key": "period_start_date", "value": "2026-07-01" },
+            { "key": "period_end_date", "value": "2026-07-31" },
+            { "key": "status", "value": "ACTIVE" }
+          ]
+        }
+      }
+    },
+    {
       "name": "List Payroll Definitions",
       "request": {
         "method": "GET",

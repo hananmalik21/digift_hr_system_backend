@@ -3,353 +3,332 @@ import EnterpriseModel from '../model/enterpriseModel.js';
 import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/users/service/enterpriseAdminProvisioningService.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
-import { ValidationError, NotFoundError, ConflictError, DatabaseError } from '../../../../utils/errors/index.js';
+import { ValidationError, NotFoundError, ConflictError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { TENANT_SLUG_RE } from '../../../../utils/tenantHostname.js';
+import { invalidateEnterpriseResolveCacheForSlug } from '../service/resolveEnterpriseBySubdomain.js';
+import {
+  buildEnterpriseDeletePayload,
+  HARD_DELETE_CONFLICT_MESSAGE,
+  isFkDeleteConflict,
+  parseAutoFallbackQuery,
+  parseBooleanQuery,
+  parseEnterpriseIdParam,
+  parseHardDeleteQuery,
+  resolveEnterpriseActor
+} from '../utils/enterpriseDeleteParams.js';
 
 const router = express.Router();
-
-// Middleware to track request start time for execution time calculation
 router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
 
-/**
- * Validation helper
- */
+function normalizeEnterpriseBody(data = {}) {
+  const subdomainRaw = data.SUBDOMAIN_SLUG ?? data.subdomain_slug;
+  const normalized = {
+    ...data,
+    ENTERPRISE_CODE: data.ENTERPRISE_CODE ?? data.enterprise_code,
+    ENTERPRISE_NAME: data.ENTERPRISE_NAME ?? data.enterprise_name,
+    IS_ACTIVE: data.IS_ACTIVE ?? data.is_active,
+    LAST_UPDATE_LOGIN: data.LAST_UPDATE_LOGIN ?? data.last_update_login
+  };
+
+  if (subdomainRaw !== undefined) {
+    const slug = subdomainRaw == null || String(subdomainRaw).trim() === ''
+      ? null
+      : String(subdomainRaw).trim().toLowerCase();
+    normalized.SUBDOMAIN_SLUG = slug;
+    normalized.subdomain_slug = slug;
+  }
+
+  const careerFlag = data.CAREER_PORTAL_ENABLED_FLAG ?? data.career_portal_enabled_flag;
+  if (careerFlag !== undefined) {
+    normalized.CAREER_PORTAL_ENABLED_FLAG = careerFlag;
+    normalized.career_portal_enabled_flag = careerFlag;
+  }
+
+  return normalized;
+}
+
 function validateEnterpriseData(data, isUpdate = false) {
   const errors = [];
 
   if (!isUpdate) {
-    // Required fields for creation
-    if (!data.ENTERPRISE_CODE || data.ENTERPRISE_CODE.trim() === '') {
+    if (!data.ENTERPRISE_CODE || String(data.ENTERPRISE_CODE).trim() === '') {
       errors.push('ENTERPRISE_CODE is required');
     }
-    if (!data.ENTERPRISE_NAME || data.ENTERPRISE_NAME.trim() === '') {
+    if (!data.ENTERPRISE_NAME || String(data.ENTERPRISE_NAME).trim() === '') {
       errors.push('ENTERPRISE_NAME is required');
     }
   } else {
-    // For updates, validate only provided fields
-    if (data.ENTERPRISE_CODE !== undefined && data.ENTERPRISE_CODE.trim() === '') {
+    if (data.ENTERPRISE_CODE !== undefined && String(data.ENTERPRISE_CODE).trim() === '') {
       errors.push('ENTERPRISE_CODE cannot be empty');
     }
-    if (data.ENTERPRISE_NAME !== undefined && data.ENTERPRISE_NAME.trim() === '') {
+    if (data.ENTERPRISE_NAME !== undefined && String(data.ENTERPRISE_NAME).trim() === '') {
       errors.push('ENTERPRISE_NAME cannot be empty');
     }
   }
 
-  // Validate boolean fields
-  if (data.IS_ACTIVE !== undefined && 
-      data.IS_ACTIVE !== true && 
-      data.IS_ACTIVE !== false && 
-      data.IS_ACTIVE !== 'Y' && 
-      data.IS_ACTIVE !== 'N') {
+  if (
+    data.IS_ACTIVE !== undefined
+    && data.IS_ACTIVE !== true
+    && data.IS_ACTIVE !== false
+    && data.IS_ACTIVE !== 'Y'
+    && data.IS_ACTIVE !== 'N'
+  ) {
     errors.push('IS_ACTIVE must be true/false or Y/N');
+  }
+
+  if (data.SUBDOMAIN_SLUG !== undefined && data.SUBDOMAIN_SLUG !== null) {
+    const slug = String(data.SUBDOMAIN_SLUG).trim().toLowerCase();
+    if (!TENANT_SLUG_RE.test(slug)) {
+      errors.push(
+        'SUBDOMAIN_SLUG must be a lowercase DNS label (letters, digits, hyphens; 1–63 chars)'
+      );
+    }
+  }
+
+  if (
+    data.CAREER_PORTAL_ENABLED_FLAG !== undefined
+    && data.CAREER_PORTAL_ENABLED_FLAG !== true
+    && data.CAREER_PORTAL_ENABLED_FLAG !== false
+    && data.CAREER_PORTAL_ENABLED_FLAG !== 'Y'
+    && data.CAREER_PORTAL_ENABLED_FLAG !== 'N'
+  ) {
+    errors.push('CAREER_PORTAL_ENABLED_FLAG must be true/false or Y/N');
   }
 
   return errors;
 }
 
-/**
- * Extract user ID from request (can be from token, session, etc.)
- * For now, using a header or defaulting to SYSTEM
- */
-function getUserId(req) {
-  return req.headers['x-user-id'] || req.user?.id || 'SYSTEM';
+function requireEnterpriseId(rawId) {
+  return parseEnterpriseIdParam(rawId);
+}
+
+async function requireEnterprise(enterpriseId) {
+  const enterprise = await EnterpriseModel.findById(enterpriseId);
+  if (!enterprise) throw new NotFoundError('Enterprise not found');
+  return enterprise;
+}
+
+function sendSoftDeleted(res, result, message) {
+  sendDeleted(res, {
+    message: message || result.message || 'Enterprise deactivated successfully',
+    data: {
+      enterprise_id: result.enterprise_id,
+      delete_type: 'SOFT',
+      deleted: false,
+      is_active: result.is_active || 'N'
+    }
+  });
+}
+
+function invalidateSlugCaches(...slugs) {
+  for (const slug of slugs) {
+    if (slug) invalidateEnterpriseResolveCacheForSlug(slug);
+  }
+}
+
+async function updateEnterpriseHandler(req, res) {
+  const enterpriseId = requireEnterpriseId(req.params.id);
+  const data = normalizeEnterpriseBody(req.body);
+  const errors = validateEnterpriseData(data, true);
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
+  }
+
+  const existingEnterprise = await requireEnterprise(enterpriseId);
+  const existingCode = existingEnterprise.enterprise_code ?? existingEnterprise.ENTERPRISE_CODE;
+  const existingSlug = existingEnterprise.subdomain_slug ?? existingEnterprise.SUBDOMAIN_SLUG;
+
+  if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingCode) {
+    const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
+    if (codeExists) {
+      throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
+    }
+  }
+
+  const actor = resolveEnterpriseActor(req);
+  const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, actor);
+  const converted = toLowerCaseKeys(updatedEnterprise);
+  invalidateSlugCaches(existingSlug, data.SUBDOMAIN_SLUG, converted.subdomain_slug);
+
+  sendUpdated(res, {
+    message: 'Enterprise updated successfully',
+    data: converted
+  });
 }
 
 /**
  * @route   GET /api/enterprises
- * @desc    Get all enterprises
- * @query   enterprise_id - Filter by enterprise ID
- * @query   enterprise_code - Filter by enterprise code
- * @query   isActive - Filter by active status (true/false)
- * @access  Public
  */
 router.get('/', asyncHandler(async (req, res) => {
   const filters = {};
   const appliedFilters = {};
-  
+
   if (req.query.enterprise_id) {
-    filters.enterpriseId = parseInt(req.query.enterprise_id);
-    if (isNaN(filters.enterpriseId)) {
-      throw new ValidationError('Invalid ENTERPRISE_ID format');
-    }
+    filters.enterpriseId = requireEnterpriseId(req.query.enterprise_id);
     appliedFilters.enterprise_id = filters.enterpriseId;
   }
-  
+
   if (req.query.enterprise_code) {
     filters.enterpriseCode = req.query.enterprise_code;
     appliedFilters.enterprise_code = filters.enterpriseCode;
   }
 
   if (req.query.isActive !== undefined) {
-    filters.isActive = req.query.isActive === 'true' || req.query.isActive === '1';
+    filters.isActive = parseBooleanQuery(req.query.isActive);
     appliedFilters.is_active = filters.isActive;
   }
 
   const enterprises = await EnterpriseModel.findAll(filters);
-  
-  // Get total count for metadata
-  const totalCount = enterprises.length;
-  
-  // Convert keys to lowercase snake_case
-  const convertedEnterprises = toLowerCaseKeys(enterprises);
-  
+
   sendList(res, {
     message: 'Enterprises fetched successfully',
-    data: convertedEnterprises,
+    data: toLowerCaseKeys(enterprises),
     meta: {
       ...(Object.keys(appliedFilters).length > 0 && { filters: appliedFilters }),
-      total: totalCount
+      total: enterprises.length
     }
   });
 }));
 
 /**
  * @route   GET /api/enterprises/:id
- * @desc    Get single enterprise by ID
- * @param   id - Enterprise ID
- * @access  Public
  */
 router.get('/:id', asyncHandler(async (req, res) => {
-  const enterpriseId = parseInt(req.params.id);
-  
-  if (isNaN(enterpriseId)) {
-    throw new ValidationError('Invalid ENTERPRISE_ID format');
-  }
-
-  const enterprise = await EnterpriseModel.findById(enterpriseId);
-  if (!enterprise) {
-    throw new NotFoundError('Enterprise not found');
-  }
-  
-  // Convert keys to lowercase snake_case
-  const convertedEnterprise = toLowerCaseKeys(enterprise);
-  
+  const enterpriseId = requireEnterpriseId(req.params.id);
+  const enterprise = await requireEnterprise(enterpriseId);
   sendSuccess(res, {
     message: 'Enterprise fetched successfully',
-    data: convertedEnterprise
+    data: toLowerCaseKeys(enterprise)
   });
 }));
 
 /**
  * @route   POST /api/enterprises
- * @desc    Create a new enterprise
- * @body    { ENTERPRISE_CODE, ENTERPRISE_NAME, IS_ACTIVE?, LAST_UPDATE_LOGIN? }
- * @access  Public
  */
 router.post('/', asyncHandler(async (req, res) => {
-  const data = req.body;
+  const data = normalizeEnterpriseBody(req.body);
   const errors = validateEnterpriseData(data, false);
-
   if (errors.length > 0) {
     throw new ValidationError('Validation failed', errors);
   }
 
-  // Check if enterprise code already exists
   const existingEnterprise = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
   if (existingEnterprise) {
     throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
   }
 
-  const userId = getUserId(req);
-  try {
-    const newEnterprise = await EnterpriseModel.create(data, userId);
-    const convertedEnterprise = toLowerCaseKeys(newEnterprise);
-    const enterpriseId = convertedEnterprise.enterprise_id ?? convertedEnterprise.ENTERPRISE_ID;
+  const actor = resolveEnterpriseActor(req);
+  const newEnterprise = await EnterpriseModel.create(data, actor);
+  const convertedEnterprise = toLowerCaseKeys(newEnterprise);
+  const enterpriseId = convertedEnterprise.enterprise_id ?? convertedEnterprise.ENTERPRISE_ID;
 
-    const adminUser = await provisionEnterpriseAdminOnEnterpriseCreate({
-      enterpriseId,
-      enterpriseCode: convertedEnterprise.enterprise_code ?? data.ENTERPRISE_CODE,
-      enterpriseName: convertedEnterprise.enterprise_name ?? data.ENTERPRISE_NAME
-    });
+  invalidateSlugCaches(data.SUBDOMAIN_SLUG, convertedEnterprise.subdomain_slug);
 
-    sendCreated(res, {
-      message: 'Enterprise created successfully',
-      data: convertedEnterprise,
-      meta: {
-        enterprise_admin: adminUser.ok
-          ? {
-              user_guid: adminUser.userGuid ?? null,
-              created: adminUser.created === true,
-              username: 'enterprise_admin'
-            }
-          : null,
-        ...(adminUser.ok ? {} : { enterprise_admin_warning: adminUser.message ?? 'Failed to create enterprise admin user' })
-      }
-    });
-  } catch (error) {
-    // Database errors from model are already wrapped in DatabaseError
-    throw error;
-  }
+  const adminUser = await provisionEnterpriseAdminOnEnterpriseCreate({
+    enterpriseId,
+    enterpriseCode: convertedEnterprise.enterprise_code ?? data.ENTERPRISE_CODE,
+    enterpriseName: convertedEnterprise.enterprise_name ?? data.ENTERPRISE_NAME
+  });
+
+  sendCreated(res, {
+    message: 'Enterprise created successfully',
+    data: convertedEnterprise,
+    meta: {
+      enterprise_admin: adminUser.ok
+        ? {
+            user_guid: adminUser.userGuid ?? null,
+            created: adminUser.created === true,
+            username: 'enterprise_admin'
+          }
+        : null,
+      ...(adminUser.ok
+        ? {}
+        : { enterprise_admin_warning: adminUser.message ?? 'Failed to create enterprise admin user' })
+    }
+  });
 }));
 
 /**
  * @route   PUT /api/enterprises/:id
- * @desc    Update an existing enterprise
- * @param   id - Enterprise ID
- * @body    { ENTERPRISE_CODE?, ENTERPRISE_NAME?, IS_ACTIVE?, LAST_UPDATE_LOGIN? }
- * @access  Public
  */
-router.put('/:id', asyncHandler(async (req, res) => {
-  const enterpriseId = parseInt(req.params.id);
-  
-  if (isNaN(enterpriseId)) {
-    throw new ValidationError('Invalid ENTERPRISE_ID format');
-  }
-
-  const data = req.body;
-  const errors = validateEnterpriseData(data, true);
-
-  if (errors.length > 0) {
-    throw new ValidationError('Validation failed', errors);
-  }
-
-  // Check if enterprise exists
-  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-  if (!existingEnterprise) {
-    throw new NotFoundError('Enterprise not found');
-  }
-
-  // If updating enterprise code, check if it conflicts with another enterprise
-  if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.ENTERPRISE_CODE) {
-    const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
-    if (codeExists) {
-      throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
-    }
-  }
-
-  const userId = getUserId(req);
-  try {
-    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
-    // Convert keys to lowercase snake_case
-    const convertedEnterprise = toLowerCaseKeys(updatedEnterprise);
-    
-    sendUpdated(res, {
-      message: 'Enterprise updated successfully',
-      data: convertedEnterprise
-    });
-  } catch (error) {
-    // Database errors from model are already wrapped in DatabaseError
-    throw error;
-  }
-}));
+router.put('/:id', asyncHandler(updateEnterpriseHandler));
 
 /**
  * @route   PATCH /api/enterprises/:id
- * @desc    Partially update an enterprise (same as PUT for this implementation)
- * @param   id - Enterprise ID
- * @body    Partial update fields
- * @access  Public
  */
-router.patch('/:id', asyncHandler(async (req, res) => {
-  const enterpriseId = parseInt(req.params.id);
-  
-  if (isNaN(enterpriseId)) {
-    throw new ValidationError('Invalid ENTERPRISE_ID format');
-  }
-
-  const data = req.body;
-  const errors = validateEnterpriseData(data, true);
-
-  if (errors.length > 0) {
-    throw new ValidationError('Validation failed', errors);
-  }
-
-  // Check if enterprise exists
-  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-  if (!existingEnterprise) {
-    throw new NotFoundError('Enterprise not found');
-  }
-
-  // If updating enterprise code, check if it conflicts with another enterprise
-  if (data.ENTERPRISE_CODE && data.ENTERPRISE_CODE !== existingEnterprise.ENTERPRISE_CODE) {
-    const codeExists = await EnterpriseModel.findByCode(data.ENTERPRISE_CODE);
-    if (codeExists) {
-      throw new ConflictError(`Enterprise with code '${data.ENTERPRISE_CODE}' already exists`);
-    }
-  }
-
-  const userId = getUserId(req);
-  try {
-    const updatedEnterprise = await EnterpriseModel.update(enterpriseId, data, userId);
-    // Convert keys to lowercase snake_case
-    const convertedEnterprise = toLowerCaseKeys(updatedEnterprise);
-    
-    sendUpdated(res, {
-      message: 'Enterprise updated successfully',
-      data: convertedEnterprise
-    });
-  } catch (error) {
-    // Database errors from model are already wrapped in DatabaseError
-    throw error;
-  }
-}));
+router.patch('/:id', asyncHandler(updateEnterpriseHandler));
 
 /**
  * @route   DELETE /api/enterprises/:id
- * @desc    Soft delete an enterprise (sets IS_ACTIVE = 'N')
- * @param   id - Enterprise ID
- * @query   hard - Set to 'true' for permanent deletion
- * @query   soft - Set to 'true' for soft deletion (default behavior)
- * @query   auto_fallback - Set to 'true' to automatically fallback to soft delete if hard delete fails
- * @access  Public
+ * @query   hard - true/1 for permanent deletion; false/omit for soft delete
+ * @query   auto_fallback - true/1 to soft-delete when hard delete hits FK conflict
  */
 router.delete('/:id', asyncHandler(async (req, res) => {
-  const enterpriseId = parseInt(req.params.id);
-  
-  if (isNaN(enterpriseId)) {
-    throw new ValidationError('Invalid ENTERPRISE_ID format');
-  }
+  const enterpriseId = requireEnterpriseId(req.params.id);
+  const existing = await requireEnterprise(enterpriseId);
+  const existingSlug = existing.subdomain_slug ?? existing.SUBDOMAIN_SLUG;
 
-  // Check if enterprise exists
-  const existingEnterprise = await EnterpriseModel.findById(enterpriseId);
-  if (!existingEnterprise) {
-    throw new NotFoundError('Enterprise not found');
-  }
+  const hardDelete = parseHardDeleteQuery(req.query.hard);
+  const autoFallback = parseAutoFallbackQuery(req.query.auto_fallback);
+  const actor = resolveEnterpriseActor(req);
+  const payload = buildEnterpriseDeletePayload({ enterpriseId, hardDelete, actor });
 
-  const userId = getUserId(req);
-  const isHardDelete = req.query.hard === 'true' || req.query.hard === '1';
-  const autoFallback = req.query.auto_fallback === 'true' || req.query.auto_fallback === '1';
-
-  // Default to soft delete unless explicitly requesting hard delete
-  if (isHardDelete) {
-    // Try hard delete first, fallback to soft delete if constraint violation
-    try {
-      await EnterpriseModel.hardDelete(enterpriseId);
-      sendDeleted(res, {
-        message: 'Enterprise permanently deleted',
-        data: enterpriseId
-      });
-    } catch (deleteError) {
-      // If hard delete fails due to foreign key constraint, provide detailed error
-      if (deleteError instanceof DatabaseError && deleteError.errorNum === 2292) {
-        if (autoFallback) {
-          // Automatically fallback to soft delete
-          await EnterpriseModel.softDelete(enterpriseId, userId);
-          sendDeleted(res, {
-            message: 'Enterprise deactivated (cannot permanently delete due to existing references)',
-            data: enterpriseId
-          });
-        } else {
-          // Return detailed error with reference information
-          throw deleteError;
-        }
-      } else {
-        // Re-throw other errors
-        throw deleteError;
-      }
-    }
-  } else {
-    // Default to soft delete
-    await EnterpriseModel.softDelete(enterpriseId, userId);
-    sendDeleted(res, {
-      message: 'Enterprise deactivated (soft delete)',
-      data: enterpriseId
+  if (process.env.ENTERPRISE_DELETE_DEBUG === 'true') {
+    console.log({
+      action: 'DELETE',
+      enterpriseId: req.params.id,
+      hardQueryValue: req.query.hard,
+      payload
     });
+  }
+
+  if (!hardDelete) {
+    const softResult = await EnterpriseModel.softDelete(enterpriseId, actor);
+    invalidateSlugCaches(existingSlug);
+    sendSoftDeleted(res, softResult);
+    return;
+  }
+
+  try {
+    const result = await EnterpriseModel.hardDelete(enterpriseId, actor);
+    invalidateSlugCaches(existingSlug);
+    sendDeleted(res, {
+      message: result.message || 'Enterprise permanently deleted',
+      data: {
+        enterprise_id: result.enterprise_id,
+        delete_type: 'HARD',
+        deleted: true
+      }
+    });
+  } catch (deleteError) {
+    if (!isFkDeleteConflict(deleteError)) throw deleteError;
+
+    if (autoFallback) {
+      const softResult = await EnterpriseModel.softDelete(enterpriseId, actor);
+      invalidateSlugCaches(existingSlug);
+      sendSoftDeleted(
+        res,
+        softResult,
+        'Enterprise deactivated (cannot permanently delete due to existing references)'
+      );
+      return;
+    }
+
+    throw new ConflictError(
+      HARD_DELETE_CONFLICT_MESSAGE,
+      deleteError.constraint || null,
+      null,
+      deleteError.technicalMessage || deleteError.message,
+      {
+        enterprise_id: enterpriseId,
+        delete_type: 'HARD'
+      }
+    );
   }
 }));
 
 export default router;
-

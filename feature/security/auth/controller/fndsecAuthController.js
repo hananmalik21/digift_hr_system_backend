@@ -1,8 +1,9 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { ValidationError } from '../../../../utils/errors/index.js';
+import { AppError, ValidationError } from '../../../../utils/errors/index.js';
 import { loginUserService, validateLoginBody } from '../service/fndsecAuthService.js';
 import { authDebugEnabled } from '../utils/authDebug.js';
+import { sendTenantError } from '../../../../utils/tenantErrors.js';
 
 const router = express.Router();
 
@@ -11,7 +12,6 @@ function logAuthError(err, req) {
     message: String(err?.message || 'Unknown error'),
     code: err?.code,
     name: err?.name,
-    // common Oracle driver fields
     errorNum: err?.errorNum,
     offset: err?.offset,
     status: err?.status,
@@ -40,10 +40,18 @@ router.post(
   '/login',
   asyncHandler(async (req, res) => {
     try {
-      validateLoginBody(req.body);
-      const { httpStatus, payload } = await loginUserService(req.body);
+      validateLoginBody(req.body, req);
+      const { httpStatus, payload } = await loginUserService(req.body, req);
       return json(res, httpStatus, payload);
     } catch (err) {
+      if (err instanceof AppError && (
+        err.code === 'TENANT_REQUIRED'
+        || err.code === 'ENTERPRISE_CONTEXT_MISMATCH'
+        || err.code === 'INVALID_TENANT_HOST'
+        || err.code === 'ENTERPRISE_NOT_FOUND'
+      )) {
+        return sendTenantError(res, err.statusCode, err.code, err.message);
+      }
       if (err instanceof ValidationError) return sendValidation(res, err);
       logAuthError(err, req);
       return json(res, 500, { success: false, message: 'Unexpected server error', data: null });
@@ -52,4 +60,3 @@ router.post(
 );
 
 export default router;
-
