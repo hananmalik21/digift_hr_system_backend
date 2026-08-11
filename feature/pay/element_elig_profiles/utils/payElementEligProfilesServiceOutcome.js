@@ -32,7 +32,8 @@ export function mapPackageOutcome(
   return {
     success: false,
     httpStatus: isNotFound ? HTTP_NOT_FOUND : HTTP_BAD_REQUEST,
-    message
+    message,
+    data
   };
 }
 

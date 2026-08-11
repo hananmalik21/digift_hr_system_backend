@@ -2225,7 +2225,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"rule_name\": \"All Permanent Staff\",\n  \"criteria_values_json\": [\n    {\n      \"criteria_type_code\": \"EMPLOYMENT_TYPE\",\n      \"criteria_value\": \"*\"\n    }\n  ],\n  \"effective_start_date\": \"2026-01-01\",\n  \"status\": \"ACTIVE\"\n}"
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"rule_name\": \"All Payroll Employees\",\n  \"criteria_values_json\": [\n    {\n      \"criteria_type_code\": \"EMPLOYMENT_TYPE\",\n      \"criteria_values\": []\n    }\n  ],\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": \"4712-12-31\",\n  \"status\": \"ACTIVE\"\n}"
             }
           }
         },
@@ -2424,7 +2424,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"profile_name\": \"Standard Earnings Profile\",\n  \"status\": \"ACTIVE\",\n  \"eligibility_rules_json\": []\n}"
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"profile_code\": \"ALL_PAYROLL_EMPLOYEES\",\n  \"profile_name\": \"All Payroll Employees Profile\",\n  \"description\": \"Eligibility profile for controlled payroll testing\",\n  \"match_logic_code\": \"ANY\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": \"4712-12-31\",\n  \"status\": \"ACTIVE\",\n  \"eligibility_rules_json\": [\n    {\n      \"eligibility_rule_id\": 55,\n      \"rule_sequence\": 1,\n      \"active_flag\": \"Y\"\n    }\n  ]\n}"
             }
           }
         },
@@ -2554,7 +2554,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"element_guid\": \"{{element_guid}}\"\n}"
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"element_guid\": \"{{element_guid}}\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"effective_end_date\": \"4712-12-31\",\n  \"status\": \"ACTIVE\"\n}"
             }
           }
         },

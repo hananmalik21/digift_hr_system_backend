@@ -71,7 +71,7 @@ export function sendMutationOutcome(res, outcome) {
     message: outcome.message
   };
 
-  if (outcome.success && outcome.data != null) {
+  if (outcome.data != null) {
     payload.data = outcome.data;
   }
 

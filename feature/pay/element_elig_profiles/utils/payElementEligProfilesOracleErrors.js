@@ -1,6 +1,15 @@
 const PACKAGE_MESSAGE_MAP = Object.freeze([
   { pattern: /profile\s*name\s*is\s*required/i, message: 'Profile name is required.' },
+  {
+    pattern: /enterprise,\s*profile\s*code,\s*profile\s*name\s*and\s*start\s*date/i,
+    message: 'Enterprise, profile code, profile name and start date are required.'
+  },
   { pattern: /profile\s*was\s*not\s*found/i, message: 'Profile was not found.' },
+  { pattern: /eligibility\s*rule\s*was\s*not\s*found/i, message: 'Eligibility rule was not found.' },
+  {
+    pattern: /profile\s*match\s*logic\s*must\s*be\s*any\s*or\s*all/i,
+    message: 'Profile match logic must be ANY or ALL.'
+  },
   {
     pattern: /selected\s*profile\s*is\s*not\s*valid/i,
     message: 'Selected profile is not valid for this enterprise.'
@@ -39,7 +48,11 @@ const PACKAGE_MESSAGE_MAP = Object.freeze([
     message: 'Invalid element. Please select a valid value from the list.'
   },
   { pattern: /enterprise\s*is\s*required|enterprise\s*is\s*not\s*valid/i, message: 'Enterprise is required.' },
-  { pattern: /invalid\s*status/i, message: 'Invalid status value.' },
+  { pattern: /invalid\s*status|profile\s*status\s*must\s*be/i, message: 'Invalid status value.' },
+  {
+    pattern: /active\s*flag\s*must\s*be\s*y\s*or\s*n/i,
+    message: 'Active flag must be Y or N.'
+  },
   {
     pattern: /created\s*by|creation\s*date|last\s*updated\s*by|last\s*update\s*date|audit/i,
     message: 'Audit information is required.'

@@ -11,7 +11,7 @@ export function buildPayElementEligProfileListWhereClause(filters) {
   }
 
   if (filters.profile_guid != null) {
-    whereParts.push('v.PROFILE_GUID = :profile_guid');
+    whereParts.push('UPPER(v.PROFILE_GUID) = :profile_guid');
     binds.profile_guid = String(filters.profile_guid).trim().toUpperCase();
   }
 
@@ -22,7 +22,7 @@ export function buildPayElementEligProfileListWhereClause(filters) {
 
   if (filters.search != null) {
     whereParts.push(
-      "(UPPER(v.PROFILE_NAME) LIKE :search OR UPPER(NVL(v.PROFILE_DESCRIPTION, ' ')) LIKE :search)"
+      "(UPPER(v.PROFILE_NAME) LIKE :search OR UPPER(NVL(v.PROFILE_CODE, ' ')) LIKE :search OR UPPER(NVL(v.DESCRIPTION, ' ')) LIKE :search)"
     );
     binds.search = `%${String(filters.search).trim().toUpperCase()}%`;
   }

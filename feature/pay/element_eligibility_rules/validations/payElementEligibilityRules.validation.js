@@ -10,9 +10,8 @@ import {
   DEFAULT_STATUS
 } from '../constants/payElementEligibilityRules.constants.js';
 import {
-  collectDuplicateCriteriaTypeErrors,
-  isAllValuesCriteriaMarker,
-  isBlank
+  isBlank,
+  normalizeCriteriaValuesJson
 } from '../utils/payElementEligibilityCriteriaUtils.js';
 
 function throwIfErrors(errors) {
@@ -86,84 +85,19 @@ function parseStatus(errors, raw, { required = false, defaultValue = null } = {}
   return status;
 }
 
-function parseCriteriaValue(errors, raw, { required = false } = {}) {
-  if (isBlank(raw)) {
-    if (required) errors.push('criteria_value is required');
-    return null;
+/**
+ * Prefer criteria_values_json; accept legacy `criteria` for backward compatibility.
+ * Returns undefined when neither field is present.
+ */
+function resolveCriteriaValuesJsonRaw(body) {
+  if (body == null || typeof body !== 'object') return undefined;
+  if (Object.prototype.hasOwnProperty.call(body, 'criteria_values_json')) {
+    return body.criteria_values_json;
   }
-  const value = String(raw).trim();
-  if (isAllValuesCriteriaMarker(value)) {
-    errors.push('criteria_value is invalid');
-    return null;
+  if (Object.prototype.hasOwnProperty.call(body, 'criteria')) {
+    return body.criteria;
   }
-  return value;
-}
-
-function parseCriteriaRow(errors, raw, index) {
-  const prefix = `criteria[${index}]`;
-  if (raw == null || typeof raw !== 'object') {
-    errors.push(`${prefix} must be an object`);
-    return null;
-  }
-
-  const criteriaTypeCode = parseCriteriaTypeCode(
-    errors,
-    raw.criteria_type_code ?? raw.criteriaTypeCode,
-    { required: true }
-  );
-
-  if (criteriaTypeCode == null) return null;
-
-  const criteriaValues = raw.criteria_values ?? raw.criteriaValues;
-  if (Array.isArray(criteriaValues)) {
-    const values = criteriaValues
-      .filter((value) => !isBlank(value) && !isAllValuesCriteriaMarker(value))
-      .map((value) => String(value).trim());
-
-    if (criteriaValues.some((value) => isAllValuesCriteriaMarker(value))) {
-      errors.push(`${prefix}.criteria_values cannot include the all-values marker`);
-      return null;
-    }
-
-    return {
-      criteria_type_code: criteriaTypeCode,
-      criteria_values: values
-    };
-  }
-
-  const criteriaValue = raw.criteria_value ?? raw.criteriaValue;
-  const singleValue = parseCriteriaValue(errors, criteriaValue, { required: true });
-  if (singleValue == null) return null;
-
-  return {
-    criteria_type_code: criteriaTypeCode,
-    criteria_value: singleValue
-  };
-}
-
-function parseCriteriaArray(errors, rawCriteria, { required = false } = {}) {
-  if (rawCriteria == null || (Array.isArray(rawCriteria) && rawCriteria.length === 0)) {
-    if (required) errors.push('Criteria configuration is required.');
-    return [];
-  }
-  if (!Array.isArray(rawCriteria)) {
-    errors.push('criteria must be an array');
-    return [];
-  }
-
-  const normalized = [];
-  rawCriteria.forEach((row, index) => {
-    const parsed = parseCriteriaRow(errors, row, index);
-    if (parsed) normalized.push(parsed);
-  });
-
-  errors.push(...collectDuplicateCriteriaTypeErrors(normalized));
-
-  if (required && normalized.length === 0 && errors.length === 0) {
-    errors.push('Criteria configuration is required.');
-  }
-
-  return normalized;
+  return undefined;
 }
 
 function parseRuleName(errors, raw, { required = false } = {}) {
@@ -270,7 +204,17 @@ export function validateCreateElementEligibilityRuleBody(body) {
   const errors = [];
   const enterpriseId = parseEnterpriseIdField(errors, body?.enterprise_id, { required: true });
   const ruleName = parseRuleName(errors, body?.rule_name, { required: true });
-  const criteria = parseCriteriaArray(errors, body?.criteria, { required: true });
+
+  let criteriaValuesJson = null;
+  try {
+    criteriaValuesJson = normalizeCriteriaValuesJson(resolveCriteriaValuesJsonRaw(body));
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      errors.push(firstValidationMessage(err));
+    } else {
+      throw err;
+    }
+  }
 
   let effectiveStartDate = todayIsoDate();
   if (!isBlank(body?.effective_start_date)) {
@@ -288,7 +232,7 @@ export function validateCreateElementEligibilityRuleBody(body) {
   return {
     enterprise_id: enterpriseId,
     rule_name: ruleName,
-    criteria,
+    criteria_values_json: criteriaValuesJson,
     effective_start_date: effectiveStartDate,
     effective_end_date: effectiveEndDate,
     status
@@ -305,9 +249,20 @@ export function validateUpdateElementEligibilityRuleBody(body) {
   if (Object.prototype.hasOwnProperty.call(body ?? {}, 'rule_name')) {
     parseRuleName(errors, body.rule_name, { required: true });
   }
-  if (Object.prototype.hasOwnProperty.call(body ?? {}, 'criteria')) {
-    payload.criteria = parseCriteriaArray(errors, body.criteria, { required: true });
+
+  const rawCriteria = resolveCriteriaValuesJsonRaw(body);
+  if (rawCriteria !== undefined) {
+    try {
+      payload.criteria_values_json = normalizeCriteriaValuesJson(rawCriteria);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        errors.push(firstValidationMessage(err));
+      } else {
+        throw err;
+      }
+    }
   }
+
   if (Object.prototype.hasOwnProperty.call(body ?? {}, 'effective_start_date')) {
     parseDateField(errors, body.effective_start_date, 'effective_start_date', { required: true });
   }
