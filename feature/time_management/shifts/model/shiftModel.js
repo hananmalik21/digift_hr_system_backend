@@ -4,10 +4,10 @@ import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils
 
 /**
  * Shift Model
- * Handles all database operations for ENT.TM_SHIFTS table
+ * Handles all database operations for TM.TM_SHIFTS table
  */
 class ShiftModel {
-  static TABLE_NAME = 'ENT.TM_SHIFTS';
+  static TABLE_NAME = 'TM.TM_SHIFTS';
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
@@ -297,7 +297,7 @@ class ShiftModel {
         // Get next SHIFT_ID from sequence (or use MAX+1 if sequence doesn't exist)
         let shiftId;
         try {
-          const seqQuery = `SELECT ENT.TM_SHIFTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
+          const seqQuery = `SELECT TM.TM_SHIFTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`;
           const seqResult = await connection.execute(seqQuery, [], {
             outFormat: oracledb.OUT_FORMAT_OBJECT
           });
@@ -344,7 +344,7 @@ class ShiftModel {
           tenantId: { val: data.TENANT_ID, dir: oracledb.BIND_IN },
           shiftCode: { val: data.SHIFT_CODE, dir: oracledb.BIND_IN },
           shiftNameEn: { val: data.SHIFT_NAME_EN, dir: oracledb.BIND_IN },
-          shiftNameAr: { val: data.SHIFT_NAME_AR || null, dir: oracledb.BIND_IN },
+          shiftNameAr: { val: data.SHIFT_NAME_AR || data.SHIFT_NAME_EN, dir: oracledb.BIND_IN },
           shiftType: { val: data.SHIFT_TYPE, dir: oracledb.BIND_IN },
           startMinutes: { val: data.START_MINUTES, dir: oracledb.BIND_IN },
           endMinutes: { val: data.END_MINUTES, dir: oracledb.BIND_IN },

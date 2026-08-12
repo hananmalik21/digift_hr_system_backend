@@ -56,7 +56,27 @@ export function requireYn(value, field, defaultValue = null) {
 
 export function optionalDate(value, field) {
   if (value == null || value === '') return null;
-  const d = new Date(String(value));
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new ValidationError(`${field} must be a valid ISO date`, [
+        { field, message: `${field} must be a valid ISO date` }
+      ]);
+    }
+    return value;
+  }
+  const s = String(value).trim();
+  // YYYY-MM-DD → local midnight (Oracle DATE / business calendar, not UTC).
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) {
+    const local = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!Number.isFinite(local.getTime())) {
+      throw new ValidationError(`${field} must be a valid ISO date`, [
+        { field, message: `${field} must be a valid ISO date` }
+      ]);
+    }
+    return local;
+  }
+  const d = new Date(s);
   if (!Number.isFinite(d.getTime())) {
     throw new ValidationError(`${field} must be a valid ISO date`, [
       { field, message: `${field} must be a valid ISO date` }

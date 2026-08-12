@@ -26,6 +26,7 @@ export const VALID_DAY_TYPE_INPUTS = [
 export function normalizeDayType(v) {
   const x = String(v ?? 'WORK').trim().toUpperCase();
   if (['OFF', 'OFFDAY', 'OFF_DAY'].includes(x)) return 'OFF';
-  if (['REST', 'RESTDAY', 'REST_DAY'].includes(x)) return 'REST';
+  if (['REST', 'RESTDAY', 'REST_DAY', 'DAYOFF', 'WEEKEND'].includes(x)) return 'REST';
+  if (['WORK', 'WORKDAY', 'WORK_DAY', 'WD'].includes(x)) return 'WORK';
   return 'WORK';
 }

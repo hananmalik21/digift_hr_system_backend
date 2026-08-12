@@ -28,6 +28,42 @@ function mutationResult(outcome, httpStatus = 200) {
   return okMutation(outcome.message, outcome.data, httpStatus, outcome.status);
 }
 
+/** First non-nullish value across request body + existing-row defaults (supports REST aliases). */
+function pickField(body, defaults, ...keys) {
+  for (const key of keys) {
+    if (body?.[key] != null && body[key] !== '') return body[key];
+  }
+  for (const key of keys) {
+    if (defaults?.[key] != null && defaults[key] !== '') return defaults[key];
+  }
+  return null;
+}
+
+/** Prefer body date; otherwise coerce an existing ISO/date default. */
+function dateFromBodyOrDefault(body, defaults, field) {
+  if (body?.[field] != null && body[field] !== '') {
+    return requireDate(body[field], field);
+  }
+  const fallback = defaults?.[field];
+  if (fallback == null || fallback === '') return null;
+  if (fallback instanceof Date) return fallback;
+  return requireDate(fallback, field);
+}
+
+function requirePolicyWriteFields(payload) {
+  requireString(payload.policyCode, 'policy_code');
+  requireString(payload.policyName, 'policy_name');
+  requirePositiveInt(payload.payrollId, 'payroll_id');
+  requirePositiveInt(payload.sourcePayrollElementId, 'source_payroll_element_id');
+  requireString(payload.divisorMethodCode, 'divisor_method_code');
+}
+
+function requireMappingWriteFields(payload) {
+  requireString(payload.sourceTypeCode, 'source_type_code');
+  requirePositiveInt(payload.payrollElementId, 'payroll_element_id');
+  requireString(payload.transferUnitCode, 'transfer_unit_code');
+}
+
 // =====================================================================================
 // Hourly rate policies
 // =====================================================================================
@@ -66,30 +102,22 @@ export async function getHourlyRatePolicyHandler(req, res) {
 function policyPayloadFromBody(body, { policyId = null, actor, defaults = {} } = {}) {
   return {
     hourlyRatePolicyId: policyId,
-    enterpriseId: body.enterprise_id ?? defaults.enterprise_id,
-    payrollId: body.payroll_id ?? defaults.payroll_id,
-    policyCode: body.policy_code ?? defaults.policy_code,
-    policyName: body.policy_name ?? defaults.policy_name,
-    sourcePayrollElementId: body.source_payroll_element_id ?? defaults.source_payroll_element_id,
-    sourceValueCode: body.source_value_code ?? defaults.source_value_code ?? 'PAY_VALUE',
-    divisorMethodCode: body.divisor_method_code ?? defaults.divisor_method_code,
-    fixedDivisor: body.fixed_divisor ?? defaults.fixed_divisor,
-    standardHoursPerWeek: body.standard_hours_per_week ?? defaults.standard_hours_per_week,
-    weeksPerYear: body.weeks_per_year ?? defaults.weeks_per_year,
-    monthsPerYear: body.months_per_year ?? defaults.months_per_year,
-    roundingScale: body.rounding_scale ?? defaults.rounding_scale,
-    effectiveStartDate: body.effective_start_date
-      ? requireDate(body.effective_start_date, 'effective_start_date')
-      : defaults.effective_start_date
-        ? new Date(defaults.effective_start_date)
-        : null,
-    effectiveEndDate: body.effective_end_date
-      ? requireDate(body.effective_end_date, 'effective_end_date')
-      : defaults.effective_end_date
-        ? new Date(defaults.effective_end_date)
-        : null,
-    statusCode: body.status_code ?? body.status ?? defaults.status_code ?? 'DRAFT',
-    description: body.description ?? defaults.description,
+    enterpriseId: pickField(body, defaults, 'enterprise_id'),
+    payrollId: pickField(body, defaults, 'payroll_id'),
+    policyCode: pickField(body, defaults, 'policy_code'),
+    policyName: pickField(body, defaults, 'policy_name'),
+    sourcePayrollElementId: pickField(body, defaults, 'source_payroll_element_id'),
+    sourceValueCode: pickField(body, defaults, 'source_value_code') ?? 'PAY_VALUE',
+    divisorMethodCode: pickField(body, defaults, 'divisor_method_code'),
+    fixedDivisor: pickField(body, defaults, 'fixed_divisor'),
+    standardHoursPerWeek: pickField(body, defaults, 'standard_hours_per_week'),
+    weeksPerYear: pickField(body, defaults, 'weeks_per_year'),
+    monthsPerYear: pickField(body, defaults, 'months_per_year'),
+    roundingScale: pickField(body, defaults, 'rounding_scale'),
+    effectiveStartDate: dateFromBodyOrDefault(body, defaults, 'effective_start_date'),
+    effectiveEndDate: dateFromBodyOrDefault(body, defaults, 'effective_end_date'),
+    statusCode: pickField(body, defaults, 'status_code', 'status') ?? 'DRAFT',
+    description: pickField(body, defaults, 'description'),
     actor
   };
 }
@@ -98,17 +126,12 @@ export async function createHourlyRatePolicyHandler(req, res) {
   return withPayrollErrorHandling(res, async () => {
     const enterpriseId = resolveEnterpriseId(req, req.body.enterprise_id);
     assertEnterpriseAccess(req, enterpriseId);
-    const actor = resolveAuditActor(req);
-    const payload = policyPayloadFromBody(req.body, { actor });
+    const payload = policyPayloadFromBody(req.body, { actor: resolveAuditActor(req) });
     payload.enterpriseId = enterpriseId;
-    requireString(payload.policyCode, 'policy_code');
-    requireString(payload.policyName, 'policy_name');
-    requirePositiveInt(payload.payrollId, 'payroll_id');
-    requirePositiveInt(payload.sourcePayrollElementId, 'source_payroll_element_id');
-    requireString(payload.divisorMethodCode, 'divisor_method_code');
+    requirePolicyWriteFields(payload);
     requireDate(payload.effectiveStartDate, 'effective_start_date');
 
-    const outcome = await tm.upsertHourlyRatePolicy(payload);
+    const outcome = await tm.createOrUpdateHourlyRatePolicy(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const created = await tm.getHourlyRatePolicyById(outcome.data.hourly_rate_policy_id);
     return sendOutcome(
@@ -124,21 +147,20 @@ export async function updateHourlyRatePolicyHandler(req, res) {
     const existing = await tm.getHourlyRatePolicyById(policyId);
     if (!existing) return sendOutcome(res, notFoundOutcome('Hourly rate policy not found.'));
     assertEnterpriseAccess(req, existing.enterprise_id);
-    const actor = resolveAuditActor(req);
-    const payload = policyPayloadFromBody(req.body, { policyId, actor, defaults: existing });
+    const payload = policyPayloadFromBody(req.body, {
+      policyId,
+      actor: resolveAuditActor(req),
+      defaults: existing
+    });
     payload.enterpriseId = existing.enterprise_id;
-    requireString(payload.policyCode, 'policy_code');
-    requireString(payload.policyName, 'policy_name');
-    requirePositiveInt(payload.payrollId, 'payroll_id');
-    requirePositiveInt(payload.sourcePayrollElementId, 'source_payroll_element_id');
-    requireString(payload.divisorMethodCode, 'divisor_method_code');
+    requirePolicyWriteFields(payload);
     if (!payload.effectiveStartDate) {
       throw new ValidationError('effective_start_date is required', [
         { field: 'effective_start_date', message: 'effective_start_date is required' }
       ]);
     }
 
-    const outcome = await tm.upsertHourlyRatePolicy(payload);
+    const outcome = await tm.createOrUpdateHourlyRatePolicy(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const updated = await tm.getHourlyRatePolicyById(policyId);
     return sendOutcome(res, okMutation(outcome.message || 'Hourly rate policy updated successfully.', updated ?? outcome.data));
@@ -152,21 +174,16 @@ export async function patchHourlyRatePolicyStatusHandler(req, res) {
     if (!existing) return sendOutcome(res, notFoundOutcome('Hourly rate policy not found.'));
     assertEnterpriseAccess(req, existing.enterprise_id);
     const statusCode = requireString(req.body.status_code ?? req.body.status, 'status_code');
-    const actor = resolveAuditActor(req);
     const payload = policyPayloadFromBody(
       { ...existing, status_code: statusCode },
-      { policyId, actor, defaults: existing }
+      { policyId, actor: resolveAuditActor(req), defaults: existing }
     );
     payload.enterpriseId = existing.enterprise_id;
     payload.statusCode = statusCode;
-    payload.effectiveStartDate = existing.effective_start_date
-      ? new Date(existing.effective_start_date)
-      : null;
-    payload.effectiveEndDate = existing.effective_end_date
-      ? new Date(existing.effective_end_date)
-      : null;
+    payload.effectiveStartDate = dateFromBodyOrDefault({}, existing, 'effective_start_date');
+    payload.effectiveEndDate = dateFromBodyOrDefault({}, existing, 'effective_end_date');
 
-    const outcome = await tm.upsertHourlyRatePolicy(payload);
+    const outcome = await tm.createOrUpdateHourlyRatePolicy(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const updated = await tm.getHourlyRatePolicyById(policyId);
     return sendOutcome(res, okMutation(outcome.message || 'Hourly rate policy status updated.', updated ?? outcome.data));
@@ -260,40 +277,43 @@ export async function getSourceMappingHandler(req, res) {
 function mappingPayloadFromBody(body, { mappingId = null, actor, defaults = {} } = {}) {
   return {
     payrollSourceMappingId: mappingId,
-    enterpriseId: body.enterprise_id ?? defaults.enterprise_id,
-    sourceTypeCode: body.source_type_code ?? defaults.source_type_code,
-    sourceSubtypeCode: body.source_subtype_code ?? defaults.source_subtype_code,
-    payrollId: body.payroll_id ?? defaults.payroll_id,
-    payrollElementId: body.payroll_element_id ?? defaults.payroll_element_id,
-    payrollSourceCode: body.payroll_source_code ?? defaults.payroll_source_code,
-    calculationOwnerCode: body.calculation_owner_code ?? defaults.calculation_owner_code,
-    transferUnitCode: body.transfer_unit_code ?? defaults.transfer_unit_code,
-    hoursInputValueName: body.hours_input_value_name ?? defaults.hours_input_value_name,
-    daysInputValueName: body.days_input_value_name ?? defaults.days_input_value_name,
-    multiplierInputName: body.multiplier_input_name ?? defaults.multiplier_input_name,
-    rateTypeInputName: body.rate_type_input_name ?? defaults.rate_type_input_name,
-    sourceDateInputName: body.source_date_input_name ?? defaults.source_date_input_name,
-    signMultiplier: body.sign_multiplier ?? defaults.sign_multiplier,
-    defaultCurrencyCode: body.default_currency_code ?? defaults.default_currency_code,
-    effectiveStartDate: body.effective_start_date
-      ? requireDate(body.effective_start_date, 'effective_start_date')
-      : defaults.effective_start_date
-        ? new Date(defaults.effective_start_date)
-        : null,
-    effectiveEndDate: body.effective_end_date
-      ? requireDate(body.effective_end_date, 'effective_end_date')
-      : defaults.effective_end_date
-        ? new Date(defaults.effective_end_date)
-        : null,
-    statusCode: body.status_code ?? body.status ?? defaults.status_code ?? 'ACTIVE',
-    description: body.description ?? defaults.description,
+    enterpriseId: pickField(body, defaults, 'enterprise_id'),
+    sourceTypeCode: pickField(body, defaults, 'source_type_code'),
+    sourceSubtypeCode: pickField(body, defaults, 'source_subtype_code'),
+    payrollId: pickField(body, defaults, 'payroll_id'),
+    payrollElementId: pickField(body, defaults, 'payroll_element_id'),
+    payrollSourceCode: pickField(body, defaults, 'payroll_source_code'),
+    calculationOwnerCode: pickField(body, defaults, 'calculation_owner_code'),
+    transferUnitCode: pickField(body, defaults, 'transfer_unit_code'),
+    hoursInputValueName: pickField(body, defaults, 'hours_input_value_name'),
+    daysInputValueName: pickField(body, defaults, 'days_input_value_name'),
+    // REST/view: *_input_value_name → Oracle: P_*_INPUT_NAME
+    multiplierInputName: pickField(
+      body,
+      defaults,
+      'multiplier_input_name',
+      'multiplier_input_value_name'
+    ),
+    rateTypeInputName: pickField(body, defaults, 'rate_type_input_name', 'rate_type_input_value_name'),
+    sourceDateInputName: pickField(
+      body,
+      defaults,
+      'source_date_input_name',
+      'source_date_input_value_name'
+    ),
+    signMultiplier: pickField(body, defaults, 'sign_multiplier'),
+    defaultCurrencyCode: pickField(body, defaults, 'default_currency_code'),
+    effectiveStartDate: dateFromBodyOrDefault(body, defaults, 'effective_start_date'),
+    effectiveEndDate: dateFromBodyOrDefault(body, defaults, 'effective_end_date'),
+    statusCode: pickField(body, defaults, 'status_code', 'status') ?? 'ACTIVE',
+    description: pickField(body, defaults, 'description'),
     actor,
-    hourlyRateInputValueName: body.hourly_rate_input_value_name ?? defaults.hourly_rate_input_value_name,
-    hourlyRateSourceCode: body.hourly_rate_source_code ?? defaults.hourly_rate_source_code,
-    hourlyRateFixedValue: body.hourly_rate_fixed_value ?? defaults.hourly_rate_fixed_value,
-    hourlyRateSourceElementId: body.hourly_rate_source_element_id ?? defaults.hourly_rate_source_element_id,
-    hourlyRateSourceValueCode: body.hourly_rate_source_value_code ?? defaults.hourly_rate_source_value_code,
-    hourlyRateDivisor: body.hourly_rate_divisor ?? defaults.hourly_rate_divisor
+    hourlyRateInputValueName: pickField(body, defaults, 'hourly_rate_input_value_name'),
+    hourlyRateSourceCode: pickField(body, defaults, 'hourly_rate_source_code'),
+    hourlyRateFixedValue: pickField(body, defaults, 'hourly_rate_fixed_value'),
+    hourlyRateSourceElementId: pickField(body, defaults, 'hourly_rate_source_element_id'),
+    hourlyRateSourceValueCode: pickField(body, defaults, 'hourly_rate_source_value_code'),
+    hourlyRateDivisor: pickField(body, defaults, 'hourly_rate_divisor')
   };
 }
 
@@ -301,15 +321,12 @@ export async function createSourceMappingHandler(req, res) {
   return withPayrollErrorHandling(res, async () => {
     const enterpriseId = resolveEnterpriseId(req, req.body.enterprise_id);
     assertEnterpriseAccess(req, enterpriseId);
-    const actor = resolveAuditActor(req);
-    const payload = mappingPayloadFromBody(req.body, { actor });
+    const payload = mappingPayloadFromBody(req.body, { actor: resolveAuditActor(req) });
     payload.enterpriseId = enterpriseId;
-    requireString(payload.sourceTypeCode, 'source_type_code');
-    requirePositiveInt(payload.payrollElementId, 'payroll_element_id');
-    requireString(payload.transferUnitCode, 'transfer_unit_code');
+    requireMappingWriteFields(payload);
     requireDate(payload.effectiveStartDate, 'effective_start_date');
 
-    const outcome = await tm.upsertSourceMapping(payload);
+    const outcome = await tm.createOrUpdateSourceMapping(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const created = await tm.getSourceMappingById(outcome.data.payroll_source_mapping_id);
     return sendOutcome(
@@ -325,19 +342,18 @@ export async function updateSourceMappingHandler(req, res) {
     const existing = await tm.getSourceMappingById(mappingId);
     if (!existing) return sendOutcome(res, notFoundOutcome('Payroll source mapping not found.'));
     assertEnterpriseAccess(req, existing.enterprise_id);
-    const actor = resolveAuditActor(req);
-    const payload = mappingPayloadFromBody(req.body, { mappingId, actor, defaults: existing });
+    const payload = mappingPayloadFromBody(req.body, {
+      mappingId,
+      actor: resolveAuditActor(req),
+      defaults: existing
+    });
     payload.enterpriseId = existing.enterprise_id;
-    requireString(payload.sourceTypeCode, 'source_type_code');
-    requirePositiveInt(payload.payrollElementId, 'payroll_element_id');
-    requireString(payload.transferUnitCode, 'transfer_unit_code');
+    requireMappingWriteFields(payload);
     if (!payload.effectiveStartDate) {
-      payload.effectiveStartDate = existing.effective_start_date
-        ? new Date(existing.effective_start_date)
-        : null;
+      payload.effectiveStartDate = dateFromBodyOrDefault({}, existing, 'effective_start_date');
     }
 
-    const outcome = await tm.upsertSourceMapping(payload);
+    const outcome = await tm.createOrUpdateSourceMapping(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const updated = await tm.getSourceMappingById(mappingId);
     return sendOutcome(res, okMutation(outcome.message || 'Payroll source mapping updated successfully.', updated ?? outcome.data));
@@ -351,21 +367,16 @@ export async function patchSourceMappingStatusHandler(req, res) {
     if (!existing) return sendOutcome(res, notFoundOutcome('Payroll source mapping not found.'));
     assertEnterpriseAccess(req, existing.enterprise_id);
     const statusCode = requireString(req.body.status_code ?? req.body.status, 'status_code');
-    const actor = resolveAuditActor(req);
     const payload = mappingPayloadFromBody(
       { status_code: statusCode },
-      { mappingId, actor, defaults: existing }
+      { mappingId, actor: resolveAuditActor(req), defaults: existing }
     );
     payload.enterpriseId = existing.enterprise_id;
     payload.statusCode = statusCode;
-    payload.effectiveStartDate = existing.effective_start_date
-      ? new Date(existing.effective_start_date)
-      : null;
-    payload.effectiveEndDate = existing.effective_end_date
-      ? new Date(existing.effective_end_date)
-      : null;
+    payload.effectiveStartDate = dateFromBodyOrDefault({}, existing, 'effective_start_date');
+    payload.effectiveEndDate = dateFromBodyOrDefault({}, existing, 'effective_end_date');
 
-    const outcome = await tm.upsertSourceMapping(payload);
+    const outcome = await tm.createOrUpdateSourceMapping(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
     const updated = await tm.getSourceMappingById(mappingId);
     return sendOutcome(res, okMutation(outcome.message || 'Payroll source mapping status updated.', updated ?? outcome.data));

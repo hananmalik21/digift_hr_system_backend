@@ -6,11 +6,11 @@ import { toAuditActorId } from '../../../../utils/requestUtils.js';
 
 /**
  * Work Pattern Model
- * Handles all database operations for ENT.TM_WORK_PATTERNS and ENT.TM_WORK_PATTERN_DAYS tables
+ * Handles all database operations for TM.TM_WORK_PATTERNS and TM.TM_WORK_PATTERN_DAYS tables
  */
 class WorkPatternModel {
-  static TABLE_NAME = 'ENT.TM_WORK_PATTERNS';
-  static DAYS_TABLE_NAME = 'ENT.TM_WORK_PATTERN_DAYS';
+  static TABLE_NAME = 'TM.TM_WORK_PATTERNS';
+  static DAYS_TABLE_NAME = 'TM.TM_WORK_PATTERN_DAYS';
 
   /**
    * Convert object keys from UPPER_CASE to lowercase snake_case
@@ -94,7 +94,7 @@ class WorkPatternModel {
         let workPatternId;
         try {
           const seqResult = await connection.execute(
-            `SELECT ENT.TM_WORK_PATTERNS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
+            `SELECT TM.TM_WORK_PATTERNS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
             [],
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
           );
@@ -136,7 +136,7 @@ class WorkPatternModel {
           tenantId: { val: data.TENANT_ID, dir: oracledb.BIND_IN },
           patternCode: { val: data.PATTERN_CODE, dir: oracledb.BIND_IN },
           patternNameEn: { val: data.PATTERN_NAME_EN, dir: oracledb.BIND_IN },
-          patternNameAr: { val: data.PATTERN_NAME_AR || null, dir: oracledb.BIND_IN },
+          patternNameAr: { val: data.PATTERN_NAME_AR || data.PATTERN_NAME_EN, dir: oracledb.BIND_IN },
           patternType: { val: data.PATTERN_TYPE, dir: oracledb.BIND_IN },
           totalHoursPerWeek: { val: data.TOTAL_HOURS_PER_WEEK, dir: oracledb.BIND_IN },
           status: { val: data.STATUS || 'ACTIVE', dir: oracledb.BIND_IN },

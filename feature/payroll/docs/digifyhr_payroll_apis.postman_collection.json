@@ -9703,7 +9703,7 @@
                 "source-mappings"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPSERT_SOURCE_MAPPING (create).",
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (create).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"enterprise_id\": 1,\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
@@ -9745,7 +9745,7 @@
                 "{{payroll_source_mapping_id}}"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPSERT_SOURCE_MAPPING (update).",
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (update).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
@@ -9788,7 +9788,7 @@
                 "status"
               ]
             },
-            "description": "Status change via CREATE_OR_UPSERT_SOURCE_MAPPING (no dedicated SET_STATUS procedure).",
+            "description": "Status change via CREATE_OR_UPDATE_SOURCE_MAPPING (no dedicated SET_STATUS procedure).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"status_code\": \"INACTIVE\"\n}",
@@ -10152,7 +10152,7 @@
                 "hourly-rate-policies"
               ]
             },
-            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.CREATE_OR_UPSERT_HOURLY_RATE_POLICY",
+            "description": "TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG.CREATE_OR_UPDATE_HOURLY_RATE_POLICY",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 13,\n  \"policy_code\": \"API_TEST_POLICY\",\n  \"policy_name\": \"API Test Policy\",\n  \"source_payroll_element_id\": 1,\n  \"source_value_code\": \"PAY_VALUE\",\n  \"divisor_method_code\": \"MONTHLY_STANDARD_HOURS\",\n  \"standard_hours_per_week\": 40,\n  \"weeks_per_year\": 52,\n  \"months_per_year\": 12,\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"DRAFT\"\n}",

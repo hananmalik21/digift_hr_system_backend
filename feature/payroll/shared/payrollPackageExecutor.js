@@ -38,7 +38,7 @@ export function outNumber(name) {
   return { [name]: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER } };
 }
 
-/** IN/OUT NUMBER bind (create-or-upsert id patterns). */
+/** IN/OUT NUMBER bind (CREATE_OR_UPDATE id patterns; NULL on create). */
 export function inoutNumber(value) {
   return {
     dir: oracledb.BIND_INOUT,
@@ -73,6 +73,15 @@ export function stringBind(value, maxSize = 4000) {
 
 export function dateBind(value) {
   if (value == null || value === '') return { val: null, type: oracledb.DATE };
+  // Date-only strings bind as local midnight so Oracle DATE matches the business day.
+  if (!(value instanceof Date)) {
+    const s = String(value).trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) {
+      const local = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      return { val: Number.isFinite(local.getTime()) ? local : null, type: oracledb.DATE };
+    }
+  }
   const d = value instanceof Date ? value : new Date(String(value));
   return { val: Number.isFinite(d.getTime()) ? d : null, type: oracledb.DATE };
 }

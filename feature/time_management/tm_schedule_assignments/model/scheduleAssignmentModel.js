@@ -7,7 +7,7 @@ import { employeeAccessPredicate } from '../../../../utils/userContext.js';
 
 /**
  * Schedule Assignment Model
- * Table: ENT.TM_SCHEDULE_ASSIGNMENTS
+ * Table: TM.TM_SCHEDULE_ASSIGNMENTS
  *
  * DB truth:
  * - DEPARTMENT_ID is RAW(16) FK -> ENT.ORG_UNITS(ORG_UNIT_ID)
@@ -24,7 +24,7 @@ import { employeeAccessPredicate } from '../../../../utils/userContext.js';
  * ✅ work_schedule object disappearing: always set from cache and fallback fetch if missing
  */
 class ScheduleAssignmentModel {
-  static TABLE_NAME = 'ENT.TM_SCHEDULE_ASSIGNMENTS';
+  static TABLE_NAME = 'TM.TM_SCHEDULE_ASSIGNMENTS';
 
   /* =========================
    * Helpers
@@ -148,7 +148,7 @@ class ScheduleAssignmentModel {
     try {
       const sql = `
         SELECT 1
-        FROM ENT.TM_WORK_SCHEDULES
+        FROM TM.TM_WORK_SCHEDULES
         WHERE WORK_SCHEDULE_ID = :1
           AND TENANT_ID = :2
       `;
@@ -235,7 +235,7 @@ class ScheduleAssignmentModel {
           SCHEDULE_CODE,
           SCHEDULE_NAME_EN,
           SCHEDULE_NAME_AR
-        FROM ENT.TM_WORK_SCHEDULES
+        FROM TM.TM_WORK_SCHEDULES
         WHERE WORK_SCHEDULE_ID = :1
           AND TENANT_ID = :2
       `;
@@ -261,7 +261,7 @@ class ScheduleAssignmentModel {
           SCHEDULE_CODE,
           SCHEDULE_NAME_EN,
           SCHEDULE_NAME_AR
-        FROM ENT.TM_WORK_SCHEDULES
+        FROM TM.TM_WORK_SCHEDULES
         WHERE WORK_SCHEDULE_ID IN (${placeholders})
           AND TENANT_ID = :1
       `;
@@ -832,7 +832,7 @@ class ScheduleAssignmentModel {
         let scheduleAssignmentId;
         try {
           const seqResult = await connection.execute(
-            `SELECT ENT.TM_SCHEDULE_ASSIGNMENTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
+            `SELECT TM.TM_SCHEDULE_ASSIGNMENTS_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
             [],
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
           );
@@ -881,6 +881,32 @@ class ScheduleAssignmentModel {
           }
         }
 
+        const departmentRaw =
+          (data.DEPARTMENT_ID === null || data.DEPARTMENT_ID === undefined || data.DEPARTMENT_ID === '')
+            ? null
+            : this.hexToRawBuffer(data.DEPARTMENT_ID);
+
+        // TM.TM_SCHEDULE_ASSIGNMENTS.ORG_UNIT_ID_GUID is NOT NULL + FK to ENT.ORG_UNITS.
+        // DEPARTMENT assignments use DEPARTMENT_ID; EMPLOYEE assignments still need a valid org GUID.
+        let orgUnitIdGuid = departmentRaw;
+        if (!orgUnitIdGuid && data.ORG_UNIT_ID_GUID) {
+          orgUnitIdGuid = this.hexToRawBuffer(data.ORG_UNIT_ID_GUID);
+        }
+        if (!orgUnitIdGuid) {
+          const orgRes = await connection.execute(
+            `SELECT ORG_UNIT_ID
+               FROM ENT.ORG_UNITS
+              WHERE ENTERPRISE_ID = :1
+              FETCH FIRST 1 ROW ONLY`,
+            [data.TENANT_ID],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+          );
+          orgUnitIdGuid = orgRes.rows?.[0]?.ORG_UNIT_ID ?? null;
+        }
+        if (!orgUnitIdGuid) {
+          throw new ValidationError('org_unit_id_guid is required for schedule assignments');
+        }
+
         const insertSql = `
           INSERT INTO ${this.TABLE_NAME} (
             SCHEDULE_ASSIGNMENT_ID,
@@ -893,6 +919,7 @@ class ScheduleAssignmentModel {
             EFFECTIVE_END_DATE,
             STATUS,
             NOTES,
+            ORG_UNIT_ID_GUID,
             CREATION_DATE,
             CREATED_BY,
             LAST_UPDATE_DATE,
@@ -908,6 +935,7 @@ class ScheduleAssignmentModel {
             :effectiveEndDate,
             :status,
             :notes,
+            :orgUnitIdGuid,
             :creationDate,
             :createdBy,
             :lastUpdateDate,
@@ -915,11 +943,6 @@ class ScheduleAssignmentModel {
           )
           RETURNING SCHEDULE_ASSIGNMENT_ID INTO :returnId
         `;
-
-        const departmentRaw =
-          (data.DEPARTMENT_ID === null || data.DEPARTMENT_ID === undefined || data.DEPARTMENT_ID === '')
-            ? null
-            : this.hexToRawBuffer(data.DEPARTMENT_ID);
 
         const binds = {
           scheduleAssignmentId: { val: scheduleAssignmentId, dir: oracledb.BIND_IN },
@@ -932,6 +955,7 @@ class ScheduleAssignmentModel {
           effectiveEndDate: { val: effectiveEndDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           status: { val: status, dir: oracledb.BIND_IN },
           notes: { val: data.NOTES ?? null, dir: oracledb.BIND_IN },
+          orgUnitIdGuid: { val: orgUnitIdGuid, dir: oracledb.BIND_IN },
           creationDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
           createdBy: { val: actor, dir: oracledb.BIND_IN },
           lastUpdateDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -995,7 +1019,7 @@ class ScheduleAssignmentModel {
 
       // FNDSEC DB-level data access. Employee rows use CAN_ACCESS_EMPLOYEE;
       // department/org rows use CAN_ACCESS_ORG_UNIT against DEPARTMENT_ID
-      // (the org-unit RAW column on ENT.TM_SCHEDULE_ASSIGNMENTS).
+      // (the org-unit RAW column on TM.TM_SCHEDULE_ASSIGNMENTS).
       //
       // Named binds (object) are required here because the security predicate
       // references :user_id more than once. With oracledb positional/array

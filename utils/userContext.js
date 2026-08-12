@@ -274,7 +274,7 @@ export function nullableEmployeeAccessPredicate(enterpriseIdExpr, employeeIdExpr
  *   ));
  *
  * Use when the source table mixes employee-level and non-employee-level rows
- * (e.g. ENT.TM_SCHEDULE_ASSIGNMENTS where ASSIGNMENT_LEVEL may be EMPLOYEE or
+ * (e.g. TM.TM_SCHEDULE_ASSIGNMENTS where ASSIGNMENT_LEVEL may be EMPLOYEE or
  * DEPARTMENT).
  *
  * @param {string} enterpriseIdExpr
