@@ -40,7 +40,7 @@ export class DatabaseError extends AppError {
       
       // Map specific constraint names to user-friendly messages
       if (constraint) {
-        // Remove schema prefix if present (e.g., "ENT.TM_SHIFTS_U1" -> "TM_SHIFTS_U1")
+        // Remove schema prefix if present (e.g., "TM.TM_SHIFTS_U1" -> "TM_SHIFTS_U1")
         const constraintName = constraint.includes('.') 
           ? constraint.split('.').pop() 
           : constraint;

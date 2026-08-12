@@ -13,15 +13,17 @@
  *   TM.V_TM_PAYROLL_TRANSFER_BATCHES / _LINES / _HISTORY
  */
 
-import oracledb from 'oracledb';
 import {
   dateBind,
   executePayrollPackage,
   inoutNumber,
   numberBind,
+  outNumber,
+  outString,
   queryPayList,
   queryPayOne,
-  stringBind
+  stringBind,
+  successOutBinds
 } from '../shared/index.js';
 
 const POLICY_PKG = 'TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG';
@@ -86,12 +88,13 @@ export async function getHourlyRatePolicyById(policyId, enterpriseId = null) {
 }
 
 /**
- * CREATE_OR_UPSERT_HOURLY_RATE_POLICY — no P_SUCCESS OUT; success = no exception + returned id.
+ * CREATE_OR_UPDATE_HOURLY_RATE_POLICY — no P_SUCCESS OUT; success = no exception + returned id.
+ * Oracle package exposes CREATE_OR_UPDATE_* only (no UPSERT synonym for policies).
  */
-export async function upsertHourlyRatePolicy(payload) {
+export async function createOrUpdateHourlyRatePolicy(payload) {
   const plsql = `
 BEGIN
-  ${POLICY_PKG}.CREATE_OR_UPSERT_HOURLY_RATE_POLICY(
+  ${POLICY_PKG}.CREATE_OR_UPDATE_HOURLY_RATE_POLICY(
     P_HOURLY_RATE_POLICY_ID     => :p_hourly_rate_policy_id,
     P_ENTERPRISE_ID             => :p_enterprise_id,
     P_PAYROLL_ID                => :p_payroll_id,
@@ -160,8 +163,7 @@ END;`;
     {
       p_hourly_rate_policy_id: numberBind(policyId),
       p_effective_date: dateBind(effectiveDate),
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to validate hourly rate policy. Please try again.',
@@ -194,13 +196,12 @@ END;`;
       p_hourly_rate_policy_id: numberBind(policyId),
       p_employee_id: numberBind(employeeId),
       p_effective_date: dateBind(effectiveDate),
-      p_source_element_entry_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_source_base_value: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_resolved_divisor: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_resolved_hourly_rate: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_source_reference: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 },
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_source_element_entry_id'),
+      ...outNumber('p_source_base_value'),
+      ...outNumber('p_resolved_divisor'),
+      ...outNumber('p_resolved_hourly_rate'),
+      ...outString('p_source_reference', 4000),
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to resolve employee hourly rate. Please try again.',
@@ -236,8 +237,7 @@ END;`;
       p_hourly_rate_policy_id: numberBind(policyId),
       p_payroll_source_mapping_id: numberBind(mappingId),
       p_actor: stringBind(actor, 100),
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to apply hourly rate policy to source mapping. Please try again.',
@@ -308,10 +308,13 @@ export async function getSourceMappingById(mappingId, enterpriseId = null) {
   });
 }
 
-export async function upsertSourceMapping(payload) {
+/**
+ * CREATE_OR_UPDATE_SOURCE_MAPPING — canonical public API (IN OUT id; NULL on create).
+ */
+export async function createOrUpdateSourceMapping(payload) {
   const plsql = `
 BEGIN
-  ${XFER_PKG}.CREATE_OR_UPSERT_SOURCE_MAPPING(
+  ${XFER_PKG}.CREATE_OR_UPDATE_SOURCE_MAPPING(
     P_PAYROLL_SOURCE_MAPPING_ID      => :p_payroll_source_mapping_id,
     P_ENTERPRISE_ID                  => :p_enterprise_id,
     P_SOURCE_TYPE_CODE               => :p_source_type_code,
@@ -415,15 +418,15 @@ END;`;
       p_reference_employee_id: numberBind(payload.referenceEmployeeId),
       p_effective_date: dateBind(payload.effectiveDate),
       p_actor: stringBind(payload.actor, 100),
-      p_resolved_hourly_rate_policy_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_source_element_entry_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_source_base_value: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_resolved_divisor: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_resolved_hourly_rate: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_source_reference: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 },
-      p_fixed_transfer_line_count: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_ready_flag: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 10 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_resolved_hourly_rate_policy_id'),
+      ...outNumber('p_source_element_entry_id'),
+      ...outNumber('p_source_base_value'),
+      ...outNumber('p_resolved_divisor'),
+      ...outNumber('p_resolved_hourly_rate'),
+      ...outString('p_source_reference', 4000),
+      ...outNumber('p_fixed_transfer_line_count'),
+      ...outString('p_ready_flag', 10),
+      ...outString('p_message', 4000)
     },
     {
       genericError: 'Unable to validate production hourly-rate readiness. Please try again.',
@@ -468,9 +471,8 @@ END;`;
       p_reference_employee_id: numberBind(payload.referenceEmployeeId),
       p_effective_date: dateBind(payload.effectiveDate),
       p_actor: stringBind(payload.actor, 100),
-      p_resolved_hourly_rate: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_resolved_hourly_rate'),
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to activate production hourly-rate mapping. Please try again.',
@@ -501,8 +503,7 @@ END;`;
       p_payroll_source_mapping_id: numberBind(mappingId),
       p_reason: stringBind(reason, 4000),
       p_actor: stringBind(actor, 100),
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to deactivate production hourly-rate mapping. Please try again.',
@@ -692,7 +693,7 @@ END;`;
       p_period_end_date: dateBind(payload.periodEndDate),
       p_transfer_batch_number: stringBind(payload.transferBatchNumber, 80),
       p_actor: stringBind(payload.actor, 100),
-      p_payroll_transfer_batch_id: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER }
+      ...outNumber('p_payroll_transfer_batch_id')
     },
     {
       genericError: 'Unable to create transfer batch. Please try again.',
@@ -720,9 +721,9 @@ END;`;
     {
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_actor: stringBind(actor, 100),
-      p_total_source_records: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_total_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_total_source_records'),
+      ...outNumber('p_total_transfer_lines'),
+      ...outString('p_message', 4000)
     },
     {
       genericError: 'Unable to preview transfer batch. Please try again.',
@@ -753,10 +754,9 @@ END;`;
     {
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_actor: stringBind(actor, 100),
-      p_validated_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_error_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_validated_transfer_lines'),
+      ...outNumber('p_error_transfer_lines'),
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to validate transfer batch. Please try again.',
@@ -787,10 +787,9 @@ END;`;
     {
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_actor: stringBind(actor, 100),
-      p_transferred_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_error_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_transferred_transfer_lines'),
+      ...outNumber('p_error_transfer_lines'),
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to transfer batch to payroll. Please try again.',
@@ -822,11 +821,11 @@ END;`;
     {
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_actor: stringBind(actor, 100),
-      p_reconciliation_status_code: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_source_total: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_payroll_total: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_variance: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outString('p_reconciliation_status_code', 40),
+      ...outNumber('p_source_total'),
+      ...outNumber('p_payroll_total'),
+      ...outNumber('p_variance'),
+      ...outString('p_message', 4000)
     },
     {
       genericError: 'Unable to reconcile transfer batch. Please try again.',
@@ -856,7 +855,7 @@ END;`;
     {
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_actor: stringBind(actor, 100),
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outString('p_message', 4000)
     },
     {
       genericError: 'Unable to lock transfer batch. Please try again.',
@@ -885,10 +884,9 @@ END;`;
       p_payroll_transfer_batch_id: numberBind(batchId),
       p_reversal_reason: stringBind(reversalReason, 4000),
       p_actor: stringBind(actor, 100),
-      p_reversed_transfer_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_reversal_required_lines: { dir: oracledb.BIND_OUT, type: oracledb.NUMBER },
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...outNumber('p_reversed_transfer_lines'),
+      ...outNumber('p_reversal_required_lines'),
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to reverse transfer batch. Please try again.',
@@ -917,8 +915,7 @@ END;`;
     {
       p_payroll_transfer_line_id: numberBind(lineId),
       p_actor: stringBind(actor, 100),
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to retry transfer line. Please try again.',
@@ -945,8 +942,7 @@ END;`;
       p_payroll_transfer_line_id: numberBind(lineId),
       p_reversal_reason: stringBind(reversalReason, 4000),
       p_actor: stringBind(actor, 100),
-      p_success: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 40 },
-      p_message: { dir: oracledb.BIND_OUT, type: oracledb.STRING, maxSize: 4000 }
+      ...successOutBinds()
     },
     {
       genericError: 'Unable to reverse transfer line. Please try again.',

@@ -8,12 +8,6 @@ import assert from 'node:assert/strict';
 import { ValidationError, ForbiddenError } from '../../../utils/errors/index.js';
 import { mapPayrollOracleError } from '../shared/payrollOracleErrors.js';
 import {
-  packageSuccessIsTruthy,
-  numberBind,
-  stringBind,
-  ynBind
-} from '../shared/payrollPackageExecutor.js';
-import {
   toIsoDateOrNull,
   toIsoDateTimeOrNull,
   toNumberOrNull,
@@ -29,6 +23,13 @@ import {
   parsePaginationQuery,
   assertEnterpriseAccess
 } from '../shared/payrollValidation.js';
+import {
+  packageSuccessIsTruthy,
+  numberBind,
+  stringBind,
+  ynBind,
+  dateBind
+} from '../shared/payrollPackageExecutor.js';
 import {
   okList,
   okGet,
@@ -85,7 +86,11 @@ test('bind helpers coerce values', () => {
 });
 
 test('row mapper converts dates, numbers, guids', async () => {
+  // Noon UTC stays on the same local calendar day in common offsets.
   assert.equal(toIsoDateOrNull(new Date('2026-08-01T12:00:00Z')), '2026-08-01');
+  // Oracle DATE often materialises as local midnight (UTC-shifted ISO string).
+  assert.equal(toIsoDateOrNull(new Date(2026, 7, 1)), '2026-08-01');
+  assert.equal(toIsoDateOrNull('2026-08-01'), '2026-08-01');
   assert.ok(toIsoDateTimeOrNull(new Date('2026-08-01T12:00:00Z')).startsWith('2026-08-01'));
   assert.equal(toNumberOrNull('12.5'), 12.5);
   assert.equal(toNumberOrNull(null), null);
@@ -95,7 +100,7 @@ test('row mapper converts dates, numbers, guids', async () => {
     {
       RUN_ID: 163,
       RUN_GUID: '583A83ABDF9A754DE0631718000AF43B',
-      PERIOD_START_DATE: new Date('2027-08-01T00:00:00Z'),
+      PERIOD_START_DATE: new Date(2027, 7, 1),
       NET_PAY: '1765',
       STATUS_CODE: 'COMPLETED',
       TOTAL_COUNT: 99
@@ -108,6 +113,20 @@ test('row mapper converts dates, numbers, guids', async () => {
   assert.equal(mapped.status_code, 'COMPLETED');
   assert.equal(mapped.period_start_date, '2027-08-01');
   assert.equal(mapped.total_count, undefined);
+});
+
+test('optionalDate / dateBind treat YYYY-MM-DD as local business dates', () => {
+  const d = optionalDate('2026-08-01', 'd');
+  assert.equal(d.getFullYear(), 2026);
+  assert.equal(d.getMonth(), 7);
+  assert.equal(d.getDate(), 1);
+  // Must not be UTC-midnight-shifted in positive-offset zones.
+  assert.equal(toIsoDateOrNull(d), '2026-08-01');
+
+  const bind = dateBind('2026-08-01');
+  assert.equal(bind.val.getFullYear(), 2026);
+  assert.equal(bind.val.getMonth(), 7);
+  assert.equal(bind.val.getDate(), 1);
 });
 
 test('validation helpers enforce required types', () => {

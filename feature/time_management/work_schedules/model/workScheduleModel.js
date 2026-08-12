@@ -1,9 +1,8 @@
-// workScheduleModel.js (UPDATED: Rest Day support)
-// - Adds DAY_TYPE (WORK|REST|OFF) support in TM_WORK_SCHEDULE_LINES; OFF normalized to REST
-// - For REST day: SHIFT_ID must be NULL
-// - Still prevents ORA-12860 by disabling Parallel DML per transaction
-// - Still serializes concurrent updates with SELECT ... FOR UPDATE
-// - Preserves ORA code in DatabaseError messages
+// workScheduleModel.js — canonical TM schema
+// - Tables: TM.TM_WORK_SCHEDULES / TM.TM_WORK_SCHEDULE_LINES / joins TM.TM_WORK_PATTERNS + TM.TM_SHIFTS
+// - DAY_TYPE comes from TM.TM_WORK_PATTERN_DAYS (schedule lines have no DAY_TYPE; SHIFT_ID is NOT NULL)
+// - TIME_ZONE is not a TM.TM_WORK_SCHEDULES column; API still returns time_zone (null) for contract stability
+// - Prevents ORA-12860 by disabling Parallel DML; concurrent updates use SELECT ... FOR UPDATE
 
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
@@ -12,8 +11,11 @@ import { toAuditActorId } from '../../../../utils/requestUtils.js';
 import { normalizeDayType } from '../constants.js';
 
 class WorkScheduleModel {
-  static TABLE_NAME = 'ENT.TM_WORK_SCHEDULES';
-  static LINES_TABLE_NAME = 'ENT.TM_WORK_SCHEDULE_LINES';
+  static TABLE_NAME = 'TM.TM_WORK_SCHEDULES';
+  static LINES_TABLE_NAME = 'TM.TM_WORK_SCHEDULE_LINES';
+  static PATTERNS_TABLE_NAME = 'TM.TM_WORK_PATTERNS';
+  static PATTERN_DAYS_TABLE_NAME = 'TM.TM_WORK_PATTERN_DAYS';
+  static SHIFTS_TABLE_NAME = 'TM.TM_SHIFTS';
 
   /* =========================
    * Utilities
@@ -80,17 +82,18 @@ class WorkScheduleModel {
   }
 
   /**
-   * Insert lines helper (supports DAY_TYPE + REST shift_id null)
-   * Expects UPPER_CASE keys but tolerates snake_case for safety.
+   * Insert WORK-day schedule lines.
+   * TM.TM_WORK_SCHEDULE_LINES has no DAY_TYPE and SHIFT_ID is NOT NULL —
+   * REST/OFF days are owned by TM.TM_WORK_PATTERN_DAYS and are skipped here.
    */
-  static async insertWeeklyLines(connection, workScheduleId, weeklyLines, actor, now) {
+  static async insertWeeklyLines(connection, workScheduleId, weeklyLines, actor, now, tenantId) {
     if (!weeklyLines || !Array.isArray(weeklyLines) || weeklyLines.length === 0) return;
+    if (tenantId == null) throw new ValidationError('tenant_id is required for schedule lines');
 
-    // NOTE: requires DB column DAY_TYPE and SHIFT_ID nullable
     const linesInsertSql = `INSERT INTO ${this.LINES_TABLE_NAME} (
+      TENANT_ID,
       WORK_SCHEDULE_ID,
       DAY_OF_WEEK,
-      DAY_TYPE,
       SHIFT_ID,
       CREATION_DATE,
       CREATED_BY,
@@ -98,32 +101,36 @@ class WorkScheduleModel {
       LAST_UPDATED_BY
     ) VALUES (:1,:2,:3,:4,:5,:6,:7,:8)`;
 
-    const linesData = weeklyLines.map(line => {
+    const linesData = [];
+    for (const line of weeklyLines) {
       const dayOfWeek = Number(line.DAY_OF_WEEK ?? line.day_of_week);
       const dayType = this.normalizeDayType(line.DAY_TYPE ?? line.day_type);
       const shiftIdRaw = line.SHIFT_ID ?? line.shift_id;
-
-      // REST / OFF -> shift_id must be null
-      const shiftId = (dayType === 'REST' || dayType === 'OFF') ? null : shiftIdRaw;
-
-      return [
+      // Pattern owns REST/OFF; only persist WORK days with a shift.
+      if (dayType === 'REST' || dayType === 'OFF') continue;
+      if (shiftIdRaw == null || shiftIdRaw === '') {
+        throw new ValidationError(`shift_id is required for WORK day_of_week ${dayOfWeek}`);
+      }
+      linesData.push([
+        Number(tenantId),
         workScheduleId,
         dayOfWeek,
-        dayType,
-        shiftId,
+        Number(shiftIdRaw),
         now,
         actor,
         now,
         actor
-      ];
-    });
+      ]);
+    }
+
+    if (!linesData.length) return;
 
     const linesRes = await connection.executeMany(linesInsertSql, linesData, {
       bindDefs: [
+        { type: oracledb.NUMBER },                 // tenant_id
         { type: oracledb.NUMBER },                 // work_schedule_id
         { type: oracledb.NUMBER },                 // day_of_week
-        { type: oracledb.STRING, maxSize: 10 },    // day_type
-        { type: oracledb.NUMBER },                 // shift_id (nullable)
+        { type: oracledb.NUMBER },                 // shift_id
         { type: oracledb.DATE },                   // creation_date
         { type: oracledb.STRING, maxSize: 50 },    // created_by
         { type: oracledb.DATE },                   // last_update_date
@@ -153,7 +160,7 @@ class WorkScheduleModel {
         let workScheduleId;
         try {
           const seqResult = await connection.execute(
-            `SELECT ENT.TM_WORK_SCHEDULES_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
+            `SELECT TM.TM_WORK_SCHEDULES_SEQ.NEXTVAL AS NEXT_ID FROM DUAL`,
             [],
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
           );
@@ -178,6 +185,7 @@ class WorkScheduleModel {
           ? (data.EFFECTIVE_END_DATE instanceof Date ? data.EFFECTIVE_END_DATE : new Date(data.EFFECTIVE_END_DATE))
           : null;
 
+        // TIME_ZONE is not stored on TM.TM_WORK_SCHEDULES (generation defaults timezone when absent).
         const insertHeaderSql = `INSERT INTO ${this.TABLE_NAME} (
           WORK_SCHEDULE_ID,
           TENANT_ID,
@@ -189,7 +197,6 @@ class WorkScheduleModel {
           EFFECTIVE_END_DATE,
           ASSIGNMENT_MODE,
           STATUS,
-          TIME_ZONE,
           CREATION_DATE,
           CREATED_BY,
           LAST_UPDATE_DATE,
@@ -197,7 +204,6 @@ class WorkScheduleModel {
         ) VALUES (
           :workScheduleId, :tenantId, :scheduleCode, :scheduleNameEn, :scheduleNameAr,
           :workPatternId, :effectiveStartDate, :effectiveEndDate, :assignmentMode, :status,
-          :timeZone,
           :creationDate, :createdBy, :lastUpdateDate, :lastUpdatedBy
         ) RETURNING WORK_SCHEDULE_ID INTO :returnWorkScheduleId`;
 
@@ -206,13 +212,12 @@ class WorkScheduleModel {
           tenantId: { val: data.TENANT_ID, dir: oracledb.BIND_IN },
           scheduleCode: { val: data.SCHEDULE_CODE, dir: oracledb.BIND_IN },
           scheduleNameEn: { val: data.SCHEDULE_NAME_EN, dir: oracledb.BIND_IN },
-          scheduleNameAr: { val: data.SCHEDULE_NAME_AR || null, dir: oracledb.BIND_IN },
+          scheduleNameAr: { val: data.SCHEDULE_NAME_AR || data.SCHEDULE_NAME_EN, dir: oracledb.BIND_IN },
           workPatternId: { val: data.WORK_PATTERN_ID, dir: oracledb.BIND_IN },
           effectiveStartDate: { val: effectiveStartDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           effectiveEndDate: { val: effectiveEndDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           assignmentMode: { val: data.ASSIGNMENT_MODE, dir: oracledb.BIND_IN },
           status: { val: data.STATUS || 'ACTIVE', dir: oracledb.BIND_IN },
-          timeZone: { val: data.TIME_ZONE ?? null, dir: oracledb.BIND_IN },
           creationDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
           createdBy: { val: createdBy, dir: oracledb.BIND_IN },
           lastUpdateDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -228,8 +233,7 @@ class WorkScheduleModel {
           ? headerRes.outBinds.returnWorkScheduleId[0]
           : headerRes.outBinds.returnWorkScheduleId;
 
-        // Insert weekly lines (DAY_TYPE supported)
-        await this.insertWeeklyLines(connection, returnedId, data.WEEKLY_LINES, createdBy, now);
+        await this.insertWeeklyLines(connection, returnedId, data.WEEKLY_LINES, createdBy, now, data.TENANT_ID);
 
         return await this.findByIdWithConnection(connection, returnedId, data.TENANT_ID);
       });
@@ -256,7 +260,7 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        ws.TIME_ZONE,
+        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY`;
 
       const pagination = filters.pagination;
@@ -265,7 +269,7 @@ class WorkScheduleModel {
       }
       dataSql += `
       FROM ${this.TABLE_NAME} ws
-      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID`;
+      LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID`;
 
       if (!filters.tenantId) throw new ValidationError('tenant_id is required');
 
@@ -334,26 +338,31 @@ class WorkScheduleModel {
               ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
               ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
               ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-              ws.TIME_ZONE, ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY,
+              CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE, ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY,
               COUNT(*) OVER() AS total
             FROM ${this.TABLE_NAME} ws
-            LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
+            LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
             ${where}
             ORDER BY ${sortCol} ${sortOrder}
             OFFSET :${binds.length + 1} ROWS FETCH NEXT :${binds.length + 2} ROWS ONLY
           )
           SELECT
             p.*,
-            wsl.DAY_OF_WEEK AS WSL_DAY_OF_WEEK, wsl.DAY_TYPE AS WSL_DAY_TYPE, wsl.SHIFT_ID AS WSL_SHIFT_ID,
+            wpd.DAY_OF_WEEK AS WSL_DAY_OF_WEEK,
+            wpd.DAY_TYPE AS WSL_DAY_TYPE,
+            wsl.SHIFT_ID AS WSL_SHIFT_ID,
             s.SHIFT_CODE AS S_SHIFT_CODE, s.SHIFT_NAME_EN AS S_SHIFT_NAME_EN, s.SHIFT_NAME_AR AS S_SHIFT_NAME_AR,
             s.START_MINUTES AS S_START_MINUTES, s.END_MINUTES AS S_END_MINUTES,
             s.DURATION_HOURS AS S_DURATION_HOURS, s.BREAK_HOURS AS S_BREAK_HOURS,
             (s.DURATION_HOURS - NVL(s.BREAK_HOURS, 0)) AS S_PAID_HOURS,
             s.SHIFT_TYPE AS S_SHIFT_TYPE, s.COLOR_HEX AS S_COLOR_HEX, s.STATUS AS S_SHIFT_STATUS
           FROM PAGED p
-          LEFT JOIN ${this.LINES_TABLE_NAME} wsl ON wsl.WORK_SCHEDULE_ID = p.WORK_SCHEDULE_ID
-          LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
-          ORDER BY p.WORK_SCHEDULE_ID, wsl.DAY_OF_WEEK`;
+          LEFT JOIN ${this.PATTERN_DAYS_TABLE_NAME} wpd
+            ON wpd.WORK_PATTERN_ID = p.WORK_PATTERN_ID AND wpd.TENANT_ID = p.TENANT_ID
+          LEFT JOIN ${this.LINES_TABLE_NAME} wsl
+            ON wsl.WORK_SCHEDULE_ID = p.WORK_SCHEDULE_ID AND wsl.DAY_OF_WEEK = wpd.DAY_OF_WEEK
+          LEFT JOIN ${this.SHIFTS_TABLE_NAME} s ON wsl.SHIFT_ID = s.SHIFT_ID
+          ORDER BY p.WORK_SCHEDULE_ID, wpd.DAY_OF_WEEK`;
         const combinedRes = await db.executeQuery(combinedSql, combinedBinds);
         const rows = combinedRes.rows || [];
         const scheduleMap = {};
@@ -445,9 +454,9 @@ class WorkScheduleModel {
 
     const placeholders = workScheduleIds.map((_, i) => `:${i + 1}`).join(',');
     const sql = `SELECT
-      wsl.WORK_SCHEDULE_ID,
-      wsl.DAY_OF_WEEK,
-      wsl.DAY_TYPE,
+      ws.WORK_SCHEDULE_ID,
+      wpd.DAY_OF_WEEK,
+      wpd.DAY_TYPE,
       wsl.SHIFT_ID,
       s.SHIFT_CODE,
       s.SHIFT_NAME_EN,
@@ -460,10 +469,14 @@ class WorkScheduleModel {
       s.SHIFT_TYPE,
       s.COLOR_HEX,
       s.STATUS AS SHIFT_STATUS
-    FROM ${this.LINES_TABLE_NAME} wsl
-    LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
-    WHERE wsl.WORK_SCHEDULE_ID IN (${placeholders})
-    ORDER BY wsl.WORK_SCHEDULE_ID, wsl.DAY_OF_WEEK`;
+    FROM ${this.TABLE_NAME} ws
+    LEFT JOIN ${this.PATTERN_DAYS_TABLE_NAME} wpd
+      ON wpd.WORK_PATTERN_ID = ws.WORK_PATTERN_ID AND wpd.TENANT_ID = ws.TENANT_ID
+    LEFT JOIN ${this.LINES_TABLE_NAME} wsl
+      ON wsl.WORK_SCHEDULE_ID = ws.WORK_SCHEDULE_ID AND wsl.DAY_OF_WEEK = wpd.DAY_OF_WEEK
+    LEFT JOIN ${this.SHIFTS_TABLE_NAME} s ON wsl.SHIFT_ID = s.SHIFT_ID
+    WHERE ws.WORK_SCHEDULE_ID IN (${placeholders})
+    ORDER BY ws.WORK_SCHEDULE_ID, wpd.DAY_OF_WEEK`;
 
     const result = await db.executeQuery(sql, [...workScheduleIds]);
 
@@ -511,15 +524,15 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        ws.TIME_ZONE,
+        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
-      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
+      LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
       WHERE ws.WORK_SCHEDULE_ID = :1 AND ws.TENANT_ID = :2`;
 
     const linesSql = `SELECT
-        wsl.DAY_OF_WEEK,
-        wsl.DAY_TYPE,
+        wpd.DAY_OF_WEEK,
+        wpd.DAY_TYPE,
         wsl.SHIFT_ID,
         s.SHIFT_CODE,
         s.SHIFT_NAME_EN,
@@ -532,10 +545,14 @@ class WorkScheduleModel {
         s.SHIFT_TYPE,
         s.COLOR_HEX,
         s.STATUS AS SHIFT_STATUS
-      FROM ${this.LINES_TABLE_NAME} wsl
-      LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
-      WHERE wsl.WORK_SCHEDULE_ID = :1
-      ORDER BY wsl.DAY_OF_WEEK`;
+      FROM ${this.TABLE_NAME} ws
+      LEFT JOIN ${this.PATTERN_DAYS_TABLE_NAME} wpd
+        ON wpd.WORK_PATTERN_ID = ws.WORK_PATTERN_ID AND wpd.TENANT_ID = ws.TENANT_ID
+      LEFT JOIN ${this.LINES_TABLE_NAME} wsl
+        ON wsl.WORK_SCHEDULE_ID = ws.WORK_SCHEDULE_ID AND wsl.DAY_OF_WEEK = wpd.DAY_OF_WEEK
+      LEFT JOIN ${this.SHIFTS_TABLE_NAME} s ON wsl.SHIFT_ID = s.SHIFT_ID
+      WHERE ws.WORK_SCHEDULE_ID = :1
+      ORDER BY wpd.DAY_OF_WEEK`;
 
     const [headerRes, linesRes] = await Promise.all([
       connection.execute(headerSql, [workScheduleId, tenantId], { outFormat: oracledb.OUT_FORMAT_OBJECT }),
@@ -585,15 +602,15 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        ws.TIME_ZONE,
+        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
-      LEFT JOIN ENT.TM_WORK_PATTERNS wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
+      LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
       WHERE ws.WORK_SCHEDULE_ID = :1 AND ws.TENANT_ID = :2`;
 
       const linesSql = `SELECT
-        wsl.DAY_OF_WEEK,
-        wsl.DAY_TYPE,
+        wpd.DAY_OF_WEEK,
+        wpd.DAY_TYPE,
         wsl.SHIFT_ID,
         s.SHIFT_CODE,
         s.SHIFT_NAME_EN,
@@ -606,10 +623,14 @@ class WorkScheduleModel {
         s.SHIFT_TYPE,
         s.COLOR_HEX,
         s.STATUS AS SHIFT_STATUS
-      FROM ${this.LINES_TABLE_NAME} wsl
-      LEFT JOIN ENT.TM_SHIFTS s ON wsl.SHIFT_ID = s.SHIFT_ID
-      WHERE wsl.WORK_SCHEDULE_ID = :1
-      ORDER BY wsl.DAY_OF_WEEK`;
+      FROM ${this.TABLE_NAME} ws
+      LEFT JOIN ${this.PATTERN_DAYS_TABLE_NAME} wpd
+        ON wpd.WORK_PATTERN_ID = ws.WORK_PATTERN_ID AND wpd.TENANT_ID = ws.TENANT_ID
+      LEFT JOIN ${this.LINES_TABLE_NAME} wsl
+        ON wsl.WORK_SCHEDULE_ID = ws.WORK_SCHEDULE_ID AND wsl.DAY_OF_WEEK = wpd.DAY_OF_WEEK
+      LEFT JOIN ${this.SHIFTS_TABLE_NAME} s ON wsl.SHIFT_ID = s.SHIFT_ID
+      WHERE ws.WORK_SCHEDULE_ID = :1
+      ORDER BY wpd.DAY_OF_WEEK`;
 
       const [headerRes, linesRes] = await Promise.all([
         db.executeQuery(headerSql, [workScheduleId, tenantId]),
@@ -628,7 +649,7 @@ class WorkScheduleModel {
           work_schedule_id: workScheduleId,
           day_of_week: converted.day_of_week,
           day_type: dayType,
-          shift: dayType === 'REST'
+          shift: (dayType === 'REST' || dayType === 'OFF')
             ? null
             : {
                 shift_id: converted.shift_id ?? null,
@@ -712,7 +733,7 @@ class WorkScheduleModel {
 
         if (data.ASSIGNMENT_MODE !== undefined) { updateFields.push(`ASSIGNMENT_MODE = :${p}`); bindParams.push(data.ASSIGNMENT_MODE); p++; }
         if (data.STATUS !== undefined) { updateFields.push(`STATUS = :${p}`); bindParams.push(data.STATUS); p++; }
-        if (data.TIME_ZONE !== undefined) { updateFields.push(`TIME_ZONE = :${p}`); bindParams.push(data.TIME_ZONE === null || data.TIME_ZONE === '' ? null : data.TIME_ZONE); p++; }
+        // TIME_ZONE is not a TM.TM_WORK_SCHEDULES column — ignore if clients still send it.
 
         if (updateFields.length > 0) {
           updateFields.push(`LAST_UPDATED_BY = :${p}`); bindParams.push(actor); p++;
@@ -728,7 +749,7 @@ class WorkScheduleModel {
           await connection.execute(updateSql, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT });
         }
 
-        // Replace weekly lines if provided (DAY_TYPE supported)
+        // Replace weekly lines if provided (WORK days only; REST/OFF from pattern)
         if (data.WEEKLY_LINES !== undefined && Array.isArray(data.WEEKLY_LINES)) {
           await connection.execute(
             `DELETE FROM ${this.LINES_TABLE_NAME}
@@ -737,7 +758,7 @@ class WorkScheduleModel {
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
           );
 
-          await this.insertWeeklyLines(connection, workScheduleId, data.WEEKLY_LINES, actor, now);
+          await this.insertWeeklyLines(connection, workScheduleId, data.WEEKLY_LINES, actor, now, tenantId);
         }
 
         if (updateFields.length === 0 && (data.WEEKLY_LINES === undefined || !Array.isArray(data.WEEKLY_LINES))) {
@@ -789,7 +810,7 @@ class WorkScheduleModel {
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
-        await this.insertWeeklyLines(connection, workScheduleId, weeklyLines, actor, now);
+        await this.insertWeeklyLines(connection, workScheduleId, weeklyLines, actor, now, tenantId);
 
         return { success: true };
       });

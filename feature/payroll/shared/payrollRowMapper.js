@@ -4,15 +4,57 @@
 
 import { normalizePayViewGuid } from '../../pay/utils/payViewModelUtils.js';
 
+const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Local calendar YYYY-MM-DD (avoids UTC day-shift for Oracle DATE / local midnight). */
+function formatLocalIsoDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Parse a business date without UTC day-shifting.
+ * Date-only strings (YYYY-MM-DD) become local midnight.
+ * @returns {Date|null}
+ */
+export function parseBusinessDateOrNull(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+  const s = String(value).trim();
+  const m = DATE_ONLY_RE.exec(s);
+  if (m) {
+    const local = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return Number.isFinite(local.getTime()) ? local : null;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    // Keep date-only prefix when a time suffix is present but date is authoritative.
+    const prefix = DATE_ONLY_RE.exec(s.slice(0, 10));
+    if (prefix && (s.length === 10 || s[10] === 'T' || s[10] === ' ')) {
+      const local = new Date(Number(prefix[1]), Number(prefix[2]) - 1, Number(prefix[3]));
+      return Number.isFinite(local.getTime()) ? local : null;
+    }
+  }
+  const parsed = new Date(s);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+/**
+ * Format a DATE-only business value as YYYY-MM-DD.
+ * Uses local calendar components so Oracle DATE values (often materialised as
+ * local midnight) are not shifted by UTC serialization (e.g. 2026-08-01 → 2026-07-31).
+ */
 export function toIsoDateOrNull(value) {
   if (value == null || value === '') return null;
-  if (value instanceof Date && Number.isFinite(value.getTime())) {
-    return value.toISOString().slice(0, 10);
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (DATE_ONLY_RE.test(s.slice(0, 10)) && (s.length === 10 || s[10] === 'T' || s[10] === ' ')) {
+      return s.slice(0, 10);
+    }
   }
-  const s = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const d = new Date(s);
-  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : null;
+  const d = parseBusinessDateOrNull(value);
+  return d ? formatLocalIsoDate(d) : null;
 }
 
 export function toIsoDateTimeOrNull(value) {
