@@ -265,17 +265,12 @@ export class DatabaseError extends AppError {
       return extracted || 'Schedule assignment overlaps with an existing assignment. Please adjust the effective dates.';
     }
 
-    // Mutating table error (trigger reading from same table being modified)
+    // Mutating table error (trigger reading the table currently being modified) — not a business overlap
     if (errorNum === 4091 || message.includes('ORA-04091')) {
-      // Try to infer context from error message or table name
       if (message.includes('LEAVE_REQUESTS') || message.includes('LEAVE_REQUEST')) {
-        return 'Cannot update leave request due to a database constraint conflict. Please verify the dates and try again, or contact support if the issue persists.';
+        return 'Cannot update leave request because a database trigger conflicted with this change. Please try again, or contact support if the issue persists.';
       }
-      if (message.includes('SCHEDULE') || message.includes('ASSIGNMENT')) {
-        return 'Cannot update schedule assignment due to a database constraint conflict. The assignment may overlap with existing assignments. Please verify the dates and try again, or contact support if the issue persists.';
-      }
-      // Generic message for other contexts
-      return 'Cannot update the record due to a database constraint conflict. A trigger or constraint is preventing this update. Please verify your input and try again, or contact support if the issue persists.';
+      return 'Cannot complete this change because a database trigger conflicted with the update (mutating table). Please try again, or contact support if the issue persists.';
     }
 
     // Package body does not exist or is invalid (ORA-04067)
@@ -413,9 +408,10 @@ export class DatabaseError extends AppError {
     if (errorNum === 20001 || message.includes('ORA-20001')) {
       const upper = (oracleError.message || '').toUpperCase();
       if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) return 404;
-      return 409; // Conflict - Schedule overlap
+      if (upper.includes('OVERLAP') || upper.includes('OVERLAPS')) return 409;
+      return 400; // Other application-raised ORA-20001 errors
     }
-    if (errorNum === 4091 || message.includes('ORA-04091')) return 409; // Conflict - Mutating table (overlap check)
+    if (errorNum === 4091 || message.includes('ORA-04091')) return 500; // Mutating-table trigger error (not a client overlap)
     if (errorNum === 2291 || message.includes('ORA-02291')) return 400; // Bad Request
     if (errorNum === 2292 || message.includes('ORA-02292')) return 409; // Conflict
     if (errorNum === 1400 || message.includes('ORA-01400')) return 400; // Bad Request
@@ -491,9 +487,10 @@ export class DatabaseError extends AppError {
     if (errorNum === 20001 || message.includes('ORA-20001')) {
       const upper = (oracleError.message || '').toUpperCase();
       if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) return 'ATTENDANCE_DAY_NOT_FOUND';
-      return 'SCHEDULE_OVERLAP_CONFLICT';
+      if (upper.includes('OVERLAP') || upper.includes('OVERLAPS')) return 'SCHEDULE_OVERLAP_CONFLICT';
+      return 'APPLICATION_ERROR';
     }
-    if (errorNum === 4091 || message.includes('ORA-04091')) return 'SCHEDULE_OVERLAP_CONFLICT';
+    if (errorNum === 4091 || message.includes('ORA-04091')) return 'MUTATING_TABLE_ERROR';
     if (errorNum === 2291 || message.includes('ORA-02291')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 2292 || message.includes('ORA-02292')) return 'FOREIGN_KEY_CONSTRAINT';
     if (errorNum === 1400 || message.includes('ORA-01400')) return 'NOT_NULL_CONSTRAINT';

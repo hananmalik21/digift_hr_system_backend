@@ -1,7 +1,7 @@
 // workScheduleModel.js — canonical TM schema
 // - Tables: TM.TM_WORK_SCHEDULES / TM.TM_WORK_SCHEDULE_LINES / joins TM.TM_WORK_PATTERNS + TM.TM_SHIFTS
 // - DAY_TYPE comes from TM.TM_WORK_PATTERN_DAYS (schedule lines have no DAY_TYPE; SHIFT_ID is NOT NULL)
-// - TIME_ZONE is not a TM.TM_WORK_SCHEDULES column; API still returns time_zone (null) for contract stability
+// - TIME_ZONE is required on create; validated via V$TIMEZONE_NAMES
 // - Prevents ORA-12860 by disabling Parallel DML; concurrent updates use SELECT ... FOR UPDATE
 
 import db from '../../../../config/db.js';
@@ -51,6 +51,44 @@ class WorkScheduleModel {
 
   static normalizeDayType(v) {
     return normalizeDayType(v);
+  }
+
+  /**
+   * Validate timezone region against Oracle V$TIMEZONE_NAMES.
+   * @param {string|null|undefined} value
+   * @param {{ allowNull?: boolean }} [opts]
+   */
+  static async assertValidTimeZone(value, { allowNull = false } = {}) {
+    if (value == null || value === '') {
+      if (allowNull) return null;
+      throw new ValidationError('time_zone is required', [
+        { field: 'time_zone', message: 'time_zone is required' }
+      ]);
+    }
+    const tz = String(value).trim();
+    if (!tz) {
+      if (allowNull) return null;
+      throw new ValidationError('time_zone is required', [
+        { field: 'time_zone', message: 'time_zone is required' }
+      ]);
+    }
+    if (tz.length > 100) {
+      throw new ValidationError('time_zone must be at most 100 characters', [
+        { field: 'time_zone', message: 'time_zone must be at most 100 characters' }
+      ]);
+    }
+
+    const result = await db.executeQuery(
+      `SELECT 1 AS OK FROM v$timezone_names WHERE tzname = :tz FETCH FIRST 1 ROW ONLY`,
+      [tz],
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (!result.rows?.length) {
+      throw new ValidationError('time_zone must be a valid Oracle timezone region', [
+        { field: 'time_zone', message: `Unknown timezone region: ${tz}` }
+      ]);
+    }
+    return tz;
   }
 
   static async disableParallelDml(connection) {
@@ -185,7 +223,8 @@ class WorkScheduleModel {
           ? (data.EFFECTIVE_END_DATE instanceof Date ? data.EFFECTIVE_END_DATE : new Date(data.EFFECTIVE_END_DATE))
           : null;
 
-        // TIME_ZONE is not stored on TM.TM_WORK_SCHEDULES (generation defaults timezone when absent).
+        const timeZone = await this.assertValidTimeZone(data.TIME_ZONE);
+
         const insertHeaderSql = `INSERT INTO ${this.TABLE_NAME} (
           WORK_SCHEDULE_ID,
           TENANT_ID,
@@ -197,6 +236,7 @@ class WorkScheduleModel {
           EFFECTIVE_END_DATE,
           ASSIGNMENT_MODE,
           STATUS,
+          TIME_ZONE,
           CREATION_DATE,
           CREATED_BY,
           LAST_UPDATE_DATE,
@@ -204,6 +244,7 @@ class WorkScheduleModel {
         ) VALUES (
           :workScheduleId, :tenantId, :scheduleCode, :scheduleNameEn, :scheduleNameAr,
           :workPatternId, :effectiveStartDate, :effectiveEndDate, :assignmentMode, :status,
+          :timeZone,
           :creationDate, :createdBy, :lastUpdateDate, :lastUpdatedBy
         ) RETURNING WORK_SCHEDULE_ID INTO :returnWorkScheduleId`;
 
@@ -218,6 +259,7 @@ class WorkScheduleModel {
           effectiveEndDate: { val: effectiveEndDate, dir: oracledb.BIND_IN, type: oracledb.DATE },
           assignmentMode: { val: data.ASSIGNMENT_MODE, dir: oracledb.BIND_IN },
           status: { val: data.STATUS || 'ACTIVE', dir: oracledb.BIND_IN },
+          timeZone: { val: timeZone, dir: oracledb.BIND_IN },
           creationDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
           createdBy: { val: createdBy, dir: oracledb.BIND_IN },
           lastUpdateDate: { val: now, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -260,7 +302,7 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
+        ws.TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY`;
 
       const pagination = filters.pagination;
@@ -338,7 +380,7 @@ class WorkScheduleModel {
               ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
               ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
               ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-              CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE, ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY,
+              ws.TIME_ZONE, ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY,
               COUNT(*) OVER() AS total
             FROM ${this.TABLE_NAME} ws
             LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
@@ -524,7 +566,7 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
+        ws.TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
       LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
@@ -602,7 +644,7 @@ class WorkScheduleModel {
         ws.WORK_SCHEDULE_ID, ws.TENANT_ID, ws.SCHEDULE_CODE, ws.SCHEDULE_NAME_EN, ws.SCHEDULE_NAME_AR,
         ws.WORK_PATTERN_ID, wp.PATTERN_NAME_EN, wp.PATTERN_NAME_AR,
         ws.EFFECTIVE_START_DATE, ws.EFFECTIVE_END_DATE, ws.ASSIGNMENT_MODE, ws.STATUS,
-        CAST(NULL AS VARCHAR2(64)) AS TIME_ZONE,
+        ws.TIME_ZONE,
         ws.CREATION_DATE, ws.CREATED_BY, ws.LAST_UPDATE_DATE, ws.LAST_UPDATED_BY
       FROM ${this.TABLE_NAME} ws
       LEFT JOIN ${this.PATTERNS_TABLE_NAME} wp ON ws.WORK_PATTERN_ID = wp.WORK_PATTERN_ID AND ws.TENANT_ID = wp.TENANT_ID
@@ -733,7 +775,17 @@ class WorkScheduleModel {
 
         if (data.ASSIGNMENT_MODE !== undefined) { updateFields.push(`ASSIGNMENT_MODE = :${p}`); bindParams.push(data.ASSIGNMENT_MODE); p++; }
         if (data.STATUS !== undefined) { updateFields.push(`STATUS = :${p}`); bindParams.push(data.STATUS); p++; }
-        // TIME_ZONE is not a TM.TM_WORK_SCHEDULES column — ignore if clients still send it.
+
+        // TIME_ZONE: omit = preserve; explicit null = clear; empty string rejected by validation.
+        if (data.TIME_ZONE !== undefined) {
+          const tz =
+            data.TIME_ZONE === null
+              ? null
+              : await this.assertValidTimeZone(data.TIME_ZONE);
+          updateFields.push(`TIME_ZONE = :${p}`);
+          bindParams.push(tz);
+          p++;
+        }
 
         if (updateFields.length > 0) {
           updateFields.push(`LAST_UPDATED_BY = :${p}`); bindParams.push(actor); p++;

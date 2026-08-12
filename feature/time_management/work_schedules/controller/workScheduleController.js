@@ -90,6 +90,9 @@ function validateWorkScheduleData(data, isUpdate = false) {
     if (!data.work_pattern_id && data.work_pattern_id !== 0) errors.push('work_pattern_id is required');
     if (!data.effective_start_date) errors.push('effective_start_date is required');
     if (!data.assignment_mode || data.assignment_mode.trim() === '') errors.push('assignment_mode is required');
+    if (data.time_zone == null || String(data.time_zone).trim() === '') {
+      errors.push('time_zone is required');
+    }
   } else {
     if (data.schedule_name_en !== undefined && data.schedule_name_en.trim() === '') {
       errors.push('schedule_name_en cannot be empty');
@@ -109,6 +112,16 @@ function validateWorkScheduleData(data, isUpdate = false) {
     const validStatuses = ['ACTIVE', 'INACTIVE'];
     if (!validStatuses.includes(String(data.status).toUpperCase())) {
       errors.push(`status must be one of: ${validStatuses.join(', ')}`);
+    }
+  }
+
+  // time_zone shape (Oracle region validated in the model via V$TIMEZONE_NAMES)
+  if (data.time_zone !== undefined && data.time_zone !== null) {
+    const tz = String(data.time_zone).trim();
+    if (tz === '') {
+      if (isUpdate) errors.push('time_zone cannot be empty');
+    } else if (tz.length > 100) {
+      errors.push('time_zone must be at most 100 characters');
     }
   }
 
