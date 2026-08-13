@@ -9703,10 +9703,10 @@
                 "source-mappings"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (create).",
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (create). OVERTIME_REQUEST V2 simplified shared-data contract — Oracle normalizes transfer config; do not send transfer_unit_code / hourly_rate_divisor / TM OT config.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"*\",\n  \"payroll_id\": 15,\n  \"payroll_element_id\": 71,\n  \"hours_input_value_name\": \"Hours\",\n  \"multiplier_input_value_name\": \"Multiplier\",\n  \"hourly_rate_input_value_name\": \"Hourly Rate\",\n  \"hourly_rate_source_element_id\": 67,\n  \"hourly_rate_source_value_code\": \"PAY_VALUE\",\n  \"effective_start_date\": \"2026-08-01\",\n  \"effective_end_date\": null,\n  \"status_code\": \"ACTIVE\",\n  \"description\": \"Optional description\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9745,10 +9745,10 @@
                 "{{payroll_source_mapping_id}}"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (update).",
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_OR_UPDATE_SOURCE_MAPPING (update). OVERTIME_REQUEST V2 simplified shared-data contract.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"WORKDAY\",\n  \"payroll_id\": 13,\n  \"payroll_element_id\": 1,\n  \"transfer_unit_code\": \"HOURS\",\n  \"hours_input_value_name\": \"Hours\",\n  \"effective_start_date\": \"2026-01-01\",\n  \"status_code\": \"ACTIVE\"\n}",
+              "raw": "{\n  \"source_type_code\": \"OVERTIME_REQUEST\",\n  \"source_subtype_code\": \"*\",\n  \"payroll_id\": 15,\n  \"payroll_element_id\": 71,\n  \"hours_input_value_name\": \"Hours\",\n  \"multiplier_input_value_name\": \"Multiplier\",\n  \"hourly_rate_input_value_name\": \"Hourly Rate\",\n  \"hourly_rate_source_element_id\": 67,\n  \"hourly_rate_source_value_code\": \"PAY_VALUE\",\n  \"effective_start_date\": \"2026-08-01\",\n  \"status_code\": \"ACTIVE\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10555,10 +10555,10 @@
                 "transfer-batches"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_TRANSFER_BATCH",
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.CREATE_TRANSFER_BATCH. Oracle inserts a new DRAFT batch, or reopens a same-period REVERSED batch (same ID → DRAFT, appends REOPEN_BATCH). Do not treat same-period existence as HTTP 409 when status is REVERSED. Non-REVERSED same-period conflicts return Oracle business error as 409. Response data is the persisted Oracle batch row.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 13,\n  \"period_start_date\": \"2026-07-01\",\n  \"period_end_date\": \"2026-07-31\",\n  \"transfer_batch_number\": null\n}",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 15,\n  \"period_start_date\": \"2026-08-01\",\n  \"period_end_date\": \"2026-08-31\",\n  \"transfer_batch_number\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10566,7 +10566,21 @@
               }
             }
           },
-          "response": []
+          "response": [
+            {
+              "name": "Reopened REVERSED batch (same ID)",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Transfer batch reopened.\",\n  \"data\": {\n    \"payroll_transfer_batch_id\": 23,\n    \"enterprise_id\": 1,\n    \"payroll_id\": 15,\n    \"period_start_date\": \"2026-08-01\",\n    \"period_end_date\": \"2026-08-31\",\n    \"status_code\": \"DRAFT\",\n    \"total_source_records\": 0,\n    \"total_transfer_lines\": 0,\n    \"validated_transfer_lines\": 0,\n    \"transferred_transfer_lines\": 0,\n    \"error_transfer_lines\": 0,\n    \"reversed_transfer_lines\": 0,\n    \"reconciliation_status_code\": \"NOT_RECONCILED\",\n    \"locked_flag\": \"N\"\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Preview transfer batch",
@@ -10593,9 +10607,47 @@
                 "preview"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.PREVIEW_TRANSFER_BATCH"
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.PREVIEW_TRANSFER_BATCH. Response includes OUT summary plus persisted batch and lines (hourly_rate/multiplier/quantity from Oracle)."
           },
-          "response": []
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/preview",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "transfer-batches",
+                    "{{transfer_batch_id}}",
+                    "preview"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Transfer preview completed. Source records=1, transfer lines=1.\",\n  \"data\": {\n    \"summary\": {\n      \"source_records\": 1,\n      \"transfer_lines\": 1\n    },\n    \"batch\": {\n      \"payroll_transfer_batch_id\": 23,\n      \"enterprise_id\": 1,\n      \"payroll_id\": 15,\n      \"period_start_date\": \"2026-08-01\",\n      \"period_end_date\": \"2026-08-31\",\n      \"status_code\": \"PREVIEWED\",\n      \"total_source_records\": 1,\n      \"total_transfer_lines\": 1,\n      \"validated_transfer_lines\": 0,\n      \"transferred_transfer_lines\": 0,\n      \"error_transfer_lines\": 0,\n      \"reconciliation_status_code\": \"NOT_RECONCILED\",\n      \"locked_flag\": \"N\"\n    },\n    \"lines\": [\n      {\n        \"payroll_transfer_line_id\": 123,\n        \"employee_id\": 293,\n        \"source_type_code\": \"OVERTIME_REQUEST\",\n        \"source_record_id\": 65,\n        \"payroll_element_id\": 71,\n        \"transfer_quantity\": 1,\n        \"transfer_unit_code\": \"HOURS\",\n        \"rate_multiplier\": 1.25,\n        \"hourly_rate\": 12.692308,\n        \"currency_code\": \"USD\",\n        \"status_code\": \"PREVIEWED\",\n        \"validation_message\": null,\n        \"payroll_element_entry_id\": null,\n        \"reversed_flag\": \"N\"\n      }\n    ]\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Validate transfer batch",
@@ -10622,9 +10674,47 @@
                 "validate"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.VALIDATE_TRANSFER_BATCH"
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.VALIDATE_TRANSFER_BATCH. Returns passed/failed OUT binds plus refreshed batch/lines."
           },
-          "response": []
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/validate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "transfer-batches",
+                    "{{transfer_batch_id}}",
+                    "validate"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Transfer validation completed. Passed=1, Failed=0.\",\n  \"data\": {\n    \"summary\": {\n      \"passed\": 1,\n      \"failed\": 0\n    },\n    \"batch\": {\n      \"payroll_transfer_batch_id\": 23,\n      \"status_code\": \"VALIDATED\",\n      \"validated_transfer_lines\": 1,\n      \"error_transfer_lines\": 0\n    },\n    \"lines\": [\n      {\n        \"payroll_transfer_line_id\": 123,\n        \"source_record_id\": 65,\n        \"transfer_quantity\": 1,\n        \"rate_multiplier\": 1.25,\n        \"hourly_rate\": 12.692308,\n        \"currency_code\": \"USD\",\n        \"status_code\": \"VALIDATED\",\n        \"validation_message\": \"Transfer line validation passed.\",\n        \"reversed_flag\": \"N\"\n      }\n    ]\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Transfer batch to payroll",
@@ -10651,9 +10741,47 @@
                 "transfer"
               ]
             },
-            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.TRANSFER_BATCH_TO_PAYROLL"
+            "description": "TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.TRANSFER_BATCH_TO_PAYROLL. Oracle creates PAY entries; response includes payroll_element_entry_id and input_values_json from persisted lines."
           },
-          "response": []
+          "response": [
+            {
+              "name": "Success",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/time-management/transfer-batches/{{transfer_batch_id}}/transfer",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "time-management",
+                    "transfer-batches",
+                    "{{transfer_batch_id}}",
+                    "transfer"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll transfer completed. Transferred=1, Failed=0.\",\n  \"data\": {\n    \"summary\": {\n      \"transferred\": 1,\n      \"failed\": 0\n    },\n    \"batch\": {\n      \"payroll_transfer_batch_id\": 23,\n      \"status_code\": \"TRANSFERRED\",\n      \"transferred_transfer_lines\": 1,\n      \"error_transfer_lines\": 0\n    },\n    \"lines\": [\n      {\n        \"payroll_transfer_line_id\": 123,\n        \"source_record_id\": 65,\n        \"transfer_quantity\": 1,\n        \"rate_multiplier\": 1.25,\n        \"hourly_rate\": 12.692308,\n        \"currency_code\": \"USD\",\n        \"status_code\": \"TRANSFERRED\",\n        \"validation_message\": \"Payroll element entry created successfully.\",\n        \"input_values_json\": {\n          \"HOURS\": 1,\n          \"MULTIPLIER\": 1.25,\n          \"HOURLY RATE\": 12.692308\n        },\n        \"payroll_element_entry_id\": 999,\n        \"payroll_source_reference\": \"TM_PAYROLL_TRANSFER_LINE:123\",\n        \"reversed_flag\": \"N\"\n      }\n    ]\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Reconcile transfer batch",

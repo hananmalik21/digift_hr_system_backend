@@ -25,17 +25,19 @@ function assertNotIncludes(haystack, needle, label) {
   assert.ok(!haystack.includes(needle), `${label}: must not invoke ${needle}`);
 }
 
+test('source mapping never defaults hourly_rate_divisor to 1', () => {
+  assertNotIncludes(serviceSource, 'hourlyRateDivisor ?? 1', 'forced divisor default');
+});
+
 test('source mapping create/update calls CREATE_OR_UPDATE_SOURCE_MAPPING', () => {
   assertIncludes(
     serviceSource,
     'CREATE_OR_UPDATE_SOURCE_MAPPING',
     'source mapping procedure'
   );
-  assertNotIncludes(
-    serviceSource,
-    'CREATE_OR_UPSERT_SOURCE_MAPPING',
-    'stale source mapping upsert alias'
-  );
+  // Match PL/SQL call sites only (comments may mention the forbidden name).
+  const upsertCalls = serviceSource.match(/\.\s*CREATE_OR_UPSERT_SOURCE_MAPPING/g) || [];
+  assert.deepEqual(upsertCalls, [], `stale source mapping upsert alias: ${upsertCalls.join(', ')}`);
 });
 
 test('hourly rate policy create/update calls CREATE_OR_UPDATE_HOURLY_RATE_POLICY', () => {

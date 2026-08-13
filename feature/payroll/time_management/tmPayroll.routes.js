@@ -4,6 +4,8 @@
  */
 
 import express from 'express';
+import './swagger/tmPayrollSourceMappings.swagger.js';
+import './swagger/tmPayrollTransferBatches.swagger.js';
 import {
   activateProductionHourlyRateHandler,
   applyPolicyToMappingHandler,

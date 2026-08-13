@@ -55,6 +55,10 @@ export class DatabaseError extends AppError {
           'TM_WORK_SCHEDULE_LINES_U1': 'A day of week already exists for this work schedule.',
           'TM_SCHEDULE_ASSIGNMENTS_U1': 'A schedule assignment already exists for this combination.',
           'TM_SCHEDULE_ASSIGNMENTS_PK': 'This schedule assignment already exists.',
+          'TM_PAYROLL_TRANSFER_BATCHES_U1':
+            'A transfer batch already exists for this enterprise, payroll, and period.',
+          'TM_PAYROLL_TRANSFER_BATCHES_UK1':
+            'A transfer batch already exists for this enterprise, payroll, and period.',
           'COMPANIES_U1': 'A company with this code already exists.',
           'COMPANIES_PK': 'This company already exists.',
           'ENTERPRISES_U1': 'An enterprise with this code already exists.',
@@ -67,6 +71,9 @@ export class DatabaseError extends AppError {
         }
         
         // For other constraints, try to infer from table name
+        if (constraintName.includes('PAYROLL_TRANSFER_BATCH') && (constraintName.includes('U') || constraintName.includes('UK'))) {
+          return 'A transfer batch already exists for this enterprise, payroll, and period.';
+        }
         if (constraintName.includes('SHIFTS') && (constraintName.includes('U') || constraintName.includes('UK'))) {
           return 'A shift with this information already exists. Please use a different shift code.';
         }
@@ -334,6 +341,20 @@ export class DatabaseError extends AppError {
       if (upperMessage.includes('PROJECT') && upperMessage.includes('NOT FOUND')) {
         return 'Project not found for update. Check project_id or project_guid and enterprise_id.';
       }
+      // TM → PAY transfer batch period conflict (non-REVERSED existing batch)
+      if (
+        upperMessage.includes('TRANSFER') &&
+        upperMessage.includes('BATCH') &&
+        (upperMessage.includes('ALREADY') ||
+          upperMessage.includes('EXISTS') ||
+          upperMessage.includes('EXIST') ||
+          upperMessage.includes('IN PROGRESS') ||
+          upperMessage.includes('NOT REVERSED') ||
+          upperMessage.includes('CONFLICT'))
+      ) {
+        const cleaned = userMessage.replace(/^ORA-\d+:\s*/i, '').split('\n')[0].trim();
+        return cleaned || 'A transfer batch already exists for this enterprise, payroll, and period.';
+      }
       // ORA-20008: COMPONENT_CODE already exists for this TENANT_ID
       if (errorNum === 20008 || message.includes('ORA-20008')) {
         if (upperMessage.includes('COMPONENT_CODE') && upperMessage.includes('ALREADY EXISTS')) {
@@ -409,6 +430,15 @@ export class DatabaseError extends AppError {
       const upper = (oracleError.message || '').toUpperCase();
       if (upper.includes('ATTENDANCE DAY') && (upper.includes('DOES NOT EXIST') || upper.includes('NOT EXIST'))) return 404;
       if (upper.includes('OVERLAP') || upper.includes('OVERLAPS')) return 409;
+      // TM transfer batch same-period conflict (non-REVERSED). REVERSED reopen succeeds in Oracle.
+      if (
+        (upper.includes('TRANSFER') && upper.includes('BATCH') &&
+          (upper.includes('ALREADY') || upper.includes('EXISTS') || upper.includes('EXIST') ||
+            upper.includes('IN PROGRESS') || upper.includes('NOT REVERSED') || upper.includes('CONFLICT'))) ||
+        (/TM_PAYROLL_TRANSFER_BATCH/.test(upper) && (upper.includes('UNIQUE') || /_U\d*\b/.test(upper)))
+      ) {
+        return 409;
+      }
       return 400; // Other application-raised ORA-20001 errors
     }
     if (errorNum === 4091 || message.includes('ORA-04091')) return 500; // Mutating-table trigger error (not a client overlap)
@@ -469,7 +499,22 @@ export class DatabaseError extends AppError {
     ) {
       return 409;
     }
-    if (errorNum >= 20000 && errorNum <= 20999) return 400; // Application / user-defined errors
+    if (errorNum >= 20000 && errorNum <= 20999) {
+      const upper = message.toUpperCase();
+      if (
+        upper.includes('TRANSFER') &&
+        upper.includes('BATCH') &&
+        (upper.includes('ALREADY') ||
+          upper.includes('EXISTS') ||
+          upper.includes('EXIST') ||
+          upper.includes('IN PROGRESS') ||
+          upper.includes('NOT REVERSED') ||
+          upper.includes('CONFLICT'))
+      ) {
+        return 409;
+      }
+      return 400; // Application / user-defined errors
+    }
 
     return 500; // Internal Server Error
   }

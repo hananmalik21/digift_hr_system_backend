@@ -25,6 +25,7 @@ import {
   stringBind,
   successOutBinds
 } from '../shared/index.js';
+import { isOvertimeRequestSource } from './tmPayroll.validation.js';
 
 const POLICY_PKG = 'TM.TM_PAYROLL_HOURLY_RATE_POLICY_PKG';
 const PROD_PKG = 'TM.TM_PAYROLL_HOURLY_RATE_PRODUCTION_PKG';
@@ -310,8 +311,14 @@ export async function getSourceMappingById(mappingId, enterpriseId = null) {
 
 /**
  * CREATE_OR_UPDATE_SOURCE_MAPPING — canonical public API (IN OUT id; NULL on create).
+ *
+ * V2 OVERTIME_REQUEST: Oracle normalizes transfer config and derives schedule divisor.
+ * REST must map only supplied properties; omitted optional binds → NULL (no Node business defaults).
+ * Canonical procedure only — do not call any UPSERT synonym for source mappings.
  */
 export async function createOrUpdateSourceMapping(payload) {
+  const isOvertime = isOvertimeRequestSource(payload.sourceTypeCode);
+
   const plsql = `
 BEGIN
   ${XFER_PKG}.CREATE_OR_UPDATE_SOURCE_MAPPING(
@@ -354,15 +361,25 @@ END;`;
       p_source_subtype_code: stringBind(payload.sourceSubtypeCode ?? '*', 80),
       p_payroll_id: numberBind(payload.payrollId),
       p_payroll_element_id: numberBind(payload.payrollElementId),
-      p_payroll_source_code: stringBind(payload.payrollSourceCode ?? 'MANUAL_ENTRY', 80),
-      p_calculation_owner_code: stringBind(payload.calculationOwnerCode ?? 'PAYROLL', 80),
+      // OVERTIME_REQUEST: omit → NULL; Oracle sets MANUAL_ENTRY / PAYROLL / HOURS / etc.
+      // Non-OT: retain legacy Node convenience defaults for existing clients.
+      p_payroll_source_code: stringBind(
+        isOvertime ? payload.payrollSourceCode : (payload.payrollSourceCode ?? 'MANUAL_ENTRY'),
+        80
+      ),
+      p_calculation_owner_code: stringBind(
+        isOvertime ? payload.calculationOwnerCode : (payload.calculationOwnerCode ?? 'PAYROLL'),
+        80
+      ),
       p_transfer_unit_code: stringBind(payload.transferUnitCode, 40),
       p_hours_input_value_name: stringBind(payload.hoursInputValueName, 80),
       p_days_input_value_name: stringBind(payload.daysInputValueName, 80),
       p_multiplier_input_name: stringBind(payload.multiplierInputName, 80),
       p_rate_type_input_name: stringBind(payload.rateTypeInputName, 80),
       p_source_date_input_name: stringBind(payload.sourceDateInputName, 80),
-      p_sign_multiplier: numberBind(payload.signMultiplier ?? 1),
+      p_sign_multiplier: numberBind(
+        isOvertime ? payload.signMultiplier : (payload.signMultiplier ?? 1)
+      ),
       p_default_currency_code: stringBind(payload.defaultCurrencyCode, 30),
       p_effective_start_date: dateBind(payload.effectiveStartDate),
       p_effective_end_date: dateBind(payload.effectiveEndDate),
@@ -373,8 +390,12 @@ END;`;
       p_hourly_rate_source_code: stringBind(payload.hourlyRateSourceCode, 80),
       p_hourly_rate_fixed_value: numberBind(payload.hourlyRateFixedValue),
       p_hourly_rate_source_element_id: numberBind(payload.hourlyRateSourceElementId),
-      p_hourly_rate_source_value_code: stringBind(payload.hourlyRateSourceValueCode ?? 'PAY_VALUE', 80),
-      p_hourly_rate_divisor: numberBind(payload.hourlyRateDivisor ?? 1)
+      p_hourly_rate_source_value_code: stringBind(
+        payload.hourlyRateSourceValueCode ?? 'PAY_VALUE',
+        80
+      ),
+      // Never force divisor=1 — OT derives hours/week from published TM work pattern.
+      p_hourly_rate_divisor: numberBind(payload.hourlyRateDivisor)
     },
     {
       genericError: 'Unable to save payroll source mapping. Please try again.',
@@ -600,6 +621,32 @@ export async function getTransferBatchById(batchId, enterpriseId = null) {
   });
 }
 
+/**
+ * Soft period lookup for create/reopen response classification only.
+ * Never used to reject CREATE_TRANSFER_BATCH — Oracle owns reopen vs conflict.
+ */
+export async function findTransferBatchByPeriod(filters) {
+  return queryPayOne({
+    fromSql: `${V_BATCHES} v`,
+    alias: 'v',
+    filters: [
+      { sql: 'v.ENTERPRISE_ID = :enterprise_id', bind: 'enterprise_id', value: filters.enterpriseId },
+      { sql: 'v.PAYROLL_ID = :payroll_id', bind: 'payroll_id', value: filters.payrollId },
+      {
+        sql: 'TRUNC(v.PERIOD_START_DATE) = TRUNC(:period_start_date)',
+        bind: 'period_start_date',
+        value: filters.periodStartDate
+      },
+      {
+        sql: 'TRUNC(v.PERIOD_END_DATE) = TRUNC(:period_end_date)',
+        bind: 'period_end_date',
+        value: filters.periodEndDate
+      }
+    ],
+    logTag: 'tmTransferBatchesByPeriod'
+  });
+}
+
 export async function listTransferLines(filters) {
   return queryPayList({
     fromSql: `${V_LINES} v`,
@@ -628,6 +675,37 @@ export async function listTransferLines(filters) {
     pageSize: filters.pageSize,
     logTag: 'tmTransferLines'
   });
+}
+
+/**
+ * Persisted Oracle batch + lines after a lifecycle package call.
+ * Values (hours, multiplier, hourly rate, validation messages, PAY entry ids) come from Oracle — not Node.
+ */
+export async function getTransferBatchOperationSnapshot(batchId, enterpriseId = null) {
+  const batch = await getTransferBatchById(batchId, enterpriseId);
+  if (!batch) return null;
+
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 50; // hard stop: 5_000 lines
+  const lines = [];
+  let page = 1;
+  let total = Infinity;
+
+  while (lines.length < total && page <= MAX_PAGES) {
+    const pageResult = await listTransferLines({
+      enterpriseId: batch.enterprise_id,
+      payrollTransferBatchId: batchId,
+      page,
+      pageSize: PAGE_SIZE
+    });
+    total = Number(pageResult.total || 0);
+    const pageRows = pageResult.data || [];
+    lines.push(...pageRows);
+    if (!pageRows.length || pageRows.length < PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return { batch, lines };
 }
 
 export async function getTransferLineById(lineId, enterpriseId = null) {
@@ -670,6 +748,11 @@ export async function listTransferHistory(filters) {
   });
 }
 
+/**
+ * CREATE_TRANSFER_BATCH — inserts a new DRAFT batch, or reopens a same-period REVERSED batch
+ * (same ID, status → DRAFT, appends REOPEN_BATCH history). Oracle owns this decision.
+ * Do not pre-reject same-period rows in the API.
+ */
 export async function createTransferBatch(payload) {
   const plsql = `
 BEGIN

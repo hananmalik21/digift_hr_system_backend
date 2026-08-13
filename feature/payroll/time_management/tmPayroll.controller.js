@@ -6,6 +6,7 @@ import { ValidationError } from '../../../utils/errors/index.js';
 import {
   assertEnterpriseAccess,
   failOutcome,
+  isTransferBatchPeriodConflict,
   notFoundOutcome,
   okGet,
   okList,
@@ -22,6 +23,26 @@ import {
   withPayrollErrorHandling
 } from '../shared/index.js';
 import * as tm from './tmPayroll.service.js';
+import {
+  isOvertimeRequestSource,
+  requireMappingWriteFields
+} from './tmPayroll.validation.js';
+import {
+  loadBatchForTenant,
+  lockSummary,
+  preferPackageMessage,
+  previewSuccessMessage,
+  previewSummary,
+  reconcileSummary,
+  reverseSuccessMessage,
+  reverseSummary,
+  runTransferBatchLifecycle,
+  transferSuccessMessage,
+  transferSummary,
+  validateSuccessMessage,
+  validateSummary,
+  wasReversedBatchReopened
+} from './tmPayroll.lifecycle.js';
 
 function mutationResult(outcome, httpStatus = 200) {
   if (!outcome.success) return failOutcome(outcome.message, 400, outcome.data);
@@ -37,6 +58,23 @@ function pickField(body, defaults, ...keys) {
     if (defaults?.[key] != null && defaults[key] !== '') return defaults[key];
   }
   return null;
+}
+
+/** Body-only pick (no defaults). Used for OVERTIME_REQUEST Oracle-owned fields. */
+function pickBodyOnly(body, ...keys) {
+  for (const key of keys) {
+    if (body?.[key] != null && body[key] !== '') return body[key];
+  }
+  return null;
+}
+
+/**
+ * For OVERTIME_REQUEST, Oracle-owned transfer config is body-only (omitted → NULL → Oracle normalizes).
+ * Other source types keep body-then-defaults behavior.
+ */
+function pickMappingField(body, defaults, isOvertime, ...keys) {
+  if (isOvertime) return pickBodyOnly(body, ...keys);
+  return pickField(body, defaults, ...keys);
 }
 
 /** Prefer body date; otherwise coerce an existing ISO/date default. */
@@ -56,12 +94,6 @@ function requirePolicyWriteFields(payload) {
   requirePositiveInt(payload.payrollId, 'payroll_id');
   requirePositiveInt(payload.sourcePayrollElementId, 'source_payroll_element_id');
   requireString(payload.divisorMethodCode, 'divisor_method_code');
-}
-
-function requireMappingWriteFields(payload) {
-  requireString(payload.sourceTypeCode, 'source_type_code');
-  requirePositiveInt(payload.payrollElementId, 'payroll_element_id');
-  requireString(payload.transferUnitCode, 'transfer_unit_code');
 }
 
 // =====================================================================================
@@ -274,17 +306,27 @@ export async function getSourceMappingHandler(req, res) {
   });
 }
 
+/**
+ * Build CREATE_OR_UPDATE_SOURCE_MAPPING payload from REST body.
+ * OVERTIME_REQUEST: Oracle-owned config fields are optional (body-only; omitted → NULL).
+ * TM OT config / schedule / labor-limit fields are intentionally not mapped.
+ */
 function mappingPayloadFromBody(body, { mappingId = null, actor, defaults = {} } = {}) {
+  const sourceTypeCode = pickField(body, defaults, 'source_type_code');
+  const isOvertime = isOvertimeRequestSource(sourceTypeCode);
+
   return {
     payrollSourceMappingId: mappingId,
     enterpriseId: pickField(body, defaults, 'enterprise_id'),
-    sourceTypeCode: pickField(body, defaults, 'source_type_code'),
-    sourceSubtypeCode: pickField(body, defaults, 'source_subtype_code'),
+    sourceTypeCode,
+    // REST convenience defaults (also allowed when omitted for OT)
+    sourceSubtypeCode: pickField(body, defaults, 'source_subtype_code') ?? '*',
     payrollId: pickField(body, defaults, 'payroll_id'),
     payrollElementId: pickField(body, defaults, 'payroll_element_id'),
-    payrollSourceCode: pickField(body, defaults, 'payroll_source_code'),
-    calculationOwnerCode: pickField(body, defaults, 'calculation_owner_code'),
-    transferUnitCode: pickField(body, defaults, 'transfer_unit_code'),
+    // Oracle-owned for OVERTIME_REQUEST — pass through only when supplied
+    payrollSourceCode: pickMappingField(body, defaults, isOvertime, 'payroll_source_code'),
+    calculationOwnerCode: pickMappingField(body, defaults, isOvertime, 'calculation_owner_code'),
+    transferUnitCode: pickMappingField(body, defaults, isOvertime, 'transfer_unit_code'),
     hoursInputValueName: pickField(body, defaults, 'hours_input_value_name'),
     daysInputValueName: pickField(body, defaults, 'days_input_value_name'),
     // REST/view: *_input_value_name → Oracle: P_*_INPUT_NAME
@@ -301,19 +343,21 @@ function mappingPayloadFromBody(body, { mappingId = null, actor, defaults = {} }
       'source_date_input_name',
       'source_date_input_value_name'
     ),
-    signMultiplier: pickField(body, defaults, 'sign_multiplier'),
-    defaultCurrencyCode: pickField(body, defaults, 'default_currency_code'),
+    signMultiplier: pickMappingField(body, defaults, isOvertime, 'sign_multiplier'),
+    defaultCurrencyCode: pickMappingField(body, defaults, isOvertime, 'default_currency_code'),
     effectiveStartDate: dateFromBodyOrDefault(body, defaults, 'effective_start_date'),
     effectiveEndDate: dateFromBodyOrDefault(body, defaults, 'effective_end_date'),
     statusCode: pickField(body, defaults, 'status_code', 'status') ?? 'ACTIVE',
     description: pickField(body, defaults, 'description'),
     actor,
     hourlyRateInputValueName: pickField(body, defaults, 'hourly_rate_input_value_name'),
-    hourlyRateSourceCode: pickField(body, defaults, 'hourly_rate_source_code'),
-    hourlyRateFixedValue: pickField(body, defaults, 'hourly_rate_fixed_value'),
+    hourlyRateSourceCode: pickMappingField(body, defaults, isOvertime, 'hourly_rate_source_code'),
+    hourlyRateFixedValue: pickMappingField(body, defaults, isOvertime, 'hourly_rate_fixed_value'),
     hourlyRateSourceElementId: pickField(body, defaults, 'hourly_rate_source_element_id'),
-    hourlyRateSourceValueCode: pickField(body, defaults, 'hourly_rate_source_value_code'),
-    hourlyRateDivisor: pickField(body, defaults, 'hourly_rate_divisor')
+    hourlyRateSourceValueCode:
+      pickField(body, defaults, 'hourly_rate_source_value_code') ?? 'PAY_VALUE',
+    // Never inherit/force divisor for OT; omit → NULL so Oracle derives from work pattern
+    hourlyRateDivisor: pickMappingField(body, defaults, isOvertime, 'hourly_rate_divisor')
   };
 }
 
@@ -324,10 +368,10 @@ export async function createSourceMappingHandler(req, res) {
     const payload = mappingPayloadFromBody(req.body, { actor: resolveAuditActor(req) });
     payload.enterpriseId = enterpriseId;
     requireMappingWriteFields(payload);
-    requireDate(payload.effectiveStartDate, 'effective_start_date');
 
     const outcome = await tm.createOrUpdateSourceMapping(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
+    // Return Oracle-persisted row (includes V2-normalized OT values), not request defaults.
     const created = await tm.getSourceMappingById(outcome.data.payroll_source_mapping_id);
     return sendOutcome(
       res,
@@ -348,10 +392,10 @@ export async function updateSourceMappingHandler(req, res) {
       defaults: existing
     });
     payload.enterpriseId = existing.enterprise_id;
-    requireMappingWriteFields(payload);
     if (!payload.effectiveStartDate) {
       payload.effectiveStartDate = dateFromBodyOrDefault({}, existing, 'effective_start_date');
     }
+    requireMappingWriteFields(payload);
 
     const outcome = await tm.createOrUpdateSourceMapping(payload);
     if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
@@ -506,95 +550,124 @@ export async function createTransferBatchHandler(req, res) {
   return withPayrollErrorHandling(res, async () => {
     const enterpriseId = resolveEnterpriseId(req, req.body.enterprise_id);
     assertEnterpriseAccess(req, enterpriseId);
+    const payrollId = requirePositiveInt(req.body.payroll_id, 'payroll_id');
+    const periodStartDate = requireDate(req.body.period_start_date, 'period_start_date');
+    const periodEndDate = requireDate(req.body.period_end_date, 'period_end_date');
+
+    // Soft read only — NEVER reject same-period existence here.
+    // Oracle CREATE_TRANSFER_BATCH reopens REVERSED batches or raises for other statuses.
+    const priorSamePeriod = await tm.findTransferBatchByPeriod({
+      enterpriseId,
+      payrollId,
+      periodStartDate,
+      periodEndDate
+    });
+
     const outcome = await tm.createTransferBatch({
       enterpriseId,
-      payrollId: requirePositiveInt(req.body.payroll_id, 'payroll_id'),
-      periodStartDate: requireDate(req.body.period_start_date, 'period_start_date'),
-      periodEndDate: requireDate(req.body.period_end_date, 'period_end_date'),
+      payrollId,
+      periodStartDate,
+      periodEndDate,
       transferBatchNumber: optionalString(req.body.transfer_batch_number, 'transfer_batch_number'),
       actor: resolveAuditActor(req)
     });
-    if (!outcome.success) return sendOutcome(res, failOutcome(outcome.message, 400, outcome.data));
-    const created = await tm.getTransferBatchById(outcome.data.payroll_transfer_batch_id);
+    if (!outcome.success) {
+      const httpStatus = isTransferBatchPeriodConflict(outcome.message) ? 409 : 400;
+      return sendOutcome(res, failOutcome(outcome.message, httpStatus, outcome.data));
+    }
+
+    const batchId = outcome.data.payroll_transfer_batch_id;
+    const persisted = await tm.getTransferBatchById(batchId);
+    if (!persisted) {
+      return sendOutcome(
+        res,
+        failOutcome('Transfer batch was created but could not be reloaded from Oracle.', 500, outcome.data)
+      );
+    }
+
+    const reopened = wasReversedBatchReopened(priorSamePeriod, persisted);
     return sendOutcome(
       res,
-      okMutation(outcome.message || 'Transfer batch created successfully.', created ?? outcome.data, 201)
+      okMutation(
+        reopened
+          ? 'Transfer batch reopened.'
+          : preferPackageMessage(outcome.message, 'Transfer batch ready.'),
+        persisted,
+        reopened ? 200 : 201
+      )
     );
   });
 }
 
-async function withBatchTenant(batchId, req) {
-  const batch = await tm.getTransferBatchById(batchId);
-  if (!batch) return { error: notFoundOutcome('Transfer batch not found.') };
-  assertEnterpriseAccess(req, batch.enterprise_id);
-  return { batch };
-}
-
 export async function previewTransferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const outcome = await tm.previewTransferBatch(batchId, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor) => tm.previewTransferBatch(batchId, actor),
+      buildSummary: previewSummary,
+      successMessage: previewSuccessMessage
+    })
+  );
 }
 
 export async function validateTransferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const outcome = await tm.validateTransferBatch(batchId, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor) => tm.validateTransferBatch(batchId, actor),
+      buildSummary: validateSummary,
+      successMessage: validateSuccessMessage
+    })
+  );
 }
 
 export async function transferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const outcome = await tm.transferBatchToPayroll(batchId, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor) => tm.transferBatchToPayroll(batchId, actor),
+      buildSummary: transferSummary,
+      successMessage: transferSuccessMessage
+    })
+  );
 }
 
 export async function reconcileTransferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const outcome = await tm.reconcileTransferBatch(batchId, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor) => tm.reconcileTransferBatch(batchId, actor),
+      buildSummary: reconcileSummary,
+      successMessage: (o) => preferPackageMessage(o.message, 'Transfer reconciliation completed.')
+    })
+  );
 }
 
 export async function lockTransferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const outcome = await tm.lockTransferBatch(batchId, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor) => tm.lockTransferBatch(batchId, actor),
+      buildSummary: lockSummary,
+      successMessage: (o) => preferPackageMessage(o.message, 'Transfer batch locked.')
+    })
+  );
 }
 
 export async function reverseTransferBatchHandler(req, res) {
-  return withPayrollErrorHandling(res, async () => {
-    const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
-    if (error) return sendOutcome(res, error);
-    const reason = requireString(req.body.reversal_reason ?? req.body.reason, 'reversal_reason');
-    const outcome = await tm.reverseTransferBatch(batchId, reason, resolveAuditActor(req));
-    return sendOutcome(res, mutationResult(outcome));
-  });
+  return withPayrollErrorHandling(res, () =>
+    runTransferBatchLifecycle(req, res, {
+      action: (batchId, actor, request) =>
+        tm.reverseTransferBatch(
+          batchId,
+          requireString(request.body.reversal_reason ?? request.body.reason, 'reversal_reason'),
+          actor
+        ),
+      buildSummary: reverseSummary,
+      successMessage: reverseSuccessMessage
+    })
+  );
 }
 
 export async function listTransferBatchLinesHandler(req, res) {
   return withPayrollErrorHandling(res, async () => {
     const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { batch, error } = await withBatchTenant(batchId, req);
+    const { batch, error } = await loadBatchForTenant(batchId, req);
     if (error) return sendOutcome(res, error);
     const { page, pageSize } = parsePaginationQuery(req.query);
     const { data, total } = await tm.listTransferLines({
@@ -613,7 +686,7 @@ export async function listTransferBatchLinesHandler(req, res) {
 export async function listTransferBatchHistoryHandler(req, res) {
   return withPayrollErrorHandling(res, async () => {
     const batchId = requirePositiveInt(req.params.batchId, 'batchId');
-    const { error } = await withBatchTenant(batchId, req);
+    const { error } = await loadBatchForTenant(batchId, req);
     if (error) return sendOutcome(res, error);
     const { page, pageSize } = parsePaginationQuery(req.query);
     const { data, total } = await tm.listTransferHistory({

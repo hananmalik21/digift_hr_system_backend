@@ -76,6 +76,8 @@ Existing `npm run test:payroll`: **47 pass / 0 fail**
 - POST .../hourly-rate/readiness|activate|deactivate
 - GET .../hourly-rate/history
 
+**V2 OVERTIME_REQUEST contract:** create/update accept a simplified shared-data body (element + input-value names + hourly_rate_source_element_id). Oracle owns normalization of `payroll_source_code`, `calculation_owner_code`, `transfer_unit_code`, `sign_multiplier`, `hourly_rate_source_code`, and leaves `hourly_rate_divisor` null so rate resolution uses published TM work-pattern weekly hours. REST must not require or inject TM OT config / schedule / labor-limit fields. Generic (non-OT) mappings keep the existing contract including `transfer_unit_code`.
+
 ### Transfer batches / lines
 - GET/POST /api/payroll/time-management/transfer-batches
 - GET .../{batchId}
@@ -83,6 +85,10 @@ Existing `npm run test:payroll`: **47 pass / 0 fail**
 - GET .../lines|history
 - GET /api/payroll/time-management/transfer-lines/{lineId}
 - POST .../retry|reverse
+
+**CREATE_TRANSFER_BATCH reopen:** same enterprise/payroll/period with status `REVERSED` is reopened by Oracle (same batch ID → `DRAFT`, appends `REOPEN_BATCH` history). The API must not pre-reject same-period existence as HTTP 409. Non-REVERSED same-period conflicts return Oracle’s business error as **409**. Success response is always the persisted Oracle batch row.
+
+**Lifecycle responses (preview/validate/transfer/reconcile/lock/reverse):** after each package call the API re-reads persisted batch + lines and returns `{ summary, batch, lines }`. OT hours, multiplier, weekly hours, divisor, and hourly rate are never calculated in Node.
 
 ### Remounts / aliases under /api/payroll
 - /definitions, /payroll-definitions
