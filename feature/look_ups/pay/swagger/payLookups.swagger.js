@@ -97,14 +97,15 @@
  *     summary: Bulk create lookup values
  *     description: |
  *       Calls PAY.PAY_LOOKUPS_PKG.CREATE_LOOKUP_VALUES_BULK.
- *       Top-level enterprise_id is the default for rows that omit enterprise_id.
+ *       Top-level enterprise_id is optional (omit or null for global).
+ *       It is the default for rows that omit enterprise_id.
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [type_code, enterprise_id, values]
+ *             required: [type_code, values]
  *             properties:
  *               type_code: { type: string }
  *               enterprise_id: { type: integer, nullable: true }

@@ -203,7 +203,8 @@ export const MAX_BULK_LOOKUP_VALUES = 100;
 
 /**
  * Validates bulk create payload.
- * Top-level `enterprise_id` is the default for rows that omit it.
+ * Top-level `enterprise_id` is optional; when omitted or null it defaults to global.
+ * It is used as the default for rows that omit `enterprise_id`.
  *
  * @param {Record<string, unknown>} body
  */
@@ -212,7 +213,7 @@ export function validateCreateLookupValuesBulkBody(body) {
   const payload = body || {};
 
   requireString(errors, payload, 'type_code');
-  requireEnterpriseIdField(errors, payload);
+  requireEnterpriseIdField(errors, payload, { required: false });
 
   if (!Array.isArray(payload.values) || payload.values.length === 0) {
     errors.push('values must be a non-empty array');
