@@ -28,6 +28,7 @@ import {
   handleSecuredQueryError,
   employeeAccessOptionsFromReq
 } from '../../utils/userContext.js';
+import '../swagger/tmOvertimeRequests.swagger.js';
 
 const ROUTE_TAG_LIST = 'GET /api/tm/overtime/requests';
 const ROUTE_TAG_EXPORT = 'GET /api/tm/overtime/requests/export';
@@ -195,12 +196,12 @@ export const submit = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await submitRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: 'Request submitted.',
+    message: 'Overtime request submitted successfully.',
     data: result,
   });
 });
 
-/** POST /api/tm/overtime/requests/:ot_request_guid/approve */
+/** POST /api/tm/overtime/requests/:ot_request_guid/approve — SUBMITTED → APPROVED (final; no HR gate for TM→PAY) */
 export const approve = asyncHandler(async (req, res) => {
   const params = guidParamSchema.safeParse({ ot_request_guid: req.params.ot_request_guid });
   if (!params.success) throw new ValidationError('Invalid ot_request_guid', [params.error.message]);
@@ -208,7 +209,7 @@ export const approve = asyncHandler(async (req, res) => {
   const data = validate(actionSchema, body);
   const result = await approveRequest(Number(data.tenant_id), params.data.ot_request_guid, data);
   sendSuccess(res, {
-    message: 'Request approved.',
+    message: 'Overtime request approved successfully.',
     data: result,
   });
 });
@@ -282,22 +283,24 @@ export const cancel = asyncHandler(async (req, res) => {
     "actor": "john.doe"
   }
 
-  --- Submit ---
+  Lifecycle: DRAFT → SUBMITTED → APPROVED (APPROVED is final for TM→PAY; HR audit optional).
+
+  --- Submit (DRAFT → SUBMITTED) ---
   POST {{baseUrl}}/api/tm/overtime/requests/:ot_request_guid/submit
   Content-Type: application/json
 
   {
     "tenant_id": 1,
-    "actor": "manager.user"
+    "actor": "john.doe"
   }
 
-  --- Approve ---
+  --- Approve (SUBMITTED → APPROVED) ---
   POST {{baseUrl}}/api/tm/overtime/requests/:ot_request_guid/approve
   Content-Type: application/json
 
   {
     "tenant_id": 1,
-    "actor": "approver.user"
+    "actor": "manager.user"
   }
 
   --- Reject ---

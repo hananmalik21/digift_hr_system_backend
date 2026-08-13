@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  OT_REQUEST_CREATE_STATUSES,
+  OT_REQUEST_LIST_FILTER_STATUSES,
+} from '../constants/tmOvertimeRequestStatuses.js';
 
 const GUID_PATTERN = /^[0-9A-Fa-f]{32}$|^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/i;
 
@@ -7,6 +11,9 @@ const tenantIdSchema = z.number().int().positive();
 
 /** GUID string: 32 hex chars or standard UUID with dashes */
 const guidSchema = z.string().min(1).regex(GUID_PATTERN, 'Must be 32-char hex or standard GUID string');
+
+const createStatusEnum = z.enum(OT_REQUEST_CREATE_STATUSES);
+const listStatusEnum = z.enum(OT_REQUEST_LIST_FILTER_STATUSES);
 
 /** Create request body */
 export const createSchema = z.object({
@@ -17,7 +24,7 @@ export const createSchema = z.object({
   reason: z.string().max(2000).optional().nullable(),
   ot_config_id: z.number().int().positive().optional().nullable(),
   ot_rate_type_id: z.number().int().positive().optional().nullable(),
-  status: z.enum(['DRAFT', 'SUBMITTED']).optional().default('DRAFT'),
+  status: createStatusEnum.optional().default('DRAFT'),
   actor: z.string().min(1).trim(),
 });
 
@@ -28,7 +35,7 @@ export const updateDraftSchema = z.object({
   reason: z.string().max(2000).optional().nullable(),
   ot_config_id: z.number().int().positive().optional().nullable(),
   ot_rate_type_id: z.number().int().positive().optional().nullable(),
-  status: z.enum(['DRAFT', 'SUBMITTED']).optional().nullable(),
+  status: createStatusEnum.optional().nullable(),
   actor: z.string().min(1).trim(),
 });
 
@@ -58,7 +65,8 @@ const optionalDateStr = z
 /** Query for GET list: tenant_id required, optional filters, pagination */
 export const listQuerySchema = z.object({
   tenant_id: z.coerce.number().int().positive(),
-  status: z.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN']).optional(),
+  /** Normal: DRAFT|SUBMITTED|APPROVED|REJECTED|WITHDRAWN. MANAGER_APPROVED = legacy filter only. */
+  status: listStatusEnum.optional(),
   date_from: optionalDateStr,
   date_to: optionalDateStr,
   search: z.string().max(500).optional().transform((s) => (s != null && String(s).trim() === '' ? undefined : s)),

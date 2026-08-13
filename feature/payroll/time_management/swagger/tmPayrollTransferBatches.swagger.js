@@ -5,8 +5,11 @@
  *     description: >
  *       TM → PAY transfer lifecycle via TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.
  *       Oracle owns create/reopen, preview, validate, transfer, reconcile, lock, and reverse.
+ *       For OVERTIME_REQUEST, Oracle eligibility is STATUS = 'APPROVED' only
+ *       (HR_VALIDATED_BY / MANAGER_APPROVED_BY are not required).
  *       After each package call the API re-reads persisted batch + lines and returns
- *       `{ summary, batch, lines }` — it does not calculate OT hours, multiplier, divisor, or hourly rate.
+ *       `{ summary, batch, lines }` — it does not calculate OT hours, multiplier, divisor, or hourly rate,
+ *       and does not filter OT eligibility in Node.
  *
  * @swagger
  * components:
@@ -127,7 +130,9 @@
  *     tags: [TM Payroll Transfer Batches]
  *     summary: Preview transfer batch (PREVIEW_TRANSFER_BATCH)
  *     description: >
- *       After PREVIEW_TRANSFER_BATCH, returns OUT counts plus refreshed persisted batch and lines.
+ *       Calls TM.TM_PAYROLL_TRANSFER_PROCESSING_PKG.PREVIEW_TRANSFER_BATCH, then returns OUT counts
+ *       plus refreshed persisted batch and lines. Oracle selects eligible OVERTIME_REQUEST rows with
+ *       STATUS = 'APPROVED' (HR_VALIDATED_BY may be null). Do not re-implement eligibility in the API.
  *       Hourly rate / multiplier / quantity come from Oracle transfer lines.
  *     security: [{ bearerAuth: [] }]
  *     parameters:

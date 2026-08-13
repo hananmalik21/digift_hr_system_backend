@@ -423,7 +423,8 @@ export async function updateDraft(tenantId, otRequestGuidStr, payload) {
 }
 
 /**
- * Submit: DRAFT -> SUBMITTED (enforced in procedure).
+ * Submit: DRAFT → SUBMITTED (TM.TM_OT_REQUESTS_PKG.SUBMIT_REQUEST).
+ * Returns the persisted Oracle request (status as stored — do not remap).
  */
 export async function submitRequest(tenantId, otRequestGuidStr, payload) {
   const guidBuf = guidToBuffer(otRequestGuidStr);
@@ -454,7 +455,10 @@ export async function submitRequest(tenantId, otRequestGuidStr, payload) {
 }
 
 /**
- * Approve: SUBMITTED -> APPROVED (enforced in procedure).
+ * Approve: SUBMITTED → APPROVED (TM.TM_OT_REQUESTS_PKG.APPROVE_REQUEST).
+ * APPROVED is the final business status and is sufficient for TM→PAY.
+ * Does not require HR validation. Returns persisted Oracle row as-is
+ * (manager_approved_* / hr_validated_* are audit fields only).
  */
 export async function approveRequest(tenantId, otRequestGuidStr, payload) {
   const guidBuf = guidToBuffer(otRequestGuidStr);
