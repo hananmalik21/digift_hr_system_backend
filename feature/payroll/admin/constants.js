@@ -1,6 +1,8 @@
 /**
  * Payroll test/admin runtime reset — wraps PAY.PAYROLL_TEST_RESET_PKG.
- * Destructive. Disabled in production. Not a normal payroll business endpoint.
+ * Destructive test/admin endpoint. Not a normal payroll business endpoint.
+ *
+ * Disable explicitly with PAYROLL_TEST_RESET_ENABLED=false.
  */
 
 export const PKG = 'PAY.PAYROLL_TEST_RESET_PKG';
@@ -11,7 +13,7 @@ export const CONFIRMATION_CODE = 'RESET_PAYROLL_TEST_DATA';
 export const ACTION = 'PAYROLL_TEST_RESET';
 export const ERROR_CODE = 'PAYROLL_TEST_RESET_FAILED';
 export const FAILED_MESSAGE = 'Payroll runtime reset failed.';
-export const PRODUCTION_DISABLED_MESSAGE = 'Payroll test reset is disabled in production.';
+export const PRODUCTION_DISABLED_MESSAGE = 'Payroll test reset is disabled.';
 export const ADMIN_REQUIRED_MESSAGE =
   'Access denied. Enterprise administrator privileges are required.';
 export const ENTERPRISE_ACCESS_DENIED_MESSAGE = 'Enterprise access denied';
@@ -23,14 +25,17 @@ export const RESET_BUSINESS_ORACLE_CODES = Object.freeze([
 
 export const RESET_BUSINESS_ORACLE_CODE_SET = new Set(RESET_BUSINESS_ORACLE_CODES);
 
+function envFlag(name) {
+  return String(process.env[name] || '').trim().toLowerCase();
+}
+
 /**
- * True when NODE_ENV or APP_ENV is production. Evaluated at call time so tests
- * can toggle the flag without reloading this module.
+ * Enabled unless PAYROLL_TEST_RESET_ENABLED is explicitly false/0/no.
+ * Evaluated at call time so tests can toggle the flag without reloading.
  */
 export function isPayrollTestResetDisabled() {
-  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
-  const appEnv = String(process.env.APP_ENV || '').trim().toLowerCase();
-  return nodeEnv === 'production' || appEnv === 'production';
+  const enabled = envFlag('PAYROLL_TEST_RESET_ENABLED');
+  return enabled === 'false' || enabled === '0' || enabled === 'no';
 }
 
 export const RESET_ENTERPRISE_RUNTIME_PLSQL = `

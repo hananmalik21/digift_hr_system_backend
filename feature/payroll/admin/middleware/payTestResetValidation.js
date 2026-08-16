@@ -1,6 +1,6 @@
 /**
  * Validation for POST /api/payroll/admin/test-reset.
- * Test/admin only — production is blocked; enterprise_id is never defaulted from JWT.
+ * Test/admin only — enterprise_id is never defaulted from JWT.
  */
 
 import { isEnterpriseAdmin } from '../../../../utils/adminAccess.js';

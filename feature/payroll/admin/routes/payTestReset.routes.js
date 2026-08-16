@@ -1,7 +1,7 @@
 /**
  * TEST/ADMIN ONLY — destructive payroll runtime reset.
  * Wraps PAY.PAYROLL_TEST_RESET_PKG.RESET_ENTERPRISE_RUNTIME.
- * Disabled when NODE_ENV or APP_ENV is production.
+ * Set PAYROLL_TEST_RESET_ENABLED=false to disable.
  *
  * Mount at /api/payroll → POST /admin/test-reset
  */

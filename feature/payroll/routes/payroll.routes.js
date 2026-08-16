@@ -162,7 +162,7 @@ router.use('/element-default-costing', payElementDefaultCostingRoutes);
 router.use('/system-default-costing', paySystemDefaultCostingRoutes);
 
 // =====================================================================================
-// TEST/ADMIN ONLY — destructive payroll runtime reset (disabled in production)
+// TEST/ADMIN ONLY — destructive payroll runtime reset
 // =====================================================================================
 router.use('/admin', payTestResetRoutes);
 

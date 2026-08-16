@@ -310,21 +310,21 @@ test('Non-admin user is rejected with 403', async () => {
   );
 });
 
-test('Production environment → endpoint blocked', async () => {
+test('NODE_ENV=production does not block the endpoint', async () => {
   await withEnv({ NODE_ENV: 'production', APP_ENV: undefined }, async () => {
     await withApp(async ({ baseUrl }) => {
       const r = await postReset(baseUrl, validBody());
-      assert.ok([403, 404].includes(r.status), `status ${r.status}`);
-      assert.equal(r.json.success, false);
+      assert.equal(r.status, 200);
+      assert.equal(r.json.success, true);
     });
   });
 });
 
-test('APP_ENV=production also disables the endpoint', async () => {
-  await withEnv({ APP_ENV: 'production' }, async () => {
+test('PAYROLL_TEST_RESET_ENABLED=false disables the endpoint', async () => {
+  await withEnv({ PAYROLL_TEST_RESET_ENABLED: 'false' }, async () => {
     await withApp(async ({ baseUrl }) => {
       const r = await postReset(baseUrl, validBody());
-      assert.ok([403, 404].includes(r.status), `status ${r.status}`);
+      assert.equal(r.status, 403);
       assert.equal(r.json.success, false);
     });
   });
