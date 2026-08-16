@@ -1,0 +1,137 @@
+{
+  "info": {
+    "name": "DigifyHR Compensation Pay Run Details",
+    "description": "Read-only APIs over COMP.V_COMP_PAY_RUN_DETAILS.\n\nBase path: {{baseUrl}}/api/comp\nAuth: Bearer {{jwt}}\n\nAll requests require enterprise_id (tenant isolation).\nList: GET /pay-runs. Optional employee_id filters line-level endpoints.\nPagination: page (default 1), limit (default 50, max 100).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "enterprise_id", "value": "1" },
+    { "key": "pay_run_id", "value": "103" },
+    { "key": "employee_id", "value": "501" }
+  ],
+  "item": [
+    {
+      "name": "List all pay runs",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "run_type", "value": "PAYROLL", "disabled": true },
+            { "key": "run_status", "value": "COMPLETED", "disabled": true },
+            { "key": "process_year", "value": "2026", "disabled": true },
+            { "key": "process_month_no", "value": "8", "disabled": true },
+            { "key": "page", "value": "1", "disabled": true },
+            { "key": "limit", "value": "50", "disabled": true }
+          ]
+        },
+        "description": "One header record per pay run for the enterprise.\n\nExample success:\n{\n  \"success\": true,\n  \"data\": [{\n    \"payRunId\": 103,\n    \"enterpriseId\": 1,\n    \"planId\": 111,\n    \"runType\": \"PAYROLL\",\n    \"runStatus\": \"COMPLETED\",\n    \"processPeriod\": \"AUGUST 2026\",\n    \"totalSelected\": 9,\n    \"totalProcessed\": 9,\n    \"totalFailed\": 0\n  }],\n  \"pagination\": { \"page\": 1, \"limit\": 50, \"total\": 1, \"total_pages\": 1, \"has_next\": false, \"has_previous\": false }\n}"
+      }
+    },
+    {
+      "name": "Get pay run details",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/{{pay_run_id}}/details?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "{{pay_run_id}}", "details"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "employee_id", "value": "", "disabled": true },
+            { "key": "page", "value": "1", "disabled": true },
+            { "key": "limit", "value": "50", "disabled": true }
+          ]
+        },
+        "description": "Nested pay-run header + employees[].lines[]. Optional employee_id filters to one employee.\n\nExample success:\n{\n  \"success\": true,\n  \"data\": {\n    \"payRun\": { \"payRunId\": 103, \"runStatus\": \"COMPLETED\", \"processPeriod\": \"AUGUST 2026\" },\n    \"employees\": [{ \"employeeId\": 501, \"lines\": [{ \"componentId\": 10, \"amount\": 1500, \"processStatus\": \"COMPLETED\" }] }]\n  },\n  \"pagination\": { \"page\": 1, \"limit\": 50, \"total\": 9, \"total_pages\": 1, \"has_next\": false, \"has_previous\": false }\n}"
+      }
+    },
+    {
+      "name": "Get pay run details for one employee",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/{{pay_run_id}}/employees/{{employee_id}}?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "{{pay_run_id}}", "employees", "{{employee_id}}"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        },
+        "description": "404 Pay run not found | 404 Employee not found in the specified pay run\n\nExample success:\n{\n  \"success\": true,\n  \"data\": {\n    \"payRun\": { \"payRunId\": 103, \"runType\": \"PAYROLL\", \"runStatus\": \"COMPLETED\", \"processPeriod\": \"AUGUST 2026\" },\n    \"employee\": { \"employeeId\": 501, \"lines\": [] }\n  }\n}"
+      }
+    },
+    {
+      "name": "Get employees processed in a pay run",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/{{pay_run_id}}/employees?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "{{pay_run_id}}", "employees"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "page", "value": "1", "disabled": true },
+            { "key": "limit", "value": "50", "disabled": true }
+          ]
+        },
+        "description": "One record per employee. totalAmount is the sum of line amounts, not net salary.\n\nExample success:\n{\n  \"success\": true,\n  \"data\": [{ \"employeeId\": 501, \"totalLines\": 8, \"totalAmount\": 2500.75, \"completedLines\": 8, \"failedLines\": 0 }]\n}"
+      }
+    },
+    {
+      "name": "Get failed pay run lines",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/{{pay_run_id}}/failed-lines?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "{{pay_run_id}}", "failed-lines"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "employee_id", "value": "", "disabled": true }
+          ]
+        },
+        "description": "PROCESS_STATUS = FAILED. Each row includes errorMessage.\n\nExample success:\n{\n  \"success\": true,\n  \"data\": [{ \"employeeId\": 502, \"componentId\": 10, \"processStatus\": \"FAILED\", \"errorMessage\": \"Missing assignment amount\" }]\n}"
+      }
+    },
+    {
+      "name": "Search pay runs by employee",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/by-employee/{{employee_id}}?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "by-employee", "{{employee_id}}"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        },
+        "description": "Distinct pay runs in which the employee has at least one line.\n\nExample success:\n{\n  \"success\": true,\n  \"data\": [{ \"payRunId\": 103, \"runType\": \"PAYROLL\", \"runStatus\": \"COMPLETED\", \"processPeriod\": \"AUGUST 2026\", \"processPeriodCode\": \"2026-08\" }]\n}"
+      }
+    },
+    {
+      "name": "Validation — invalid employee_id",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/comp/pay-runs/{{pay_run_id}}/details?enterprise_id={{enterprise_id}}&employee_id=abc",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "comp", "pay-runs", "{{pay_run_id}}", "details"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "employee_id", "value": "abc" }
+          ]
+        },
+        "description": "Expected 400:\n{ \"success\": false, \"message\": \"Invalid employee_id\" }"
+      }
+    }
+  ]
+}
