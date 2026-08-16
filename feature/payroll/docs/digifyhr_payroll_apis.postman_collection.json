@@ -11673,6 +11673,52 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "26 Admin / Test Reset",
+      "item": [
+        {
+          "name": "Payroll test runtime reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"confirmation\": \"RESET_PAYROLL_TEST_DATA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/admin/test-reset",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "admin",
+                "test-reset"
+              ]
+            },
+            "description": "TEST/ADMIN ONLY. Calls PAY.PAYROLL_TEST_RESET_PKG.RESET_ENTERPRISE_RUNTIME. Destructive. Disabled in production. Requires enterprise_admin and confirmation RESET_PAYROLL_TEST_DATA. Authorization: Bearer {{jwt}} (collection token)."
+          },
+          "response": []
+        }
+      ]
     }
   ]
 }

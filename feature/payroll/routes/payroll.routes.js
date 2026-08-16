@@ -6,7 +6,8 @@
  *  - New feature/payroll sub-routers (formulas engine, elements nested reads,
  *    balances employee/run reads, dashboard, audit, runs, payments, GL, close,
  *    recurring entries, element dependencies, retro/arrears, approvals,
- *    statutory processing, operations & certification, payment methods).
+ *    statutory processing, operations & certification, payment methods,
+ *    TM → PAY, and the test/admin runtime reset).
  *  - Existing feature/pay CRUD routers (elements family, eligibility, balances
  *    family, formulas, lookups), remounted here so a single `/api/payroll`
  *    base exposes both the legacy CRUD and the new payroll-specific endpoints.
@@ -34,6 +35,7 @@ import payStatutoryRoutes from '../statutory/statutory.routes.js';
 import payOperationsRoutes from '../operations/operations.routes.js';
 import payPaymentMethodsRoutes from '../payment_methods/paymentMethods.routes.js';
 import payTmPayrollRoutes from '../time_management/tmPayroll.routes.js';
+import payTestResetRoutes from '../admin/routes/payTestReset.routes.js';
 
 // --- Existing feature/pay CRUD routers, remounted under /api/payroll ---
 import payElementsRoutes from '../../pay/elements/routes/payElements.routes.js';
@@ -158,6 +160,11 @@ router.use('/element-department-costing', payElementDepartmentCostingRoutes);
 router.use('/department-default-costing', payDepartmentDefaultCostingRoutes);
 router.use('/element-default-costing', payElementDefaultCostingRoutes);
 router.use('/system-default-costing', paySystemDefaultCostingRoutes);
+
+// =====================================================================================
+// TEST/ADMIN ONLY — destructive payroll runtime reset (disabled in production)
+// =====================================================================================
+router.use('/admin', payTestResetRoutes);
 
 // =====================================================================================
 // Dashboard & audit
