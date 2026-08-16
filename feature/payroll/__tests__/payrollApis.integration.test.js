@@ -250,6 +250,60 @@ test('8. Runs — list + detail + summary + nested reads', async () => {
   }
 });
 
+// =============================================================================
+// 8b. Person results (PAY.V_PAY_PERSON_RESULTS / V_PAY_PERSON_PROCESS_RESULTS)
+// =============================================================================
+test('8b. Person results — list paginated', async () => {
+  const r = await api('GET', '/api/payroll/person-results', {
+    query: { enterprise_id: E, page: 1, page_size: 25 }
+  });
+  assertSuccessList(r, 'person results');
+  for (const item of r.json.data) {
+    assert.equal(item.flow_name, undefined);
+    assert.ok(item.employee_id == null || Number.isFinite(Number(item.employee_id)));
+  }
+});
+
+test('8b. Person results — search by name', async () => {
+  const r = await api('GET', '/api/payroll/person-results', {
+    query: { enterprise_id: E, search: 'Hammad', page: 1, page_size: 25 }
+  });
+  assertSuccessList(r, 'person results search');
+});
+
+test('8b. Person results — unknown employee process-results is 404 or empty', async () => {
+  const r = await api('GET', '/api/payroll/person-results/999999999/process-results', {
+    query: { enterprise_id: E, page: 1, page_size: 25 }
+  });
+  assert.ok([200, 404].includes(r.status), `process-results unknown employee => ${r.status}`);
+  if (r.status === 200) {
+    assert.equal(r.json.success, true);
+    assert.ok(Array.isArray(r.json.data));
+    assert.equal(r.json.data.length, 0);
+  }
+});
+
+test('8b. Person results — process-results for fixture employee', async () => {
+  const r = await api('GET', `/api/payroll/person-results/${FIXTURES.employeeId}/process-results`, {
+    query: { enterprise_id: E, page: 1, page_size: 25 }
+  });
+  assert.ok([200, 404].includes(r.status), `process-results fixture => ${r.status}`);
+  if (r.status === 200) {
+    assertSuccessList(r, 'process results');
+    for (const item of r.json.data) {
+      assert.equal(item.employee_id, FIXTURES.employeeId);
+      assert.equal(item.flow_name, undefined);
+      assert.equal(item.rel_action_obj, undefined);
+      assert.equal(item.payroll_definition_obj, undefined);
+      if (item.rel_action != null) assert.equal(typeof item.rel_action, 'object');
+      if (item.payroll_definition != null) assert.equal(typeof item.payroll_definition, 'object');
+      if (item.period_end_date) {
+        assert.ok(!/August|September/i.test(String(item.period_end_date)));
+      }
+    }
+  }
+});
+
 test('8. Runs — initialize validation rejects incomplete body', async () => {
   const r = await api('POST', '/api/payroll/runs/initialize', {
     body: { enterprise_id: E }

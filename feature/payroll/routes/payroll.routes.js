@@ -23,6 +23,7 @@ import payDashboardRoutes from '../dashboard/routes/payDashboard.routes.js';
 import payAuditRoutes from '../audit/routes/payAudit.routes.js';
 
 // --- feature/payroll modules built by sibling agents (confirmed present) ---
+import payPersonResultsRoutes from '../person_results/routes/payPersonResults.routes.js';
 import payRunsRoutes from '../runs/routes/payRuns.routes.js';
 import payPaymentsRoutes from '../payments/routes/payPayments.routes.js';
 import payGlRoutes from '../gl/routes/payGl.routes.js';
@@ -124,10 +125,12 @@ router.use('/balance-initializations', payBalanceInitializationRoutes);
 router.use('/balance-inquiry', payEmployeeBalanceInquiryRoutes);
 
 // =====================================================================================
-// Runs, payments, GL, payslips/close, retro & arrears, approvals
+// Person results (Oracle views V_PAY_PERSON_RESULTS / V_PAY_PERSON_PROCESS_RESULTS)
+// then runs, payments, GL, payslips/close, retro & arrears, approvals.
 // Literal /runs/* helpers from payments/close/ops must be reachable: runs router only
 // handles its own paths and next()s unmatched ones.
 // =====================================================================================
+router.use('/', payPersonResultsRoutes);
 router.use('/runs', payRunsRoutes);
 router.use('/', payPaymentsRoutes);
 router.use('/', payGlRoutes);

@@ -1,0 +1,83 @@
+{
+  "info": {
+    "name": "DigifyHR Payroll Person Results",
+    "description": "Read-only APIs over PAY.V_PAY_PERSON_RESULTS and PAY.V_PAY_PERSON_PROCESS_RESULTS.\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nAll requests require enterprise_id. Pagination: page (default 1), page_size (default 25, max 100).\nResponse envelope: { success, message, data[], meta.pagination }.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" },
+    { "key": "enterprise_id", "value": "1" },
+    { "key": "employee_id", "value": "293" },
+    { "key": "run_id", "value": "238" }
+  ],
+  "item": [
+    {
+      "name": "List person results",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/payroll/person-results?enterprise_id={{enterprise_id}}&search=Hammad&page=1&page_size=25",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payroll", "person-results"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "search", "value": "Hammad" },
+            { "key": "business_title", "value": "", "disabled": true },
+            { "key": "assignment_status", "value": "ACTIVE", "disabled": true },
+            { "key": "employment_status", "value": "ACTIVE", "disabled": true },
+            { "key": "worker_type", "value": "EMPLOYEE", "disabled": true },
+            { "key": "effective_as_of_date", "value": "2026-08-16", "disabled": true },
+            { "key": "include_terminated_work_relationships", "value": "N" },
+            { "key": "termination_date", "value": "", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "25" }
+          ]
+        },
+        "description": "Source: PAY.V_PAY_PERSON_RESULTS only. Search is case-insensitive across employee_name, person_number, assignment_number, business_title, work_email."
+      }
+    },
+    {
+      "name": "List employee process results",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/process-results?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payroll", "person-results", "{{employee_id}}", "process-results"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "payroll_id", "value": "", "disabled": true },
+            { "key": "run_id", "value": "", "disabled": true },
+            { "key": "status", "value": "Complete", "disabled": true },
+            { "key": "period_start_date", "value": "2026-08-01", "disabled": true },
+            { "key": "period_end_date", "value": "2026-08-31", "disabled": true },
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "25" }
+          ]
+        },
+        "description": "Source: PAY.V_PAY_PERSON_PROCESS_RESULTS. One row per employee payroll run. rel_action and payroll_definition are parsed JSON objects. No Flow Name. 404 if the employee is not in V_PAY_PERSON_RESULTS for the enterprise."
+      }
+    },
+    {
+      "name": "List employee calculation results for a run",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/process-results/{{run_id}}/results?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payroll", "person-results", "{{employee_id}}", "process-results", "{{run_id}}", "results"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "page", "value": "1", "disabled": true },
+            { "key": "page_size", "value": "25", "disabled": true }
+          ]
+        },
+        "description": "Wraps existing PAY.PAY_ELEMENT_RESULTS reads filtered by enterprise_id, employee_id, and run_id. Used when the user opens a Calculate Payroll row."
+      }
+    }
+  ]
+}
