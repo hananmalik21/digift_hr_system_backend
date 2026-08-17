@@ -33,6 +33,12 @@ function baseContext(req) {
   return { enterprise_id: enterpriseId, page, pageSize };
 }
 
+function enterpriseOnly(req) {
+  const enterpriseId = resolveEnterpriseId(req);
+  assertEnterpriseAccess(req, enterpriseId);
+  return enterpriseId;
+}
+
 function employeeIdParam(req) {
   return requirePositiveInt(req.params.employeeId, 'employeeId');
 }
@@ -79,6 +85,27 @@ export function validateListPersonProcessRunResults(req, res, next) {
       ...baseContext(req),
       employee_id: employeeIdParam(req),
       run_id: requirePositiveInt(req.params.runId, 'runId')
+    };
+  });
+}
+
+/** GET /person-results/:employeeId/runs/:runId/dashboard */
+export function validateGetPersonResultDashboard(req, res, next) {
+  return runValidation(res, next, () => {
+    req.validated = {
+      enterprise_id: enterpriseOnly(req),
+      employee_id: employeeIdParam(req),
+      run_id: requirePositiveInt(req.params.runId, 'runId')
+    };
+  });
+}
+
+/** GET /person-results/:employeeId/dashboards */
+export function validateListPersonResultDashboards(req, res, next) {
+  return runValidation(res, next, () => {
+    req.validated = {
+      ...baseContext(req),
+      employee_id: employeeIdParam(req)
     };
   });
 }

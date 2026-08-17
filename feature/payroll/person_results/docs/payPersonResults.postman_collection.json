@@ -9,7 +9,7 @@
     { "key": "jwt", "value": "" },
     { "key": "enterprise_id", "value": "1" },
     { "key": "employee_id", "value": "293" },
-    { "key": "run_id", "value": "238" }
+    { "key": "run_id", "value": "242" }
   ],
   "item": [
     {
@@ -77,6 +77,37 @@
           ]
         },
         "description": "Wraps existing PAY.PAY_ELEMENT_RESULTS reads filtered by enterprise_id, employee_id, and run_id. Used when the user opens a Calculate Payroll row."
+      }
+    {
+      "name": "Get person result dashboard",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/runs/{{run_id}}/dashboard?enterprise_id={{enterprise_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payroll", "person-results", "{{employee_id}}", "runs", "{{run_id}}", "dashboard"],
+          "query": [{ "key": "enterprise_id", "value": "{{enterprise_id}}" }]
+        },
+        "description": "Source: PAY.V_PAY_PERSON_RESULT_DASHBOARD only. Nested person/run/period/distribution plus parsed JSON objects. 404 if no row."
+      }
+    },
+    {
+      "name": "List person result dashboards",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/dashboards?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "payroll", "person-results", "{{employee_id}}", "dashboards"],
+          "query": [
+            { "key": "enterprise_id", "value": "{{enterprise_id}}" },
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "25" }
+          ]
+        },
+        "description": "Dashboard history for one employee, ordered by process_date DESC."
       }
     }
   ]

@@ -3,12 +3,14 @@
  * Reads Oracle views; element-level drill-down wraps existing run results.
  */
 
-import { notFoundOutcome, okList } from '../../shared/index.js';
+import { notFoundOutcome, okGet, okList } from '../../shared/index.js';
 import { getRunResults } from '../../runs/services/payRunsService.js';
 import { MESSAGES } from '../constants.js';
 import {
   getPersonResult,
+  getPersonResultDashboard,
   listPersonProcessResults,
+  listPersonResultDashboards,
   listPersonResults
 } from '../model/payPersonResultsModel.js';
 
@@ -38,4 +40,18 @@ export async function getPersonProcessRunResults(filters) {
   const outcome = await getRunResults(filters);
   if (!outcome.success) return outcome;
   return { ...outcome, message: MESSAGES.CALCULATION_LIST };
+}
+
+export async function getPersonResultDashboardByIds(filters) {
+  const row = await getPersonResultDashboard(
+    filters.enterprise_id,
+    filters.employee_id,
+    filters.run_id
+  );
+  if (!row) return notFoundOutcome(MESSAGES.DASHBOARD_NOT_FOUND);
+  return okGet(MESSAGES.DASHBOARD_GET, row);
+}
+
+export async function getPersonResultDashboards(filters) {
+  return pagedOk(MESSAGES.DASHBOARD_LIST, await listPersonResultDashboards(filters));
 }

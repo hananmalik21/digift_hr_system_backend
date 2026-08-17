@@ -304,6 +304,47 @@ test('8b. Person results — process-results for fixture employee', async () => 
   }
 });
 
+test('8b. Person results — dashboard for fixture employee/run', async () => {
+  const r = await api('GET', `/api/payroll/person-results/${FIXTURES.employeeId}/runs/242/dashboard`, {
+    query: { enterprise_id: E }
+  });
+  assert.ok([200, 404].includes(r.status), `dashboard => ${r.status}`);
+  if (r.status === 200) {
+    assert.equal(r.json.success, true);
+    const data = r.json.data;
+    assert.equal(data.person?.employee_id, FIXTURES.employeeId);
+    assert.equal(typeof data.relation_action, 'object');
+    assert.equal(typeof data.payroll_definition, 'object');
+    assert.equal(typeof data.timeline, 'object');
+    assert.ok(Array.isArray(data.rate_details));
+    assert.ok(Array.isArray(data.earnings_breakdown));
+    assert.equal(typeof data.execution_metrics, 'object');
+    assert.equal(typeof data.distribution, 'object');
+    assert.equal(data.rel_action_obj, undefined);
+    if (data.period?.period_end_date === '4712-12-31') {
+      assert.equal(data.period.warning, true);
+    }
+  }
+});
+
+test('8b. Person results — dashboard history list', async () => {
+  const r = await api('GET', `/api/payroll/person-results/${FIXTURES.employeeId}/dashboards`, {
+    query: { enterprise_id: E, page: 1, page_size: 25 }
+  });
+  assert.ok([200, 404].includes(r.status), `dashboards => ${r.status}`);
+  if (r.status === 200) {
+    assertSuccessList(r, 'person result dashboards');
+  }
+});
+
+test('8b. Person results — unknown dashboard is 404', async () => {
+  const r = await api('GET', '/api/payroll/person-results/999999999/runs/999999999/dashboard', {
+    query: { enterprise_id: E }
+  });
+  assert.equal(r.status, 404);
+  assert.equal(r.json.success, false);
+});
+
 test('8. Runs — initialize validation rejects incomplete body', async () => {
   const r = await api('POST', '/api/payroll/runs/initialize', {
     body: { enterprise_id: E }

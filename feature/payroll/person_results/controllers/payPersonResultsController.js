@@ -5,8 +5,10 @@
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { sendOutcome, withPayrollErrorHandling } from '../../shared/index.js';
 import {
+  validateGetPersonResultDashboard,
   validateListPersonProcessResults,
   validateListPersonProcessRunResults,
+  validateListPersonResultDashboards,
   validateListPersonResults
 } from '../middleware/payPersonResultsValidation.js';
 import * as personResultsService from '../services/payPersonResultsService.js';
@@ -36,4 +38,16 @@ export const listPersonProcessResultsHandler = createHandler(
 export const listPersonProcessRunResultsHandler = createHandler(
   validateListPersonProcessRunResults,
   personResultsService.getPersonProcessRunResults
+);
+
+/** GET /person-results/:employeeId/runs/:runId/dashboard */
+export const getPersonResultDashboardHandler = createHandler(
+  validateGetPersonResultDashboard,
+  personResultsService.getPersonResultDashboardByIds
+);
+
+/** GET /person-results/:employeeId/dashboards */
+export const listPersonResultDashboardsHandler = createHandler(
+  validateListPersonResultDashboards,
+  personResultsService.getPersonResultDashboards
 );

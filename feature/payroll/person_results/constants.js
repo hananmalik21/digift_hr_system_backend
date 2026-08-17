@@ -5,6 +5,7 @@
 
 export const PERSON_RESULTS_VIEW = 'PAY.V_PAY_PERSON_RESULTS';
 export const PERSON_PROCESS_RESULTS_VIEW = 'PAY.V_PAY_PERSON_PROCESS_RESULTS';
+export const PERSON_RESULT_DASHBOARD_VIEW = 'PAY.V_PAY_PERSON_RESULT_DASHBOARD';
 
 export const LOG_TAG = 'payPersonResults';
 
@@ -40,5 +41,8 @@ export const MESSAGES = {
   PERSON_LIST: 'Payroll person results retrieved successfully.',
   PROCESS_LIST: 'Payroll process results retrieved successfully.',
   CALCULATION_LIST: 'Payroll calculation results retrieved successfully.',
-  PERSON_NOT_FOUND: 'Payroll person result not found.'
+  PERSON_NOT_FOUND: 'Payroll person result not found.',
+  DASHBOARD_GET: 'Payroll person result dashboard retrieved successfully.',
+  DASHBOARD_LIST: 'Payroll person result dashboards retrieved successfully.',
+  DASHBOARD_NOT_FOUND: 'Payroll person result dashboard not found.'
 };

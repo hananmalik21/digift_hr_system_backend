@@ -7,9 +7,11 @@ import { queryPayList, queryPayOne } from '../../shared/payrollViewQuery.js';
 import {
   LOG_TAG,
   PERSON_PROCESS_RESULTS_VIEW,
+  PERSON_RESULT_DASHBOARD_VIEW,
   PERSON_RESULTS_VIEW,
   PERSON_SEARCH_COLUMNS
 } from '../constants.js';
+import { mapPersonResultDashboardRow } from '../utils/payPersonResultDashboardMappers.js';
 import { mapPersonProcessResultRow, mapPersonResultRow } from '../utils/payPersonResultsMappers.js';
 
 const ACTIVE_ASSIGNMENT_SQL = `(
@@ -136,6 +138,44 @@ export async function listPersonProcessResults(filters) {
     mapPersonProcessResultRow,
     {
       defaultSort: 'v.PROCESS_DATE DESC',
+      page: filters.page,
+      pageSize: filters.pageSize
+    }
+  );
+}
+
+/**
+ * @param {number} enterpriseId
+ * @param {number} employeeId
+ * @param {number} runId
+ */
+export async function getPersonResultDashboard(enterpriseId, employeeId, runId) {
+  return queryPayOne({
+    fromSql: `${PERSON_RESULT_DASHBOARD_VIEW} v`,
+    alias: 'v',
+    filters: [
+      eq('ENTERPRISE_ID', 'enterprise_id', enterpriseId),
+      eq('EMPLOYEE_ID', 'employee_id', employeeId),
+      eq('RUN_ID', 'run_id', runId)
+    ],
+    mapRow: mapPersonResultDashboardRow,
+    logTag: LOG_TAG
+  });
+}
+
+/**
+ * @param {{ enterprise_id: number, employee_id: number, page: number, pageSize: number }} filters
+ */
+export async function listPersonResultDashboards(filters) {
+  return viewList(
+    PERSON_RESULT_DASHBOARD_VIEW,
+    [
+      eq('ENTERPRISE_ID', 'enterprise_id', filters.enterprise_id),
+      eq('EMPLOYEE_ID', 'employee_id', filters.employee_id)
+    ],
+    mapPersonResultDashboardRow,
+    {
+      defaultSort: 'v.PROCESS_DATE DESC NULLS LAST, v.RUN_ID DESC',
       page: filters.page,
       pageSize: filters.pageSize
     }

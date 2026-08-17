@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "DigifyHR Payroll APIs — Complete",
-    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–25 | Requests: 308\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- NEW: TM Payroll Source Mappings (22)\n- NEW: Hourly Rate Policies (23)\n- NEW: TM Payroll Transfer (24)\n- NEW: Remaining Payroll Configuration (25)\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id,\nhourly_rate_policy_id, payroll_source_mapping_id, transfer_batch_id, transfer_line_id",
+    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–26 + Person Results | Requests: 311\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, person results, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- NEW: TM Payroll Source Mappings (22)\n- NEW: Hourly Rate Policies (23)\n- NEW: TM Payroll Transfer (24)\n- NEW: Remaining Payroll Configuration (25)\n- NEW: Person Results (08b) — V_PAY_PERSON_RESULTS / V_PAY_PERSON_PROCESS_RESULTS\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id,\nhourly_rate_policy_id, payroll_source_mapping_id, transfer_batch_id, transfer_line_id",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -3686,6 +3686,268 @@
             },
             "description": ""
           }
+        }
+      ]
+    },
+    {
+      "name": "08b Person Results",
+      "item": [
+        {
+          "name": "List person results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/person-results?enterprise_id={{enterprise_id}}&search=&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "person-results"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}"
+                },
+                {
+                  "key": "search",
+                  "value": ""
+                },
+                {
+                  "key": "business_title",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "assignment_status",
+                  "value": "ACTIVE",
+                  "disabled": true
+                },
+                {
+                  "key": "employment_status",
+                  "value": "ACTIVE",
+                  "disabled": true
+                },
+                {
+                  "key": "worker_type",
+                  "value": "EMPLOYEE",
+                  "disabled": true
+                },
+                {
+                  "key": "effective_as_of_date",
+                  "value": "2026-08-16",
+                  "disabled": true
+                },
+                {
+                  "key": "include_terminated_work_relationships",
+                  "value": "N"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "GET /api/payroll/person-results\nSource: PAY.V_PAY_PERSON_RESULTS only.\nRequired: enterprise_id.\nOptional: search (name, person_number, assignment_number, business_title, work_email), business_title, assignment_status, employment_status, worker_type, effective_as_of_date, include_terminated_work_relationships (default N), page, page_size (max 100).\nOrder: employee_name ASC.\nEnvelope: { success, message, data[], meta.pagination }."
+          },
+          "response": []
+        },
+        {
+          "name": "List employee process results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/process-results?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "person-results",
+                "{{employee_id}}",
+                "process-results"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}"
+                },
+                {
+                  "key": "payroll_id",
+                  "value": "{{payroll_id}}",
+                  "disabled": true
+                },
+                {
+                  "key": "run_id",
+                  "value": "{{run_id}}",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "Complete",
+                  "disabled": true
+                },
+                {
+                  "key": "period_start_date",
+                  "value": "2026-08-01",
+                  "disabled": true
+                },
+                {
+                  "key": "period_end_date",
+                  "value": "2026-08-31",
+                  "disabled": true
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "GET /api/payroll/person-results/:employee_id/process-results\nSource: PAY.V_PAY_PERSON_PROCESS_RESULTS.\nOne row per employee payroll run. rel_action and payroll_definition are parsed JSON objects. No Flow Name.\n404 if the employee is not in V_PAY_PERSON_RESULTS for the enterprise.\nSentinel period_end_date 4712-12-31 is returned unchanged with period_warning=true."
+          },
+          "response": []
+        },
+        {
+          "name": "List employee calculation results for a run",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/process-results/{{run_id}}/results?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "person-results",
+                "{{employee_id}}",
+                "process-results",
+                "{{run_id}}",
+                "results"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "GET /api/payroll/person-results/:employee_id/process-results/:run_id/results\nWraps existing PAY.PAY_ELEMENT_RESULTS reads filtered by enterprise_id, employee_id, and run_id.\nUsed when the user opens a Calculate Payroll row."
+          },
+          "response": []
+        },
+        {
+          "name": "Get person result dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/runs/{{run_id}}/dashboard?enterprise_id={{enterprise_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "person-results",
+                "{{employee_id}}",
+                "runs",
+                "{{run_id}}",
+                "dashboard"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}"
+                }
+              ]
+            },
+            "description": "GET /api/payroll/person-results/:employee_id/runs/:run_id/dashboard\nSource: PAY.V_PAY_PERSON_RESULT_DASHBOARD only.\nNested person, run, relation_action, payroll_definition, period, timeline, rate_details, earnings_breakdown, execution_metrics, distribution, calculation, actions.\nJSON/CLOB *_OBJ columns are parsed. Sentinel period dates are not rewritten. 404 if no matching row."
+          },
+          "response": []
+        },
+        {
+          "name": "List person result dashboards",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/payroll/person-results/{{employee_id}}/dashboards?enterprise_id={{enterprise_id}}&page=1&page_size=25",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "payroll",
+                "person-results",
+                "{{employee_id}}",
+                "dashboards"
+              ],
+              "query": [
+                {
+                  "key": "enterprise_id",
+                  "value": "{{enterprise_id}}"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "page_size",
+                  "value": "25"
+                }
+              ]
+            },
+            "description": "GET /api/payroll/person-results/:employee_id/dashboards\nHistory of dashboard rows for one employee from V_PAY_PERSON_RESULT_DASHBOARD.\nOrder: PROCESS_DATE DESC NULLS LAST, RUN_ID DESC."
+          },
+          "response": []
         }
       ]
     },
