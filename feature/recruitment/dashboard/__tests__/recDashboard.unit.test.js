@@ -10,11 +10,10 @@ import {
   CANDIDATE_STATS_COLUMNS,
   DASHBOARD_SECTIONS,
   INTERVIEW_STATS_COLUMNS,
+  COMBINED_DASHBOARD_SECTIONS,
   OFFER_STATS_COLUMNS,
-  REC_APPLICATION_STATS_VIEW,
-  REC_CANDIDATE_STATS_VIEW,
-  REC_INTERVIEW_STATS_VIEW,
-  REC_OFFER_STATS_VIEW,
+  REC_REQUISITION_STATS_VIEW,
+  REQUISITION_STATS_COLUMNS,
   selectSqlFromColumns
 } from '../utils/recDashboardConstants.js';
 import { emptyStatsRow, mapStatsViewRow } from '../utils/recDashboardMapper.js';
@@ -122,12 +121,49 @@ test('select SQL lists every contracted column from the view alias', () => {
   assert.equal(sql.split(',').length, CANDIDATE_STATS_COLUMNS.length);
 });
 
+test('requisition stats mapper returns view values without recalculating trend or pct', () => {
+  const mapped = mapStatsViewRow(
+    {
+      ENTERPRISE_ID: 1,
+      TOTAL_REQUISITIONS: 13,
+      TOTAL_OPENINGS: 19,
+      PENDING_APPROVAL: 0,
+      HIGH_PRIORITY: 13,
+      MONTH_0_REQUISITIONS: 0,
+      MONTH_1_REQUISITIONS: 4,
+      MONTH_2_REQUISITIONS: 0,
+      MONTH_0_LABEL: 'AUG 2026',
+      MONTH_1_LABEL: 'JUL 2026',
+      MONTH_2_LABEL: 'JUN 2026',
+      LAST_3_MONTHS_REQUISITIONS: 4,
+      REQUISITION_CHANGE_PCT: -100,
+      REQUISITION_TREND: 'DOWN',
+      REQUISITION_CHANGE_LABEL: '100% decrease from last month'
+    },
+    REQUISITION_STATS_COLUMNS,
+    1
+  );
+
+  assert.equal(mapped.enterprise_id, 1);
+  assert.equal(mapped.total_requisitions, 13);
+  assert.equal(mapped.total_openings, 19);
+  assert.equal(mapped.pending_approval, 0);
+  assert.equal(mapped.high_priority, 13);
+  assert.equal(mapped.month_1_requisitions, 4);
+  assert.equal(mapped.last_3_months_requisitions, 4);
+  assert.equal(mapped.requisition_change_pct, -100);
+  assert.equal(mapped.requisition_trend, 'DOWN');
+  assert.equal(mapped.requisition_change_label, '100% decrease from last month');
+  assert.equal(Object.keys(mapped).length, REQUISITION_STATS_COLUMNS.length);
+});
+
 test('each stats contract has unique columns starting with ENTERPRISE_ID', () => {
   for (const columns of [
     CANDIDATE_STATS_COLUMNS,
     APPLICATION_STATS_COLUMNS,
     INTERVIEW_STATS_COLUMNS,
-    OFFER_STATS_COLUMNS
+    OFFER_STATS_COLUMNS,
+    REQUISITION_STATS_COLUMNS
   ]) {
     assert.equal(columns[0].name, 'ENTERPRISE_ID');
     const names = columns.map((c) => c.name);
@@ -135,22 +171,27 @@ test('each stats contract has unique columns starting with ENTERPRISE_ID', () =>
   }
 });
 
-test('dashboard sections cover all four views and combined response keys', () => {
+test('dashboard sections cover all views including requisition-stats route', () => {
   assert.deepEqual(
     DASHBOARD_SECTIONS.map((s) => s.key),
-    ['candidates', 'applications', 'interviews', 'offers']
+    ['candidates', 'applications', 'interviews', 'offers', 'requisitions']
   );
   assert.deepEqual(
     DASHBOARD_SECTIONS.map((s) => s.path),
-    ['/candidate-stats', '/application-stats', '/interview-stats', '/offer-stats']
-  );
-  assert.deepEqual(
-    DASHBOARD_SECTIONS.map((s) => s.view),
     [
-      REC_CANDIDATE_STATS_VIEW,
-      REC_APPLICATION_STATS_VIEW,
-      REC_INTERVIEW_STATS_VIEW,
-      REC_OFFER_STATS_VIEW
+      '/candidate-stats',
+      '/application-stats',
+      '/interview-stats',
+      '/offer-stats',
+      '/requisition-stats'
     ]
+  );
+  assert.equal(DASHBOARD_SECTIONS.at(-1)?.view, REC_REQUISITION_STATS_VIEW);
+});
+
+test('combined dashboard stats exclude requisitions section', () => {
+  assert.deepEqual(
+    COMBINED_DASHBOARD_SECTIONS.map((s) => s.key),
+    ['candidates', 'applications', 'interviews', 'offers']
   );
 });

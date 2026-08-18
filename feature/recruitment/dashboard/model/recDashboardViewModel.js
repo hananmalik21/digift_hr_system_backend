@@ -5,6 +5,7 @@ import {
   withConnection
 } from '../../shared/recViewModelUtils.js';
 import {
+  COMBINED_DASHBOARD_SECTIONS,
   DASHBOARD_SECTIONS,
   LOG_TAG,
   READ_ERROR_MESSAGE,
@@ -50,7 +51,7 @@ async function getStatsFromView(view, columns, enterpriseId) {
 }
 
 /**
- * @param {'candidates'|'applications'|'interviews'|'offers'} sectionKey
+ * @param {'candidates'|'applications'|'interviews'|'offers'|'requisitions'} sectionKey
  * @param {number} enterpriseId
  */
 export async function getDashboardSectionStats(sectionKey, enterpriseId) {
@@ -82,11 +83,16 @@ export async function getOfferStats(enterpriseId) {
 }
 
 /** @param {number} enterpriseId */
+export async function getRequisitionStats(enterpriseId) {
+  return getDashboardSectionStats('requisitions', enterpriseId);
+}
+
+/** @param {number} enterpriseId */
 export async function getCombinedDashboardStats(enterpriseId) {
   try {
     return await withConnection(async (connection) => {
       const data = {};
-      for (const section of DASHBOARD_SECTIONS) {
+      for (const section of COMBINED_DASHBOARD_SECTIONS) {
         data[section.key] = await fetchStatsRow(
           connection,
           section.view,

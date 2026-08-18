@@ -5,6 +5,7 @@
  * GET /api/recruitment/dashboard/application-stats
  * GET /api/recruitment/dashboard/interview-stats
  * GET /api/recruitment/dashboard/offer-stats
+ * GET /api/recruitment/dashboard/requisition-stats
  * GET /api/recruitment/dashboard/stats
  */
 

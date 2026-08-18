@@ -6,6 +6,8 @@ export const REC_APPLICATION_STATS_VIEW =
 export const REC_INTERVIEW_STATS_VIEW =
   process.env.REC_INTERVIEW_STATS_V || 'REC.V_INTERVIEW_STATS';
 export const REC_OFFER_STATS_VIEW = process.env.REC_OFFER_STATS_V || 'REC.V_OFFER_STATS';
+export const REC_REQUISITION_STATS_VIEW =
+  process.env.REC_REQUISITION_STATS_V || 'REC.V_REQUISITION_STATS';
 
 export const LOG_TAG = 'recDashboardViewModel';
 
@@ -16,6 +18,7 @@ export const MESSAGES = {
   APPLICATION_STATS: 'Application stats retrieved successfully.',
   INTERVIEW_STATS: 'Interview stats retrieved successfully.',
   OFFER_STATS: 'Offer stats retrieved successfully.',
+  REQUISITION_STATS: 'Requisition stats retrieved successfully.',
   COMBINED_STATS: 'Recruitment dashboard stats retrieved successfully.'
 };
 
@@ -101,11 +104,21 @@ export const OFFER_STATS_COLUMNS = [
   ...monthAndTrendColumns('OFFERS', 'OFFER')
 ];
 
+/** Columns from REC.V_REQUISITION_STATS. */
+export const REQUISITION_STATS_COLUMNS = [
+  num('ENTERPRISE_ID'),
+  num('TOTAL_REQUISITIONS'),
+  num('TOTAL_OPENINGS'),
+  num('PENDING_APPROVAL'),
+  num('HIGH_PRIORITY'),
+  ...monthAndTrendColumns('REQUISITIONS', 'REQUISITION')
+];
+
 /**
  * Single source of truth for dashboard section routes, views, and columns.
- * Combined `/stats` is handled separately so all four sections share one connection.
+ * Combined `/stats` uses COMBINED_DASHBOARD_SECTIONS (excludes requisitions).
  * @type {ReadonlyArray<{
- *   key: 'candidates'|'applications'|'interviews'|'offers',
+ *   key: 'candidates'|'applications'|'interviews'|'offers'|'requisitions',
  *   path: string,
  *   view: string,
  *   columns: StatsColumn[],
@@ -140,8 +153,20 @@ export const DASHBOARD_SECTIONS = [
     view: REC_OFFER_STATS_VIEW,
     columns: OFFER_STATS_COLUMNS,
     message: MESSAGES.OFFER_STATS
+  },
+  {
+    key: 'requisitions',
+    path: '/requisition-stats',
+    view: REC_REQUISITION_STATS_VIEW,
+    columns: REQUISITION_STATS_COLUMNS,
+    message: MESSAGES.REQUISITION_STATS
   }
 ];
+
+/** Sections returned by GET /api/recruitment/dashboard/stats */
+export const COMBINED_DASHBOARD_SECTIONS = DASHBOARD_SECTIONS.filter(
+  (section) => section.key !== 'requisitions'
+);
 
 /** @param {StatsColumn[]} columns */
 export function selectSqlFromColumns(columns) {
