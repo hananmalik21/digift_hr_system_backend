@@ -92,6 +92,7 @@ import recTalentPoolsController from './feature/recruitment/talent_pools/control
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
 import recJobPostingEmployerInfoController from './feature/recruitment/job_postings/controller/recJobPostingEmployerInfoController.js';
 import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
+import recDashboardController from './feature/recruitment/dashboard/controller/recDashboardController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
@@ -380,6 +381,9 @@ app.use('/api/rec/job-postings', recJobPostingsController);
 
 // Recruitment — applications (REC.V_APPLICATIONS reads, REC.CREATE_APPLICATION_PKG mutations)
 app.use('/api/recruitment/applications', recApplicationsController);
+
+// Recruitment — dashboard (REC.V_CANDIDATE_STATS / V_APPLICATION_STATS / V_INTERVIEW_STATS / V_OFFER_STATS)
+app.use('/api/recruitment/dashboard', recDashboardController);
 
 // Recruitment — job offers (REC.V_JOB_OFFER_MANAGEMENT reads, REC.REC_JOB_OFFER_PKG mutations)
 app.use('/api/rec/job-offers', jobOfferRoutes);
