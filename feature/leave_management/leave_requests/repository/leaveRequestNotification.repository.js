@@ -34,6 +34,32 @@ FETCH FIRST 1 ROWS ONLY`;
   });
 }
 
+export async function findEnterpriseAdminUserIds(enterpriseId) {
+  if (!enterpriseId) return [];
+
+  const sql = `
+SELECT USER_ID
+FROM FNDSEC.FNDSEC_USERS
+WHERE ENTERPRISE_ID = :enterprise_id
+  AND (
+        LOWER(USER_CODE) = 'enterprise_admin'
+     OR LOWER(USERNAME) = 'enterprise_admin'
+      )`;
+
+  return withConnection(async (connection) => {
+    const result = await connection.execute(
+      sql,
+      {
+        enterprise_id: bindInNumber(Number(enterpriseId))
+      },
+      ROW_OPTS
+    );
+    return (result.rows ?? [])
+      .map((row) => readUserId(row))
+      .filter((userId) => Number.isFinite(userId) && userId > 0);
+  });
+}
+
 export async function findReportingManagerUserId(enterpriseId, employeeId) {
   if (!enterpriseId || !employeeId) return null;
 

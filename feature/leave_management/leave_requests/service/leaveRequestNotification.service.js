@@ -121,6 +121,10 @@ async function createLeaveNotification({
   });
 }
 
+function uniquePositiveIds(ids) {
+  return [...new Set((ids ?? []).filter((id) => Number.isFinite(id) && id > 0))];
+}
+
 async function notifyApprover({
   enterpriseId,
   employeeId,
@@ -133,30 +137,52 @@ async function notifyApprover({
   message,
   metadata = {}
 }) {
-  const approverUserId = await leaveNotificationRepository.findReportingManagerUserId(
-    enterpriseId,
-    employeeId
-  );
+  const [approverUserId, adminUserIds] = await Promise.all([
+    leaveNotificationRepository.findReportingManagerUserId(enterpriseId, employeeId),
+    leaveNotificationRepository.findEnterpriseAdminUserIds(enterpriseId)
+  ]);
 
-  if (!approverUserId) {
-    console.warn(`[${LOG_TAG}] No reporting manager user found`, { enterpriseId, employeeId });
+  const recipientUserIds = uniquePositiveIds([approverUserId, ...adminUserIds]);
+
+  if (!recipientUserIds.length) {
+    console.warn(`[${LOG_TAG}] No reporting manager or enterprise admin user found`, {
+      enterpriseId,
+      employeeId
+    });
     return null;
   }
 
-  return createLeaveNotification({
-    enterpriseId,
-    actorUserId,
-    actorUsername,
-    recipientUserId: approverUserId,
-    type,
-    title,
-    message,
-    actionUrl: buildActionUrl('/absence/approvals', leaveRequest),
-    iconCode: LEAVE_NOTIFICATION_ICON.CALENDAR,
-    leaveRequest,
-    context,
-    metadata
-  });
+  const results = await Promise.allSettled(
+    recipientUserIds.map((recipientUserId) =>
+      createLeaveNotification({
+        enterpriseId,
+        actorUserId,
+        actorUsername,
+        recipientUserId,
+        type,
+        title,
+        message,
+        actionUrl: buildActionUrl('/absence/approvals', leaveRequest),
+        iconCode: LEAVE_NOTIFICATION_ICON.CALENDAR,
+        leaveRequest,
+        context,
+        metadata
+      })
+    )
+  );
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`[${LOG_TAG}] Failed to notify manager/admin recipient`, {
+        enterpriseId,
+        message: result.reason?.message || String(result.reason)
+      });
+    }
+  }
+
+  return results
+    .filter((result) => result.status === 'fulfilled')
+    .map((result) => result.value);
 }
 
 async function notifyEmployee({
