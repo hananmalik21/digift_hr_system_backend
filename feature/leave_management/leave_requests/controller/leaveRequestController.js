@@ -19,14 +19,8 @@ import {
 } from '../view/leaveRequestView.js';
 import { parseGuid } from '../../../../utils/guidUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import {
-  requireActingUserId,
-  logSecuredAccess,
-  employeeAccessOptionsFromReq
-} from '../../../../utils/userContext.js';
+import { requireActingUserId, logSecuredAccess, employeeAccessOptionsFromReq } from '../../../../utils/userContext.js';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
-import { LEAVE_NOTIFICATION_EVENTS } from '../constants/leaveRequestNotification.constants.js';
-import { dispatchLeaveRequestNotificationFromRequest } from '../utils/leaveRequestNotification.dispatch.js';
 
 const ROUTE_TAG_LIST = 'GET /api/abs/leave-requests';
 
@@ -134,16 +128,6 @@ function isInvalidGuidError(error) {
 function normalizeSubmitValue(value) {
   if (value === undefined) return true;
   return value === true || value === 'true' || value === 'TRUE';
-}
-
-function dispatchLeaveNotification(req, tenantId, headerUserId, event, leaveRequest, extra = {}) {
-  dispatchLeaveRequestNotificationFromRequest(req, {
-    tenantId,
-    headerUserId,
-    event,
-    leaveRequest,
-    extra
-  });
 }
 
 /** Attach download_url and preview_url to doc if it has document_guid. */
@@ -599,20 +583,6 @@ router.post('/', uploadDocuments, async (req, res) => {
       userId
     );
 
-    const createdLeaveRequest = result?.leave_request ?? result;
-    if (
-      createdLeaveRequest &&
-      String(createdLeaveRequest.request_status || '').toUpperCase() === 'SUBMITTED'
-    ) {
-      dispatchLeaveNotification(
-        req,
-        tenantId,
-        userId,
-        LEAVE_NOTIFICATION_EVENTS.CREATED_AND_SUBMITTED,
-        createdLeaveRequest
-      );
-    }
-
     sendCreated(res, req, result);
   } catch (error) {
     // Handle multer errors
@@ -849,18 +819,6 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
         overlapCheck
       }
     );
-
-    const previousStatus = String(existingLeaveRequest.request_status || '').toUpperCase();
-    const updatedStatus = String(updatedLeaveRequest?.request_status || '').toUpperCase();
-    if (previousStatus === 'DRAFT' && updatedStatus === 'SUBMITTED') {
-      dispatchLeaveNotification(
-        req,
-        tenantId,
-        userId,
-        LEAVE_NOTIFICATION_EVENTS.SUBMITTED,
-        updatedLeaveRequest
-      );
-    }
     
     // Update contact information if provided
     if (normalizedBody.REASON_FOR_LEAVE !== undefined || normalizedBody.ADDRESS_DURING_LEAVE !== undefined ||
@@ -995,14 +953,6 @@ router.post('/:guid/submit', async (req, res) => {
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
     const updatedLeaveRequest = await LeaveRequestModel.submitByGuid(parsed.guidHex32, tenantId, userId);
-
-    dispatchLeaveNotification(
-      req,
-      tenantId,
-      userId,
-      LEAVE_NOTIFICATION_EVENTS.SUBMITTED,
-      updatedLeaveRequest
-    );
     
     const wrappedData = { leave_details: updatedLeaveRequest };
     res.json({
@@ -1038,14 +988,6 @@ router.post('/:guid/approve', async (req, res) => {
     const tenantId = getTenantId(req);
     const userId = getUserId(req);
     const result = await LeaveRequestModel.approveByGuid(parsed.guidHex32, tenantId, userId);
-
-    dispatchLeaveNotification(
-      req,
-      tenantId,
-      userId,
-      LEAVE_NOTIFICATION_EVENTS.APPROVED,
-      result.leaveRequest
-    );
     
     const wrappedData = { 
       leave_details: result.leaveRequest,
@@ -1094,15 +1036,6 @@ router.post('/:guid/reject', async (req, res) => {
       comments: req.body.comments || null
     };
     const updatedLeaveRequest = await LeaveRequestModel.rejectByGuid(parsed.guidHex32, tenantId, userId, rejectionData);
-
-    dispatchLeaveNotification(
-      req,
-      tenantId,
-      userId,
-      LEAVE_NOTIFICATION_EVENTS.REJECTED,
-      updatedLeaveRequest,
-      { rejectionReason: rejectionData.reason || rejectionData.comments || null }
-    );
     
     const wrappedData = { leave_details: updatedLeaveRequest };
     res.json({
@@ -1152,14 +1085,6 @@ router.delete('/:guid', async (req, res) => {
     if (result.action === 'deleted') {
       sendDeleted(res, req, 'Leave request deleted successfully', parsed.guidHex32);
     } else if (result.action === 'withdrawn') {
-      dispatchLeaveNotification(
-        req,
-        tenantId,
-        userId,
-        LEAVE_NOTIFICATION_EVENTS.WITHDRAWN,
-        result.leaveRequest
-      );
-
       // Withdrawn - fetch and return all 3 objects (leave_details, contact, documents)
       // Fetch contact and document information in parallel for optimal performance
       const [leaveContact, documents] = await Promise.all([
