@@ -7,3 +7,8 @@ scripts/seed-admin.local.js
 
 .env.dev
 .env
+
+# Firebase private credentials
+*firebase-adminsdk*.json
+firebase-admin*.json
+service-account*.json

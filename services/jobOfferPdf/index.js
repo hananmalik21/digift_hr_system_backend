@@ -3,6 +3,7 @@ export { OfferPdfGenerationError } from './errors.js';
 export { buildOfferPdfFilename } from './filename.js';
 export {
   getPuppeteerBrowser,
+  closeJobOfferPdfBrowser,
   prewarmJobOfferPdfBrowser,
   renderHtmlToPdf
 } from './browser.js';

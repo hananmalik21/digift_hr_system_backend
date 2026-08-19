@@ -115,6 +115,22 @@ export async function getPuppeteerBrowser() {
   return browserLaunchPromise;
 }
 
+/** Close the shared Puppeteer browser so nodemon/restarts can release port 3000. */
+export async function closeJobOfferPdfBrowser() {
+  const browser = sharedBrowser;
+  sharedBrowser = null;
+  browserLaunchPromise = null;
+  if (!browser) {
+    return;
+  }
+
+  try {
+    await browser.close();
+  } catch (err) {
+    console.warn(`[${LOG_TAG}] Failed to close browser:`, err?.message || err);
+  }
+}
+
 /**
  * Launch Chrome once at startup to verify Render/Linux compatibility.
  * Does not block server boot on failure.

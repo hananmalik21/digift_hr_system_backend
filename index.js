@@ -4,6 +4,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { createPool, closePool } from './config/db.js';
+import { initializeFirebase } from './config/firebase.js';
 import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
 import hrOrgHierarchyLevelController from './feature/enterprise_structure/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
 import hrOrgStructureController from './feature/enterprise_structure/hr_org_structures/controller/hrOrgStructureController.js';
@@ -70,7 +71,7 @@ import { requireAuth } from './middleware/authMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
 import { prewarmFaceModels } from './utils/facePrewarm.js';
-import { prewarmJobOfferPdfBrowser } from './services/jobOfferPdf/index.js';
+import { closeJobOfferPdfBrowser, prewarmJobOfferPdfBrowser } from './services/jobOfferPdf/index.js';
 import { ensureSeedAndBackfillAdminUsers } from './scripts/seedAdminsService.js';
 import fndsecModulesController from './feature/security/modules/controller/fndsecModulesController.js';
 import fndsecSubModulesController from './feature/security/sub_modules/controller/fndsecSubModulesController.js';
@@ -147,6 +148,8 @@ import payPayrollDefinitionsRoute from './feature/pay/payroll_definitions/route/
 import payPayrollGroupsRoute from './feature/pay/payroll_groups/route/payPayrollGroupsRoute.js';
 import payCompensationTransferRoutes from './feature/pay/compensation_transfer/routes/payCompensationTransferRoutes.js';
 import payrollRoutes from './feature/payroll/routes/payroll.routes.js';
+import firebaseNotificationRoutes from './feature/notifications/firebase/routes/firebaseNotification.routes.js';
+import notificationRoutes from './feature/notifications/routes/notification.routes.js';
 import { resolveExpressTrustProxy } from './utils/tenantConfig.js';
 import {
   enforceJwtEnterpriseMatch,
@@ -519,6 +522,12 @@ app.use('/api/pay/compensation-transfer', payCompensationTransferRoutes);
 // PAY Payroll Group Management
 app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
 
+// Firebase push notification test endpoint (requires JWT + ENABLE_FIREBASE_TEST_ENDPOINT=true)
+app.use('/api/notifications/firebase', firebaseNotificationRoutes);
+
+// In-app notifications (Oracle + optional Firebase push)
+app.use('/api/notifications', notificationRoutes);
+
 // DigifyHR Payroll — main aggregate router: formula engine, elements nested reads,
 // balances employee/run reads, dashboard, audit, runs, payments, GL, close, recurring
 // entries, element dependencies, retro/arrears, approvals, plus remounted feature/pay
@@ -528,6 +537,13 @@ app.use('/api/payroll', payrollRoutes);
 // Initialize database pool on startup
 await createPool();
 await createFaceOraclePool();
+
+try {
+  initializeFirebase();
+} catch (err) {
+  console.error('[startup] Firebase initialization failed:', err?.message || err);
+  process.exit(1);
+}
 
 try {
   const seedResult = await ensureSeedAndBackfillAdminUsers();
@@ -571,13 +587,47 @@ app.use(errorMiddleware);
 // ==========================================
 const server = app.listen(PORT);
 
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other Node process (lsof -nP -iTCP:${PORT} -sTCP:LISTEN) or set PORT to a free port.`
+    );
+    process.exit(1);
+  }
+  console.error('Server listen error:', err);
+  process.exit(1);
+});
+
 // ==========================================
 // 📌 GRACEFUL SHUTDOWN
 // ==========================================
-process.on('SIGINT', async () => {
+let shuttingDown = false;
+
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received`);
+
+  const forceTimer = setTimeout(() => {
+    console.error('[shutdown] Timed out; exiting');
+    process.exit(1);
+  }, 8000);
+  forceTimer.unref();
+
   server.close(async () => {
-    await closePool();
-    await closeFaceOraclePool();
-    process.exit(0);
+    try {
+      await closeJobOfferPdfBrowser();
+      await closePool();
+      await closeFaceOraclePool();
+    } catch (err) {
+      console.error('[shutdown] cleanup error:', err?.message || err);
+    } finally {
+      process.exit(0);
+    }
   });
-});
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
