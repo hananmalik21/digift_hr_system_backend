@@ -112,34 +112,31 @@ UPDATE ${TABLE}
         OR USER_ID <> :user_id
        )`;
 
-  const mergeSql = `
-MERGE INTO ${TABLE} d
-USING (
-  SELECT :enterprise_id AS enterprise_id,
-         :user_id AS user_id,
-         :target_type AS target_type,
-         :target_value AS target_value
-    FROM dual
-) s
-ON (
-  d.ENTERPRISE_ID = s.enterprise_id
-  AND d.USER_ID = s.user_id
-  AND d.TARGET_TYPE = s.target_type
-  AND d.TARGET_VALUE = s.target_value
-)
-WHEN MATCHED THEN
-  UPDATE SET
-    d.ACTIVE_FLAG = 'Y',
-    d.DEVICE_TYPE = :device_type,
-    d.DEVICE_NAME = :device_name,
-    d.BROWSER_NAME = :browser_name,
-    d.BROWSER_VERSION = :browser_version,
-    d.OPERATING_SYSTEM = :operating_system,
-    d.LAST_REGISTERED_DATE = SYSTIMESTAMP,
-    d.LAST_USED_DATE = SYSTIMESTAMP,
-    d.LAST_UPDATE_DATE = SYSTIMESTAMP
-WHEN NOT MATCHED THEN
-  INSERT (
+  const findSql = `
+SELECT DEVICE_ID
+FROM ${TABLE}
+WHERE ENTERPRISE_ID = :enterprise_id
+  AND USER_ID = :user_id
+  AND TARGET_TYPE = :target_type
+  AND TARGET_VALUE = :target_value
+FETCH FIRST 1 ROWS ONLY`;
+
+  const updateSql = `
+UPDATE ${TABLE}
+   SET DEVICE_TYPE = :device_type,
+       DEVICE_NAME = :device_name,
+       BROWSER_NAME = :browser_name,
+       BROWSER_VERSION = :browser_version,
+       OPERATING_SYSTEM = :operating_system,
+       ACTIVE_FLAG = 'Y',
+       LAST_REGISTERED_DATE = SYSTIMESTAMP,
+       LAST_USED_DATE = SYSTIMESTAMP,
+       LAST_UPDATE_DATE = SYSTIMESTAMP
+ WHERE DEVICE_ID = :device_id`;
+
+  const insertSql = `
+INSERT INTO ${TABLE}
+(
     DEVICE_GUID,
     ENTERPRISE_ID,
     USER_ID,
@@ -155,7 +152,9 @@ WHEN NOT MATCHED THEN
     LAST_USED_DATE,
     CREATION_DATE,
     LAST_UPDATE_DATE
-  ) VALUES (
+)
+VALUES
+(
     SYS_GUID(),
     :enterprise_id,
     :user_id,
@@ -171,7 +170,7 @@ WHEN NOT MATCHED THEN
     SYSTIMESTAMP,
     SYSTIMESTAMP,
     SYSTIMESTAMP
-  )`;
+)`;
 
   const selectSql = `
 SELECT ${DEVICE_SELECT_COLUMNS}
@@ -184,11 +183,34 @@ FETCH FIRST 1 ROWS ONLY`;
 
   const targetBinds = bindTarget(payload);
   const registerBinds = bindRegistration(payload);
+  const metadataBinds = {
+    device_type: registerBinds.device_type,
+    device_name: registerBinds.device_name,
+    browser_name: registerBinds.browser_name,
+    browser_version: registerBinds.browser_version,
+    operating_system: registerBinds.operating_system
+  };
 
   try {
     return await withConnection(async (connection) => {
       await connection.execute(deactivateOtherUsersSql, targetBinds, { autoCommit: false });
-      await connection.execute(mergeSql, registerBinds, { autoCommit: false });
+
+      const existing = await connection.execute(findSql, targetBinds, ROW_OPTS);
+      const deviceId = existing.rows?.[0]?.DEVICE_ID ?? existing.rows?.[0]?.device_id ?? null;
+
+      if (deviceId != null) {
+        await connection.execute(
+          updateSql,
+          {
+            ...metadataBinds,
+            device_id: bindInNumber(deviceId)
+          },
+          { autoCommit: false }
+        );
+      } else {
+        await connection.execute(insertSql, registerBinds, { autoCommit: false });
+      }
+
       const result = await connection.execute(selectSql, targetBinds, ROW_OPTS);
       await commitConnection(connection);
       return mapDeviceRow(result.rows?.[0]);
