@@ -98,6 +98,7 @@ class PositionsModel {
       job_level_min_grade_id_ref: row.job_level_min_grade_id,
       job_level_max_grade_id_ref: row.job_level_max_grade_id,
       grade_number_ref: row.grade_number,
+      currency_code_ref: row.currency_code,
       reports_to_code_ref: row.reports_to_code,
       reports_to_title_en_ref: row.reports_to_title_en
     };
@@ -128,6 +129,9 @@ class PositionsModel {
       ...row,
       org_path_json,
       step_nos,
+      grade_id: row.grade_id ?? null,
+      grade_number: row.grade_number ?? row.grade_number_ref ?? null,
+      currency_code: row.currency_code ?? row.currency_code_ref ?? null,
       org_structure: {
         structure_id: row.org_structure_id,
         structure_code: row.org_structure_code_ref ?? null,
@@ -153,8 +157,9 @@ class PositionsModel {
         max_grade_id: row.job_level_max_grade_id_ref ?? null,
       },
       grade: {
-        grade_id: row.grade_id,
+        grade_id: row.grade_id ?? null,
         grade_number: row.grade_number_ref ?? null,
+        currency_code: row.currency_code ?? row.currency_code_ref ?? null,
       },
       reports_to: row.reports_to_position_id
         ? {
