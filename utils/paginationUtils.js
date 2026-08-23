@@ -3,15 +3,25 @@
  * Uses query.page and query.page_size (defaults: page=1, page_size=10, max page_size=100).
  */
 
+export const DEFAULT_PAGE_SIZE = 10;
+export const DEFAULT_MAX_PAGE_SIZE = 100;
+
+/** Higher page-size cap for lookup-value dropdown lists (e.g. CURRENCY). */
+export const LOOKUP_PAGE_OPTS = { maxPageSize: 1000 };
+
 /**
  * Parse and validate pagination from request query.
  * @param {object} query - Request query (e.g. req.query)
+ * @param {{ defaultPageSize?: number, maxPageSize?: number }} [options]
  * @returns {{ page: number, pageSize: number }}
  * @throws {Error} If page or page_size are invalid
  */
-export function parsePagination(query) {
+export function parsePagination(query, options = {}) {
+  const defaultPageSize = options.defaultPageSize ?? DEFAULT_PAGE_SIZE;
+  const maxPageSize = options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE;
+
   let page = 1;
-  let pageSize = 10;
+  let pageSize = defaultPageSize;
 
   if (query?.page !== undefined) {
     const parsedPage = parseInt(query.page, 10);
@@ -26,7 +36,7 @@ export function parsePagination(query) {
     if (Number.isNaN(parsedPageSize) || parsedPageSize < 1) {
       throw new Error('Invalid page_size. Must be a positive integer.');
     }
-    pageSize = Math.min(100, parsedPageSize);
+    pageSize = Math.min(maxPageSize, parsedPageSize);
   }
 
   return { page, pageSize };

@@ -13,6 +13,7 @@ import {
   sendConflict
 } from '../view/entLookupValueView.js';
 import { parseGuid } from '../../../../../utils/guidUtils.js';
+import { parsePagination, buildPaginationMeta, LOOKUP_PAGE_OPTS } from '../../../../../utils/paginationUtils.js';
 import { getUserId } from '../../../../../utils/requestUtils.js';
 import {
   normalizeEnterpriseId,
@@ -33,38 +34,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function parsePagination(query) {
-  let page = 1;
-  let pageSize = 10;
-  if (query.page !== undefined) {
-    const parsedPage = parseInt(query.page);
-    if (isNaN(parsedPage) || parsedPage < 1) {
-      throw new Error('Invalid page number. Must be a positive integer.');
-    }
-    page = parsedPage;
-  }
-  if (query.page_size !== undefined) {
-    const parsedPageSize = parseInt(query.page_size);
-    if (isNaN(parsedPageSize) || parsedPageSize < 1) {
-      throw new Error('Invalid page_size. Must be a positive integer.');
-    }
-    pageSize = Math.min(100, parsedPageSize);
-  }
-  return { page, pageSize };
-}
-
-function buildPaginationMeta(page, pageSize, totalCount) {
-  const totalPages = Math.ceil(totalCount / pageSize);
-  return {
-    page,
-    pageSize,
-    total: totalCount,
-    totalPages,
-    hasNext: page < totalPages,
-    hasPrevious: page > 1
-  };
-}
 
 function handleCreateError(res, req, error, fallbackMessage) {
   if (error.code === 'UNIQUE_CONSTRAINT_VIOLATION') {
@@ -102,7 +71,7 @@ router.get('/', async (req, res) => {
       filters.search = req.query.search;
     }
     try {
-      filters.pagination = parsePagination(req.query);
+      filters.pagination = parsePagination(req.query, LOOKUP_PAGE_OPTS);
     } catch (e) {
       return sendBadRequest(res, req, e.message);
     }
