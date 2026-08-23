@@ -8,6 +8,7 @@ import {
   rethrowEntError
 } from '../../shared/entModelBridge.js';
 import { requireTenantId, applyListStatusFilters, applyPaginationToPayload } from '../../shared/entModelHelpers.js';
+import { DEFAULT_GRADE_CURRENCY, resolveGradeCurrencyCode } from '../utils/gradeCurrency.js';
 
 class GradeModel {
   static toListPayload(filters = {}) {
@@ -21,12 +22,16 @@ class GradeModel {
     return payload;
   }
 
-  static toPackagePayload(data, userId, tenantId) {
-    return entActorPayload(data, userId, {
+  static toPackagePayload(data, userId, tenantId, options = {}) {
+    const currencyCode = resolveGradeCurrencyCode(
+      data.CURRENCY_CODE ?? data.currency_code,
+      options
+    );
+
+    const payload = entActorPayload(data, userId, {
       tenant_id: tenantId,
       grade_number: data.GRADE_NUMBER ?? data.grade_number,
       grade_category: data.GRADE_CATEGORY ?? data.grade_category,
-      currency_code: data.CURRENCY_CODE ?? data.currency_code ?? 'KWD',
       step_1_salary: data.STEP_1_SALARY ?? data.step_1_salary,
       step_2_salary: data.STEP_2_SALARY ?? data.step_2_salary,
       step_3_salary: data.STEP_3_SALARY ?? data.step_3_salary,
@@ -36,6 +41,12 @@ class GradeModel {
       status: data.STATUS ?? data.status,
       last_update_login: data.LAST_UPDATE_LOGIN ?? data.last_update_login
     });
+
+    // entActorPayload copies body keys as-is; force the normalized/omitted currency.
+    if (currencyCode !== undefined) payload.currency_code = currencyCode;
+    else delete payload.currency_code;
+
+    return payload;
   }
 
   static async findAll(filters = {}) {
@@ -63,7 +74,9 @@ class GradeModel {
   static async create(data, userId) {
     const tenantIdNum = requireTenantId(data.tenant_id ?? data.TENANT_ID);
     try {
-      return await entCreateRecord('GRADES', this.toPackagePayload(data, userId, tenantIdNum));
+      return await entCreateRecord('GRADES', this.toPackagePayload(data, userId, tenantIdNum, {
+        defaultCurrency: DEFAULT_GRADE_CURRENCY
+      }));
     } catch (error) {
       rethrowEntError(error, 'Failed to create grade');
     }

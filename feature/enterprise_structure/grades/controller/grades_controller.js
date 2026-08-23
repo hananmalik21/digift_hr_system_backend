@@ -2,6 +2,7 @@ import express from 'express';
 import GradeModel from '../model/grades_model.js';
 import EntLookupValueModel from '../../../look_ups/ent/ent_lookup_values/model/entLookupValueModel.js';
 import { validateGradeNumberForCategory } from '../../../../utils/gradeUtils.js';
+import { applyGradeCurrencyCode } from '../utils/gradeCurrency.js';
 import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
 import { getUserId } from '../../../../utils/requestUtils.js';
@@ -247,15 +248,7 @@ function validateGradeData(data, isUpdate = false, categoryToPrefixMap = null) {
     }
   }
 
-  if (!isUpdate) {
-    if (data.CURRENCY_CODE !== undefined && String(data.CURRENCY_CODE).trim() !== '') {
-      if (String(data.CURRENCY_CODE).trim().length !== 3) errors.push('CURRENCY_CODE must be 3 characters (e.g., KWD)');
-    }
-  } else {
-    if (data.CURRENCY_CODE !== undefined && String(data.CURRENCY_CODE).trim() !== '' && String(data.CURRENCY_CODE).trim().length !== 3) {
-      errors.push('CURRENCY_CODE must be 3 characters (e.g., KWD)');
-    }
-  }
+  applyGradeCurrencyCode(data, errors);
 
   if (data.STATUS !== undefined && String(data.STATUS).trim() !== '') {
     const validStatuses = ['ACTIVE', 'INACTIVE'];
@@ -264,15 +257,8 @@ function validateGradeData(data, isUpdate = false, categoryToPrefixMap = null) {
     }
   }
 
-  if (!isUpdate) {
-    // optional
-    if (data.DESCRIPTION !== undefined && data.DESCRIPTION !== null && String(data.DESCRIPTION).length > 500) {
-      errors.push('DESCRIPTION must be 500 characters or less');
-    }
-  } else {
-    if (data.DESCRIPTION !== undefined && data.DESCRIPTION !== null && String(data.DESCRIPTION).length > 500) {
-      errors.push('DESCRIPTION must be 500 characters or less');
-    }
+  if (data.DESCRIPTION !== undefined && data.DESCRIPTION !== null && String(data.DESCRIPTION).length > 500) {
+    errors.push('DESCRIPTION must be 500 characters or less');
   }
 
   // Optional strict rule: ensure steps increasing if all present
@@ -390,6 +376,7 @@ router.get('/', async (req, res) => {
 /**
  * GET /api/grades/:id
  * Query: tenant_id (required)
+ * Returns all grade fields including currency_code.
  */
 router.get('/:id', async (req, res) => {
   try {
@@ -413,6 +400,7 @@ router.get('/:id', async (req, res) => {
 
 /**
  * POST /api/grades
+ * Body: GRADE_NUMBER, GRADE_CATEGORY, CURRENCY_CODE?, STEP_1_SALARY…STEP_5_SALARY, DESCRIPTION?, STATUS?, LAST_UPDATE_LOGIN
  */
 router.post('/', async (req, res) => {
   try {
@@ -440,7 +428,7 @@ router.post('/', async (req, res) => {
 
 /**
  * PUT /api/grades/:id
- * Body/Query: tenant_id (required for filtering)
+ * Body/Query: tenant_id (required for filtering). Partial updates supported, including CURRENCY_CODE.
  */
 router.put('/:id', async (req, res) => {
   try {
@@ -473,6 +461,7 @@ router.put('/:id', async (req, res) => {
 
 /**
  * PATCH /api/grades/:id
+ * Partial update; CURRENCY_CODE is optional and must be a 3-letter ISO-style code when provided.
  */
 router.patch('/:id', async (req, res) => {
   try {

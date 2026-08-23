@@ -41,6 +41,7 @@ class JobLevelsModel {
       grade_id: g.grade_id,
       grade_number: g.grade_number,
       grade_category: g.grade_category,
+      currency_code: g.currency_code,
       step_1_salary: g.step_1_salary,
       step_2_salary: g.step_2_salary,
       step_3_salary: g.step_3_salary,
