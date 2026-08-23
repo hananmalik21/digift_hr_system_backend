@@ -61,6 +61,7 @@ import employeeCompensationPlanDetailsController from './feature/compensation/em
 import compSalaryChangeHistoryRoutes from './feature/compensation/salary_change_history/routes/compSalaryChangeHistory.routes.js';
 import timeZoneController from './feature/time_management/time_zones/controller/timeZoneController.js';
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
+import currencyRoutes from './src/routes/currency.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
 import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
 import enterpriseStatsController from './feature/enterprise_structure/enterprise_stats/controller/enterpriseStatsController.js';
@@ -544,6 +545,9 @@ app.use('/api/notifications', notificationRoutes);
 // entries, element dependencies, retro/arrears, approvals, plus remounted feature/pay
 // CRUD (elements family, eligibility, balances family, formulas, lookups).
 app.use('/api/payroll', payrollRoutes);
+
+// Currency conversion — Frankfurter (no local rates table)
+app.use('/api/currency', currencyRoutes);
 
 // Initialize database pool on startup
 await createPool();

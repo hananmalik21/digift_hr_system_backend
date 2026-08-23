@@ -1,0 +1,28 @@
+{
+  "info": {
+    "name": "Digify ERP — Currency Convert",
+    "description": "POST /api/currency/convert via Frankfurter. Set {{baseUrl}} and {{jwt}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "jwt", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Convert currency",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 1,\n  \"from_currency\": \"KWD\",\n  \"to_currency\": \"PKR\",\n  \"conversion_date\": \"2026-08-16\"\n}"
+        },
+        "url": "{{baseUrl}}/api/currency/convert"
+      }
+    }
+  ]
+}
