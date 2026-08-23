@@ -60,6 +60,7 @@ export function mapNotificationRow(row) {
     notificationId: row.NOTIFICATION_ID ?? row.notification_id ?? null,
     notificationGuid: normalizeGuidValue(row.NOTIFICATION_GUID ?? row.notification_guid),
     enterpriseId: row.ENTERPRISE_ID ?? row.enterprise_id ?? null,
+    recipientUserId: row.USER_ID ?? row.user_id ?? null,
     module: row.MODULE_CODE ?? row.module_code ?? null,
     type: row.NOTIFICATION_TYPE ?? row.notification_type ?? null,
     title: row.TITLE ?? row.title ?? null,

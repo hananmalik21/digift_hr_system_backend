@@ -46,15 +46,19 @@ function buildFirebaseMessage({
       title,
       body
     },
-    data: stringifyNotificationData(data)
+    data: stringifyNotificationData(data),
+    webpush: {
+      notification: {
+        title,
+        body
+      }
+    }
   };
 
   const link = buildWebPushLink(actionUrl);
   if (link) {
-    message.webpush = {
-      fcmOptions: {
-        link
-      }
+    message.webpush.fcmOptions = {
+      link
     };
   }
 
@@ -134,6 +138,13 @@ export async function sendFirebasePushNotification({
       channel: CHANNEL,
       code: err?.code || null,
       message: err?.message || String(err)
+    });
+    console.error('[firebase] messaging.send error', {
+      code: err?.code || null,
+      message: err?.message || String(err),
+      errorInfo: err?.errorInfo ?? null,
+      targetType,
+      targetValue: maskRegistrationToken(targetValue)
     });
     return buildSendFailureResult(err);
   }

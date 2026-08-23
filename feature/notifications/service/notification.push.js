@@ -3,7 +3,10 @@ import {
   isPermanentFirebaseTokenFailure,
   NOTIFICATION_TARGET_TYPES as PUSH_TARGET_TYPES
 } from '../../../services/notifications/constants.js';
-import { maskRegistrationToken } from '../../../services/notifications/utils/payloadUtils.js';
+import {
+  isUsableFcmRegistrationToken,
+  maskRegistrationToken
+} from '../../../services/notifications/utils/payloadUtils.js';
 import {
   NOTIFICATION_DELIVERY_STATUS,
   NOTIFICATION_PUSH_STATUS
@@ -17,6 +20,20 @@ export function truncatePushErrorMessage(message, max = 3900) {
   if (!message) return null;
   const text = String(message);
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function logPush(level, event, details = {}) {
+  const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info;
+  logger(`[${LOG_TAG}] ${event}`, details);
+}
+
+function recipientContext({ enterpriseId, recipientUserId, recipientId, notification }) {
+  return {
+    enterpriseId,
+    recipientUserId,
+    recipientId,
+    title: notification?.title ?? null
+  };
 }
 
 async function updatePushStatus({
@@ -35,12 +52,19 @@ async function updatePushStatus({
     deliveryStatus,
     pushErrorMessage
   });
+
+  logPush('info', 'recipient push status', {
+    enterpriseId,
+    userId,
+    recipientId,
+    pushStatus,
+    deliveryStatus,
+    pushErrorMessage: pushErrorMessage || null
+  });
 }
 
 async function deactivateStaleDeviceTarget({ enterpriseId, userId, device }) {
-  if (!device?.targetType || !device?.targetValue) {
-    return;
-  }
+  if (!device?.targetType || !device?.targetValue) return;
 
   try {
     await notificationDeviceRepository.deactivateNotificationDeviceByTarget({
@@ -50,14 +74,14 @@ async function deactivateStaleDeviceTarget({ enterpriseId, userId, device }) {
       targetValue: device.targetValue
     });
 
-    console.info(`[${LOG_TAG}] stale token deactivated`, {
+    logPush('info', 'stale token deactivated', {
       enterpriseId,
       userId,
       targetType: device.targetType,
       targetValue: maskRegistrationToken(device.targetValue)
     });
   } catch (err) {
-    console.error(`[${LOG_TAG}] failed to deactivate stale token`, {
+    logPush('error', 'failed to deactivate stale token', {
       enterpriseId,
       userId,
       targetType: device.targetType,
@@ -67,35 +91,8 @@ async function deactivateStaleDeviceTarget({ enterpriseId, userId, device }) {
   }
 }
 
-export async function deliverPushForRecipient({
-  enterpriseId,
-  recipientUserId,
-  recipientId,
-  notification
-}) {
-  const targets = await notificationDeviceRepository.getActiveNotificationTargets({
-    enterpriseId,
-    userId: recipientUserId
-  });
-
-  if (!targets.length) {
-    await updatePushStatus({
-      recipientId,
-      enterpriseId,
-      userId: recipientUserId,
-      pushStatus: NOTIFICATION_PUSH_STATUS.SKIPPED,
-      deliveryStatus: NOTIFICATION_DELIVERY_STATUS.SKIPPED,
-      pushErrorMessage: 'No active notification devices registered'
-    });
-    return;
-  }
-
-  let lastError = null;
-  let sentCount = 0;
-
-  for (const target of targets) {
-    if (!target?.targetValue) continue;
-
+async function sendToTarget({ enterpriseId, recipientUserId, recipientId, notification, target }) {
+  try {
     const pushResult = await sendPushNotification({
       targetType: target.targetType || PUSH_TARGET_TYPES.TOKEN,
       targetValue: target.targetValue,
@@ -114,11 +111,24 @@ export async function deliverPushForRecipient({
     });
 
     if (pushResult.success) {
-      sentCount += 1;
-      continue;
+      logPush('info', 'FCM accepted send', {
+        ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
+        deviceType: target.deviceType ?? null,
+        targetType: target.targetType ?? PUSH_TARGET_TYPES.TOKEN,
+        targetValue: maskRegistrationToken(target.targetValue),
+        messageId: pushResult.messageId ?? null
+      });
+      return { ok: true };
     }
 
-    lastError = pushResult.message || pushResult.errorCode || 'Firebase push failed';
+    const error = pushResult.message || pushResult.errorCode || 'Firebase push failed';
+    logPush('error', 'FCM rejected send', {
+      ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
+      deviceType: target.deviceType ?? null,
+      targetValue: maskRegistrationToken(target.targetValue),
+      error,
+      firebaseCode: pushResult.firebaseCode ?? null
+    });
 
     if (isPermanentFirebaseTokenFailure(pushResult.firebaseCode)) {
       await deactivateStaleDeviceTarget({
@@ -127,6 +137,75 @@ export async function deliverPushForRecipient({
         device: target
       });
     }
+
+    return { ok: false, error };
+  } catch (err) {
+    const message = err?.message || String(err);
+    logPush('error', 'token send threw', {
+      ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
+      targetType: target.targetType,
+      targetValue: maskRegistrationToken(target.targetValue),
+      message
+    });
+    return { ok: false, error: message };
+  }
+}
+
+export async function deliverPushForRecipient({
+  enterpriseId,
+  recipientUserId,
+  recipientId,
+  notification
+}) {
+  const targets = await notificationDeviceRepository.getActiveNotificationTargets({
+    enterpriseId,
+    userId: recipientUserId
+  });
+
+  const usableTargets = targets.filter((target) =>
+    isUsableFcmRegistrationToken(target?.targetValue)
+  );
+
+  logPush('info', 'devices for recipient', {
+    ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
+    registeredDevices: targets.length,
+    usableTokens: usableTargets.length,
+    tokens: usableTargets.map((target) => ({
+      deviceType: target.deviceType ?? null,
+      targetType: target.targetType ?? null,
+      targetValue: maskRegistrationToken(target.targetValue)
+    }))
+  });
+
+  if (!usableTargets.length) {
+    logPush('warn', 'skipped — no usable FCM token', {
+      ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
+      registeredDevices: targets.length
+    });
+    await updatePushStatus({
+      recipientId,
+      enterpriseId,
+      userId: recipientUserId,
+      pushStatus: NOTIFICATION_PUSH_STATUS.SKIPPED,
+      deliveryStatus: NOTIFICATION_DELIVERY_STATUS.SKIPPED,
+      pushErrorMessage: 'No active notification devices registered'
+    });
+    return;
+  }
+
+  let lastError = null;
+  let sentCount = 0;
+
+  for (const target of usableTargets) {
+    const result = await sendToTarget({
+      enterpriseId,
+      recipientUserId,
+      recipientId,
+      notification,
+      target
+    });
+    if (result.ok) sentCount += 1;
+    else lastError = result.error;
   }
 
   if (sentCount > 0) {
@@ -140,10 +219,8 @@ export async function deliverPushForRecipient({
     return;
   }
 
-  console.error(`[${LOG_TAG}] delivery failed`, {
-    enterpriseId,
-    recipientUserId,
-    recipientId,
+  logPush('error', 'delivery failed', {
+    ...recipientContext({ enterpriseId, recipientUserId, recipientId, notification }),
     error: lastError
   });
 
@@ -165,11 +242,14 @@ export async function finalizePushDelivery({
   notification,
   fallbackNotification
 }) {
-  if (!recipientId) {
-    return;
-  }
+  if (!recipientId) return;
 
   if (!pushRequired) {
+    logPush('info', 'skipped — pushRequired is false', {
+      enterpriseId,
+      recipientUserId,
+      recipientId
+    });
     await updatePushStatus({
       recipientId,
       enterpriseId,
@@ -188,7 +268,7 @@ export async function finalizePushDelivery({
       notification: notification ?? fallbackNotification
     });
   } catch (err) {
-    console.error(`[${LOG_TAG}] unexpected delivery error`, {
+    logPush('error', 'unexpected delivery error', {
       enterpriseId,
       recipientUserId,
       recipientId,

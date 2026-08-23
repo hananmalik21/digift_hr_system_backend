@@ -5,6 +5,8 @@ import {
 } from '../../../../utils/userContext.js';
 import { dispatchLeaveRequestNotification } from '../service/leaveRequestNotification.service.js';
 
+const LOG_TAG = 'leave-request-notification';
+
 export function resolveLeaveNotificationActor(req, headerUserId = null) {
   return {
     actorUserId: getActingUserId(req),
@@ -24,10 +26,20 @@ export function dispatchLeaveRequestNotificationFromRequest(
   }
 ) {
   const actor = resolveLeaveNotificationActor(req, headerUserId);
+  const enterpriseId = actor.enterpriseId ?? tenantId;
 
-  dispatchLeaveRequestNotification({
+  console.info(`[${LOG_TAG}] dispatch`, {
     event,
-    enterpriseId: tenantId ?? actor.enterpriseId,
+    enterpriseId,
+    actorUserId: actor.actorUserId,
+    leaveRequestId: leaveRequest?.leave_request_id ?? null,
+    leaveRequestGuid: leaveRequest?.leave_request_guid ?? null,
+    requestStatus: leaveRequest?.request_status ?? null
+  });
+
+  return dispatchLeaveRequestNotification({
+    event,
+    enterpriseId,
     leaveRequest,
     actorUserId: actor.actorUserId,
     actorUsername: actor.actorUsername,

@@ -136,8 +136,8 @@ function normalizeSubmitValue(value) {
   return value === true || value === 'true' || value === 'TRUE';
 }
 
-function dispatchLeaveNotification(req, tenantId, headerUserId, event, leaveRequest, extra = {}) {
-  dispatchLeaveRequestNotificationFromRequest(req, {
+async function dispatchLeaveNotification(req, tenantId, headerUserId, event, leaveRequest, extra = {}) {
+  await dispatchLeaveRequestNotificationFromRequest(req, {
     tenantId,
     headerUserId,
     event,
@@ -604,7 +604,7 @@ router.post('/', uploadDocuments, async (req, res) => {
       createdLeaveRequest &&
       String(createdLeaveRequest.request_status || '').toUpperCase() === 'SUBMITTED'
     ) {
-      dispatchLeaveNotification(
+      await dispatchLeaveNotification(
         req,
         tenantId,
         userId,
@@ -853,7 +853,7 @@ router.put('/:guid', uploadDocuments, async (req, res) => {
     const previousStatus = String(existingLeaveRequest.request_status || '').toUpperCase();
     const updatedStatus = String(updatedLeaveRequest?.request_status || '').toUpperCase();
     if (previousStatus === 'DRAFT' && updatedStatus === 'SUBMITTED') {
-      dispatchLeaveNotification(
+      await dispatchLeaveNotification(
         req,
         tenantId,
         userId,
@@ -996,7 +996,7 @@ router.post('/:guid/submit', async (req, res) => {
     const userId = getUserId(req);
     const updatedLeaveRequest = await LeaveRequestModel.submitByGuid(parsed.guidHex32, tenantId, userId);
 
-    dispatchLeaveNotification(
+    await dispatchLeaveNotification(
       req,
       tenantId,
       userId,
@@ -1039,7 +1039,7 @@ router.post('/:guid/approve', async (req, res) => {
     const userId = getUserId(req);
     const result = await LeaveRequestModel.approveByGuid(parsed.guidHex32, tenantId, userId);
 
-    dispatchLeaveNotification(
+    await dispatchLeaveNotification(
       req,
       tenantId,
       userId,
@@ -1095,7 +1095,7 @@ router.post('/:guid/reject', async (req, res) => {
     };
     const updatedLeaveRequest = await LeaveRequestModel.rejectByGuid(parsed.guidHex32, tenantId, userId, rejectionData);
 
-    dispatchLeaveNotification(
+    await dispatchLeaveNotification(
       req,
       tenantId,
       userId,
@@ -1152,7 +1152,7 @@ router.delete('/:guid', async (req, res) => {
     if (result.action === 'deleted') {
       sendDeleted(res, req, 'Leave request deleted successfully', parsed.guidHex32);
     } else if (result.action === 'withdrawn') {
-      dispatchLeaveNotification(
+      await dispatchLeaveNotification(
         req,
         tenantId,
         userId,

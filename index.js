@@ -243,6 +243,10 @@ app.use('/api/employer-info', recEmployerInfoController);
 // Job posting employer branding (must be BEFORE /api catch-all)
 app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
+// Notifications (must be BEFORE /api catch-all so /api/notifications is not matched as org structure :structureId)
+app.use('/api/notifications/firebase', firebaseNotificationRoutes);
+app.use('/api/notifications', notificationRoutes);
+
 // Org Units simplified routes (for easier access)
 // Routes: /api/org-units/tree/active
 // NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
@@ -521,12 +525,6 @@ app.use('/api/pay/compensation-transfer', payCompensationTransferRoutes);
 
 // PAY Payroll Group Management
 app.use('/api/pay/payroll-groups', payPayrollGroupsRoute);
-
-// Firebase push notification test endpoint (requires JWT + ENABLE_FIREBASE_TEST_ENDPOINT=true)
-app.use('/api/notifications/firebase', firebaseNotificationRoutes);
-
-// In-app notifications (Oracle + optional Firebase push)
-app.use('/api/notifications', notificationRoutes);
 
 // DigifyHR Payroll — main aggregate router: formula engine, elements nested reads,
 // balances employee/run reads, dashboard, audit, runs, payments, GL, close, recurring

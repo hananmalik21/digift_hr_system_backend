@@ -27,7 +27,7 @@ export async function persistNotificationForUser({
   iconCode = null,
   metadata = null,
   pushRequired = false,
-  createdBy = 'SYSTEM'
+  createdBy = null
 }) {
   const serializedEntity = serializeNotificationEntity(entity);
 

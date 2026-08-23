@@ -1,5 +1,9 @@
 import { notificationService } from '../../../notifications/index.js';
-import { NOTIFICATION_MODULES, NOTIFICATION_PRIORITY } from '../../../notifications/constants/notification.constants.js';
+import * as notificationRepository from '../../../notifications/repository/notification.repository.js';
+import {
+  NOTIFICATION_MODULES,
+  NOTIFICATION_PRIORITY
+} from '../../../notifications/constants/notification.constants.js';
 import {
   LEAVE_NOTIFICATION_EVENTS,
   LEAVE_NOTIFICATION_ICON,
@@ -8,6 +12,14 @@ import {
 import * as leaveNotificationRepository from '../repository/leaveRequestNotification.repository.js';
 
 const LOG_TAG = 'leave-request-notification';
+
+const APPROVALS_PATH = '/absence/approvals';
+const REQUESTS_PATH = '/absence/requests';
+
+const SUBMITTED_EVENTS = new Set([
+  LEAVE_NOTIFICATION_EVENTS.CREATED_AND_SUBMITTED,
+  LEAVE_NOTIFICATION_EVENTS.SUBMITTED
+]);
 
 function formatDateOnly(value) {
   if (!value) return null;
@@ -20,17 +32,23 @@ function normalizeGuid(value) {
   return String(value).replace(/-/g, '').toUpperCase();
 }
 
+function toPositiveInt(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function buildEmployeeDisplayName(context, leaveRequest) {
   if (context?.employeeName) return context.employeeName;
 
   const info = leaveRequest?.employee_info;
   if (!info) return 'Employee';
 
-  return [
-    info.first_name_en,
-    info.middle_name_en,
-    info.last_name_en
-  ].filter(Boolean).join(' ').trim() || 'Employee';
+  return (
+    [info.first_name_en, info.middle_name_en, info.last_name_en]
+      .filter(Boolean)
+      .join(' ')
+      .trim() || 'Employee'
+  );
 }
 
 function buildLeaveTypeName(context, leaveRequest) {
@@ -43,19 +61,17 @@ function buildLeaveTypeName(context, leaveRequest) {
 }
 
 function buildEntityPayload({ leaveRequest, context, entityExtra = {} }) {
-  const employeeGuid = normalizeGuid(
-    context?.employeeGuid ||
-    leaveRequest?.employee_info?.employee_guid ||
-    leaveRequest?.employee_guid
-  );
-
   return {
     type: 'ABSENCE_REQUEST',
     id: leaveRequest?.leave_request_id != null ? String(leaveRequest.leave_request_id) : null,
     guid: normalizeGuid(leaveRequest?.leave_request_guid),
     data: {
       employeeId: leaveRequest?.employee_id ?? context?.employeeId ?? null,
-      employeeGuid,
+      employeeGuid: normalizeGuid(
+        context?.employeeGuid ||
+          leaveRequest?.employee_info?.employee_guid ||
+          leaveRequest?.employee_guid
+      ),
       employeeNumber: context?.employeeNumber ?? leaveRequest?.employee_info?.employee_number ?? null,
       employeeName: buildEmployeeDisplayName(context, leaveRequest),
       absenceType: buildLeaveTypeName(context, leaveRequest),
@@ -74,12 +90,31 @@ function buildActionUrl(basePath, leaveRequest) {
 }
 
 function extractEmployeeId(leaveRequest) {
-  return leaveRequest?.employee_id ?? leaveRequest?.employee_info?.employee_id ?? null;
+  return toPositiveInt(
+    leaveRequest?.employee_id ?? leaveRequest?.employee_info?.employee_id
+  );
+}
+
+function dedupeRecipients(recipients, ...excludedIds) {
+  const excluded = new Set(excludedIds.map(toPositiveInt).filter(Boolean));
+  const unique = [];
+  const seen = new Set();
+
+  for (const row of recipients ?? []) {
+    const userId = toPositiveInt(row?.userId);
+    if (!userId || seen.has(userId) || excluded.has(userId)) continue;
+    seen.add(userId);
+    unique.push({
+      userId,
+      employeeId: toPositiveInt(row?.employeeId)
+    });
+  }
+
+  return unique;
 }
 
 async function createLeaveNotification({
   enterpriseId,
-  actorUsername,
   actorUserId,
   recipientUserId,
   recipientEmployeeId = null,
@@ -94,13 +129,22 @@ async function createLeaveNotification({
   entityExtra = {},
   pushRequired = true
 }) {
-  if (!enterpriseId || !recipientUserId) {
-    return null;
+  if (!enterpriseId || !recipientUserId) return null;
+
+  const entityGuid = normalizeGuid(leaveRequest?.leave_request_guid);
+  if (entityGuid) {
+    const existing = await notificationRepository.findOpenNotificationForUserEntity({
+      enterpriseId,
+      userId: recipientUserId,
+      type,
+      entityGuid
+    });
+    if (existing) return null;
   }
 
   return notificationService.createNotificationForEnterprise({
     enterpriseId,
-    createdBy: actorUsername || String(actorUserId || 'SYSTEM'),
+    createdBy: actorUserId,
     recipientUserId,
     recipientEmployeeId,
     module: NOTIFICATION_MODULES.ABSENCE,
@@ -121,60 +165,55 @@ async function createLeaveNotification({
   });
 }
 
-function uniquePositiveIds(ids) {
-  return [...new Set((ids ?? []).filter((id) => Number.isFinite(id) && id > 0))];
-}
-
-async function notifyApprover({
+async function notifyUsers({
   enterpriseId,
-  employeeId,
-  leaveRequest,
-  context,
+  recipients,
   actorUserId,
-  actorUsername,
   type,
   title,
   message,
-  metadata = {}
+  actionUrl,
+  iconCode,
+  leaveRequest,
+  context,
+  metadata = {},
+  entityExtra = {}
 }) {
-  const [approverUserId, adminUserIds] = await Promise.all([
-    leaveNotificationRepository.findReportingManagerUserId(enterpriseId, employeeId),
-    leaveNotificationRepository.findEnterpriseAdminUserIds(enterpriseId)
-  ]);
+  const uniqueRecipients = dedupeRecipients(recipients);
+  if (!uniqueRecipients.length) return [];
 
-  const recipientUserIds = uniquePositiveIds([approverUserId, ...adminUserIds]);
-
-  if (!recipientUserIds.length) {
-    console.warn(`[${LOG_TAG}] No reporting manager or enterprise admin user found`, {
-      enterpriseId,
-      employeeId
-    });
-    return null;
-  }
+  console.info(`[${LOG_TAG}] notify recipients`, {
+    enterpriseId,
+    type,
+    count: uniqueRecipients.length,
+    userIds: uniqueRecipients.map((row) => row.userId)
+  });
 
   const results = await Promise.allSettled(
-    recipientUserIds.map((recipientUserId) =>
+    uniqueRecipients.map((recipient) =>
       createLeaveNotification({
         enterpriseId,
         actorUserId,
-        actorUsername,
-        recipientUserId,
+        recipientUserId: recipient.userId,
+        recipientEmployeeId: recipient.employeeId,
         type,
         title,
         message,
-        actionUrl: buildActionUrl('/absence/approvals', leaveRequest),
-        iconCode: LEAVE_NOTIFICATION_ICON.CALENDAR,
+        actionUrl,
+        iconCode,
         leaveRequest,
         context,
-        metadata
+        metadata,
+        entityExtra
       })
     )
   );
 
   for (const result of results) {
     if (result.status === 'rejected') {
-      console.error(`[${LOG_TAG}] Failed to notify manager/admin recipient`, {
+      console.error(`[${LOG_TAG}] Failed to notify recipient`, {
         enterpriseId,
+        type,
         message: result.reason?.message || String(result.reason)
       });
     }
@@ -182,7 +221,101 @@ async function notifyApprover({
 
   return results
     .filter((result) => result.status === 'fulfilled')
-    .map((result) => result.value);
+    .map((result) => result.value)
+    .filter(Boolean);
+}
+
+async function resolveAudience({ enterpriseId, employeeId }) {
+  const [managerUserId, adminRecipients, employeeUserId] = await Promise.all([
+    leaveNotificationRepository.findReportingManagerUserId(enterpriseId, employeeId),
+    leaveNotificationRepository.findEnterpriseAdminUsers(enterpriseId),
+    leaveNotificationRepository.findUserIdByEmployeeId(enterpriseId, employeeId)
+  ]);
+
+  return { managerUserId, adminRecipients, employeeUserId };
+}
+
+async function notifyApproverAudience({
+  enterpriseId,
+  employeeId,
+  leaveRequest,
+  context,
+  actorUserId,
+  type,
+  title,
+  message,
+  metadata = {}
+}) {
+  const { managerUserId, adminRecipients, employeeUserId } = await resolveAudience({
+    enterpriseId,
+    employeeId
+  });
+
+  const recipients = dedupeRecipients(
+    [
+      managerUserId ? { userId: managerUserId, employeeId: null } : null,
+      ...adminRecipients
+    ],
+    employeeUserId
+  );
+
+  if (!recipients.length) {
+    console.warn(`[${LOG_TAG}] No manager or enterprise admin found`, {
+      enterpriseId,
+      employeeId
+    });
+    return null;
+  }
+
+  return notifyUsers({
+    enterpriseId,
+    recipients,
+    actorUserId,
+    type,
+    title,
+    message,
+    actionUrl: buildActionUrl(APPROVALS_PATH, leaveRequest),
+    iconCode: LEAVE_NOTIFICATION_ICON.CALENDAR,
+    leaveRequest,
+    context,
+    metadata
+  });
+}
+
+async function notifyAdminAudience({
+  enterpriseId,
+  employeeId,
+  leaveRequest,
+  context,
+  actorUserId,
+  type,
+  title,
+  message,
+  metadata = {},
+  entityExtra = {}
+}) {
+  const { adminRecipients, employeeUserId } = await resolveAudience({
+    enterpriseId,
+    employeeId
+  });
+
+  const recipients = dedupeRecipients(adminRecipients, employeeUserId);
+  if (!recipients.length) return [];
+
+  return notifyUsers({
+    enterpriseId,
+    recipients,
+    actorUserId,
+    type,
+    title,
+    message,
+    actionUrl: buildActionUrl(APPROVALS_PATH, leaveRequest),
+    iconCode: LEAVE_NOTIFICATION_ICON.CALENDAR,
+    leaveRequest,
+    context,
+    metadata,
+    entityExtra
+  });
 }
 
 async function notifyEmployee({
@@ -191,7 +324,6 @@ async function notifyEmployee({
   leaveRequest,
   context,
   actorUserId,
-  actorUsername,
   type,
   title,
   message,
@@ -204,20 +336,22 @@ async function notifyEmployee({
   );
 
   if (!employeeUserId) {
-    console.warn(`[${LOG_TAG}] No linked user found for employee`, { enterpriseId, employeeId });
+    console.warn(`[${LOG_TAG}] No linked user found for employee`, {
+      enterpriseId,
+      employeeId
+    });
     return null;
   }
 
   return createLeaveNotification({
     enterpriseId,
     actorUserId,
-    actorUsername,
     recipientUserId: employeeUserId,
     recipientEmployeeId: employeeId,
     type,
     title,
     message,
-    actionUrl: buildActionUrl('/absence/requests', leaveRequest),
+    actionUrl: buildActionUrl(REQUESTS_PATH, leaveRequest),
     iconCode:
       type === LEAVE_NOTIFICATION_TYPES.LEAVE_REJECTED
         ? LEAVE_NOTIFICATION_ICON.X
@@ -229,10 +363,104 @@ async function notifyEmployee({
   });
 }
 
-const SUBMITTED_EVENTS = new Set([
-  LEAVE_NOTIFICATION_EVENTS.CREATED_AND_SUBMITTED,
-  LEAVE_NOTIFICATION_EVENTS.SUBMITTED
-]);
+async function loadLeaveNotificationContext({ enterpriseId, employeeId, leaveTypeId }) {
+  try {
+    return await leaveNotificationRepository.findLeaveNotificationContext({
+      enterpriseId,
+      employeeId,
+      leaveTypeId
+    });
+  } catch (err) {
+    console.error(`[${LOG_TAG}] Failed to load leave notification context`, {
+      enterpriseId,
+      employeeId,
+      leaveTypeId,
+      message: err?.message || String(err)
+    });
+    return null;
+  }
+}
+
+function buildDecisionCopy({ employeeName, leaveTypeName, rejectionReason, forEmployee }) {
+  if (forEmployee) {
+    return {
+      approved: {
+        title: 'Leave Request Approved',
+        message: `Your ${leaveTypeName} request has been approved.`
+      },
+      rejected: {
+        title: 'Leave Request Rejected',
+        message: rejectionReason
+          ? `Your ${leaveTypeName} request was rejected. Reason: ${rejectionReason}`
+          : `Your ${leaveTypeName} request was rejected.`
+      }
+    };
+  }
+
+  return {
+    approved: {
+      title: 'Leave Request Approved',
+      message: `${employeeName}'s ${leaveTypeName} request has been approved.`
+    },
+    rejected: {
+      title: 'Leave Request Rejected',
+      message: rejectionReason
+        ? `${employeeName}'s ${leaveTypeName} request was rejected. Reason: ${rejectionReason}`
+        : `${employeeName}'s ${leaveTypeName} request was rejected.`
+    }
+  };
+}
+
+async function handleDecisionEvent({
+  event,
+  common,
+  employeeName,
+  leaveTypeName,
+  rejectionReason
+}) {
+  const isApproved = event === LEAVE_NOTIFICATION_EVENTS.APPROVED;
+  const type = isApproved
+    ? LEAVE_NOTIFICATION_TYPES.LEAVE_APPROVED
+    : LEAVE_NOTIFICATION_TYPES.LEAVE_REJECTED;
+  const workflowStep = isApproved ? 'APPROVED' : 'REJECTED';
+  const entityExtra = !isApproved && rejectionReason ? { rejectionReason } : {};
+  const metadata = {
+    workflowStep,
+    ...(rejectionReason ? { rejectionReason } : {})
+  };
+
+  const key = isApproved ? 'approved' : 'rejected';
+  const adminCopy = buildDecisionCopy({
+    employeeName,
+    leaveTypeName,
+    rejectionReason,
+    forEmployee: false
+  })[key];
+  const employeeCopy = buildDecisionCopy({
+    employeeName,
+    leaveTypeName,
+    rejectionReason,
+    forEmployee: true
+  })[key];
+
+  await notifyAdminAudience({
+    ...common,
+    type,
+    title: adminCopy.title,
+    message: adminCopy.message,
+    metadata,
+    entityExtra
+  });
+
+  return notifyEmployee({
+    ...common,
+    type,
+    title: employeeCopy.title,
+    message: employeeCopy.message,
+    metadata,
+    entityExtra
+  });
+}
 
 export async function notifyLeaveRequestEvent({
   event,
@@ -242,9 +470,7 @@ export async function notifyLeaveRequestEvent({
   actorUsername = null,
   rejectionReason = null
 }) {
-  if (!enterpriseId || !leaveRequest) {
-    return null;
-  }
+  if (!enterpriseId || !leaveRequest) return null;
 
   const employeeId = extractEmployeeId(leaveRequest);
   if (!employeeId) {
@@ -255,7 +481,7 @@ export async function notifyLeaveRequestEvent({
     return null;
   }
 
-  const context = await leaveNotificationRepository.findLeaveNotificationContext({
+  const context = await loadLeaveNotificationContext({
     enterpriseId,
     employeeId,
     leaveTypeId: leaveRequest?.leave_type_id
@@ -268,12 +494,20 @@ export async function notifyLeaveRequestEvent({
     employeeId,
     leaveRequest,
     context,
-    actorUserId,
-    actorUsername
+    actorUserId
   };
 
+  console.info(`[${LOG_TAG}] handling event`, {
+    event,
+    enterpriseId,
+    employeeId,
+    actorUserId,
+    actorUsername: actorUsername || null,
+    leaveRequestGuid: leaveRequest?.leave_request_guid ?? null
+  });
+
   if (SUBMITTED_EVENTS.has(event)) {
-    return notifyApprover({
+    return notifyApproverAudience({
       ...common,
       type: LEAVE_NOTIFICATION_TYPES.APPROVAL_REQUIRED,
       title: 'Leave Approval Required',
@@ -282,34 +516,21 @@ export async function notifyLeaveRequestEvent({
     });
   }
 
-  if (event === LEAVE_NOTIFICATION_EVENTS.APPROVED) {
-    return notifyEmployee({
-      ...common,
-      type: LEAVE_NOTIFICATION_TYPES.LEAVE_APPROVED,
-      title: 'Leave Request Approved',
-      message: `Your ${leaveTypeName} request has been approved.`,
-      metadata: { workflowStep: 'APPROVED' }
-    });
-  }
-
-  if (event === LEAVE_NOTIFICATION_EVENTS.REJECTED) {
-    return notifyEmployee({
-      ...common,
-      type: LEAVE_NOTIFICATION_TYPES.LEAVE_REJECTED,
-      title: 'Leave Request Rejected',
-      message: rejectionReason
-        ? `Your ${leaveTypeName} request was rejected. Reason: ${rejectionReason}`
-        : `Your ${leaveTypeName} request was rejected.`,
-      metadata: {
-        workflowStep: 'REJECTED',
-        rejectionReason: rejectionReason || null
-      },
-      entityExtra: rejectionReason ? { rejectionReason } : {}
+  if (
+    event === LEAVE_NOTIFICATION_EVENTS.APPROVED ||
+    event === LEAVE_NOTIFICATION_EVENTS.REJECTED
+  ) {
+    return handleDecisionEvent({
+      event,
+      common,
+      employeeName,
+      leaveTypeName,
+      rejectionReason
     });
   }
 
   if (event === LEAVE_NOTIFICATION_EVENTS.WITHDRAWN) {
-    return notifyApprover({
+    return notifyApproverAudience({
       ...common,
       type: LEAVE_NOTIFICATION_TYPES.LEAVE_WITHDRAWN,
       title: 'Leave Request Withdrawn',
@@ -318,16 +539,18 @@ export async function notifyLeaveRequestEvent({
     });
   }
 
+  console.warn(`[${LOG_TAG}] Unsupported leave notification event`, { event });
   return null;
 }
 
 export function dispatchLeaveRequestNotification(payload) {
-  notifyLeaveRequestEvent(payload).catch((err) => {
+  return notifyLeaveRequestEvent(payload).catch((err) => {
     console.error(`[${LOG_TAG}] Failed to dispatch notification`, {
       event: payload?.event,
       enterpriseId: payload?.enterpriseId,
       message: err?.message || String(err)
     });
+    return null;
   });
 }
 

@@ -45,8 +45,17 @@ export function bindOutNumber() {
   return { dir: oracledb.BIND_OUT, type: oracledb.NUMBER };
 }
 
+export function bindOutBuffer(maxSize = 16) {
+  return { dir: oracledb.BIND_OUT, type: oracledb.BUFFER, maxSize };
+}
+
 export function bindOutClob() {
   return { dir: oracledb.BIND_OUT, type: oracledb.CLOB };
+}
+
+export function bindCreatedByUserId(value) {
+  const n = Number(value);
+  return bindInNumber(Number.isFinite(n) && n > 0 ? n : null);
 }
 
 export function ynFlag(value, defaultValue = 'N') {

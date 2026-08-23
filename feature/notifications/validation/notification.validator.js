@@ -30,7 +30,9 @@ const notificationTargetBodySchema = z.object({
   targetValue: boundedString(
     NOTIFICATION_DEVICE_FIELD_LIMITS.TARGET_VALUE,
     'targetValue'
-  )
+  ).refine((value) => value.length >= 80 && !/^(your_fcm_token|fcm_token|test_token|<fcm)/i.test(value), {
+    message: 'targetValue must be a real FCM registration token'
+  })
 });
 
 const relativeActionUrlSchema = z

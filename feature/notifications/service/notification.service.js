@@ -79,10 +79,12 @@ function rethrowDeviceFailure(err, code, userMessage, logContext) {
 
 export async function listNotificationsForUser(scope, query) {
   const { enterpriseId, userId } = resolveNotificationScope(scope);
+  const viewAll = scope.viewAll === true;
 
   const filters = {
     enterpriseId,
     userId,
+    viewAll,
     status: query.status,
     module: query.module ?? null,
     type: query.type ?? null,
@@ -101,6 +103,7 @@ export async function listNotificationsForUser(scope, query) {
 
   return {
     notifications,
+    viewAll,
     pagination: buildPaginationMeta({
       page: pagination.page,
       limit: pagination.limit,
@@ -111,7 +114,11 @@ export async function listNotificationsForUser(scope, query) {
 
 export async function getUnreadCountForUser(scope) {
   const { enterpriseId, userId } = resolveNotificationScope(scope);
-  const unreadCount = await notificationRepository.getUnreadCount({ enterpriseId, userId });
+  const unreadCount = await notificationRepository.getUnreadCount({
+    enterpriseId,
+    userId,
+    viewAll: scope.viewAll === true
+  });
   return { unreadCount };
 }
 
@@ -179,7 +186,7 @@ export async function clearOneNotification(scope, recipientGuidHex) {
  */
 export async function createNotificationForEnterprise({
   enterpriseId,
-  createdBy = 'SYSTEM',
+  createdBy = null,
   recipientUserId,
   recipientEmployeeId = null,
   module,
@@ -212,6 +219,14 @@ export async function createNotificationForEnterprise({
     pushRequired,
     createdBy
   });
+
+  if (!createResult?.recipientId) {
+    throw new AppError(
+      createResult?.message || 'Notification was not created for the recipient',
+      500,
+      NOTIFICATION_ERROR_CODES.NOTIFICATION_CREATE_FAILED
+    );
+  }
 
   await finalizePushDelivery({
     enterpriseId: resolvedEnterpriseId,

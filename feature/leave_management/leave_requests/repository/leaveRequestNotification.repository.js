@@ -1,14 +1,44 @@
 import oracledb from 'oracledb';
 import {
   bindInNumber,
-  bindInString,
   ROW_OPTS,
   withConnection
 } from '../../../notifications/utils/notification.oracle.js';
 
+const ADMIN_IDENTITY_VALUES = [
+  'enterprise_admin',
+  'enterpriseadmin',
+  'tenant_admin',
+  'tenantadmin',
+  'super_admin',
+  'superadmin',
+  'platform_admin',
+  'platformadmin'
+];
+
 function readUserId(row) {
   const userId = row?.USER_ID ?? row?.user_id;
   return userId != null ? Number(userId) : null;
+}
+
+function readEmployeeId(row) {
+  const employeeId = row?.EMPLOYEE_ID ?? row?.employee_id;
+  if (employeeId == null) return null;
+  const n = Number(employeeId);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function mapUserRecipient(row) {
+  const userId = readUserId(row);
+  if (!Number.isFinite(userId) || userId <= 0) return null;
+  return {
+    userId,
+    employeeId: readEmployeeId(row)
+  };
+}
+
+function normalizeIdentitySql(column) {
+  return `LOWER(REPLACE(REPLACE(TRIM(NVL(${column}, '')), '-', '_'), ' ', ''))`;
 }
 
 export async function findUserIdByEmployeeId(enterpriseId, employeeId) {
@@ -34,29 +64,33 @@ FETCH FIRST 1 ROWS ONLY`;
   });
 }
 
-export async function findEnterpriseAdminUserIds(enterpriseId) {
+export async function findEnterpriseAdminUsers(enterpriseId) {
   if (!enterpriseId) return [];
 
+  const userCodeExpr = normalizeIdentitySql('USER_CODE');
+  const usernameExpr = normalizeIdentitySql('USERNAME');
+  const adminList = ADMIN_IDENTITY_VALUES.map((value) => `'${value}'`).join(', ');
+
   const sql = `
-SELECT USER_ID
+SELECT USER_ID, EMPLOYEE_ID
 FROM FNDSEC.FNDSEC_USERS
 WHERE ENTERPRISE_ID = :enterprise_id
   AND (
-        LOWER(USER_CODE) = 'enterprise_admin'
-     OR LOWER(USERNAME) = 'enterprise_admin'
+        ${userCodeExpr} IN (${adminList})
+     OR ${usernameExpr} IN (${adminList})
+     OR LOWER(TRIM(NVL(PRIMARY_EMAIL, ''))) LIKE 'enterprise_admin%'
+     OR ${userCodeExpr} LIKE '%enterprise_admin%'
+     OR ${usernameExpr} LIKE '%enterprise_admin%'
       )`;
 
   return withConnection(async (connection) => {
     const result = await connection.execute(
       sql,
-      {
-        enterprise_id: bindInNumber(Number(enterpriseId))
-      },
+      { enterprise_id: bindInNumber(Number(enterpriseId)) },
       ROW_OPTS
     );
-    return (result.rows ?? [])
-      .map((row) => readUserId(row))
-      .filter((userId) => Number.isFinite(userId) && userId > 0);
+
+    return (result.rows ?? []).map(mapUserRecipient).filter(Boolean);
   });
 }
 
@@ -92,15 +126,12 @@ export async function findLeaveNotificationContext({
   employeeId,
   leaveTypeId
 }) {
-  if (!enterpriseId || !employeeId) {
-    return null;
-  }
+  if (!enterpriseId || !employeeId) return null;
 
   const sql = `
 SELECT
     e.EMPLOYEE_ID,
     RAWTOHEX(e.EMPLOYEE_GUID) AS EMPLOYEE_GUID,
-    e.EMPLOYEE_NUMBER,
     TRIM(
       NVL(e.FIRST_NAME_EN, '') || ' ' ||
       NVL(e.MIDDLE_NAME_EN, '') || ' ' ||
@@ -124,9 +155,10 @@ FETCH FIRST 1 ROWS ONLY`;
       {
         enterprise_id: bindInNumber(Number(enterpriseId)),
         employee_id: bindInNumber(Number(employeeId)),
-        leave_type_id: leaveTypeId != null
-          ? bindInNumber(Number(leaveTypeId))
-          : { val: null, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
+        leave_type_id:
+          leaveTypeId != null
+            ? bindInNumber(Number(leaveTypeId))
+            : { val: null, dir: oracledb.BIND_IN, type: oracledb.NUMBER }
       },
       ROW_OPTS
     );
@@ -137,35 +169,14 @@ FETCH FIRST 1 ROWS ONLY`;
     return {
       employeeId: row.EMPLOYEE_ID ?? row.employee_id,
       employeeGuid: row.EMPLOYEE_GUID ?? row.employee_guid ?? null,
-      employeeNumber: row.EMPLOYEE_NUMBER ?? row.employee_number ?? null,
-      employeeName: String(row.EMPLOYEE_NAME ?? row.employee_name ?? '').replace(/\s+/g, ' ').trim(),
+      employeeNumber: null,
+      employeeName: String(row.EMPLOYEE_NAME ?? row.employee_name ?? '')
+        .replace(/\s+/g, ' ')
+        .trim(),
       leaveTypeId: row.LEAVE_TYPE_ID ?? row.leave_type_id ?? leaveTypeId ?? null,
       leaveTypeGuid: row.LEAVE_TYPE_GUID ?? row.leave_type_guid ?? null,
       leaveTypeName: row.LEAVE_NAME_EN ?? row.leave_name_en ?? null,
       leaveTypeCode: row.LEAVE_CODE ?? row.leave_code ?? null
     };
-  });
-}
-
-export async function findUserIdByUsername(enterpriseId, username) {
-  if (!enterpriseId || !username) return null;
-
-  const sql = `
-SELECT USER_ID
-FROM FNDSEC.FNDSEC_USERS
-WHERE ENTERPRISE_ID = :enterprise_id
-  AND LOWER(USERNAME) = LOWER(:username)
-FETCH FIRST 1 ROWS ONLY`;
-
-  return withConnection(async (connection) => {
-    const result = await connection.execute(
-      sql,
-      {
-        enterprise_id: bindInNumber(Number(enterpriseId)),
-        username: bindInString(String(username).trim(), 500)
-      },
-      ROW_OPTS
-    );
-    return readUserId(result.rows?.[0]);
   });
 }

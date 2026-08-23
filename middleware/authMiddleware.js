@@ -159,6 +159,7 @@ function attachUserFromPayload(req, payload) {
     subdomain_slug: payload.subdomain_slug ?? payload.subdomainSlug ?? null,
     admin_type: payload.admin_type ?? payload.adminType ?? null,
     username: payload.username ?? payload.userName ?? null,
+    user_code: payload.user_code ?? payload.userCode ?? null,
     iat: payload.iat,
     exp: payload.exp
   };

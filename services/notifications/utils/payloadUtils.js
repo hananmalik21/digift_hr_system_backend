@@ -1,3 +1,17 @@
+const PLACEHOLDER_TOKEN_PATTERN = /^(your_fcm_token|fcm_token|test_token|<fcm)/i;
+
+/**
+ * Real FCM registration tokens are long opaque strings. Reject placeholders
+ * so they are not treated as a successful device registration or send target.
+ */
+export function isUsableFcmRegistrationToken(token) {
+  if (token == null) return false;
+  const value = String(token).trim();
+  if (value.length < 80) return false;
+  if (PLACEHOLDER_TOKEN_PATTERN.test(value)) return false;
+  return true;
+}
+
 /**
  * Firebase Cloud Messaging requires all custom data payload values to be strings.
  */
@@ -32,9 +46,7 @@ export function buildWebPushLink(actionUrl) {
 
   const baseUrl = process.env.DIGIFYHR_WEB_URL;
   if (!baseUrl || !String(baseUrl).trim()) {
-    throw new Error(
-      'DIGIFYHR_WEB_URL environment variable is required when actionUrl is provided'
-    );
+    return undefined;
   }
 
   const normalizedBase = String(baseUrl).trim().replace(/\/+$/, '');

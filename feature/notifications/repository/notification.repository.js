@@ -1,23 +1,20 @@
-import oracledb from 'oracledb';
 import {
   CLEAR_NOTIFICATIONS_PROC,
   CREATE_FOR_USER_PROC,
   NOTIFICATION_TABLES
 } from '../constants/notification.constants.js';
 import {
+  bindCreatedByUserId,
   bindInBuffer,
   bindInNumber,
   bindInString,
-  bindOutClob,
+  bindOutBuffer,
   bindOutNumber,
   commitConnection,
   numOrNull,
-  readClobOut,
   rollbackConnection,
   ROW_OPTS,
-  strOrNull,
-  withConnection,
-  ynFlag
+  withConnection
 } from '../utils/notification.oracle.js';
 import { mapNotificationRow } from '../utils/notification.mapper.js';
 import { DatabaseError } from '../../../utils/errors/index.js';
@@ -33,13 +30,16 @@ function rethrowDbError(err, context) {
   throw new DatabaseError(err?.message || 'Database error', err, null);
 }
 
-function buildListFilters({ status, module, type, priority }) {
+function buildListFilters({ status, module, type, priority, viewAll }) {
   const clauses = [
     'R.ENTERPRISE_ID = :enterprise_id',
-    'R.USER_ID = :user_id',
     "R.DISMISSED_FLAG = 'N'"
   ];
   const binds = {};
+
+  if (!viewAll) {
+    clauses.push('R.USER_ID = :user_id');
+  }
 
   if (status === 'READ') {
     clauses.push("R.READ_FLAG = 'Y'");
@@ -72,6 +72,7 @@ SELECT
     N.NOTIFICATION_ID,
     RAWTOHEX(N.NOTIFICATION_GUID) AS NOTIFICATION_GUID,
     N.ENTERPRISE_ID,
+    R.USER_ID,
     N.MODULE_CODE,
     N.NOTIFICATION_TYPE,
     N.TITLE,
@@ -79,7 +80,7 @@ SELECT
     N.PRIORITY,
     N.ENTITY_TYPE,
     N.ENTITY_ID,
-    RAWTOHEX(N.ENTITY_GUID) AS ENTITY_GUID,
+    N.ENTITY_GUID,
     N.ENTITY_DATA_JSON,
     N.ACTION_URL,
     N.ICON_CODE,
@@ -99,19 +100,32 @@ JOIN ${NOTIFICATION_TABLES.RECIPIENTS} R
 
 export async function countNotifications(filters) {
   const { whereSql, binds: filterBinds } = buildListFilters(filters);
-
-  const sql = `
-SELECT COUNT(*) AS TOTAL_COUNT
+  const fromSql = `
 FROM ${NOTIFICATION_TABLES.NOTIFICATIONS} N
 JOIN ${NOTIFICATION_TABLES.RECIPIENTS} R
   ON R.NOTIFICATION_ID = N.NOTIFICATION_ID
 WHERE ${whereSql}`;
 
+  const sql = filters.viewAll
+    ? `
+SELECT COUNT(*) AS TOTAL_COUNT
+FROM (
+  SELECT 1
+  ${fromSql}
+  GROUP BY N.NOTIFICATION_TYPE, NVL(N.ENTITY_GUID, RAWTOHEX(N.NOTIFICATION_GUID))
+)`
+    : `
+SELECT COUNT(*) AS TOTAL_COUNT
+${fromSql}`;
+
   const binds = {
     enterprise_id: bindInNumber(filters.enterpriseId),
-    user_id: bindInNumber(filters.userId),
     ...filterBinds
   };
+
+  if (!filters.viewAll) {
+    binds.user_id = bindInNumber(filters.userId);
+  }
 
   try {
     return await withConnection(async (connection) => {
@@ -127,20 +141,39 @@ WHERE ${whereSql}`;
 export async function listNotifications(filters, pagination) {
   const { whereSql, binds: filterBinds } = buildListFilters(filters);
   const offset = (pagination.page - 1) * pagination.limit;
-
-  const sql = `
+  const innerSql = `
 ${LIST_SELECT_SQL}
-WHERE ${whereSql}
+WHERE ${whereSql}`;
+
+  const sql = filters.viewAll
+    ? `
+SELECT * FROM (
+  SELECT inner_rows.*,
+         ROW_NUMBER() OVER (
+           PARTITION BY inner_rows.NOTIFICATION_TYPE,
+                        NVL(inner_rows.ENTITY_GUID, inner_rows.NOTIFICATION_GUID)
+           ORDER BY inner_rows.CREATION_DATE DESC, inner_rows.RECIPIENT_ID DESC
+         ) AS RN
+  FROM (${innerSql}) inner_rows
+)
+WHERE RN = 1
+ORDER BY CREATION_DATE DESC
+OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`
+    : `
+${innerSql}
 ORDER BY N.CREATION_DATE DESC
 OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
 
   const binds = {
     enterprise_id: bindInNumber(filters.enterpriseId),
-    user_id: bindInNumber(filters.userId),
     offset: bindInNumber(offset),
     limit: bindInNumber(pagination.limit),
     ...filterBinds
   };
+
+  if (!filters.viewAll) {
+    binds.user_id = bindInNumber(filters.userId);
+  }
 
   try {
     return await withConnection(async (connection) => {
@@ -152,8 +185,21 @@ OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY`;
   }
 }
 
-export async function getUnreadCount({ enterpriseId, userId }) {
-  const sql = `
+export async function getUnreadCount({ enterpriseId, userId, viewAll = false }) {
+  const sql = viewAll
+    ? `
+SELECT COUNT(*) AS UNREAD_COUNT
+FROM (
+  SELECT 1
+  FROM ${NOTIFICATION_TABLES.NOTIFICATIONS} N
+  JOIN ${NOTIFICATION_TABLES.RECIPIENTS} R
+    ON R.NOTIFICATION_ID = N.NOTIFICATION_ID
+  WHERE R.ENTERPRISE_ID = :enterprise_id
+    AND R.READ_FLAG = 'N'
+    AND R.DISMISSED_FLAG = 'N'
+  GROUP BY N.NOTIFICATION_TYPE, NVL(N.ENTITY_GUID, RAWTOHEX(N.NOTIFICATION_GUID))
+)`
+    : `
 SELECT COUNT(*) AS UNREAD_COUNT
 FROM ${NOTIFICATION_TABLES.RECIPIENTS}
 WHERE ENTERPRISE_ID = :enterprise_id
@@ -161,16 +207,16 @@ WHERE ENTERPRISE_ID = :enterprise_id
   AND READ_FLAG = 'N'
   AND DISMISSED_FLAG = 'N'`;
 
+  const binds = {
+    enterprise_id: bindInNumber(enterpriseId)
+  };
+  if (!viewAll) {
+    binds.user_id = bindInNumber(userId);
+  }
+
   try {
     return await withConnection(async (connection) => {
-      const result = await connection.execute(
-        sql,
-        {
-          enterprise_id: bindInNumber(enterpriseId),
-          user_id: bindInNumber(userId)
-        },
-        ROW_OPTS
-      );
+      const result = await connection.execute(sql, binds, ROW_OPTS);
       const row = result.rows?.[0] ?? {};
       return Number(row.UNREAD_COUNT ?? row.unread_count ?? 0);
     });
@@ -384,6 +430,45 @@ END;`;
   }
 }
 
+export async function findOpenNotificationForUserEntity({
+  enterpriseId,
+  userId,
+  type,
+  entityGuid
+}) {
+  if (!enterpriseId || !userId || !type || !entityGuid) return null;
+
+  const sql = `
+SELECT R.RECIPIENT_ID
+FROM ${NOTIFICATION_TABLES.NOTIFICATIONS} N
+JOIN ${NOTIFICATION_TABLES.RECIPIENTS} R
+  ON R.NOTIFICATION_ID = N.NOTIFICATION_ID
+WHERE R.ENTERPRISE_ID = :enterprise_id
+  AND R.USER_ID = :user_id
+  AND R.DISMISSED_FLAG = 'N'
+  AND N.NOTIFICATION_TYPE = :notification_type
+  AND N.ENTITY_GUID = :entity_guid
+FETCH FIRST 1 ROWS ONLY`;
+
+  try {
+    return await withConnection(async (connection) => {
+      const result = await connection.execute(
+        sql,
+        {
+          enterprise_id: bindInNumber(enterpriseId),
+          user_id: bindInNumber(userId),
+          notification_type: bindInString(type, 50),
+          entity_guid: bindInString(entityGuid, 100)
+        },
+        ROW_OPTS
+      );
+      return result.rows?.[0] ? Number(result.rows[0].RECIPIENT_ID ?? result.rows[0].recipient_id) : null;
+    });
+  } catch (err) {
+    rethrowDbError(err, 'findOpenNotificationForUserEntity');
+  }
+}
+
 export async function userExistsInEnterprise({ enterpriseId, userId }) {
   const sql = `
 SELECT USER_ID
@@ -415,11 +500,15 @@ BEGIN
   ${CREATE_FOR_USER_PROC}(
     P_ENTERPRISE_ID        => :p_enterprise_id,
     P_USER_ID              => :p_user_id,
-    P_EMPLOYEE_ID          => :p_employee_id,
     P_MODULE_CODE          => :p_module_code,
     P_NOTIFICATION_TYPE    => :p_notification_type,
     P_TITLE                => :p_title,
     P_MESSAGE              => :p_message,
+    O_NOTIFICATION_ID      => :o_notification_id,
+    O_NOTIFICATION_GUID    => :o_notification_guid,
+    O_RECIPIENT_ID         => :o_recipient_id,
+    O_RECIPIENT_GUID       => :o_recipient_guid,
+    P_EMPLOYEE_ID          => :p_employee_id,
     P_PRIORITY             => :p_priority,
     P_ENTITY_TYPE          => :p_entity_type,
     P_ENTITY_ID            => :p_entity_id,
@@ -430,47 +519,44 @@ BEGIN
     P_METADATA_JSON        => :p_metadata_json,
     P_PUSH_REQUIRED_FLAG   => :p_push_required_flag,
     P_SOURCE_SYSTEM        => :p_source_system,
-    P_CREATED_BY           => :p_created_by,
-    O_NOTIFICATION_ID      => :o_notification_id,
-    O_RECIPIENT_ID         => :o_recipient_id,
-    O_RESULT               => :o_result
+    P_CREATED_BY           => :p_created_by
   );
 END;`;
 
   const binds = {
     p_enterprise_id: bindInNumber(payload.enterpriseId),
     p_user_id: bindInNumber(payload.recipientUserId),
-    p_employee_id: bindInNumber(payload.recipientEmployeeId),
-    p_module_code: bindInString(payload.module, 100),
-    p_notification_type: bindInString(payload.type, 100),
+    p_module_code: bindInString(payload.module, 50),
+    p_notification_type: bindInString(payload.type, 50),
     p_title: bindInString(payload.title, 500),
-    p_message: bindInString(payload.message, 4000),
-    p_priority: bindInString(payload.priority, 30),
+    p_message: bindInString(payload.message, 2000),
+    o_notification_id: bindOutNumber(),
+    o_notification_guid: bindOutBuffer(16),
+    o_recipient_id: bindOutNumber(),
+    o_recipient_guid: bindOutBuffer(16),
+    p_employee_id: bindInNumber(payload.recipientEmployeeId),
+    p_priority: bindInString(payload.priority, 20),
     p_entity_type: bindInString(payload.entityType, 100),
-    p_entity_id: bindInString(payload.entityId, 100),
-    p_entity_guid: bindInString(payload.entityGuid, 32),
-    p_entity_data_json: bindInString(payload.entityDataJson, 4000),
+    p_entity_id: bindInString(payload.entityId, 200),
+    p_entity_guid: bindInString(payload.entityGuid, 100),
+    p_entity_data_json: bindInString(payload.entityDataJson, 32767),
     p_action_url: bindInString(payload.actionUrl, 1000),
     p_icon_code: bindInString(payload.iconCode, 100),
-    p_metadata_json: bindInString(payload.metadataJson, 4000),
+    p_metadata_json: bindInString(payload.metadataJson, 32767),
     p_push_required_flag: bindInString(payload.pushRequiredFlag, 1),
-    p_source_system: bindInString(payload.sourceSystem, 100),
-    p_created_by: bindInString(payload.createdBy, 500),
-    o_notification_id: bindOutNumber(),
-    o_recipient_id: bindOutNumber(),
-    o_result: bindOutClob()
+    p_source_system: bindInString(payload.sourceSystem, 50),
+    p_created_by: bindCreatedByUserId(payload.createdBy)
   };
 
   try {
     return await withConnection(async (connection) => {
       const result = await connection.execute(plsql, binds, { autoCommit: false });
-      const message = await readClobOut(result.outBinds?.o_result);
       await commitConnection(connection);
 
       return {
         notificationId: numOrNull(result.outBinds?.o_notification_id),
         recipientId: numOrNull(result.outBinds?.o_recipient_id),
-        message: strOrNull(message)
+        message: 'Notification created successfully'
       };
     });
   } catch (err) {

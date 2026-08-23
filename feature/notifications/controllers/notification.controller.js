@@ -2,9 +2,9 @@ import { asyncHandler } from '../../../middleware/asyncHandler.js';
 import {
   getActingEnterpriseId,
   getActingUserId,
-  getActingUsername,
   requireActingUserId
 } from '../../../utils/userContext.js';
+import { isEnterpriseAdmin, resolveAdminTypeFromUserInfo } from '../../../utils/adminAccess.js';
 import { notificationService } from '../service/notification.service.js';
 import { NOTIFICATION_ERROR_CODES } from '../constants/notification.constants.js';
 import {
@@ -37,7 +37,17 @@ function resolveScope(req, res) {
     return null;
   }
 
-  return { enterpriseId, userId };
+  return {
+    enterpriseId,
+    userId,
+    viewAll: isEnterpriseAdmin(req) ||
+      resolveAdminTypeFromUserInfo({
+        user_info: {
+          user_code: req.user?.user_code,
+          username: req.user?.username
+        }
+      }) === 'enterprise_admin'
+  };
 }
 
 function validationFailure(res, zodError, fallback, errorCode = null) {
@@ -153,7 +163,7 @@ export const createNotification = asyncHandler(async (req, res) => {
   if (!body) return;
 
   const result = await notificationService.createNotification(scope, body, {
-    createdBy: getActingUsername(req) ?? String(getActingUserId(req) ?? 'SYSTEM')
+    createdBy: getActingUserId(req)
   });
 
   return sendNotificationSuccess(res, {

@@ -29,6 +29,8 @@ test('mapDevicePublicResponse omits FCM token', () => {
   assert.equal(mapped.targetValue, undefined);
 });
 
+const sampleFcmToken = 'a'.repeat(140);
+
 test('registerDeviceBodySchema rejects empty targetValue', () => {
   const parsed = registerDeviceBodySchema.safeParse({
     targetType: 'TOKEN',
@@ -39,10 +41,20 @@ test('registerDeviceBodySchema rejects empty targetValue', () => {
   assert.equal(parsed.success, false);
 });
 
+test('registerDeviceBodySchema rejects placeholder targetValue', () => {
+  const parsed = registerDeviceBodySchema.safeParse({
+    targetType: 'TOKEN',
+    targetValue: 'YOUR_FCM_TOKEN',
+    deviceType: 'WEB'
+  });
+
+  assert.equal(parsed.success, false);
+});
+
 test('registerDeviceBodySchema rejects userId in body', () => {
   const parsed = registerDeviceBodySchema.safeParse({
     targetType: 'TOKEN',
-    targetValue: 'abc123',
+    targetValue: sampleFcmToken,
     deviceType: 'WEB',
     userId: 999,
     enterpriseId: 1
@@ -56,7 +68,7 @@ test('registerDeviceBodySchema rejects userId in body', () => {
 test('deactivateDeviceBodySchema requires targetType TOKEN', () => {
   const parsed = deactivateDeviceBodySchema.safeParse({
     targetType: 'FID',
-    targetValue: 'abc123'
+    targetValue: sampleFcmToken
   });
 
   assert.equal(parsed.success, false);
