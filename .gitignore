@@ -11,4 +11,8 @@ scripts/seed-admin.local.js
 # Firebase private credentials
 *firebase-adminsdk*.json
 firebase-admin*.json
-service-account*.json
+service-account*.jsonfirebase-service-account.json
+
+.env
+firebase-service-account.json
+deploy.sh.backup-*

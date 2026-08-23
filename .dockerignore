@@ -10,3 +10,7 @@ npm-debug.log
 .vscode
 coverage
 .eslintcache
+
+.env
+firebase-service-account.json
+deploy.sh.backup-*
