@@ -11,6 +11,7 @@ import {
   CurrencyValidationError,
   ExchangeRateNotFoundError,
 } from '../errors/currency.errors.js';
+import { fetchPairRate } from '../clients/frankfurter.client.js';
 import { parseConvertBody } from '../validators/currency.validator.js';
 import { multiply, parseDecimal, toPlainString, toNumber } from '../utils/currencyDecimal.js';
 
@@ -211,6 +212,49 @@ test('malformed provider rate is EXCHANGE_RATE_PROVIDER_ERROR', async () => {
       assert.equal(err instanceof CurrencyProviderError, true);
       assert.equal(err.statusCode, 502);
       assert.equal(err.code, 'EXCHANGE_RATE_PROVIDER_ERROR');
+      return true;
+    }
+  );
+});
+
+test('null convert body is treated as missing required fields', () => {
+  assert.throws(
+    () => parseConvertBody(null),
+    (err) => {
+      assert.equal(err instanceof CurrencyValidationError, true);
+      assert.equal(err.message, 'amount, from_currency and to_currency are required');
+      return true;
+    }
+  );
+});
+
+test('impossible calendar date is rejected', () => {
+  assert.throws(
+    () =>
+      parseConvertBody({
+        amount: 1,
+        from_currency: 'KWD',
+        to_currency: 'PKR',
+        conversion_date: '2026-02-31',
+      }),
+    CurrencyValidationError
+  );
+});
+
+test('Frankfurter HTTP failure is EXCHANGE_RATE_PROVIDER_ERROR', async () => {
+  await assert.rejects(
+    () =>
+      fetchPairRate(
+        { fromCurrency: 'KWD', toCurrency: 'PKR', conversionDate: '2026-08-16' },
+        async () => ({
+          ok: false,
+          status: 503,
+          text: async () => 'unavailable',
+        })
+      ),
+    (err) => {
+      assert.equal(err instanceof CurrencyProviderError, true);
+      assert.equal(err.statusCode, 502);
       return true;
     }
   );

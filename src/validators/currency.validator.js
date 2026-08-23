@@ -91,10 +91,13 @@ function parseAmount(value, { allowNegative = allowNegativeAmounts() } = {}) {
   return toNumber(decimal);
 }
 
-export function parseConvertBody(body = {}) {
-  const amountRaw = readField(body, 'amount');
-  const fromRaw = readField(body, 'from_currency', 'fromCurrency');
-  const toRaw = readField(body, 'to_currency', 'toCurrency');
+export function parseConvertBody(body) {
+  const source =
+    body !== null && typeof body === 'object' && !Array.isArray(body) ? body : {};
+
+  const amountRaw = readField(source, 'amount');
+  const fromRaw = readField(source, 'from_currency', 'fromCurrency');
+  const toRaw = readField(source, 'to_currency', 'toCurrency');
 
   const missing = [];
   if (amountRaw === undefined || amountRaw === null || amountRaw === '') missing.push('amount');
@@ -114,7 +117,7 @@ export function parseConvertBody(body = {}) {
     fromCurrency: parseCurrencyCode(fromRaw, 'from_currency'),
     toCurrency: parseCurrencyCode(toRaw, 'to_currency'),
     conversionDate:
-      parseOptionalIsoDate(readField(body, 'conversion_date', 'conversionDate'), 'conversion_date') ||
-      todayIsoDate(),
+    parseOptionalIsoDate(readField(source, 'conversion_date', 'conversionDate'), 'conversion_date') ||
+    todayIsoDate(),
   };
 }

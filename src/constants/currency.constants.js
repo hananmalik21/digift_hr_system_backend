@@ -68,10 +68,15 @@ export function isKnownIso4217(code) {
   return ISO_4217_CODES.has(code);
 }
 
+function envFlag(name, defaultValue) {
+  return String(process.env[name] ?? defaultValue).trim().toLowerCase() === 'true';
+}
+
+/** Unknown ISO codes are rejected unless CURRENCY_STRICT_ISO=false. */
 export function allowUnknownIsoCodes() {
-  return String(process.env.CURRENCY_STRICT_ISO || 'true').toLowerCase() === 'false';
+  return !envFlag('CURRENCY_STRICT_ISO', 'true');
 }
 
 export function allowNegativeAmounts() {
-  return String(process.env.CURRENCY_ALLOW_NEGATIVE_AMOUNTS || 'false').toLowerCase() === 'true';
+  return envFlag('CURRENCY_ALLOW_NEGATIVE_AMOUNTS', 'false');
 }

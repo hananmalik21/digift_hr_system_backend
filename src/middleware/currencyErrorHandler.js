@@ -2,8 +2,8 @@ import { AppError } from '../../utils/errors/AppError.js';
 import { ERROR_CODES } from '../constants/currency.constants.js';
 
 /**
- * Maps currency-module errors to `{ success: false, message, code }`.
- * Unexpected errors stay 500 without leaking internals.
+ * Keeps convert errors on `{ success: false, message, code }` for Flutter.
+ * 4xx is a client problem and is not logged as a server error.
  */
 export function currencyErrorHandler(err, req, res, next) {
   if (res.headersSent) {
@@ -11,7 +11,10 @@ export function currencyErrorHandler(err, req, res, next) {
   }
 
   if (err instanceof AppError) {
-    console.error('[currency]', err.code, err.message);
+    const statusCode = err.statusCode || 500;
+    if (statusCode >= 500) {
+      console.error('[currency]', err.code, err.technicalMessage || err.message);
+    }
     const body = {
       success: false,
       message: err.userMessage || err.message || 'Request failed',
@@ -19,7 +22,7 @@ export function currencyErrorHandler(err, req, res, next) {
     if (err.code && err.code !== ERROR_CODES.INTERNAL_ERROR) {
       body.code = err.code;
     }
-    return res.status(err.statusCode || 500).json(body);
+    return res.status(statusCode).json(body);
   }
 
   console.error('[currency] Unhandled error:', err?.stack || err);

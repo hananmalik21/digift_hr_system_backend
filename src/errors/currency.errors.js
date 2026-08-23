@@ -1,10 +1,10 @@
+import { ValidationError } from '../../utils/errors/ValidationError.js';
 import { AppError } from '../../utils/errors/AppError.js';
 import { ERROR_CODES } from '../constants/currency.constants.js';
 
-export class CurrencyValidationError extends AppError {
-  constructor(message, details = null) {
-    super(message, 400, ERROR_CODES.VALIDATION_ERROR, message);
-    this.details = details;
+export class CurrencyValidationError extends ValidationError {
+  constructor(message) {
+    super(message);
   }
 }
 

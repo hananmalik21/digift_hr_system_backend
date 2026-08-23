@@ -7,9 +7,14 @@ function getFxApiBase() {
   return String(process.env.CURRENCY_FX_API_BASE || DEFAULT_FX_API_BASE).replace(/\/$/, '');
 }
 
+function truncate(value, max = 200) {
+  const text = String(value ?? '');
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
 function fail(fromCurrency, toCurrency, cause) {
   if (cause) {
-    console.error('[currency] Frankfurter error:', cause);
+    console.error('[currency] Frankfurter error:', truncate(cause));
   }
   throw new CurrencyProviderError(fromCurrency, toCurrency);
 }

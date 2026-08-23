@@ -51,10 +51,6 @@ export function parseDecimal(input) {
   return { units, scale };
 }
 
-export function isZero(decimal) {
-  return decimal.units === 0n;
-}
-
 export function isNegative(decimal) {
   return decimal.units < 0n;
 }
