@@ -21,4 +21,13 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           command_timeout: 30m
-          script: bash ~/apps/backend/deploy.sh
+          script: |
+            set -e
+            cd /home/ubuntu/apps/backend
+
+            echo "[CI] Synchronizing production source..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "[CI] Starting production deployment..."
+            bash ./deploy.sh
