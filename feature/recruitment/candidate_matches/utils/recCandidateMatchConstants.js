@@ -2,10 +2,7 @@
 export const REC_CANDIDATE_MATCH_VIEW =
   process.env.REC_REQUISITION_CANDIDATE_MATCH_V || 'REC.V_REQUISITION_CANDIDATE_MATCH';
 
-export const REC_APPLICATIONS_VIEW = process.env.REC_APPLICATIONS_V || 'REC.V_APPLICATIONS';
-export const REC_JOB_POSTINGS_VIEW = process.env.REC_JOB_POSTINGS_V || 'REC.V_JOB_POSTINGS';
 export const REC_REQUISITION_LIST_VIEW = process.env.REC_REQUISITION_LIST_V || 'REC.V_REQUISITION_LIST';
-export const REC_CANDIDATES_FULL_VIEW = process.env.REC_CANDIDATES_FULL_V || 'REC.CANDIDATES_FULL_V';
 
 export const LOG_TAG = 'recCandidateMatch';
 
@@ -16,7 +13,6 @@ export const ADD_AS_APPLICANT_ERROR_MESSAGE = 'Unable to add candidate as applic
 
 /** Find-candidates list 404 (view miss). */
 export const REQUISITION_NOT_FOUND_MESSAGE = 'Requisition not found';
-export const CANDIDATE_NOT_FOUND_MESSAGE = 'Candidate not found';
 
 /** Oracle ADD_AS_APPLICANT_PKG business messages (keep in sync with package). */
 export const ALREADY_APPLIED_MESSAGE = 'Candidate is already an applicant for this requisition.';
@@ -56,7 +52,6 @@ export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 
 export const DEFAULT_SORT_BY = 'match_score';
-export const DEFAULT_SORT_ORDER = 'desc';
 
 export const LOCATION_UNSPECIFIED_DISPLAY = 'Not specified';
 
@@ -69,39 +64,15 @@ export const SORT_COLUMNS = Object.freeze({
 
 export const SORT_KEYS = Object.freeze(Object.keys(SORT_COLUMNS));
 
+export const FIND_CANDIDATES_TIEBREAKER_SQL =
+  'v.TITLE_MATCH_SCORE DESC NULLS LAST, v.YEARS_EXPERIENCE DESC NULLS LAST, v.CANDIDATE_ID DESC';
+
 export const SEARCH_COLUMNS = Object.freeze([
   'CANDIDATE_NAME',
   'CURRENT_TITLE',
   'CURRENT_EMPLOYER',
   'EMAIL',
   'CURRENT_LOCATION'
-]);
-
-/** Documented UI columns from REC.V_REQUISITION_CANDIDATE_MATCH (mapped 1:1 in the API). */
-export const MATCH_VIEW_UI_COLUMNS = Object.freeze([
-  'NOTICE_PERIOD',
-  'NOTICE_PERIOD_DAYS',
-  'ESTIMATED_AVAILABLE_DATE',
-  'AVAILABILITY_SCORE',
-  'AVAILABILITY_CODE',
-  'AVAILABILITY_TEXT',
-  'MATCH_SCORE',
-  'MATCH_DISPLAY',
-  'MATCH_LEVEL',
-  'RECOMMENDATION_CODE',
-  'CANDIDATE_SUBTITLE',
-  'EXPERIENCE_DISPLAY',
-  'LOCATION_DISPLAY',
-  'APPLIED_FLAG',
-  'APPLICATION_STATUS',
-  'CAN_ADD_AS_APPLICANT',
-  'APPLICATION_COUNT',
-  'APPLICATION_ID',
-  'APPLICATION_GUID',
-  'APPLICATION_NUMBER',
-  'APPLICATION_STAGE_CODE',
-  'APPLICATION_STATUS_CODE',
-  'APPLICATION_APPLIED_DATE'
 ]);
 
 /** Find-candidates applied_status filter values. */

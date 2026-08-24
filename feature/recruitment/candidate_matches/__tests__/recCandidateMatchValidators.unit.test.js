@@ -65,6 +65,14 @@ test('applied_status maps ALL/APPLIED/NOT_APPLIED to APPLIED_FLAG binds', () => 
   assert.throws(() => parseAppliedStatusFilter('MAYBE'), ValidationError);
 });
 
+test('list filters omit unused optional binds', () => {
+  const { whereSql, binds } = buildCandidateMatchListFilters(REQ, 12, {});
+  assert.match(whereSql, /v\.ENTERPRISE_ID = :p_enterprise_id/);
+  assert.equal(Object.keys(binds).sort().join(','), 'p_enterprise_id,p_requisition_guid');
+  assert.doesNotMatch(whereSql, /p_min_match_score/);
+  assert.doesNotMatch(whereSql, /p_search_pat/);
+});
+
 test('list filters bind GUID and enterprise instead of concatenating SQL', () => {
   const { whereSql, binds } = buildCandidateMatchListFilters(REQ, 12, {
     min_match_score: '70',

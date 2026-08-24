@@ -15,7 +15,6 @@ import {
   ADD_AS_APPLICANT_ERROR_MESSAGE,
   ADD_AS_APPLICANT_SUCCESS_MESSAGE,
   ALREADY_APPLIED_MESSAGE,
-  CANDIDATE_NOT_FOUND_MESSAGE,
   LIST_SUCCESS_MESSAGE,
   REQUISITION_NOT_FOUND_MESSAGE
 } from './recCandidateMatchConstants.js';
@@ -105,21 +104,6 @@ export function sendRequisitionNotFoundResponse(res) {
   });
 }
 
-export function sendCandidateNotFoundResponse(res) {
-  return sendPackageResponse(res, 404, {
-    success: false,
-    message: CANDIDATE_NOT_FOUND_MESSAGE
-  });
-}
-
-export function sendAlreadyAppliedResponse(res) {
-  return sendPackageResponse(res, 409, {
-    success: false,
-    message: ALREADY_APPLIED_MESSAGE
-  });
-}
-
-export function sendFindCandidatesNotFound(res, notFound) {
-  if (notFound === 'candidate') return sendCandidateNotFoundResponse(res);
+export function sendFindCandidatesNotFound(res, _notFound) {
   return sendRequisitionNotFoundResponse(res);
 }

@@ -91,10 +91,6 @@ import fndsecUsersController from './feature/security/users/controller/fndsecUse
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
 import recRequisitionCompanyInfoController from './feature/recruitment/requisitions/controller/recRequisitionCompanyInfoController.js';
-import {
-  recApplicationMatchApplicationRouter,
-  recApplicationMatchRequisitionRouter
-} from './feature/recruitment/application_matches/controller/recApplicationMatchController.js';
 import { recCandidateMatchRequisitionRouter } from './feature/recruitment/candidate_matches/controller/recCandidateMatchController.js';
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
 import recCandidateNotesController from './feature/recruitment/candidates/controller/recCandidateNotesController.js';
@@ -383,11 +379,6 @@ app.use('/api/rec/requisitions', recCandidateMatchRequisitionRouter);
 app.use('/api/recruitment/requisitions', recCandidateMatchRequisitionRouter);
 app.use('/api/recruiting/requisitions', recCandidateMatchRequisitionRouter);
 
-// Recruitment — application match scoring (mounted before catch-all GUID routes)
-app.use('/api/rec/requisitions', recApplicationMatchRequisitionRouter);
-app.use('/api/recruitment/requisitions', recApplicationMatchRequisitionRouter);
-app.use('/api/recruiting/requisitions', recApplicationMatchRequisitionRouter);
-
 // Recruitment — requisition company info (mounted before catch-all GUID routes)
 app.use('/api/rec/requisitions', recRequisitionCompanyInfoController);
 app.use('/api/recruitment/requisitions', recRequisitionCompanyInfoController);
@@ -411,8 +402,6 @@ app.use('/api/rec/talent-pools', recTalentPoolsController);
 app.use('/api/rec/job-postings', recJobPostingsController);
 
 // Recruitment — applications (REC.V_APPLICATIONS reads, REC.CREATE_APPLICATION_PKG mutations)
-app.use('/api/recruitment/applications', recApplicationMatchApplicationRouter);
-app.use('/api/recruiting/applications', recApplicationMatchApplicationRouter);
 app.use('/api/recruitment/applications', recApplicationsController);
 
 // Recruitment — dashboard (REC.V_CANDIDATE_STATS / V_APPLICATION_STATS / V_INTERVIEW_STATS / V_OFFER_STATS)

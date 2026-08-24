@@ -1,38 +1,14 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import {
+  normalizeGuidValue,
+  normalizeYnFlag,
+  rowKeyMap,
+  safeFiniteNumber,
+  strOrNull
+} from '../../applications/utils/recApplicationRowUtils.js';
 import { parseJsonColumn } from '../../shared/recViewJsonParse.js';
 import { LOCATION_UNSPECIFIED_DISPLAY } from './recCandidateMatchConstants.js';
 
-export function rowKeyMap(row) {
-  const m = {};
-  if (!row || typeof row !== 'object') return m;
-  for (const [k, v] of Object.entries(row)) {
-    m[String(k).toLowerCase()] = v;
-  }
-  return m;
-}
-
-export function safeFiniteNumber(val) {
-  if (val == null || val === '') return null;
-  const n = Number(val);
-  return Number.isFinite(n) ? n : null;
-}
-
-export function strOrNull(v) {
-  if (v == null || v === '') return null;
-  const s = String(v).trim();
-  return s === '' ? null : s;
-}
-
-export function normalizeGuidValue(v) {
-  if (v == null) return null;
-  return normalizeApiGuidString(v) ?? bufferToHex(v);
-}
-
-export function normalizeYnFlag(v) {
-  if (v == null || v === '') return null;
-  const s = String(v).trim().toUpperCase();
-  return s === 'Y' || s === 'N' ? s : strOrNull(v);
-}
+export { normalizeGuidValue, normalizeYnFlag, rowKeyMap, safeFiniteNumber, strOrNull };
 
 /**
  * Date-only ISO (YYYY-MM-DD) without UTC day-shift.

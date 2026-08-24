@@ -1,5 +1,6 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { parseListPagination } from '../../shared/recViewQueryValidators.js';
+import { parseViewOrderSql } from '../../shared/recViewSortUtils.js';
 import { isBlank } from '../../shared/recValidationUtils.js';
 import { parseCandidateGuidParam } from '../../candidates/utils/recCandidateValidators.js';
 import { parseRequisitionGuidParam } from '../../requisitions/utils/recRequisitionValidators.js';
@@ -8,7 +9,7 @@ import {
   DEFAULT_PAGE,
   DEFAULT_PAGE_SIZE,
   DEFAULT_SORT_BY,
-  DEFAULT_SORT_ORDER,
+  FIND_CANDIDATES_TIEBREAKER_SQL,
   MAX_PAGE_SIZE,
   APPLIED_STATUS_FILTERS,
   SORT_COLUMNS,
@@ -62,12 +63,16 @@ export function parseFindCandidatesSortKey(query) {
 
 export function parseFindCandidatesSortOrder(query) {
   const raw = query?.sort_order ?? query?.sortOrder;
-  if (isBlank(raw)) return DEFAULT_SORT_ORDER;
+  if (isBlank(raw)) return 'desc';
   const order = String(raw).trim().toLowerCase();
   if (order !== 'asc' && order !== 'desc') {
     throw new ValidationError('Validation failed', ['sort_order must be asc or desc']);
   }
   return order;
+}
+
+export function parseFindCandidatesSortSql(query) {
+  return parseViewOrderSql(query, SORT_COLUMNS, DEFAULT_SORT_BY, FIND_CANDIDATES_TIEBREAKER_SQL);
 }
 
 function parseScore0to100(raw, fieldName) {
@@ -111,13 +116,6 @@ export function parseAppliedStatusFilter(raw) {
   }
   if (key === 'ALL') return null;
   return key === 'APPLIED' ? 'Y' : 'N';
-}
-
-export function parseFindCandidatesSortSql(query) {
-  const key = parseFindCandidatesSortKey(query);
-  const order = parseFindCandidatesSortOrder(query).toUpperCase();
-  const column = SORT_COLUMNS[key];
-  return `ORDER BY ${column} ${order} NULLS LAST, v.TITLE_MATCH_SCORE DESC NULLS LAST, v.YEARS_EXPERIENCE DESC NULLS LAST, v.CANDIDATE_ID DESC`;
 }
 
 export function validateRequisitionGuidEnterprise(requisitionGuidParam, enterpriseId) {
