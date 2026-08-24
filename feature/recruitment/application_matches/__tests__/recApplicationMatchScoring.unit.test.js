@@ -108,8 +108,19 @@ test('past target start date does not penalize notice-period availability', () =
   const now = new Date('2026-08-23T00:00:00Z');
   const scored = scoreAvailability(30, '2026-01-01', now);
   assert.equal(scored.raw_score, 80);
+  assert.equal(scored.score, 80);
+  assert.equal(scored.code, 'WITHIN_1_MONTH');
+  assert.equal(scored.display, 'Available in 1 month');
   assert.equal(scored.notice_period_days, 30);
   assert.equal(scored.estimated_available_date, '2026-09-22');
+});
+
+test('availability codes follow notice-period buckets', () => {
+  const now = new Date('2026-08-24T00:00:00Z');
+  assert.equal(scoreAvailability(0, null, now).code, 'IMMEDIATE');
+  assert.equal(scoreAvailability(14, null, now).code, 'WITHIN_2_WEEKS');
+  assert.equal(scoreAvailability(null, null, now).code, 'UNKNOWN');
+  assert.equal(scoreAvailability(null, null, now).display, 'Availability unknown');
 });
 
 test('compensation is NOT_COMPARABLE across currencies and does not invent a score', () => {

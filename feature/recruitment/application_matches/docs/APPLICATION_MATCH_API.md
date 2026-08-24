@@ -86,6 +86,7 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
       },
       "match": {
         "match_score": 88,
+        "match_display": "88% Match",
         "match_level": "STRONG",
         "recommendation": "SHORTLIST",
         "eligibility_status": "ELIGIBLE",
@@ -101,6 +102,18 @@ curl -sS -H "Authorization: Bearer $TOKEN" \
           "compensation": 100
         }
       },
+      "availability": {
+        "score": 80,
+        "code": "WITHIN_1_MONTH",
+        "notice_period_days": 30,
+        "estimated_available_date": "2026-09-22",
+        "display": "Available in 1 month"
+      },
+      "availability_score": 80,
+      "availability_code": "WITHIN_1_MONTH",
+      "availability_text": "Available in 1 month",
+      "notice_period_days": 30,
+      "estimated_available_date": "2026-09-22",
       "matched_skills": ["Python", "LangChain", "RAG", "FastAPI"],
       "missing_required_skills": ["LangGraph"],
       "match_reasons": [

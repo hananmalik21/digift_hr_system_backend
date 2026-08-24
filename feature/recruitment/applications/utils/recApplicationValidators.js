@@ -25,18 +25,31 @@ const APPLICATION_GUID_MESSAGES = {
   invalidMessage: 'application_guid must be a valid 32-character hex GUID'
 };
 
-const CANDIDATE_GUID_MESSAGES = {
-  requiredMessage: 'candidate_guid is required',
-  invalidMessage: 'candidate_guid must be a valid 32-character hex GUID'
-};
-
 const NOTE_GUID_MESSAGES = {
   requiredMessage: 'note_guid is required',
   invalidMessage: 'note_guid must be a valid 32-character hex GUID'
 };
 
+/** @param {string} field @returns {{ requiredMessage: string, invalidMessage: string }} */
+function notesListGuidMessages(field) {
+  return {
+    requiredMessage: `Valid ${field} is required`,
+    invalidMessage: `Valid ${field} is required`
+  };
+}
+
 export function parseApplicationGuidParam(value) {
   return parseHexGuidParam(value, APPLICATION_GUID_MESSAGES);
+}
+
+/** Path GUID for GET application notes list. */
+export function parseApplicationGuidParamForNotesList(value) {
+  return parseHexGuidParam(value, notesListGuidMessages('application_guid'));
+}
+
+/** Path GUID for GET candidate notes list. */
+export function parseCandidateGuidParamForNotesList(value) {
+  return parseHexGuidParam(value, notesListGuidMessages('candidate_guid'));
 }
 
 /**

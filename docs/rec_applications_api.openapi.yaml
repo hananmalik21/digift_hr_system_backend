@@ -7,7 +7,8 @@ info:
     View exposes `HAS_RESUME` (Y/N) and `RESUME_URL` (`/api/recruitment/applications/{guid}/resume`).
     Mutations via `REC.CREATE_APPLICATION_PKG` on `REC.REC_APPLICATIONS`
     (`apply_job`, `change_application_stage`, `reject_application`, application note procedures).
-    Application notes are embedded on application detail; mutations via note package procedures.
+    Application notes are embedded on application detail; list via GET notes (`REC.V_APPLICATION_NOTES`);
+    mutations via note package procedures.
 
     **Apply:** `POST /api/rec/job-postings/{postingGuid}/apply` — public (career portal, no JWT).
     Accepts `multipart/form-data` with required `resume_file` (PDF, DOC, DOCX; max 5 MB).
@@ -403,6 +404,42 @@ paths:
   /api/recruitment/applications/{applicationGuid}/notes:
     parameters:
       - $ref: '#/components/parameters/ApplicationGuidPath'
+    get:
+      tags: [Recruitment Application Notes]
+      summary: List application notes
+      operationId: listRecApplicationNotes
+      description: |
+        Reads `REC.V_APPLICATION_NOTES` for the application (newest first).
+        Application and candidate appear once; notes are returned as an array.
+        Empty notes (application exists) returns `notes: []` with guids only.
+      parameters:
+        - $ref: '#/components/parameters/EnterpriseIdQuery'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApplicationNotesListResponse'
+        '404':
+          description: Application not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                success: false
+                message: Application not found
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                success: false
+                message: Failed to retrieve application notes
     post:
       tags: [Recruitment Application Notes]
       summary: Add application note
@@ -761,6 +798,62 @@ components:
         private_flag: { type: string, enum: [Y, N] }
         created_by: { type: string }
         creation_date: { type: string, example: '2026-06-03 12:00:00' }
+    ApplicationNotesListResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            application:
+              type: object
+              properties:
+                application_id: { type: integer }
+                application_guid: { type: string }
+                application_number: { type: string }
+                posting_id: { type: integer }
+                requisition_id: { type: integer }
+                source: { type: string }
+                current_stage_code: { type: string }
+                status: { type: string }
+                applied_date: { type: string, format: date-time }
+            candidate:
+              type: object
+              properties:
+                candidate_id: { type: integer }
+                candidate_guid: { type: string }
+                candidate_name: { type: string }
+                first_name: { type: string }
+                middle_name: { type: string, nullable: true }
+                last_name: { type: string }
+                email: { type: string }
+                phone: { type: string }
+                current_title: { type: string }
+                current_employer: { type: string }
+                years_experience: { type: number }
+                current_location: { type: string }
+                source: { type: string }
+                expected_salary: { type: number }
+                salary_currency: { type: string }
+                notice_period: { type: string }
+                linkedin_profile: { type: string }
+                status: { type: string }
+                active_flag: { type: string, enum: [Y, N] }
+            notes:
+              type: array
+              items:
+                type: object
+                properties:
+                  note_id: { type: integer }
+                  note_guid: { type: string }
+                  note_type_code: { $ref: '#/components/schemas/ApplicationNoteTypeCode' }
+                  note_text: { type: string }
+                  private_flag: { type: string, enum: [Y, N] }
+                  created_by: { type: string }
+                  creation_date: { type: string, format: date-time }
+                  last_updated_by: { type: string }
+                  last_update_date: { type: string, format: date-time }
+            note_count: { type: integer }
     AddApplicationNoteRequest:
       type: object
       required: [enterprise_id, note_type_code, note_text, private_flag, created_by]

@@ -94,7 +94,9 @@ import {
   recApplicationMatchApplicationRouter,
   recApplicationMatchRequisitionRouter
 } from './feature/recruitment/application_matches/controller/recApplicationMatchController.js';
+import { recCandidateMatchRequisitionRouter } from './feature/recruitment/candidate_matches/controller/recCandidateMatchController.js';
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
+import recCandidateNotesController from './feature/recruitment/candidates/controller/recCandidateNotesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
 import recJobPostingEmployerInfoController from './feature/recruitment/job_postings/controller/recJobPostingEmployerInfoController.js';
@@ -375,6 +377,11 @@ app.use('/api/security/users', fndsecUsersController);
 // Security - Auth (FNDSEC.FNDSEC_AUTH_PKG)
 app.use('/api/security/auth', fndsecAuthController);
 
+// Recruitment — find candidates / add as applicant (mounted before catch-all GUID routes)
+app.use('/api/rec/requisitions', recCandidateMatchRequisitionRouter);
+app.use('/api/recruitment/requisitions', recCandidateMatchRequisitionRouter);
+app.use('/api/recruiting/requisitions', recCandidateMatchRequisitionRouter);
+
 // Recruitment — application match scoring (mounted before catch-all GUID routes)
 app.use('/api/rec/requisitions', recApplicationMatchRequisitionRouter);
 app.use('/api/recruitment/requisitions', recApplicationMatchRequisitionRouter);
@@ -385,6 +392,7 @@ app.use('/api/rec/requisitions', recRequisitionsController);
 
 // Recruitment — candidates (REC.CANDIDATE_PKG)
 app.use('/api/rec/candidates', recCandidatesController);
+app.use('/api/recruitment/candidates', recCandidateNotesController);
 app.use('/api/recruitment/candidates', recCandidatesController);
 
 // Career portal — token-free (register, etc.)

@@ -107,8 +107,52 @@ export function toListSummary(full) {
   };
 }
 
+function matchDisplayFromScore(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+  return `${Math.round(n)}% Match`;
+}
+
+function availabilityCard(availability) {
+  if (!availability || typeof availability !== 'object') {
+    return {
+      score: null,
+      code: null,
+      notice_period_days: null,
+      estimated_available_date: null,
+      display: null
+    };
+  }
+  return {
+    score: availability.score ?? availability.raw_score ?? null,
+    code: availability.code ?? null,
+    notice_period_days: availability.notice_period_days ?? null,
+    estimated_available_date: availability.estimated_available_date ?? null,
+    display: availability.display ?? null
+  };
+}
+
+/** Nested + flat availability/match fields shared by list and detail responses. */
+function availabilityAndMatchFields(result) {
+  const availability = availabilityCard(result.availability);
+  const match_display = matchDisplayFromScore(result.match_score);
+  return {
+    availability,
+    match_display,
+    match_score: result.match_score ?? null,
+    match_level: result.match_level ?? null,
+    recommendation_code: result.recommendation ?? null,
+    availability_score: availability.score,
+    availability_code: availability.code,
+    availability_text: availability.display,
+    notice_period_days: availability.notice_period_days,
+    estimated_available_date: availability.estimated_available_date
+  };
+}
+
 export function toListItemFromLive(source, result) {
   const app = source.application || {};
+  const fields = availabilityAndMatchFields(result);
   return {
     application_id: app.application_id ?? null,
     application_guid: app.application_guid ?? null,
@@ -117,11 +161,22 @@ export function toListItemFromLive(source, result) {
     candidate: candidateCard(source.candidate || {}),
     match: {
       match_score: result.match_score,
+      match_display: fields.match_display,
       match_level: result.match_level,
       recommendation: result.recommendation,
       eligibility_status: result.eligibility_status,
       scores: result.scores
     },
+    availability: fields.availability,
+    match_score: fields.match_score,
+    match_display: fields.match_display,
+    match_level: fields.match_level,
+    recommendation_code: fields.recommendation_code,
+    availability_score: fields.availability_score,
+    availability_code: fields.availability_code,
+    availability_text: fields.availability_text,
+    notice_period_days: fields.notice_period_days,
+    estimated_available_date: fields.estimated_available_date,
     matched_skills: result.matched_skills || [],
     missing_required_skills: result.missing_required_skills || [],
     match_reasons: result.match_reasons || [],
@@ -132,6 +187,7 @@ export function toListItemFromLive(source, result) {
 
 export function toDetailFromLive(source, requisition, result) {
   const app = source.application || {};
+  const fields = availabilityAndMatchFields(result);
   return {
     application_guid: app.application_guid ?? null,
     application_id: app.application_id ?? null,
@@ -142,9 +198,11 @@ export function toDetailFromLive(source, requisition, result) {
       requisition_title: requisition.requisition_title ?? null
     },
     candidate: candidateCard(source.candidate || {}),
-    match_score: result.match_score,
-    match_level: result.match_level,
+    match_score: fields.match_score,
+    match_display: fields.match_display,
+    match_level: fields.match_level,
     recommendation: result.recommendation,
+    recommendation_code: fields.recommendation_code,
     eligibility_status: result.eligibility_status,
     profile_completeness: result.profile_completeness ?? null,
     score_breakdown: result.score_breakdown || [],
@@ -161,7 +219,12 @@ export function toDetailFromLive(source, requisition, result) {
     title: result.title || null,
     job_family: result.job_family || null,
     screening: result.screening || null,
-    availability: result.availability || null,
+    availability: fields.availability,
+    availability_score: fields.availability_score,
+    availability_code: fields.availability_code,
+    availability_text: fields.availability_text,
+    notice_period_days: fields.notice_period_days,
+    estimated_available_date: fields.estimated_available_date,
     location: result.location || null,
     compensation: result.compensation || null,
     matched_requirements: result.matched_requirements || [],

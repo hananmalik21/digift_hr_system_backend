@@ -168,6 +168,10 @@ export const REC_APPLICATION_NOTES_TABLE =
 export const REC_APPLICATIONS_TABLE =
   process.env.REC_APPLICATIONS_TABLE || 'REC.REC_APPLICATIONS';
 
+/** Oracle view for application notes list reads. */
+export const REC_APPLICATION_NOTES_VIEW =
+  process.env.REC_APPLICATION_NOTES_V || 'REC.V_APPLICATION_NOTES';
+
 export const NOTE_MUTATION_ERROR_MESSAGE =
   'Unable to process application note. Please try again.';
 
@@ -177,9 +181,69 @@ export const NOTE_UPDATE_SUCCESS_MESSAGE = 'Application note updated successfull
 
 export const NOTE_DELETE_SUCCESS_MESSAGE = 'Application note deleted successfully.';
 
+export const NOTES_LIST_READ_ERROR_MESSAGE = 'Failed to retrieve application notes';
+
+export const NOTES_LIST_NOT_FOUND_MESSAGE = 'Application not found';
+
+export const CANDIDATE_NOTES_LIST_READ_ERROR_MESSAGE = 'Failed to retrieve candidate notes';
+
+export const CANDIDATE_NOTES_LIST_NOT_FOUND_MESSAGE = 'Candidate not found';
+
+/** Shared ORDER BY for GET notes list from REC.V_APPLICATION_NOTES. */
+export const NOTES_LIST_ORDER_SQL =
+  'ORDER BY v.NOTE_CREATION_DATE DESC NULLS LAST, v.NOTE_ID DESC';
+
 export const NOTES_DETAIL_MAX_ROWS = 100;
 
 export const NOTE_TEXT_MAX_LEN = TEXT_FIELD_MAX_LEN;
+
+/** Columns from REC.V_APPLICATION_NOTES (keep in sync with list mapper). */
+export const APPLICATION_NOTES_VIEW_COLUMNS = [
+  'NOTE_ID',
+  'NOTE_GUID',
+  'ENTERPRISE_ID',
+  'NOTE_TYPE_CODE',
+  'NOTE_TEXT',
+  'PRIVATE_FLAG',
+  'NOTE_CREATED_BY',
+  'NOTE_CREATION_DATE',
+  'NOTE_LAST_UPDATED_BY',
+  'NOTE_LAST_UPDATE_DATE',
+  'APPLICATION_ID',
+  'APPLICATION_GUID',
+  'APPLICATION_NUMBER',
+  'POSTING_ID',
+  'REQUISITION_ID',
+  'APPLICATION_SOURCE',
+  'CURRENT_STAGE_CODE',
+  'APPLICATION_STATUS',
+  'APPLIED_DATE',
+  'CANDIDATE_ID',
+  'CANDIDATE_GUID',
+  'CANDIDATE_NAME',
+  'FIRST_NAME',
+  'MIDDLE_NAME',
+  'LAST_NAME',
+  'EMAIL',
+  'PHONE',
+  'CURRENT_TITLE',
+  'CURRENT_EMPLOYER',
+  'YEARS_EXPERIENCE',
+  'CURRENT_LOCATION',
+  'CANDIDATE_SOURCE',
+  'EXPECTED_SALARY',
+  'SALARY_CURRENCY',
+  'NOTICE_PERIOD',
+  'LINKEDIN_PROFILE',
+  'CANDIDATE_STATUS',
+  'CANDIDATE_ACTIVE_FLAG'
+];
+
+export const APPLICATION_NOTES_SELECT_SQL = APPLICATION_NOTES_VIEW_COLUMNS.map((c) =>
+  c === 'NOTE_TEXT'
+    ? `DBMS_LOB.SUBSTR(v.NOTE_TEXT, ${NOTE_TEXT_MAX_LEN}, 1) AS NOTE_TEXT`
+    : `v.${c}`
+).join(', ');
 
 /** Allowed status_code values for application list filters. */
 export const APPLICATION_STATUS_FILTER_CODES = [

@@ -9,12 +9,17 @@ import { parseListPagination } from '../../shared/recViewQueryValidators.js';
 import { buildApplicationListFilters } from '../utils/recApplicationListFilters.js';
 import {
   APPLICATION_SELECT_SQL,
+  APPLICATION_NOTES_SELECT_SQL,
   LOG_TAG,
   NOTES_DETAIL_MAX_ROWS,
   NOTES_JOIN_SQL,
   NOTE_SELECT_SQL,
+  NOTES_LIST_READ_ERROR_MESSAGE,
+  NOTES_LIST_ORDER_SQL,
+  CANDIDATE_NOTES_LIST_READ_ERROR_MESSAGE,
   READ_ERROR_MESSAGE,
   REC_APPLICATIONS_VIEW,
+  REC_APPLICATION_NOTES_VIEW,
   REC_APPLICATION_STAGE_HISTORY_VIEW,
   STAGE_HISTORY_DETAIL_MAX_ROWS,
   STAGE_HISTORY_READ_ERROR_MESSAGE,
@@ -24,15 +29,22 @@ import {
   mapApplicationDetailRow,
   mapApplicationListRow,
   mapApplicationNoteDetailEntry,
+  mapApplicationNotesListPayload,
+  mapCandidateNotesListPayload,
   mapStageHistoryDetailEntry,
   mapStageHistoryListRow
 } from '../utils/recApplicationMappers.js';
 import {
   APPLICATION_BY_GUID_WHERE,
   applicationGuidEnterpriseBinds,
-  NOTES_BY_APPLICATION_WHERE
+  candidateGuidEnterpriseBinds,
+  NOTES_BY_APPLICATION_WHERE,
+  NOTES_VIEW_BY_CANDIDATE_WHERE,
+  normalizeGuidValue,
+  rowKeyMap
 } from '../utils/recApplicationRowUtils.js';
 import { parseApplicationSort, parseStageHistorySort } from '../utils/recApplicationViewValidators.js';
+import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 
 async function listApplicationNotesForDetail(applicationGuidHex, enterpriseId) {
   const sql = `SELECT ${NOTE_SELECT_SQL} FROM ${NOTES_JOIN_SQL}
@@ -170,5 +182,103 @@ export async function getApplicationByGuidFromView(applicationGuidHex, enterpris
     return detail;
   } catch (err) {
     rethrowUnlessOperational(err, `${LOG_TAG} getApplicationByGuidFromView`, READ_ERROR_MESSAGE);
+  }
+}
+
+/**
+ * Resolve application + candidate guids for notes list (also acts as existence check).
+ * @param {string} applicationGuidHex
+ * @param {number} enterpriseId
+ * @returns {Promise<{ application_guid: string, candidate_guid: string|null }|null>}
+ */
+export async function getApplicationNotesScope(applicationGuidHex, enterpriseId) {
+  const sql = `SELECT v.APPLICATION_GUID, v.CANDIDATE_GUID FROM ${REC_APPLICATIONS_VIEW} v
+    ${APPLICATION_BY_GUID_WHERE} FETCH FIRST 1 ROWS ONLY`;
+
+  try {
+    return await withConnection(async (connection) => {
+      const r = await connection.execute(
+        sql,
+        applicationGuidEnterpriseBinds(applicationGuidHex, enterpriseId),
+        ROW_OPTS
+      );
+      const row = r.rows?.[0];
+      if (!row) return null;
+      const m = rowKeyMap(row);
+      return {
+        application_guid:
+          normalizeGuidValue(m.application_guid) ??
+          normalizeApiGuidString(applicationGuidHex) ??
+          String(applicationGuidHex).toUpperCase(),
+        candidate_guid: normalizeGuidValue(m.candidate_guid)
+      };
+    });
+  } catch (err) {
+    rethrowUnlessOperational(err, `${LOG_TAG} getApplicationNotesScope`, NOTES_LIST_READ_ERROR_MESSAGE);
+  }
+}
+
+/**
+ * @param {string} whereSql
+ * @param {Record<string, unknown>} binds
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+async function fetchNotesViewRows(whereSql, binds) {
+  const sql = `SELECT ${APPLICATION_NOTES_SELECT_SQL}
+    FROM ${REC_APPLICATION_NOTES_VIEW} v
+    ${whereSql}
+    ${NOTES_LIST_ORDER_SQL}`;
+
+  return await withConnection(async (connection) => {
+    const r = await connection.execute(sql, binds, ROW_OPTS);
+    return r.rows || [];
+  });
+}
+
+/**
+ * List notes from REC.V_APPLICATION_NOTES for an application.
+ * @param {string} applicationGuidHex
+ * @param {number} enterpriseId
+ * @param {{ application_guid: string, candidate_guid?: string|null }} scope
+ */
+export async function listApplicationNotesFromView(applicationGuidHex, enterpriseId, scope) {
+  try {
+    const rows = await fetchNotesViewRows(
+      APPLICATION_BY_GUID_WHERE,
+      applicationGuidEnterpriseBinds(applicationGuidHex, enterpriseId)
+    );
+    return mapApplicationNotesListPayload(rows, {
+      application_guid: scope.application_guid,
+      candidate_guid: scope.candidate_guid ?? null
+    });
+  } catch (err) {
+    rethrowUnlessOperational(
+      err,
+      `${LOG_TAG} listApplicationNotesFromView`,
+      NOTES_LIST_READ_ERROR_MESSAGE
+    );
+  }
+}
+
+/**
+ * List notes from REC.V_APPLICATION_NOTES for a candidate (all applications).
+ * @param {string} candidateGuidHex
+ * @param {number} enterpriseId
+ */
+export async function listCandidateNotesFromView(candidateGuidHex, enterpriseId) {
+  try {
+    const rows = await fetchNotesViewRows(
+      NOTES_VIEW_BY_CANDIDATE_WHERE,
+      candidateGuidEnterpriseBinds(candidateGuidHex, enterpriseId)
+    );
+    const candidateGuidOut =
+      normalizeApiGuidString(candidateGuidHex) ?? String(candidateGuidHex).toUpperCase();
+    return mapCandidateNotesListPayload(rows, { candidate_guid: candidateGuidOut });
+  } catch (err) {
+    rethrowUnlessOperational(
+      err,
+      `${LOG_TAG} listCandidateNotesFromView`,
+      CANDIDATE_NOTES_LIST_READ_ERROR_MESSAGE
+    );
   }
 }

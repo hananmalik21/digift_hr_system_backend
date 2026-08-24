@@ -64,7 +64,21 @@ test('filterSortPageLiveItems filters score and sorts descending by default', ()
           application: { application_id: 1, application_guid: 'A', applied_date: '2026-01-02' },
           candidate: { full_name: 'Ada' }
         },
-        { match_score: 70, match_level: 'GOOD', eligibility_status: 'ELIGIBLE', recommendation: 'RECRUITER_REVIEW', scores: {} }
+        {
+          match_score: 70,
+          match_level: 'GOOD',
+          eligibility_status: 'ELIGIBLE',
+          recommendation: 'RECRUITER_REVIEW',
+          scores: {},
+          availability: {
+            raw_score: 80,
+            score: 80,
+            code: 'WITHIN_1_MONTH',
+            display: 'Available in 1 month',
+            notice_period_days: 30,
+            estimated_available_date: '2026-09-23'
+          }
+        }
       )
     },
     {
@@ -73,7 +87,21 @@ test('filterSortPageLiveItems filters score and sorts descending by default', ()
           application: { application_id: 2, application_guid: 'B', applied_date: '2026-01-01' },
           candidate: { full_name: 'Bob' }
         },
-        { match_score: 90, match_level: 'EXCEPTIONAL', eligibility_status: 'ELIGIBLE', recommendation: 'PRIORITY_SHORTLIST', scores: {} }
+        {
+          match_score: 90,
+          match_level: 'EXCEPTIONAL',
+          eligibility_status: 'ELIGIBLE',
+          recommendation: 'PRIORITY_SHORTLIST',
+          scores: {},
+          availability: {
+            raw_score: 100,
+            score: 100,
+            code: 'IMMEDIATE',
+            display: 'Immediate',
+            notice_period_days: 0,
+            estimated_available_date: '2026-08-24'
+          }
+        }
       )
     }
   ];
@@ -82,7 +110,10 @@ test('filterSortPageLiveItems filters score and sorts descending by default', ()
   assert.equal(total, 1);
   assert.equal(paged[0].application_guid, 'B');
   assert.equal(paged[0].match.match_score, 90);
-  assert.equal(paged[0].applied_date, undefined);
+  assert.equal(paged[0].match.match_display, '90% Match');
+  assert.equal(paged[0].availability_code, 'IMMEDIATE');
+  assert.equal(paged[0].availability.code, 'IMMEDIATE');
+  assert.equal(paged[0].availability.display, 'Immediate');
 });
 
 test('isMatchStoreUnavailableError detects ORA-00942 on wrapped DatabaseError', () => {

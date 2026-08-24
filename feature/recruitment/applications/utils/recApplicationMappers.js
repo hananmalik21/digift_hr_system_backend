@@ -1,6 +1,7 @@
 import { formatDateOnly } from '../../job_postings/utils/recJobPostingViewMapper.js';
 import {
   formatDateTime,
+  formatDateTimeIso,
   normalizeGuidValue,
   normalizeYnFlag,
   rowKeyMap,
@@ -152,6 +153,116 @@ export function mapApplicationNoteDetailEntry(row) {
     created_by: strOrNull(m.created_by),
     creation_date: formatDateTime(m.creation_date)
   };
+}
+
+/**
+ * Map one REC.V_APPLICATION_NOTES row into nested application / candidate / note.
+ * @param {Record<string, unknown>} row
+ */
+export function mapApplicationNotesViewRow(row) {
+  const m = rowKeyMap(row);
+
+  return {
+    application: {
+      application_id: safeFiniteNumber(m.application_id),
+      application_guid: normalizeGuidValue(m.application_guid),
+      application_number: strOrNull(m.application_number),
+      posting_id: safeFiniteNumber(m.posting_id),
+      requisition_id: safeFiniteNumber(m.requisition_id),
+      source: strOrNull(m.application_source),
+      current_stage_code: strOrNull(m.current_stage_code),
+      status: strOrNull(m.application_status),
+      applied_date: formatDateTimeIso(m.applied_date)
+    },
+    candidate: {
+      candidate_id: safeFiniteNumber(m.candidate_id),
+      candidate_guid: normalizeGuidValue(m.candidate_guid),
+      candidate_name: strOrNull(m.candidate_name),
+      first_name: strOrNull(m.first_name),
+      middle_name: strOrNull(m.middle_name),
+      last_name: strOrNull(m.last_name),
+      email: strOrNull(m.email),
+      phone: strOrNull(m.phone),
+      current_title: strOrNull(m.current_title),
+      current_employer: strOrNull(m.current_employer),
+      years_experience: safeFiniteNumber(m.years_experience),
+      current_location: strOrNull(m.current_location),
+      source: strOrNull(m.candidate_source),
+      expected_salary: safeFiniteNumber(m.expected_salary),
+      salary_currency: strOrNull(m.salary_currency),
+      notice_period: strOrNull(m.notice_period),
+      linkedin_profile: strOrNull(m.linkedin_profile),
+      status: strOrNull(m.candidate_status),
+      active_flag: normalizeYnFlag(m.candidate_active_flag)
+    },
+    note: {
+      note_id: safeFiniteNumber(m.note_id),
+      note_guid: normalizeGuidValue(m.note_guid),
+      note_type_code: strOrNull(m.note_type_code),
+      note_text: strOrNull(m.note_text),
+      private_flag: normalizeYnFlag(m.private_flag),
+      created_by: strOrNull(m.note_created_by),
+      creation_date: formatDateTimeIso(m.note_creation_date),
+      last_updated_by: strOrNull(m.note_last_updated_by),
+      last_update_date: formatDateTimeIso(m.note_last_update_date)
+    }
+  };
+}
+
+/**
+ * @param {ReturnType<typeof mapApplicationNotesViewRow>[]} mapped
+ * @param {'application'|'candidate'} scope
+ * @param {{ application_guid?: string, candidate_guid?: string|null }} emptyContext
+ */
+export function mapNotesListPayload(mapped, scope, emptyContext) {
+  if (!mapped.length) {
+    if (scope === 'candidate') {
+      return {
+        candidate: { candidate_guid: emptyContext.candidate_guid },
+        notes: [],
+        note_count: 0
+      };
+    }
+    return {
+      application: { application_guid: emptyContext.application_guid },
+      candidate: { candidate_guid: emptyContext.candidate_guid ?? null },
+      notes: [],
+      note_count: 0
+    };
+  }
+
+  const notes =
+    scope === 'candidate'
+      ? mapped.map((entry) => ({ ...entry.note, application: entry.application }))
+      : mapped.map((entry) => entry.note);
+
+  const payload = {
+    candidate: mapped[0].candidate,
+    notes,
+    note_count: mapped.length
+  };
+  if (scope === 'application') {
+    payload.application = mapped[0].application;
+  }
+  return payload;
+}
+
+/** @param {Record<string, unknown>[]} rows @param {{ application_guid: string, candidate_guid?: string|null }} emptyContext */
+export function mapApplicationNotesListPayload(rows, emptyContext) {
+  return mapNotesListPayload(
+    (rows || []).map((row) => mapApplicationNotesViewRow(row)),
+    'application',
+    emptyContext
+  );
+}
+
+/** @param {Record<string, unknown>[]} rows @param {{ candidate_guid: string }} emptyContext */
+export function mapCandidateNotesListPayload(rows, emptyContext) {
+  return mapNotesListPayload(
+    (rows || []).map((row) => mapApplicationNotesViewRow(row)),
+    'candidate',
+    emptyContext
+  );
 }
 
 /** @param {Record<string, unknown>} row */

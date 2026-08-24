@@ -100,6 +100,17 @@ export const COMPENSATION_SLIGHTLY_ABOVE_PCT = 0.15;
 /** Neutral score when a component cannot be evaluated. Not a confirmed mismatch. */
 export const UNKNOWN_COMPONENT_SCORE = 50;
 
+/** Availability codes aligned with REC.V_REQUISITION_CANDIDATE_MATCH. */
+export const AVAILABILITY_CODES = Object.freeze({
+  IMMEDIATE: 'IMMEDIATE',
+  WITHIN_2_WEEKS: 'WITHIN_2_WEEKS',
+  WITHIN_1_MONTH: 'WITHIN_1_MONTH',
+  WITHIN_2_MONTHS: 'WITHIN_2_MONTHS',
+  WITHIN_3_MONTHS: 'WITHIN_3_MONTHS',
+  MORE_THAN_3_MONTHS: 'MORE_THAN_3_MONTHS',
+  UNKNOWN: 'UNKNOWN'
+});
+
 export const DEFAULT_PAGE = 1;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;

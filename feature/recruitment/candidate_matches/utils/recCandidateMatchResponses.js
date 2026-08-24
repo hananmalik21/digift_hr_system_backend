@@ -1,0 +1,66 @@
+import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { sendPackageResponse } from '../../shared/recControllerHelpers.js';
+import {
+  ADD_AS_APPLICANT_SUCCESS_MESSAGE,
+  ALREADY_APPLIED_MESSAGE,
+  CANDIDATE_NOT_FOUND_MESSAGE,
+  LIST_SUCCESS_MESSAGE,
+  REQUISITION_NOT_FOUND_MESSAGE
+} from './recCandidateMatchConstants.js';
+
+function listMeta(page, pageSize, total) {
+  const p = buildPaginationMeta(page, pageSize, total);
+  return {
+    page: p.page,
+    page_size: p.pageSize,
+    total: p.total,
+    total_pages: p.totalPages,
+    has_next: p.hasNext,
+    has_previous: p.hasPrevious
+  };
+}
+
+export function sendFindCandidatesResponse(res, { rows, total, page, limit, requisition, summary }) {
+  return sendPackageResponse(res, 200, {
+    success: true,
+    message: LIST_SUCCESS_MESSAGE,
+    meta: listMeta(page, limit, total),
+    requisition,
+    summary,
+    data: rows
+  });
+}
+
+export function sendAddAsApplicantResponse(res, data) {
+  return sendPackageResponse(res, 200, {
+    success: true,
+    message: ADD_AS_APPLICANT_SUCCESS_MESSAGE,
+    data
+  });
+}
+
+export function sendRequisitionNotFoundResponse(res) {
+  return sendPackageResponse(res, 404, {
+    success: false,
+    message: REQUISITION_NOT_FOUND_MESSAGE
+  });
+}
+
+export function sendCandidateNotFoundResponse(res) {
+  return sendPackageResponse(res, 404, {
+    success: false,
+    message: CANDIDATE_NOT_FOUND_MESSAGE
+  });
+}
+
+export function sendAlreadyAppliedResponse(res) {
+  return sendPackageResponse(res, 409, {
+    success: false,
+    message: ALREADY_APPLIED_MESSAGE
+  });
+}
+
+export function sendFindCandidatesNotFound(res, notFound) {
+  if (notFound === 'candidate') return sendCandidateNotFoundResponse(res);
+  return sendRequisitionNotFoundResponse(res);
+}

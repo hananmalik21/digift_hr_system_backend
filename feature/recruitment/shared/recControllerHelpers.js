@@ -1,7 +1,14 @@
-import { AppError, DatabaseError, NotFoundError, ValidationError } from '../../../utils/errors/index.js';
+import {
+  AppError,
+  ConflictError,
+  DatabaseError,
+  NotFoundError,
+  ValidationError
+} from '../../../utils/errors/index.js';
 import { buildPaginationMeta } from '../../../utils/paginationUtils.js';
 import { getActingUsername } from '../../../utils/userContext.js';
 import { isTenantErrorCode, sendTenantError } from '../../../utils/tenantErrors.js';
+import { resolveRequestEnterpriseId } from '../../../utils/requestEnterprise.js';
 
 function handleTenantAppError(res, err) {
   if (err instanceof AppError && isTenantErrorCode(err.code)) {
@@ -13,6 +20,17 @@ function handleTenantAppError(res, err) {
 export function firstValidationMessage(err) {
   const details = Array.isArray(err?.errors) ? err.errors.filter(Boolean) : [];
   return details[0] || err?.message || 'Validation failed';
+}
+
+/**
+ * Resolve enterprise_id for recruitment GET handlers (query / tenant / hostname / JWT).
+ * @param {import('express').Request} req
+ * @returns {number}
+ */
+export function resolveEnterpriseIdFromRequestQuery(req) {
+  return resolveRequestEnterpriseId(req, {
+    clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
+  });
 }
 
 /** @param {string} tag @param {string} action @param {import('express').Request} req @param {Record<string, unknown>} [extra] */
@@ -79,6 +97,18 @@ export function handleMutationError(res, err, fallbackMessage) {
   if (tenant) return tenant;
   if (err instanceof ValidationError) {
     return sendValidationError(res, err);
+  }
+  if (err instanceof NotFoundError) {
+    return sendPackageResponse(res, 404, {
+      success: false,
+      message: err.userMessage || err.message || fallbackMessage
+    });
+  }
+  if (err instanceof ConflictError) {
+    return sendPackageResponse(res, 409, {
+      success: false,
+      message: err.userMessage || err.message || fallbackMessage
+    });
   }
   return sendPackageResponse(res, 500, {
     success: false,

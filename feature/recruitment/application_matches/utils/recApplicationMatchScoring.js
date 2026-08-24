@@ -1,4 +1,5 @@
 import {
+  AVAILABILITY_CODES,
   COMPENSATION_SLIGHTLY_ABOVE_PCT,
   COMPENSATION_STATUS,
   EDUCATION_RANK_FALLBACKS,
@@ -652,9 +653,41 @@ export function scoreScreening(screening) {
   };
 }
 
+/**
+ * Map notice-period days to availability code/display (same vocabulary as
+ * REC.V_REQUISITION_CANDIDATE_MATCH). Score boosts for target-start fit do not change the code.
+ * @param {number|null} days
+ * @returns {{ code: string, display: string }}
+ */
+export function availabilityCodeFromDays(days) {
+  if (days == null || !Number.isFinite(days)) {
+    return { code: AVAILABILITY_CODES.UNKNOWN, display: 'Availability unknown' };
+  }
+  if (days <= 0) {
+    return { code: AVAILABILITY_CODES.IMMEDIATE, display: 'Immediate' };
+  }
+  if (days <= 15) {
+    return { code: AVAILABILITY_CODES.WITHIN_2_WEEKS, display: 'Available in 2 weeks' };
+  }
+  if (days <= 30) {
+    return { code: AVAILABILITY_CODES.WITHIN_1_MONTH, display: 'Available in 1 month' };
+  }
+  if (days <= 60) {
+    return { code: AVAILABILITY_CODES.WITHIN_2_MONTHS, display: 'Available in 2 months' };
+  }
+  if (days <= 90) {
+    return { code: AVAILABILITY_CODES.WITHIN_3_MONTHS, display: 'Available in 3 months' };
+  }
+  return {
+    code: AVAILABILITY_CODES.MORE_THAN_3_MONTHS,
+    display: 'Available in more than 3 months'
+  };
+}
+
 export function scoreAvailability(noticePeriodRaw, targetStartDate, now = new Date()) {
   const days = parseNoticePeriodDays(noticePeriodRaw);
   const estimated = days == null ? null : addDaysIso(now, days);
+  const { code, display } = availabilityCodeFromDays(days);
   let raw;
   if (days == null) {
     raw = UNKNOWN_COMPONENT_SCORE;
@@ -684,6 +717,9 @@ export function scoreAvailability(noticePeriodRaw, targetStartDate, now = new Da
 
   return {
     raw_score: roundScore(raw),
+    score: roundScore(raw),
+    code,
+    display,
     unknown: days == null,
     notice_period_days: days,
     estimated_available_date: estimated

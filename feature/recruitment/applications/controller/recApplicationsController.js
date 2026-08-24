@@ -7,6 +7,7 @@ import {
   handleReadError,
   logRecruitmentAudit,
   resolveAuditActor,
+  resolveEnterpriseIdFromRequestQuery,
   sendPackageResponse
 } from '../../shared/recControllerHelpers.js';
 import {
@@ -23,13 +24,16 @@ import {
 import {
   applicationExistsInApplicationsView,
   getApplicationByGuidFromView,
+  getApplicationNotesScope,
   listApplicationsFromView,
+  listApplicationNotesFromView,
   listApplicationStageHistoryFromView
 } from '../model/recApplicationViewModel.js';
 import {
   MUTATION_ERROR_MESSAGE,
   NOT_FOUND_MESSAGE,
   NOTE_MUTATION_ERROR_MESSAGE,
+  NOTES_LIST_READ_ERROR_MESSAGE,
   READ_ERROR_MESSAGE,
   RESUME_DOWNLOAD_ERROR_MESSAGE,
   RESUME_NOT_FOUND_MESSAGE,
@@ -40,6 +44,8 @@ import {
   sendAddApplicationNoteResponse,
   sendApplicationDetailResponse,
   sendApplicationListResponse,
+  sendApplicationNotesListResponse,
+  sendApplicationNotesNotFoundResponse,
   sendApplicationNotFoundResponse,
   sendChangeStageResponse,
   sendDeleteApplicationNoteResponse,
@@ -50,6 +56,7 @@ import {
 import { validateApplicationGuidEnterpriseParams } from '../utils/recApplicationViewValidators.js';
 import {
   parseApplicationGuidParam,
+  parseApplicationGuidParamForNotesList,
   parseNoteGuidParam,
   validateAddApplicationNoteBody,
   validateChangeStageBody,
@@ -57,10 +64,7 @@ import {
   validateRejectApplicationBody,
   validateUpdateApplicationNoteBody
 } from '../utils/recApplicationValidators.js';
-import {
-  resolveRequestEnterpriseId,
-  withResolvedEnterpriseQuery
-} from '../../../../utils/requestEnterprise.js';
+import { withResolvedEnterpriseQuery } from '../../../../utils/requestEnterprise.js';
 
 const AUDIT_TAG = 'recApplications';
 const router = express.Router();
@@ -224,9 +228,7 @@ router.get(
   '/:application_guid/stage-history',
   asyncHandler(async (req, res) => {
     try {
-      const enterprise_id = resolveRequestEnterpriseId(req, {
-        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
-      });
+      const enterprise_id = resolveEnterpriseIdFromRequestQuery(req);
       const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
         enterprise_id
@@ -250,15 +252,37 @@ router.get(
 );
 
 /**
+ * GET /api/recruitment/applications/:application_guid/notes?enterprise_id=1
+ * Source: REC.V_APPLICATION_NOTES
+ */
+router.get(
+  '/:application_guid/notes',
+  asyncHandler(async (req, res) => {
+    try {
+      const enterprise_id = resolveEnterpriseIdFromRequestQuery(req);
+      const application_guid = parseApplicationGuidParamForNotesList(req.params.application_guid);
+
+      const scope = await getApplicationNotesScope(application_guid, enterprise_id);
+      if (!scope) {
+        return sendApplicationNotesNotFoundResponse(res);
+      }
+
+      const payload = await listApplicationNotesFromView(application_guid, enterprise_id, scope);
+      return sendApplicationNotesListResponse(res, payload);
+    } catch (err) {
+      return handleReadError(res, err, NOTES_LIST_READ_ERROR_MESSAGE);
+    }
+  })
+);
+
+/**
  * GET /api/recruitment/applications/:application_guid/resume
  */
 router.get(
   '/:application_guid/resume',
   asyncHandler(async (req, res) => {
     try {
-      const enterprise_id = resolveRequestEnterpriseId(req, {
-        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
-      });
+      const enterprise_id = resolveEnterpriseIdFromRequestQuery(req);
       const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
         enterprise_id
@@ -305,9 +329,7 @@ router.get(
   '/:application_guid',
   asyncHandler(async (req, res) => {
     try {
-      const enterprise_id = resolveRequestEnterpriseId(req, {
-        clientRaw: req.query?.enterprise_id ?? req.query?.tenant_id
-      });
+      const enterprise_id = resolveEnterpriseIdFromRequestQuery(req);
       const { application_guid } = validateApplicationGuidEnterpriseParams(
         req.params.application_guid,
         enterprise_id

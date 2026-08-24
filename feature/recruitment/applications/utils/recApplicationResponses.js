@@ -17,7 +17,9 @@ import {
   STAGE_HISTORY_LIST_SUCCESS_MESSAGE,
   NOTE_ADD_SUCCESS_MESSAGE,
   NOTE_DELETE_SUCCESS_MESSAGE,
-  NOTE_UPDATE_SUCCESS_MESSAGE
+  NOTE_UPDATE_SUCCESS_MESSAGE,
+  NOTES_LIST_NOT_FOUND_MESSAGE,
+  CANDIDATE_NOTES_LIST_NOT_FOUND_MESSAGE
 } from './recApplicationConstants.js';
 
 /**
@@ -77,6 +79,41 @@ export function sendApplicationNotFoundResponse(res) {
     success: false,
     message: NOT_FOUND_MESSAGE
   });
+}
+
+/**
+ * @param {import('express').Response} res
+ * @param {Record<string, unknown>} payload
+ */
+export function sendNotesListResponse(res, payload) {
+  return sendPackageResponse(res, 200, {
+    success: true,
+    data: payload
+  });
+}
+
+/** @param {import('express').Response} res @param {string} message */
+export function sendNotesNotFoundResponse(res, message) {
+  return sendPackageResponse(res, 404, {
+    success: false,
+    message
+  });
+}
+
+export function sendApplicationNotesListResponse(res, payload) {
+  return sendNotesListResponse(res, payload);
+}
+
+export function sendApplicationNotesNotFoundResponse(res) {
+  return sendNotesNotFoundResponse(res, NOTES_LIST_NOT_FOUND_MESSAGE);
+}
+
+export function sendCandidateNotesListResponse(res, payload) {
+  return sendNotesListResponse(res, payload);
+}
+
+export function sendCandidateNotesNotFoundResponse(res) {
+  return sendNotesNotFoundResponse(res, CANDIDATE_NOTES_LIST_NOT_FOUND_MESSAGE);
 }
 
 /**
