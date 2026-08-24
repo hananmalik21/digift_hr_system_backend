@@ -155,3 +155,166 @@ export async function validateParentForUpdate({ existingOrgUnit, data, resolver,
 
   data.parent_org_unit_id = newParentId;
 }
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj ?? {}, key);
+}
+
+function getValue(obj, lowerKey, upperKey) {
+  if (hasOwn(obj, lowerKey)) return obj[lowerKey];
+  if (hasOwn(obj, upperKey)) return obj[upperKey];
+  return undefined;
+}
+
+function isMeaningfulNonNullString(value) {
+  if (value === undefined || value === null) return false;
+  return String(value).trim() !== '';
+}
+
+/**
+ * Parse legal_employer input for COMPANY-level payloads.
+ * @returns {('Y'|'N'|null|undefined)}
+ */
+export function parseCompanyLegalEmployer(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const s = String(value).trim().toUpperCase();
+  if (s === '') return null;
+  if (s !== 'Y' && s !== 'N') {
+    const err = new Error('legal_employer must be Y or N');
+    err.code = 'VALIDATION_ERROR';
+    throw err;
+  }
+  return s;
+}
+
+/**
+ * Parse currency_code input for COMPANY-level payloads.
+ * @returns {(string|null|undefined)}
+ */
+export function parseCompanyCurrencyCode(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const s = String(value).trim().toUpperCase();
+  if (s === '') return null;
+  if (!/^[A-Z]{3}$/.test(s)) {
+    const err = new Error('currency_code must be a 3-letter currency code');
+    err.code = 'VALIDATION_ERROR';
+    throw err;
+  }
+  return s;
+}
+
+const COMPANY_FIELDS_ALLOWED_MESSAGE = 'legal_employer and currency_code are allowed only for COMPANY level';
+
+/**
+ * COMPANY-only fields validation (CREATE).
+ * Mutates `data` to normalized values when inputs are provided.
+ */
+export function validateCompanyLegalEmployerCurrencyOnCreate({ levelCode, data }) {
+  const levelUpper = String(levelCode ?? '').trim().toUpperCase();
+  const isCompany = levelUpper === 'COMPANY';
+
+  const legalProvided = hasOwn(data, 'legal_employer') || hasOwn(data, 'LEGAL_EMPLOYER');
+  const currencyProvided = hasOwn(data, 'currency_code') || hasOwn(data, 'CURRENCY_CODE');
+
+  const legalRaw = getValue(data, 'legal_employer', 'LEGAL_EMPLOYER');
+  const currencyRaw = getValue(data, 'currency_code', 'CURRENCY_CODE');
+
+  if (!isCompany) {
+    const hasMeaningfulLegal = legalProvided && isMeaningfulNonNullString(legalRaw);
+    const hasMeaningfulCurrency = currencyProvided && isMeaningfulNonNullString(currencyRaw);
+
+    if (hasMeaningfulLegal || hasMeaningfulCurrency) {
+      const err = new Error(COMPANY_FIELDS_ALLOWED_MESSAGE);
+      err.code = 'VALIDATION_ERROR';
+      throw err;
+    }
+
+    // If client explicitly provided null/blank, normalize to null and clear uppercase keys.
+    if (legalProvided) {
+      data.legal_employer = null;
+      delete data.LEGAL_EMPLOYER;
+    }
+    if (currencyProvided) {
+      data.currency_code = null;
+      delete data.CURRENCY_CODE;
+    }
+    return;
+  }
+
+  // COMPANY-level: validate & normalize only when fields are provided.
+  if (legalProvided) {
+    data.legal_employer = parseCompanyLegalEmployer(legalRaw);
+    delete data.LEGAL_EMPLOYER;
+  }
+  if (currencyProvided) {
+    data.currency_code = parseCompanyCurrencyCode(currencyRaw);
+    delete data.CURRENCY_CODE;
+  }
+}
+
+/**
+ * COMPANY-only fields validation (UPDATE).
+ * Uses existing org-unit info to enforce non-COMPANY updates.
+ * Mutates `data` to normalized values when inputs are provided.
+ */
+export function validateCompanyLegalEmployerCurrencyOnUpdate({ existingOrgUnit, data }) {
+  const existingLevelUpper = String(existingOrgUnit?.level_code ?? existingOrgUnit?.LEVEL_CODE ?? '').trim().toUpperCase();
+
+  const requestedLevelProvided = hasOwn(data, 'level_code') || hasOwn(data, 'LEVEL_CODE');
+  const requestedLevelRaw = requestedLevelProvided ? getValue(data, 'level_code', 'LEVEL_CODE') : undefined;
+  const effectiveLevelUpper = requestedLevelProvided
+    ? String(requestedLevelRaw).trim().toUpperCase()
+    : existingLevelUpper;
+
+  const isExistingCompany = existingLevelUpper === 'COMPANY';
+  const isEffectiveCompany = effectiveLevelUpper === 'COMPANY';
+
+  const legalProvided = hasOwn(data, 'legal_employer') || hasOwn(data, 'LEGAL_EMPLOYER');
+  const currencyProvided = hasOwn(data, 'currency_code') || hasOwn(data, 'CURRENCY_CODE');
+
+  const legalRaw = getValue(data, 'legal_employer', 'LEGAL_EMPLOYER');
+  const currencyRaw = getValue(data, 'currency_code', 'CURRENCY_CODE');
+
+  // If switching away from COMPANY, force clear regardless of what was provided.
+  if (isExistingCompany && !isEffectiveCompany) {
+    data.legal_employer = null;
+    data.currency_code = null;
+    delete data.LEGAL_EMPLOYER;
+    delete data.CURRENCY_CODE;
+    return;
+  }
+
+  if (!isEffectiveCompany) {
+    const hasMeaningfulLegal = legalProvided && isMeaningfulNonNullString(legalRaw);
+    const hasMeaningfulCurrency = currencyProvided && isMeaningfulNonNullString(currencyRaw);
+
+    if (hasMeaningfulLegal || hasMeaningfulCurrency) {
+      const err = new Error(COMPANY_FIELDS_ALLOWED_MESSAGE);
+      err.code = 'VALIDATION_ERROR';
+      throw err;
+    }
+
+    // If client explicitly provided null/blank, normalize to null and clear uppercase keys.
+    if (legalProvided) {
+      data.legal_employer = null;
+      delete data.LEGAL_EMPLOYER;
+    }
+    if (currencyProvided) {
+      data.currency_code = null;
+      delete data.CURRENCY_CODE;
+    }
+    return;
+  }
+
+  // COMPANY-level update: validate & normalize only when fields are provided.
+  if (legalProvided) {
+    data.legal_employer = parseCompanyLegalEmployer(legalRaw);
+    delete data.LEGAL_EMPLOYER;
+  }
+  if (currencyProvided) {
+    data.currency_code = parseCompanyCurrencyCode(currencyRaw);
+    delete data.CURRENCY_CODE;
+  }
+}

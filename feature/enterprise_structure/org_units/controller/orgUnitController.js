@@ -3,7 +3,12 @@ import db from '../../../../config/db.js';
 import OrgUnitModel from '../model/orgUnitModel.js';
 import StructureResolverService from '../service/structureResolverService.js';
 import StructureHierarchyService from '../service/structureHierarchyService.js';
-import { validateParentForCreate, validateParentForUpdate } from '../service/orgUnitValidator.js';
+import {
+  validateCompanyLegalEmployerCurrencyOnCreate,
+  validateCompanyLegalEmployerCurrencyOnUpdate,
+  validateParentForCreate,
+  validateParentForUpdate
+} from '../service/orgUnitValidator.js';
 import HrOrgStructureModel from '../../hr_org_structures/model/hrOrgStructureModel.js';
 import {
   sendOrgUnitList,
@@ -141,6 +146,9 @@ function handleOrgUnitRouteError(res, req, error, serverMessage = 'Request faile
  * @route   GET /org-units/tree/active
  * @desc    Get tree structure for the active org structure (minimal data, hierarchy only). One active structure per enterprise.
  * @query   enterprise_id (required)
+ * @response Org-unit nodes include:
+ *           - legal_employer (Y/N for COMPANY, otherwise null)
+ *           - currency_code (3-letter for COMPANY, otherwise null)
  */
 router.get('/org-units/tree/active', async (req, res) => {
   try {
@@ -328,6 +336,9 @@ router.get('/:structureId/org-units/export', async (req, res) => {
 /**
  * @route   GET /hr-org-structures/:structureId/org-units
  * @desc    Get org units for a level
+ * @response Each org unit includes:
+ *           - legal_employer (Y/N for COMPANY, otherwise null)
+ *           - currency_code (3-letter for COMPANY, otherwise null)
  * @query   level (required) - Level code (e.g., 'COMPANY', 'BUSINESS_UNIT', 'DIVISION')
  * @query   parentId (optional) - Filter by parent org unit ID
  * @query   search (optional) - Search in org_unit_code, org_unit_name_en, org_unit_name_ar (case-insensitive)
@@ -458,7 +469,11 @@ router.get('/:structureId/org-units/parents', async (req, res) => {
 /**
  * @route   POST /hr-org-structures/:structureId/org-units
  * @desc    Create a new org unit
- * @body    { level_code, org_unit_code, org_unit_name_en, parent_org_unit_id?, ... }
+ * @body    { level_code, org_unit_code, org_unit_name_en, parent_org_unit_id?, ...
+ *             legal_employer?, currency_code?
+ *             - COMPANY level: legal_employer (Y/N) and currency_code (3-letter) are allowed.
+ *             - non-COMPANY level: these fields must be null (and non-null values are rejected).
+ *         }
  */
 router.post('/:structureId/org-units', async (req, res) => {
   try {
@@ -488,6 +503,9 @@ router.post('/:structureId/org-units', async (req, res) => {
       return sendBadRequest(res, req, `Level '${levelCode}' does not exist in this structure`);
     }
 
+    // COMPANY-only fields validation/normalization.
+    validateCompanyLegalEmployerCurrencyOnCreate({ levelCode, data });
+
     const { parentId } = await validateParentForCreate(resolver, data, structureId);
     data.parent_org_unit_id = parentId;
 
@@ -503,6 +521,9 @@ router.post('/:structureId/org-units', async (req, res) => {
 /**
  * @route   PUT /hr-org-structures/:structureId/org-units/:orgUnitId
  * @desc    Update an org unit
+ * @body    Partial update; COMPANY-only fields:
+ *          - legal_employer?: 'Y'|'N'|null (only when resulting level is COMPANY)
+ *          - currency_code?: 3-letter code (only when resulting level is COMPANY)
  */
 router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
   try {
@@ -523,6 +544,10 @@ router.put('/:structureId/org-units/:orgUnitId', async (req, res) => {
     }
 
     const data = req.body;
+
+    // COMPANY-only fields validation/normalization (uses existing org-unit level).
+    validateCompanyLegalEmployerCurrencyOnUpdate({ existingOrgUnit, data });
+
     await validateParentForUpdate({ existingOrgUnit, data, resolver, structureId });
 
     const userId = getUserId(req);

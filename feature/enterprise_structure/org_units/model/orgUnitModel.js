@@ -22,6 +22,21 @@ class OrgUnitModel {
 
   static attachParentUnit(row) {
     if (!row) return row;
+
+    // Enforce ENT.ORG_UNITS business rule on the Node response boundary:
+    // legal_employer and currency_code are COMPANY-only fields.
+    const levelCodeRaw = row.level_code ?? row.LEVEL_CODE;
+    const hasLevelCode = levelCodeRaw !== undefined && levelCodeRaw !== null && String(levelCodeRaw).trim() !== '';
+    if (hasLevelCode) {
+      const isCompanyLevel = String(levelCodeRaw).trim().toUpperCase() === 'COMPANY';
+      if (!isCompanyLevel) {
+        row.legal_employer = null;
+        row.currency_code = null;
+        delete row.LEGAL_EMPLOYER;
+        delete row.CURRENCY_CODE;
+      }
+    }
+
     if (row.parent_unit) return row;
     const parentId = row.parent_org_unit_id ?? null;
     if (!parentId) return { ...row, parent_unit: null };
@@ -59,6 +74,9 @@ class OrgUnitModel {
       org_unit_name_ar: data.org_unit_name_ar ?? data.ORG_UNIT_NAME_AR,
       parent_org_unit_id: parent ? this.guidToHex(parent) : (parent === null ? null : undefined),
       is_active: data.is_active ?? data.IS_ACTIVE,
+      // Legal employer / currency are COMPANY-only fields in ENT.ORG_UNITS.
+      legal_employer: data.legal_employer ?? data.LEGAL_EMPLOYER,
+      currency_code: data.currency_code ?? data.CURRENCY_CODE,
       manager_name: data.manager_name ?? data.MANAGER_NAME,
       manager_email: data.manager_email ?? data.MANAGER_EMAIL,
       manager_phone: data.manager_phone ?? data.MANAGER_PHONE,
@@ -167,12 +185,21 @@ class OrgUnitModel {
 
   static toMinimalData(orgUnit) {
     if (!orgUnit) return null;
+    const levelCodeRaw = orgUnit.level_code || orgUnit.LEVEL_CODE;
+    const hasLevelCode = levelCodeRaw !== undefined && levelCodeRaw !== null && String(levelCodeRaw).trim() !== '';
+    const isCompanyLevel = hasLevelCode && String(levelCodeRaw).trim().toUpperCase() === 'COMPANY';
     return {
       org_unit_id: orgUnit.org_unit_id || orgUnit.ORG_UNIT_ID,
       org_unit_code: orgUnit.org_unit_code || orgUnit.ORG_UNIT_CODE,
       org_unit_name_en: orgUnit.org_unit_name_en || orgUnit.ORG_UNIT_NAME_EN,
       org_unit_name_ar: orgUnit.org_unit_name_ar || orgUnit.ORG_UNIT_NAME_AR,
       level_code: orgUnit.level_code || orgUnit.LEVEL_CODE,
+      legal_employer: isCompanyLevel
+        ? (orgUnit.legal_employer ?? orgUnit.LEGAL_EMPLOYER ?? null)
+        : (hasLevelCode ? null : (orgUnit.legal_employer ?? orgUnit.LEGAL_EMPLOYER ?? null)),
+      currency_code: isCompanyLevel
+        ? (orgUnit.currency_code ?? orgUnit.CURRENCY_CODE ?? null)
+        : (hasLevelCode ? null : (orgUnit.currency_code ?? orgUnit.CURRENCY_CODE ?? null)),
       parent_org_unit_id: orgUnit.parent_org_unit_id || orgUnit.PARENT_ORG_UNIT_ID || null,
       is_active: orgUnit.is_active || orgUnit.IS_ACTIVE
     };

@@ -15,10 +15,16 @@ const EXPORT_COLUMNS = defineExcelColumns([
   { header: 'Location', key: 'location', width: 20 },
   { header: 'City', key: 'city', width: 16 },
   { header: 'Address', key: 'address', width: 32 },
-  { header: 'Description', key: 'description', width: 32 }
+  { header: 'Description', key: 'description', width: 32 },
+  { header: 'Legal Employer', key: 'legal_employer', width: 16 },
+  { header: 'Currency Code', key: 'currency_code', width: 14 }
 ]);
 
 function mapOrgUnitRow(orgUnit) {
+  const levelCodeRaw = orgUnit.level_code ?? orgUnit.LEVEL_CODE;
+  const hasLevelCode = levelCodeRaw !== undefined && levelCodeRaw !== null && String(levelCodeRaw).trim() !== '';
+  const isCompanyLevel = hasLevelCode && String(levelCodeRaw).trim().toUpperCase() === 'COMPANY';
+
   const parentName = orgUnit.parent_unit?.name
     ?? orgUnit.parent_org_unit_name_en
     ?? orgUnit.parent_org_unit_name_ar
@@ -34,7 +40,14 @@ function mapOrgUnitRow(orgUnit) {
     location: orgUnit.location ?? '',
     city: orgUnit.city ?? '',
     address: orgUnit.address ?? '',
-    description: orgUnit.description ?? ''
+    description: orgUnit.description ?? '',
+    // COMPANY-only fields — export blanks when Oracle returns NULL/undefined.
+    legal_employer: isCompanyLevel
+      ? (orgUnit.legal_employer ?? '')
+      : (hasLevelCode ? '' : (orgUnit.legal_employer ?? '')),
+    currency_code: isCompanyLevel
+      ? (orgUnit.currency_code ?? '')
+      : (hasLevelCode ? '' : (orgUnit.currency_code ?? ''))
   };
 }
 
