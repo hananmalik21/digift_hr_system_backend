@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { AppError } from '../../../../utils/errors/index.js';
 import {
   clearEnterpriseResolveCache,
-  shapeResolvedEnterprise
+  shapeResolvedEnterprise,
+  toPublicEnterpriseContext
 } from '../service/resolveEnterpriseBySubdomain.js';
 
 test('shapeResolvedEnterprise maps package payload', () => {
@@ -12,6 +13,7 @@ test('shapeResolvedEnterprise maps package payload', () => {
       enterprise_id: 28,
       enterprise_code: 'ABC_TRADING',
       enterprise_name: 'ABC Trading Company',
+      currency_code: 'KWD',
       subdomain_slug: 'abc-trading',
       is_active: 'Y',
       career_portal_enabled_flag: 'Y',
@@ -24,10 +26,36 @@ test('shapeResolvedEnterprise maps package payload', () => {
 
   assert.equal(shaped.enterpriseId, 28);
   assert.equal(shaped.enterpriseCode, 'ABC_TRADING');
+  assert.equal(shaped.currencyCode, 'KWD');
   assert.equal(shaped.subdomainSlug, 'abc-trading');
   assert.equal(shaped.portalType, 'MAIN');
   assert.equal(shaped.isActive, true);
   assert.equal(shaped.careerPortalEnabled, true);
+});
+
+test('toPublicEnterpriseContext maps resolved enterprise to API response', () => {
+  const shaped = shapeResolvedEnterprise(
+    {
+      enterprise_id: 3,
+      enterprise_code: 'DIGIFY_SOLUTIONS_LLC',
+      enterprise_name: 'Digify Solutions LLC',
+      currency_code: 'KWD',
+      subdomain_slug: 'digify-solutions-llc',
+      portal_type: 'MAIN'
+    },
+    'MAIN'
+  );
+
+  assert.deepEqual(toPublicEnterpriseContext(shaped), {
+    enterprise_id: 3,
+    enterprise_code: 'DIGIFY_SOLUTIONS_LLC',
+    enterprise_name: 'Digify Solutions LLC',
+    currency_code: 'KWD',
+    subdomain_slug: 'digify-solutions-llc',
+    portal_type: 'MAIN',
+    main_application_url: null,
+    career_portal_url: null
+  });
 });
 
 test('shapeResolvedEnterprise returns null without enterprise_id', () => {

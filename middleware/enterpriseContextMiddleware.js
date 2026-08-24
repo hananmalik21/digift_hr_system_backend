@@ -52,6 +52,7 @@ function attachEnterprise(req, enterprise) {
     enterpriseId: enterprise.enterpriseId,
     enterpriseCode: enterprise.enterpriseCode,
     enterpriseName: enterprise.enterpriseName,
+    currencyCode: enterprise.currencyCode ?? null,
     subdomainSlug: enterprise.subdomainSlug,
     portalType: enterprise.portalType,
     mainApplicationUrl: enterprise.mainApplicationUrl,

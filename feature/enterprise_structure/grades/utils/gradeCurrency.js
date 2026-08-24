@@ -3,7 +3,7 @@
  * Validation stays in the controller; the model only normalizes/omits for Oracle.
  */
 
-const ISO_CURRENCY_CODE = /^[A-Z]{3}$/;
+import { parseIsoCurrencyCode } from '../../shared/isoCurrencyCode.js';
 
 export const GRADE_CURRENCY_CODE_ERROR = 'CURRENCY_CODE must be a valid 3-letter currency code';
 export const DEFAULT_GRADE_CURRENCY = 'KWD';
@@ -13,20 +13,7 @@ export const DEFAULT_GRADE_CURRENCY = 'KWD';
  * @returns {{ ok: true, value: string|undefined } | { ok: false, error: string }}
  */
 export function parseGradeCurrencyCode(value) {
-  if (value === undefined || value === null) {
-    return { ok: true, value: undefined };
-  }
-  if (typeof value !== 'string') {
-    return { ok: false, error: GRADE_CURRENCY_CODE_ERROR };
-  }
-  const normalized = value.trim().toUpperCase();
-  if (normalized === '') {
-    return { ok: true, value: undefined };
-  }
-  if (!ISO_CURRENCY_CODE.test(normalized)) {
-    return { ok: false, error: GRADE_CURRENCY_CODE_ERROR };
-  }
-  return { ok: true, value: normalized };
+  return parseIsoCurrencyCode(value, GRADE_CURRENCY_CODE_ERROR);
 }
 
 /**

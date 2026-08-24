@@ -91,6 +91,9 @@ function mapEntValidationMessage(message) {
   if (message.includes('Required field cannot be null') || message.includes('cannot be null')) {
     return new ValidationError(message, null, message);
   }
+  if (/currency_code/i.test(message)) {
+    return new ValidationError(message);
+  }
   if (message.includes('same grade family') || message.includes('greater than or equal')) {
     return new ValidationError(message);
   }

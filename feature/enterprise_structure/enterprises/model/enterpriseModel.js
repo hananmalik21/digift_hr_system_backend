@@ -15,6 +15,7 @@ class EnterpriseModel {
     const payload = {};
     if (filters.enterpriseId) payload.enterprise_id = filters.enterpriseId;
     if (filters.enterpriseCode) payload.enterprise_code = filters.enterpriseCode;
+    if (filters.currencyCode) payload.currency_code = filters.currencyCode;
     if (filters.isActive !== undefined) {
       Object.assign(payload, ynActive(filters.isActive));
     }
@@ -24,6 +25,7 @@ class EnterpriseModel {
   static toPackagePayload(data, userId) {
     const subdomainRaw = data.SUBDOMAIN_SLUG ?? data.subdomain_slug;
     const careerFlag = data.CAREER_PORTAL_ENABLED_FLAG ?? data.career_portal_enabled_flag;
+    const currencyCode = data.CURRENCY_CODE ?? data.currency_code;
     return entActorPayload(data, userId, {
       enterprise_code: data.ENTERPRISE_CODE ?? data.enterprise_code,
       enterprise_name: data.ENTERPRISE_NAME ?? data.enterprise_name,
@@ -36,6 +38,9 @@ class EnterpriseModel {
         : {}),
       ...(careerFlag !== undefined
         ? { career_portal_enabled_flag: careerFlag }
+        : {}),
+      ...(currencyCode !== undefined
+        ? { currency_code: currencyCode }
         : {})
     });
   }

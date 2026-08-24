@@ -1,18 +1,22 @@
 import express from 'express';
+import '../swagger/enterprises.swagger.js';
 import EnterpriseModel from '../model/enterpriseModel.js';
+import {
+  normalizeEnterpriseBody,
+  parseEnterpriseListFilters,
+  validateEnterpriseData
+} from '../utils/enterpriseValidators.js';
 import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/users/service/enterpriseAdminProvisioningService.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
 import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
 import { ValidationError, NotFoundError, ConflictError } from '../../../../utils/errors/index.js';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { TENANT_SLUG_RE } from '../../../../utils/tenantHostname.js';
 import { invalidateEnterpriseResolveCacheForSlug } from '../service/resolveEnterpriseBySubdomain.js';
 import {
   buildEnterpriseDeletePayload,
   HARD_DELETE_CONFLICT_MESSAGE,
   isFkDeleteConflict,
   parseAutoFallbackQuery,
-  parseBooleanQuery,
   parseEnterpriseIdParam,
   parseHardDeleteQuery,
   resolveEnterpriseActor
@@ -23,84 +27,6 @@ router.use((req, res, next) => {
   req._startTime = Date.now();
   next();
 });
-
-function normalizeEnterpriseBody(data = {}) {
-  const subdomainRaw = data.SUBDOMAIN_SLUG ?? data.subdomain_slug;
-  const normalized = {
-    ...data,
-    ENTERPRISE_CODE: data.ENTERPRISE_CODE ?? data.enterprise_code,
-    ENTERPRISE_NAME: data.ENTERPRISE_NAME ?? data.enterprise_name,
-    IS_ACTIVE: data.IS_ACTIVE ?? data.is_active,
-    LAST_UPDATE_LOGIN: data.LAST_UPDATE_LOGIN ?? data.last_update_login
-  };
-
-  if (subdomainRaw !== undefined) {
-    const slug = subdomainRaw == null || String(subdomainRaw).trim() === ''
-      ? null
-      : String(subdomainRaw).trim().toLowerCase();
-    normalized.SUBDOMAIN_SLUG = slug;
-    normalized.subdomain_slug = slug;
-  }
-
-  const careerFlag = data.CAREER_PORTAL_ENABLED_FLAG ?? data.career_portal_enabled_flag;
-  if (careerFlag !== undefined) {
-    normalized.CAREER_PORTAL_ENABLED_FLAG = careerFlag;
-    normalized.career_portal_enabled_flag = careerFlag;
-  }
-
-  return normalized;
-}
-
-function validateEnterpriseData(data, isUpdate = false) {
-  const errors = [];
-
-  if (!isUpdate) {
-    if (!data.ENTERPRISE_CODE || String(data.ENTERPRISE_CODE).trim() === '') {
-      errors.push('ENTERPRISE_CODE is required');
-    }
-    if (!data.ENTERPRISE_NAME || String(data.ENTERPRISE_NAME).trim() === '') {
-      errors.push('ENTERPRISE_NAME is required');
-    }
-  } else {
-    if (data.ENTERPRISE_CODE !== undefined && String(data.ENTERPRISE_CODE).trim() === '') {
-      errors.push('ENTERPRISE_CODE cannot be empty');
-    }
-    if (data.ENTERPRISE_NAME !== undefined && String(data.ENTERPRISE_NAME).trim() === '') {
-      errors.push('ENTERPRISE_NAME cannot be empty');
-    }
-  }
-
-  if (
-    data.IS_ACTIVE !== undefined
-    && data.IS_ACTIVE !== true
-    && data.IS_ACTIVE !== false
-    && data.IS_ACTIVE !== 'Y'
-    && data.IS_ACTIVE !== 'N'
-  ) {
-    errors.push('IS_ACTIVE must be true/false or Y/N');
-  }
-
-  if (data.SUBDOMAIN_SLUG !== undefined && data.SUBDOMAIN_SLUG !== null) {
-    const slug = String(data.SUBDOMAIN_SLUG).trim().toLowerCase();
-    if (!TENANT_SLUG_RE.test(slug)) {
-      errors.push(
-        'SUBDOMAIN_SLUG must be a lowercase DNS label (letters, digits, hyphens; 1–63 chars)'
-      );
-    }
-  }
-
-  if (
-    data.CAREER_PORTAL_ENABLED_FLAG !== undefined
-    && data.CAREER_PORTAL_ENABLED_FLAG !== true
-    && data.CAREER_PORTAL_ENABLED_FLAG !== false
-    && data.CAREER_PORTAL_ENABLED_FLAG !== 'Y'
-    && data.CAREER_PORTAL_ENABLED_FLAG !== 'N'
-  ) {
-    errors.push('CAREER_PORTAL_ENABLED_FLAG must be true/false or Y/N');
-  }
-
-  return errors;
-}
 
 function requireEnterpriseId(rawId) {
   return parseEnterpriseIdParam(rawId);
@@ -164,22 +90,9 @@ async function updateEnterpriseHandler(req, res) {
  * @route   GET /api/enterprises
  */
 router.get('/', asyncHandler(async (req, res) => {
-  const filters = {};
-  const appliedFilters = {};
-
-  if (req.query.enterprise_id) {
-    filters.enterpriseId = requireEnterpriseId(req.query.enterprise_id);
-    appliedFilters.enterprise_id = filters.enterpriseId;
-  }
-
-  if (req.query.enterprise_code) {
-    filters.enterpriseCode = req.query.enterprise_code;
-    appliedFilters.enterprise_code = filters.enterpriseCode;
-  }
-
-  if (req.query.isActive !== undefined) {
-    filters.isActive = parseBooleanQuery(req.query.isActive);
-    appliedFilters.is_active = filters.isActive;
+  const { filters, appliedFilters, errors } = parseEnterpriseListFilters(req.query);
+  if (errors.length > 0) {
+    throw new ValidationError('Validation failed', errors);
   }
 
   const enterprises = await EnterpriseModel.findAll(filters);

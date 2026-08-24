@@ -8,6 +8,7 @@ import {
   requireEnterpriseContext
 } from '../../../../middleware/enterpriseContextMiddleware.js';
 import { sendTenantSuccess } from '../../../../utils/tenantErrors.js';
+import { toPublicEnterpriseContext } from '../service/resolveEnterpriseBySubdomain.js';
 
 const router = express.Router();
 
@@ -18,16 +19,7 @@ router.get(
   '/enterprise-context',
   requireEnterpriseContext,
   asyncHandler(async (req, res) => {
-    const e = req.enterprise;
-    return sendTenantSuccess(res, {
-      enterprise_id: e.enterpriseId,
-      enterprise_code: e.enterpriseCode,
-      enterprise_name: e.enterpriseName,
-      subdomain_slug: e.subdomainSlug,
-      portal_type: e.portalType,
-      main_application_url: e.mainApplicationUrl,
-      career_portal_url: e.careerPortalUrl
-    });
+    return sendTenantSuccess(res, toPublicEnterpriseContext(req.enterprise));
   })
 );
 

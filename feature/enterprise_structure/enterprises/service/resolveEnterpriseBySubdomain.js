@@ -9,6 +9,7 @@ import {
   TENANT_ERROR_CODES,
   TENANT_ERROR_MESSAGES
 } from '../../../../utils/tenantErrors.js';
+import { normalizeIsoCurrencyCodeFromRow } from '../../shared/isoCurrencyCode.js';
 import { entInvokeAction } from '../../shared/entModelBridge.js';
 
 const MAX_CACHE_ENTRIES = 500;
@@ -61,10 +62,13 @@ export function shapeResolvedEnterprise(data, portalType) {
     return null;
   }
 
+  const currencyCode = normalizeIsoCurrencyCodeFromRow(row);
+
   return Object.freeze({
     enterpriseId,
     enterpriseCode: String(row.enterprise_code ?? row.ENTERPRISE_CODE ?? ''),
     enterpriseName: String(row.enterprise_name ?? row.ENTERPRISE_NAME ?? ''),
+    currencyCode,
     subdomainSlug: String(row.subdomain_slug ?? row.SUBDOMAIN_SLUG ?? '').toLowerCase(),
     isActive: String(row.is_active ?? row.IS_ACTIVE ?? 'Y').toUpperCase() === 'Y',
     careerPortalEnabled:
@@ -73,6 +77,23 @@ export function shapeResolvedEnterprise(data, portalType) {
     mainApplicationUrl: row.main_application_url ?? row.MAIN_APPLICATION_URL ?? null,
     careerPortalUrl: row.career_portal_url ?? row.CAREER_PORTAL_URL ?? null
   });
+}
+
+/**
+ * Map resolved enterprise context to the public API response shape.
+ * @param {ReturnType<typeof shapeResolvedEnterprise>} enterprise
+ */
+export function toPublicEnterpriseContext(enterprise) {
+  return {
+    enterprise_id: enterprise.enterpriseId,
+    enterprise_code: enterprise.enterpriseCode,
+    enterprise_name: enterprise.enterpriseName,
+    currency_code: enterprise.currencyCode,
+    subdomain_slug: enterprise.subdomainSlug,
+    portal_type: enterprise.portalType,
+    main_application_url: enterprise.mainApplicationUrl,
+    career_portal_url: enterprise.careerPortalUrl
+  };
 }
 
 /**
