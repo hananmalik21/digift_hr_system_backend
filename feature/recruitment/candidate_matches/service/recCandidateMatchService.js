@@ -1,30 +1,41 @@
-import { ConflictError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
-import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
-import { applyJobViaPackage } from '../../applications/model/recApplicationsModel.js';
-import { APPLY_ERROR_DUPLICATE } from '../../applications/utils/recApplicationConstants.js';
 import {
-  ALREADY_APPLIED_MESSAGE,
-  CANDIDATE_NOT_FOUND_MESSAGE,
-  DEFAULT_ADD_SOURCE_CODE,
-  POSTING_REQUIRED_MESSAGE
+  AppError,
+  ConflictError,
+  NotFoundError,
+  ValidationError
+} from '../../../../utils/errors/index.js';
+import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
+import { addAsApplicantViaPackage } from '../model/recAddAsApplicantModel.js';
+import {
+  ADD_AS_APPLICANT_SOURCE_CODE,
+  ADD_AS_APPLICANT_STAGE_CODE,
+  ADD_AS_APPLICANT_STATUS_CODE,
+  ADD_AS_APPLICANT_ERROR_MESSAGE,
+  ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS
 } from '../utils/recCandidateMatchConstants.js';
 import { mapRequisitionHeader } from '../utils/recCandidateMatchMappers.js';
 import {
-  candidateExistsInView,
-  findExistingApplication,
-  findPostingForRequisition,
-  getApplicationStageByGuid,
   getRequisitionHeaderFromView,
   listCandidateMatchesFromView
 } from '../model/recCandidateMatchViewModel.js';
 
-function isDuplicateApplyMessage(message) {
-  const m = String(message ?? '').trim().toLowerCase();
-  return (
-    m === String(APPLY_ERROR_DUPLICATE).toLowerCase() ||
-    m.includes('already applied') ||
-    m.includes('duplicate')
-  );
+/**
+ * Map Oracle ADD_AS_APPLICANT p_message to HTTP domain errors.
+ * Known package messages are returned unchanged. Unknown text → generic 500
+ * (never expose raw Oracle / SQL detail).
+ *
+ * Business rules live only in the package — Node does not look up postings
+ * or re-validate requisition state.
+ *
+ * @param {string|null|undefined} message
+ */
+export function throwAddAsApplicantPackageError(message) {
+  const m = String(message ?? '').trim();
+  const kind = ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS[m];
+  if (kind === 'conflict') throw new ConflictError(m);
+  if (kind === 'not_found') throw new NotFoundError(m);
+  if (kind === 'validation') throw new ValidationError('Validation failed', [m]);
+  throw new AppError(ADD_AS_APPLICANT_ERROR_MESSAGE, 500, 'ADD_AS_APPLICANT_FAILED');
 }
 
 /**
@@ -53,68 +64,40 @@ export async function listFindCandidates(requisitionGuidHex, enterpriseId, query
 }
 
 /**
+ * Find Candidates → Add as Applicant via REC.ADD_AS_APPLICANT_PKG.ADD_AS_APPLICANT.
+ * Does not look up posting_guid — the package finds the active posting.
+ * source_code is always HR_SYSTEM (package-side); created_by must be the authenticated user.
+ *
  * @param {string} requisitionGuidHex
  * @param {string} candidateGuidHex
  * @param {number} enterpriseId
- * @param {string} actor
- * @param {Record<string, unknown>|undefined} body
+ * @param {string} createdBy
  */
 export async function addCandidateAsApplicant(
   requisitionGuidHex,
   candidateGuidHex,
   enterpriseId,
-  actor,
-  body
+  createdBy
 ) {
-  const requisition = await getRequisitionHeaderFromView(requisitionGuidHex, enterpriseId);
-  if (!requisition) return { notFound: 'requisition' };
-
-  const candidateExists = await candidateExistsInView(candidateGuidHex, enterpriseId);
-  if (!candidateExists) return { notFound: 'candidate' };
-
-  const existing = await findExistingApplication(requisitionGuidHex, candidateGuidHex, enterpriseId);
-  if (existing?.application_guid) {
-    throw new ConflictError(ALREADY_APPLIED_MESSAGE);
-  }
-
-  const posting = await findPostingForRequisition(requisitionGuidHex, enterpriseId);
-  if (!posting?.posting_guid) {
-    throw new ValidationError('Validation failed', [POSTING_REQUIRED_MESSAGE]);
-  }
-
-  const source_code = String(body?.source_code ?? DEFAULT_ADD_SOURCE_CODE).trim().toUpperCase();
-  const pkg = await applyJobViaPackage(
-    {
-      enterprise_id: enterpriseId,
-      candidate_guid: candidateGuidHex,
-      source_code,
-      created_by: actor
-    },
-    posting.posting_guid
-  );
+  const pkg = await addAsApplicantViaPackage({
+    enterprise_id: enterpriseId,
+    requisition_guid: requisitionGuidHex,
+    candidate_guid: candidateGuidHex,
+    created_by: createdBy
+  });
 
   if (!packageStatusIsSuccess(pkg.status)) {
-    const message = pkg.message || ALREADY_APPLIED_MESSAGE;
-    if (isDuplicateApplyMessage(message)) {
-      throw new ConflictError(ALREADY_APPLIED_MESSAGE);
-    }
-    const lower = String(message).toLowerCase();
-    if (lower.includes('does not exist') || lower.includes('not found')) {
-      throw new NotFoundError(message);
-    }
-    throw new ValidationError('Validation failed', [message]);
+    throwAddAsApplicantPackageError(pkg.message);
   }
 
-  const created = pkg.application_guid
-    ? await getApplicationStageByGuid(pkg.application_guid, enterpriseId)
-    : null;
-
   return {
-    data: {
-      candidate_guid: candidateGuidHex,
-      requisition_guid: requisitionGuidHex,
-      application_guid: pkg.application_guid ?? created?.application_guid ?? null,
-      application_stage: created?.application_stage ?? created?.status_code ?? 'APPLIED'
-    }
+    application_id: pkg.application_id,
+    application_guid: pkg.application_guid,
+    application_number: pkg.application_number,
+    requisition_guid: requisitionGuidHex,
+    candidate_guid: candidateGuidHex,
+    source_code: ADD_AS_APPLICANT_SOURCE_CODE,
+    current_stage_code: ADD_AS_APPLICANT_STAGE_CODE,
+    status_code: ADD_AS_APPLICANT_STATUS_CODE
   };
 }

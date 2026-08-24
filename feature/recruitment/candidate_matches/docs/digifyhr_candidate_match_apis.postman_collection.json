@@ -2,11 +2,12 @@
   "info": {
     "name": "DigifyHR Recruiting — Find Candidates APIs",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Find matching candidates from REC.V_REQUISITION_CANDIDATE_MATCH and add them as applicants. Canonical paths use /api/recruitment. /api/recruiting and /api/rec/requisitions aliases are also mounted."
+    "description": "Find matching candidates from REC.V_REQUISITION_CANDIDATE_MATCH and add them as applicants via REC.ADD_AS_APPLICANT_PKG. Canonical paths use /api/recruitment. /api/recruiting and /api/rec/requisitions aliases are also mounted."
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:3000" },
     { "key": "token", "value": "" },
+    { "key": "enterprise_id", "value": "1" },
     { "key": "requisition_guid", "value": "574176DB57C7EFCBE0631718000A61BB" },
     { "key": "candidate_guid", "value": "53F8CDD520DAD58AE0631718000ADEDC" }
   ],
@@ -18,7 +19,7 @@
         "header": [
           { "key": "Authorization", "value": "Bearer {{token}}" }
         ],
-        "url": "{{baseUrl}}/api/recruiting/requisitions/{{requisition_guid}}/find-candidates?page=1&page_size=20&min_match_score=70&min_availability_score=80&availability_code=IMMEDIATE&sort_by=match_score&sort_order=desc"
+        "url": "{{baseUrl}}/api/recruitment/requisitions/{{requisition_guid}}/find-candidates?page=1&page_size=20&min_match_score=70&min_availability_score=80&availability_code=IMMEDIATE&sort_by=match_score&sort_order=desc"
       }
     },
     {
@@ -41,9 +42,24 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"source_code\": \"RECRUITER\"\n}"
+          "raw": "{\n  \"enterprise_id\": {{enterprise_id}},\n  \"candidate_guid\": \"{{candidate_guid}}\"\n}"
         },
-        "url": "{{baseUrl}}/api/recruiting/requisitions/{{requisition_guid}}/candidates/{{candidate_guid}}/add-as-applicant"
+        "url": "{{baseUrl}}/api/recruitment/requisitions/{{requisition_guid}}/applicants"
+      }
+    },
+    {
+      "name": "4. Add as applicant (legacy path)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": {{enterprise_id}}\n}"
+        },
+        "url": "{{baseUrl}}/api/recruitment/requisitions/{{requisition_guid}}/candidates/{{candidate_guid}}/add-as-applicant"
       }
     }
   ]

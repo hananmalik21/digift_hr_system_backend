@@ -121,5 +121,46 @@ export function validateRequisitionCandidateEnterprise(
   };
 }
 
+/**
+ * Validate POST /requisitions/:requisition_guid/applicants body + URL.
+ * Does not accept created_by or source_code from the client.
+ *
+ * @param {string} requisitionGuidParam
+ * @param {Record<string, unknown>|undefined} body
+ * @param {number|null|undefined} resolvedEnterpriseId — from hostname/JWT/body via resolveRequestEnterpriseId
+ */
+export function validateAddAsApplicantRequest(requisitionGuidParam, body, resolvedEnterpriseId) {
+  const b = body && typeof body === 'object' ? body : {};
+  const enterpriseRaw = b.enterprise_id ?? b.enterpriseId;
+  if (enterpriseRaw == null || String(enterpriseRaw).trim() === '') {
+    throw new ValidationError('Validation failed', ['enterprise_id is required']);
+  }
+  const enterpriseNum = Number(enterpriseRaw);
+  if (!Number.isFinite(enterpriseNum) || enterpriseNum <= 0) {
+    throw new ValidationError('Validation failed', ['enterprise_id must be numeric']);
+  }
+
+  const candidateRaw = b.candidate_guid ?? b.candidateGuid;
+  if (isBlank(candidateRaw)) {
+    throw new ValidationError('Validation failed', ['candidate_guid is required']);
+  }
+
+  let candidate_guid;
+  try {
+    candidate_guid = parseCandidateGuidParam(candidateRaw);
+  } catch {
+    throw new ValidationError('Validation failed', [
+      'candidate_guid must be a valid 32-character hex GUID'
+    ]);
+  }
+
+  // Prefer tenant-resolved enterprise (hostname/JWT match); body value already validated as numeric.
+  return {
+    requisition_guid: parseMatchRequisitionGuidParam(requisitionGuidParam),
+    candidate_guid,
+    enterprise_id: requireEnterpriseId(resolvedEnterpriseId ?? enterpriseNum)
+  };
+}
+
 export { parseOptionalUpperCode as parseMatchLevelFilter };
 export { parseOptionalUpperCode as parseAvailabilityCodeFilter };

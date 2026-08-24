@@ -7,11 +7,14 @@ Canonical routes follow existing DigifyHR prefixes. Spec `/api/recruiting/...` a
 | Method | Path |
 | ------ | ---- |
 | GET | `/api/recruitment/requisitions/:requisition_guid/find-candidates` |
-| POST | `/api/recruitment/requisitions/:requisition_guid/candidates/:candidate_guid/add-as-applicant` |
+| POST | `/api/recruitment/requisitions/:requisition_guid/applicants` |
+| POST | `/api/recruitment/requisitions/:requisition_guid/candidates/:candidate_guid/add-as-applicant` (legacy alias) |
 
 Also mounted at `/api/rec/requisitions/...` and `/api/recruiting/requisitions/...`.
 
-Enterprise ID is taken from hostname / JWT. Do not send `enterprise_id` as trusted security context. A mismatched query `enterprise_id` returns 403.
+`POST .../applicants` requires `enterprise_id` and `candidate_guid` in the body. `created_by` and `source_code` are never accepted from the client — `p_created_by` comes from the JWT username, and the application source is always `HR_SYSTEM` (set by `REC.ADD_AS_APPLICANT_PKG`).
+
+Enterprise ID is resolved from hostname / JWT (body `enterprise_id` is validated and checked for tenant match). A mismatched `enterprise_id` returns 403.
 
 ## cURL
 
@@ -23,13 +26,13 @@ CAND=53F8CDD520DAD58AE0631718000ADEDC
 
 # Find matching candidates
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/recruiting/requisitions/$REQ/find-candidates?page=1&page_size=20&min_match_score=70&min_availability_score=80&availability_code=IMMEDIATE&sort_by=match_score&sort_order=desc"
+  "$BASE/api/recruitment/requisitions/$REQ/find-candidates?page=1&page_size=20&min_match_score=70&min_availability_score=80&availability_code=IMMEDIATE&sort_by=match_score&sort_order=desc"
 
 # Add candidate as applicant
 curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"source_code":"RECRUITER"}' \
-  "$BASE/api/recruiting/requisitions/$REQ/candidates/$CAND/add-as-applicant"
+  -d "{\"enterprise_id\":1,\"candidate_guid\":\"$CAND\"}" \
+  "$BASE/api/recruitment/requisitions/$REQ/applicants"
 ```
 
 ## Query parameters
@@ -139,43 +142,70 @@ Flat match/availability fields are returned alongside nested objects so existing
 }
 ```
 
-### POST add-as-applicant — 200
+### POST applicants (add as applicant) — 201
 
 ```json
 {
   "success": true,
-  "message": "Candidate added as applicant successfully",
+  "message": "Candidate added as applicant successfully.",
   "data": {
-    "candidate_guid": "53F8CDD520DAD58AE0631718000ADEDC",
-    "requisition_guid": "574176DB57C7EFCBE0631718000A61BB",
+    "application_id": 123,
     "application_guid": "APPLICATION_GUID",
-    "application_stage": "APPLIED"
+    "application_number": "APP-2026-000123",
+    "requisition_guid": "574176DB57C7EFCBE0631718000A61BB",
+    "candidate_guid": "53F8CDD520DAD58AE0631718000ADEDC",
+    "source_code": "HR_SYSTEM",
+    "current_stage_code": "APPLIED",
+    "status_code": "NEW"
   }
 }
 ```
 
-Creates the application through `REC.CREATE_APPLICATION_PKG.apply_job` using the requisition’s job posting. Source defaults to `RECRUITER`.
+Creates the application through `REC.ADD_AS_APPLICANT_PKG.ADD_AS_APPLICANT`. Source is always `HR_SYSTEM`. New applications start at stage `APPLIED` / status `NEW`.
 
-### POST add-as-applicant — 409
+Request body:
+
+```json
+{
+  "enterprise_id": 1,
+  "candidate_guid": "53F8CDD520DAD58AE0631718000ADEDC"
+}
+```
+
+### POST applicants — 409
 
 ```json
 {
   "success": false,
-  "message": "Candidate has already applied for this requisition."
+  "message": "Candidate is already an applicant for this requisition."
 }
 ```
+
+### POST applicants — other package errors
+
+| Status | Message |
+| ------ | ------- |
+| 404 | `Requisition does not exist.` |
+| 404 | `Candidate does not exist.` |
+| 400 | `The requisition must be approved before a candidate can be added as an applicant.` |
+| 400 | `The requisition must be open before a candidate can be added as an applicant.` |
+| 400 | `An active job posting is required before a candidate can be added as an applicant.` |
+| 500 | `Unable to add candidate as applicant.` |
+
+The API does **not** look up `posting_guid`. `REC.ADD_AS_APPLICANT_PKG` finds the active posting for the requisition and returns the no-posting message above when none exists.
 
 ## Errors
 
 | Status | When |
 | ------ | ---- |
-| 200 | Success |
-| 400 | Invalid query/body, missing job posting, or package business error |
-| 401 | Unauthenticated (auth middleware) |
+| 201 | Applicant created |
+| 200 | Find-candidates success |
+| 400 | Invalid body/query, or package business rule (not approved / not open / no posting) |
+| 401 | Unauthenticated (auth middleware) or missing acting username |
 | 403 | Enterprise context mismatch |
-| 404 | Requisition or candidate not found in the authenticated enterprise |
-| 409 | Candidate already applied |
-| 500 | Unexpected database error (Oracle detail is logged, not returned) |
+| 404 | Requisition or candidate not found |
+| 409 | Candidate already an applicant for this requisition |
+| 500 | Unexpected error (Oracle detail is logged, not returned) |
 
 ## View columns
 
@@ -201,4 +231,4 @@ Reads `SELECT v.*` from `REC.V_REQUISITION_CANDIDATE_MATCH`, with
 
 `INITIALS` is presentation-only and is derived in Node from `FIRST_NAME` / `LAST_NAME`.
 
-Add-as-applicant requires a row in `REC.V_JOB_POSTINGS` for the requisition because `apply_job` takes `p_posting_guid`.
+Add-as-applicant is handled entirely by `REC.ADD_AS_APPLICANT_PKG` (including active posting checks). Node does not insert into `REC.REC_APPLICATIONS` directly.

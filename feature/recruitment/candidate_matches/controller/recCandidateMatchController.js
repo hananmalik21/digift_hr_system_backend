@@ -1,19 +1,18 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { UnauthorizedError } from '../../../../utils/errors/index.js';
 import { resolveRequestEnterpriseId } from '../../../../utils/requestEnterprise.js';
 import { getActingUsername } from '../../../../utils/userContext.js';
-import { handleMutationError, handleReadError, logRecruitmentAudit } from '../../shared/recControllerHelpers.js';
+import { handleReadError, logRecruitmentAudit } from '../../shared/recControllerHelpers.js';
+import { LOG_TAG, READ_ERROR_MESSAGE } from '../utils/recCandidateMatchConstants.js';
 import {
-  ADD_AS_APPLICANT_ERROR_MESSAGE,
-  LOG_TAG,
-  READ_ERROR_MESSAGE
-} from '../utils/recCandidateMatchConstants.js';
-import {
+  handleAddAsApplicantError,
   sendAddAsApplicantResponse,
   sendFindCandidatesNotFound,
   sendFindCandidatesResponse
 } from '../utils/recCandidateMatchResponses.js';
 import {
+  validateAddAsApplicantRequest,
   validateRequisitionCandidateEnterprise,
   validateRequisitionGuidEnterprise
 } from '../utils/recCandidateMatchValidators.js';
@@ -30,8 +29,39 @@ function resolveEnterprise(req) {
   });
 }
 
-function actor(req) {
-  return getActingUsername(req) ?? 'SYSTEM';
+/** Authenticated username for p_created_by — never accept created_by from the body. */
+function requireActingUsername(req) {
+  const username = getActingUsername(req);
+  if (!username) throw new UnauthorizedError('Unauthorized');
+  return username;
+}
+
+/**
+ * @param {{
+ *   requisition_guid: string,
+ *   candidate_guid: string,
+ *   enterprise_id: number
+ * }} ctx
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ */
+async function runAddAsApplicant(ctx, req, res) {
+  const createdBy = requireActingUsername(req);
+  const data = await addCandidateAsApplicant(
+    ctx.requisition_guid,
+    ctx.candidate_guid,
+    ctx.enterprise_id,
+    createdBy
+  );
+
+  logRecruitmentAudit(LOG_TAG, 'add_as_applicant', req, {
+    requisition_guid: ctx.requisition_guid,
+    candidate_guid: ctx.candidate_guid,
+    enterprise_id: ctx.enterprise_id,
+    application_guid: data.application_guid,
+    source_code: data.source_code
+  });
+  return sendAddAsApplicantResponse(res, data);
 }
 
 recCandidateMatchRequisitionRouter.get(
@@ -48,6 +78,29 @@ recCandidateMatchRequisitionRouter.get(
   })
 );
 
+/**
+ * Find Candidates → Add as Applicant
+ * POST /api/recruitment/requisitions/:requisition_guid/applicants
+ */
+recCandidateMatchRequisitionRouter.post(
+  '/:requisition_guid/applicants',
+  asyncHandler(async (req, res) => {
+    try {
+      const ctx = validateAddAsApplicantRequest(
+        req.params.requisition_guid,
+        req.body,
+        resolveEnterprise(req)
+      );
+      return await runAddAsApplicant(ctx, req, res);
+    } catch (err) {
+      return handleAddAsApplicantError(res, err);
+    }
+  })
+);
+
+/**
+ * Legacy path — same package and response as POST .../applicants.
+ */
 recCandidateMatchRequisitionRouter.post(
   '/:requisition_guid/candidates/:candidate_guid/add-as-applicant',
   asyncHandler(async (req, res) => {
@@ -57,24 +110,9 @@ recCandidateMatchRequisitionRouter.post(
         req.params.candidate_guid,
         resolveEnterprise(req)
       );
-      const createdBy = actor(req);
-      const result = await addCandidateAsApplicant(
-        ctx.requisition_guid,
-        ctx.candidate_guid,
-        ctx.enterprise_id,
-        createdBy,
-        req.body
-      );
-      if (result.notFound) return sendFindCandidatesNotFound(res, result.notFound);
-      logRecruitmentAudit(LOG_TAG, 'add_as_applicant', req, {
-        requisition_guid: ctx.requisition_guid,
-        candidate_guid: ctx.candidate_guid,
-        enterprise_id: ctx.enterprise_id,
-        application_guid: result.data?.application_guid
-      });
-      return sendAddAsApplicantResponse(res, result.data);
+      return await runAddAsApplicant(ctx, req, res);
     } catch (err) {
-      return handleMutationError(res, err, ADD_AS_APPLICANT_ERROR_MESSAGE);
+      return handleAddAsApplicantError(res, err);
     }
   })
 );

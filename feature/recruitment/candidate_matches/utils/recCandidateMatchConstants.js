@@ -11,15 +11,41 @@ export const LOG_TAG = 'recCandidateMatch';
 
 export const READ_ERROR_MESSAGE = 'Unable to fetch matching candidates. Please try again.';
 export const LIST_SUCCESS_MESSAGE = 'Matching candidates fetched successfully';
-export const ADD_AS_APPLICANT_SUCCESS_MESSAGE = 'Candidate added as applicant successfully';
-export const ADD_AS_APPLICANT_ERROR_MESSAGE =
-  'Unable to add candidate as applicant. Please try again.';
+export const ADD_AS_APPLICANT_SUCCESS_MESSAGE = 'Candidate added as applicant successfully.';
+export const ADD_AS_APPLICANT_ERROR_MESSAGE = 'Unable to add candidate as applicant.';
 
+/** Find-candidates list 404 (view miss). */
 export const REQUISITION_NOT_FOUND_MESSAGE = 'Requisition not found';
 export const CANDIDATE_NOT_FOUND_MESSAGE = 'Candidate not found';
-export const ALREADY_APPLIED_MESSAGE = 'Candidate has already applied for this requisition.';
-export const POSTING_REQUIRED_MESSAGE =
-  'A job posting is required to add this candidate as an applicant.';
+
+/** Oracle ADD_AS_APPLICANT_PKG business messages (keep in sync with package). */
+export const ALREADY_APPLIED_MESSAGE = 'Candidate is already an applicant for this requisition.';
+export const ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE = 'Requisition does not exist.';
+export const ADD_AS_APPLICANT_CANDIDATE_NOT_FOUND_MESSAGE = 'Candidate does not exist.';
+export const REQUISITION_NOT_APPROVED_MESSAGE =
+  'The requisition must be approved before a candidate can be added as an applicant.';
+export const REQUISITION_NOT_OPEN_MESSAGE =
+  'The requisition must be open before a candidate can be added as an applicant.';
+export const NO_ACTIVE_POSTING_MESSAGE =
+  'An active job posting is required before a candidate can be added as an applicant.';
+
+/**
+ * Exact p_message → HTTP mapping for ADD_AS_APPLICANT.
+ * @type {Readonly<Record<string, 'conflict' | 'not_found' | 'validation'>>}
+ */
+export const ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS = Object.freeze({
+  [ALREADY_APPLIED_MESSAGE]: 'conflict',
+  [ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE]: 'not_found',
+  [ADD_AS_APPLICANT_CANDIDATE_NOT_FOUND_MESSAGE]: 'not_found',
+  [REQUISITION_NOT_APPROVED_MESSAGE]: 'validation',
+  [REQUISITION_NOT_OPEN_MESSAGE]: 'validation',
+  [NO_ACTIVE_POSTING_MESSAGE]: 'validation'
+});
+
+/** Fixed application source for Find Candidates → Add as Applicant (never from client). */
+export const ADD_AS_APPLICANT_SOURCE_CODE = 'HR_SYSTEM';
+export const ADD_AS_APPLICANT_STAGE_CODE = 'APPLIED';
+export const ADD_AS_APPLICANT_STATUS_CODE = 'NEW';
 
 export const DEFAULT_PAGE = 1;
 export const DEFAULT_PAGE_SIZE = 20;
@@ -27,8 +53,6 @@ export const MAX_PAGE_SIZE = 100;
 
 export const DEFAULT_SORT_BY = 'match_score';
 export const DEFAULT_SORT_ORDER = 'desc';
-
-export const DEFAULT_ADD_SOURCE_CODE = 'RECRUITER';
 
 /** Withdrawn applications do not block re-adding a candidate. */
 export const INACTIVE_APPLICATION_STATUS_CODES = Object.freeze(['WITHDRAWN']);
