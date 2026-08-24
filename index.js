@@ -66,6 +66,7 @@ import leavePolicyController from './feature/leave_management/abs_leave_policies
 import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
 import enterpriseStatsController from './feature/enterprise_structure/enterprise_stats/controller/enterpriseStatsController.js';
 import activeStructureStatsController from './feature/enterprise_structure/active_structure_stats/controller/activeStructureStatsController.js';
+import currenciesController from './feature/enterprise_structure/currencies/controller/currenciesController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import { requireAuth } from './middleware/authMiddleware.js';
@@ -235,6 +236,9 @@ app.use('/api/enterprise-stats', enterpriseStatsController);
 
 // Active structure stats (active structure + levels with component counts per enterprise)
 app.use('/api/active-structure-stats', activeStructureStatsController);
+
+// Enterprise currencies (ENT.CURRENCIES reference list; before /api catch-all)
+app.use('/api/enterprise/currencies', currenciesController);
 
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
