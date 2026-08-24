@@ -28,38 +28,49 @@ function mockRes() {
 test('normalizeCurrencySearch trims, blanks to null, and caps length', () => {
   assert.equal(normalizeCurrencySearch(undefined), null);
   assert.equal(normalizeCurrencySearch('  '), null);
-  assert.equal(normalizeCurrencySearch(' kw '), 'kw');
-  assert.equal(normalizeCurrencySearch('x'.repeat(40)).length, 32);
+  assert.equal(normalizeCurrencySearch(' Kuwait '), 'Kuwait');
+  assert.equal(normalizeCurrencySearch('x'.repeat(120)).length, 100);
 });
 
-test('buildCurrenciesListQuery orders without WHERE when no search', () => {
+test('buildCurrenciesListQuery selects code+name and orders by name then code', () => {
   const { sql, binds } = buildCurrenciesListQuery();
-  assert.equal(sql, 'SELECT CURRENCY_CODE FROM ENT.CURRENCIES ORDER BY CURRENCY_CODE');
+  assert.equal(
+    sql,
+    'SELECT CURRENCY_CODE, CURRENCY_NAME FROM ENT.CURRENCIES ORDER BY CURRENCY_NAME, CURRENCY_CODE'
+  );
   assert.deepEqual(binds, {});
 });
 
-test('buildCurrenciesListQuery uses :search bind only', () => {
-  const { sql, binds } = buildCurrenciesListQuery({ search: 'KW' });
-  assert.match(sql, /LIKE '%' \|\| UPPER\(:search\) \|\| '%'/);
-  assert.deepEqual(binds, { search: 'KW' });
-  assert.doesNotMatch(sql, /KW/);
+test('buildCurrenciesListQuery searches code and name with :search bind only', () => {
+  const { sql, binds } = buildCurrenciesListQuery({ search: 'Kuwait' });
+  assert.match(
+    sql,
+    /WHERE \(UPPER\(CURRENCY_CODE\) LIKE '%' \|\| UPPER\(:search\) \|\| '%' OR UPPER\(CURRENCY_NAME\) LIKE '%' \|\| UPPER\(:search\) \|\| '%'\)/
+  );
+  assert.match(sql, /ORDER BY CURRENCY_NAME, CURRENCY_CODE/);
+  assert.deepEqual(binds, { search: 'Kuwait' });
+  assert.doesNotMatch(sql, /Kuwait/);
 });
 
 test('mapCurrencyRows shapes payload and empty input', () => {
   assert.deepEqual(mapCurrencyRows(null), []);
-  assert.deepEqual(mapCurrencyRows([{ currency_code: 'USD', extra: 1 }]), [
-    { currency_code: 'USD' }
+  assert.deepEqual(
+    mapCurrencyRows([
+      { currency_code: 'KWD', currency_name: 'Kuwaiti Dinar', extra: 1 }
+    ]),
+    [{ currency_code: 'KWD', currency_name: 'Kuwaiti Dinar' }]
+  );
+  assert.deepEqual(mapCurrencyRows([{}]), [
+    { currency_code: null, currency_name: null }
   ]);
 });
 
 test('sendCurrenciesList returns success envelope', () => {
   const res = mockRes();
-  sendCurrenciesList(res, [{ currency_code: 'AED' }]);
+  const row = { currency_code: 'AED', currency_name: 'UAE Dirham' };
+  sendCurrenciesList(res, [row]);
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, {
-    success: true,
-    data: [{ currency_code: 'AED' }]
-  });
+  assert.deepEqual(res.body, { success: true, data: [row] });
 
   sendCurrenciesList(res, null);
   assert.deepEqual(res.body, { success: true, data: [] });

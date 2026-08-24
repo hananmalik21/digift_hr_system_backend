@@ -22,7 +22,7 @@ class CurrenciesModel {
 
   /**
    * @param {{ search?: string }} [filters]
-   * @returns {Promise<Array<{ currency_code: string }>>}
+   * @returns {Promise<Array<{ currency_code: string, currency_name: string }>>}
    */
   static async findAll(filters = {}) {
     const { sql, binds } = buildCurrenciesListQuery(filters);

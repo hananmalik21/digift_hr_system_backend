@@ -10,14 +10,15 @@ const router = express.Router();
 
 /**
  * GET /api/enterprise/currencies
- * List ENT.CURRENCIES codes alphabetically.
+ * List ENT.CURRENCIES (code + name), ordered by name then code.
  *
- * @query search - Optional partial match on CURRENCY_CODE (case-insensitive)
+ * @query search - Optional partial match on CURRENCY_CODE or CURRENCY_NAME
  */
 router.get('/', async (req, res) => {
   try {
-    const search = normalizeCurrencySearch(req.query.search);
-    const data = await CurrenciesModel.findAll(search != null ? { search } : {});
+    const data = await CurrenciesModel.findAll({
+      search: normalizeCurrencySearch(req.query.search)
+    });
     return sendCurrenciesList(res, data);
   } catch (error) {
     return sendCurrenciesServerError(res, error);

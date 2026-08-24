@@ -2,7 +2,18 @@
  * Shared helpers for ENT.CURRENCIES list (pure — no DB import).
  */
 
-const MAX_SEARCH_LENGTH = 32;
+const MAX_SEARCH_LENGTH = 100;
+
+const SELECT_SQL =
+  'SELECT CURRENCY_CODE, CURRENCY_NAME FROM ENT.CURRENCIES';
+
+const ORDER_SQL = 'ORDER BY CURRENCY_NAME, CURRENCY_CODE';
+
+const SEARCH_WHERE_SQL =
+  `WHERE (` +
+  `UPPER(CURRENCY_CODE) LIKE '%' || UPPER(:search) || '%' ` +
+  `OR UPPER(CURRENCY_NAME) LIKE '%' || UPPER(:search) || '%'` +
+  `)`;
 
 /**
  * Normalize optional `search` query/filter to a trimmed string, or null.
@@ -17,31 +28,32 @@ export function normalizeCurrencySearch(value) {
 }
 
 /**
- * Build SELECT + binds for currency list.
+ * Build SELECT + binds for currency list (code + name).
  * @param {{ search?: string|null }} [filters]
  * @returns {{ sql: string, binds: Record<string, string> }}
  */
 export function buildCurrenciesListQuery(filters = {}) {
   const search = normalizeCurrencySearch(filters.search);
+  const parts = [SELECT_SQL];
   const binds = {};
 
-  let sql = `SELECT CURRENCY_CODE FROM ENT.CURRENCIES`;
-
   if (search != null) {
-    sql += ` WHERE UPPER(CURRENCY_CODE) LIKE '%' || UPPER(:search) || '%'`;
+    parts.push(SEARCH_WHERE_SQL);
     binds.search = search;
   }
 
-  sql += ` ORDER BY CURRENCY_CODE`;
-
-  return { sql, binds };
+  parts.push(ORDER_SQL);
+  return { sql: parts.join(' '), binds };
 }
 
 /**
- * @param {Array<{ currency_code?: string }>|null|undefined} rows
- * @returns {Array<{ currency_code: string|undefined }>}
+ * @param {Array<{ currency_code?: string, currency_name?: string }>|null|undefined} rows
+ * @returns {Array<{ currency_code: string|null, currency_name: string|null }>}
  */
 export function mapCurrencyRows(rows) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
-  return rows.map((row) => ({ currency_code: row?.currency_code }));
+  return rows.map((row) => ({
+    currency_code: row?.currency_code ?? null,
+    currency_name: row?.currency_name ?? null
+  }));
 }
