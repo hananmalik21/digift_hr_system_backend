@@ -65,7 +65,13 @@ test('sendCurrenciesList returns success envelope', () => {
   assert.deepEqual(res.body, { success: true, data: [] });
 });
 
-test('sendCurrenciesServerError hides Oracle details', () => {
+test('sendCurrenciesServerError hides Oracle details', (t) => {
+  const originalError = console.error;
+  console.error = () => {};
+  t.after(() => {
+    console.error = originalError;
+  });
+
   const res = mockRes();
   sendCurrenciesServerError(res, new Error('ORA-00942: table or view does not exist'));
   assert.equal(res.statusCode, 500);
