@@ -14,6 +14,7 @@
     "test:currency": "node --test src/__tests__/currency.service.unit.test.js",
     "test:enterprises": "node --test feature/enterprise_structure/enterprises/__tests__/enterpriseCurrency.unit.test.js feature/enterprise_structure/enterprises/__tests__/resolveEnterpriseBySubdomain.test.js feature/enterprise_structure/shared/__tests__/isoCurrencyCode.unit.test.js",
     "test:employer-info": "node --test feature/recruitment/employer_info/__tests__/recEmployerInfo.unit.test.js",
+    "test:requisition-company-info": "node --test feature/recruitment/requisitions/__tests__/recRequisitionCompanyInfo.unit.test.js",
     "test:payroll": "node --test feature/payroll/__tests__/payrollShared.unit.test.js feature/payroll/__tests__/payTestReset.unit.test.js feature/payroll/__tests__/tmPayroll.bindings.unit.test.js feature/payroll/__tests__/tmPayroll.sourceMapping.v2.unit.test.js feature/payroll/__tests__/tmPayroll.transferBatch.reopen.unit.test.js feature/payroll/__tests__/tmPayroll.transferLifecycle.response.unit.test.js feature/payroll/__tests__/payrollApis.integration.test.js feature/payroll/person_results/__tests__/payPersonResults.unit.test.js feature/payroll/person_results/__tests__/payPersonResultDashboard.unit.test.js src/__tests__/tmOvertimeRequests.lifecycle.unit.test.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

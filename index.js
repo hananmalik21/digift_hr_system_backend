@@ -90,6 +90,7 @@ import fndsecWorkLocationsController from './feature/security/work_locations/con
 import fndsecUsersController from './feature/security/users/controller/fndsecUsersController.js';
 import fndsecAuthController from './feature/security/auth/controller/fndsecAuthController.js';
 import recRequisitionsController from './feature/recruitment/requisitions/controller/recRequisitionsController.js';
+import recRequisitionCompanyInfoController from './feature/recruitment/requisitions/controller/recRequisitionCompanyInfoController.js';
 import {
   recApplicationMatchApplicationRouter,
   recApplicationMatchRequisitionRouter
@@ -386,6 +387,11 @@ app.use('/api/recruiting/requisitions', recCandidateMatchRequisitionRouter);
 app.use('/api/rec/requisitions', recApplicationMatchRequisitionRouter);
 app.use('/api/recruitment/requisitions', recApplicationMatchRequisitionRouter);
 app.use('/api/recruiting/requisitions', recApplicationMatchRequisitionRouter);
+
+// Recruitment — requisition company info (mounted before catch-all GUID routes)
+app.use('/api/rec/requisitions', recRequisitionCompanyInfoController);
+app.use('/api/recruitment/requisitions', recRequisitionCompanyInfoController);
+app.use('/api/recruiting/requisitions', recRequisitionCompanyInfoController);
 
 // Recruitment — requisitions (REC.CREATE_REQUISITION_PKG)
 app.use('/api/rec/requisitions', recRequisitionsController);
