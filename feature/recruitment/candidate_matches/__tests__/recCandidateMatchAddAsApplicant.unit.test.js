@@ -11,6 +11,7 @@ import {
   ADD_AS_APPLICANT_ERROR_MESSAGE,
   ADD_AS_APPLICANT_CANDIDATE_NOT_FOUND_MESSAGE,
   ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE,
+  ALREADY_APPLIED_CONFLICT_MESSAGE,
   ALREADY_APPLIED_MESSAGE,
   NO_ACTIVE_POSTING_MESSAGE,
   REQUISITION_NOT_APPROVED_MESSAGE,
@@ -69,7 +70,13 @@ test('validateAddAsApplicantRequest returns normalized hex GUIDs', () => {
 });
 
 test('throwAddAsApplicantPackageError maps known package messages', () => {
-  assert.throws(() => throwAddAsApplicantPackageError(ALREADY_APPLIED_MESSAGE), ConflictError);
+  assert.throws(
+    () => throwAddAsApplicantPackageError(ALREADY_APPLIED_MESSAGE, { candidate_guid: CAND }),
+    (err) =>
+      err instanceof ConflictError &&
+      err.message === ALREADY_APPLIED_CONFLICT_MESSAGE &&
+      err.details?.candidate_guid === CAND
+  );
   assert.throws(
     () => throwAddAsApplicantPackageError(ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE),
     NotFoundError

@@ -11,7 +11,8 @@ import {
   ADD_AS_APPLICANT_STAGE_CODE,
   ADD_AS_APPLICANT_STATUS_CODE,
   ADD_AS_APPLICANT_ERROR_MESSAGE,
-  ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS
+  ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS,
+  ALREADY_APPLIED_CONFLICT_MESSAGE
 } from '../utils/recCandidateMatchConstants.js';
 import { mapRequisitionHeader } from '../utils/recCandidateMatchMappers.js';
 import {
@@ -19,20 +20,32 @@ import {
   listCandidateMatchesFromView
 } from '../model/recCandidateMatchViewModel.js';
 
+function isDuplicateApplicantMessage(message) {
+  const m = String(message ?? '').trim().toLowerCase();
+  if (!m) return false;
+  return (
+    ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS[String(message ?? '').trim()] === 'conflict' ||
+    m.includes('already an applicant') ||
+    m.includes('already applied')
+  );
+}
+
 /**
  * Map Oracle ADD_AS_APPLICANT p_message to HTTP domain errors.
- * Known package messages are returned unchanged. Unknown text → generic 500
- * (never expose raw Oracle / SQL detail).
- *
- * Business rules live only in the package — Node does not look up postings
- * or re-validate requisition state.
+ * Duplicate conflicts always re-check via the package (never trust a prior GET).
  *
  * @param {string|null|undefined} message
+ * @param {{ candidate_guid?: string|null, application_guid?: string|null }} [ctx]
  */
-export function throwAddAsApplicantPackageError(message) {
+export function throwAddAsApplicantPackageError(message, ctx = {}) {
   const m = String(message ?? '').trim();
+  if (isDuplicateApplicantMessage(m)) {
+    throw new ConflictError(ALREADY_APPLIED_CONFLICT_MESSAGE, null, null, m, {
+      candidate_guid: ctx.candidate_guid ?? null,
+      application_guid: ctx.application_guid ?? null
+    });
+  }
   const kind = ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS[m];
-  if (kind === 'conflict') throw new ConflictError(m);
   if (kind === 'not_found') throw new NotFoundError(m);
   if (kind === 'validation') throw new ValidationError('Validation failed', [m]);
   throw new AppError(ADD_AS_APPLICANT_ERROR_MESSAGE, 500, 'ADD_AS_APPLICANT_FAILED');
@@ -65,8 +78,7 @@ export async function listFindCandidates(requisitionGuidHex, enterpriseId, query
 
 /**
  * Find Candidates → Add as Applicant via REC.ADD_AS_APPLICANT_PKG.ADD_AS_APPLICANT.
- * Does not look up posting_guid — the package finds the active posting.
- * source_code is always HR_SYSTEM (package-side); created_by must be the authenticated user.
+ * Package enforces CAN_ADD_AS_APPLICANT / duplicate rules at write time.
  *
  * @param {string} requisitionGuidHex
  * @param {string} candidateGuidHex
@@ -87,7 +99,10 @@ export async function addCandidateAsApplicant(
   });
 
   if (!packageStatusIsSuccess(pkg.status)) {
-    throwAddAsApplicantPackageError(pkg.message);
+    throwAddAsApplicantPackageError(pkg.message, {
+      candidate_guid: candidateGuidHex,
+      application_guid: pkg.application_guid
+    });
   }
 
   return {

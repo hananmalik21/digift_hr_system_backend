@@ -83,10 +83,14 @@ export function handleAddAsApplicantError(res, err) {
     });
   }
   if (err instanceof ConflictError) {
-    return sendPackageResponse(res, 409, {
+    const payload = {
       success: false,
       message: err.userMessage || err.message || ALREADY_APPLIED_MESSAGE
-    });
+    };
+    if (err.details && typeof err.details === 'object') {
+      payload.data = err.details;
+    }
+    return sendPackageResponse(res, 409, payload);
   }
   return sendPackageResponse(res, 500, {
     success: false,

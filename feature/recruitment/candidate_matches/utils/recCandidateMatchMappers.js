@@ -208,14 +208,39 @@ export async function mapCandidateMatchRow(row) {
   const availability_code = strOrNull(m.availability_code);
   const availability_text = strOrNull(m.availability_text);
 
-  const application_guid = normalizeGuidValue(
-    pick(m, 'applied_application_guid', 'application_guid')
+  // Application status from REC.V_REQUISITION_CANDIDATE_MATCH — do not invent flags in Node.
+  const applied_flag = normalizeYnFlag(m.applied_flag);
+  const application_status = strOrNull(m.application_status);
+  const can_add_as_applicant = normalizeYnFlag(m.can_add_as_applicant);
+  const application_count = safeFiniteNumber(m.application_count);
+  const application_id = safeFiniteNumber(m.application_id);
+  const application_guid = normalizeGuidValue(m.application_guid);
+  const application_number = strOrNull(m.application_number);
+  const application_stage_code = strOrNull(
+    pick(m, 'application_stage_code', 'current_stage_code')
   );
-  const already_applied = Boolean(application_guid);
+  const application_status_code = strOrNull(m.application_status_code);
+  const application_applied_date = formatDateOnly(
+    pick(m, 'application_applied_date_iso', 'application_applied_date', 'applied_date')
+  );
+  const already_applied = applied_flag === 'Y';
 
   const title_score = safeFiniteNumber(m.title_match_score);
   const experience_score = safeFiniteNumber(m.experience_score);
   const relocation_score = safeFiniteNumber(m.relocation_score);
+
+  const application = {
+    applied_flag,
+    application_status,
+    can_add_as_applicant,
+    application_count,
+    application_id,
+    application_guid,
+    application_number,
+    stage_code: application_stage_code,
+    status_code: application_status_code,
+    applied_date: application_applied_date
+  };
 
   return {
     candidate_id: safeFiniteNumber(m.candidate_id),
@@ -289,9 +314,19 @@ export async function mapCandidateMatchRow(row) {
     skills: mapSkills(skillsJson, m.key_skills_text),
     talent_pool: mapTalentPool(m),
     education: mapEducation(m, educationJson),
-    already_applied,
+    application,
+    // Flat fields for backward-compatible Flutter clients
+    applied_flag,
+    application_status,
+    can_add_as_applicant,
+    application_count,
+    application_id,
     application_guid,
-    can_add_as_applicant: !already_applied
+    application_number,
+    application_stage_code,
+    application_status_code,
+    application_applied_date,
+    already_applied
   };
 }
 

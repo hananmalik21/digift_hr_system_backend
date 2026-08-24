@@ -10,6 +10,7 @@ import {
   DEFAULT_SORT_BY,
   DEFAULT_SORT_ORDER,
   MAX_PAGE_SIZE,
+  APPLIED_STATUS_FILTERS,
   SORT_COLUMNS,
   SORT_KEYS
 } from './recCandidateMatchConstants.js';
@@ -93,6 +94,23 @@ export function parseOptionalUpperCode(raw) {
 
 export function parseWillingToRelocateFilter(raw) {
   return parseOptionalYnFilter(raw, 'willing_to_relocate');
+}
+
+/**
+ * applied_status=ALL|APPLIED|NOT_APPLIED → APPLIED_FLAG bind (Y/N) or null for ALL.
+ * @param {unknown} raw
+ * @returns {'Y'|'N'|null}
+ */
+export function parseAppliedStatusFilter(raw) {
+  if (isBlank(raw)) return null;
+  const key = String(raw).trim().toUpperCase();
+  if (!APPLIED_STATUS_FILTERS.includes(key)) {
+    throw new ValidationError('Validation failed', [
+      `applied_status must be one of: ${APPLIED_STATUS_FILTERS.join(', ')}`
+    ]);
+  }
+  if (key === 'ALL') return null;
+  return key === 'APPLIED' ? 'Y' : 'N';
 }
 
 export function parseFindCandidatesSortSql(query) {

@@ -66,7 +66,20 @@ test('availability display comes from the view, not notice-period rules', async 
   assert.equal(mapped.experience.display, '6 years');
   assert.equal(mapped.candidate_subtitle, 'Senior Software Engineer at Tech Synergy Ltd');
   assert.equal(mapped.already_applied, false);
-  assert.equal(mapped.can_add_as_applicant, true);
+  assert.equal(mapped.applied_flag, null);
+  assert.equal(mapped.can_add_as_applicant, null);
+  assert.deepEqual(mapped.application, {
+    applied_flag: null,
+    application_status: null,
+    can_add_as_applicant: null,
+    application_count: null,
+    application_id: null,
+    application_guid: null,
+    application_number: null,
+    stage_code: null,
+    status_code: null,
+    applied_date: null
+  });
   assert.deepEqual(mapped.skills, []);
   assert.equal(mapped.talent_pool, null);
   assert.equal(mapped.education, null);
@@ -120,14 +133,60 @@ test('missing location uses Not specified display without inventing availability
   assert.equal(mapped.availability_score, null);
 });
 
-test('already applied flags come from the application join column', async () => {
-  const mapped = await mapCandidateMatchRow({
+test('application status comes from the view, not Node-invented flags', async () => {
+  const notApplied = await mapCandidateMatchRow({
     CANDIDATE_GUID: '53F8CDD520DAD58AE0631718000ADEDC',
-    APPLIED_APPLICATION_GUID: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    APPLIED_FLAG: 'N',
+    APPLICATION_STATUS: 'NOT_APPLIED',
+    CAN_ADD_AS_APPLICANT: 'Y',
+    APPLICATION_COUNT: 0
   });
-  assert.equal(mapped.already_applied, true);
-  assert.equal(mapped.can_add_as_applicant, false);
-  assert.equal(mapped.application_guid, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(notApplied.already_applied, false);
+  assert.equal(notApplied.can_add_as_applicant, 'Y');
+  assert.deepEqual(notApplied.application, {
+    applied_flag: 'N',
+    application_status: 'NOT_APPLIED',
+    can_add_as_applicant: 'Y',
+    application_count: 0,
+    application_id: null,
+    application_guid: null,
+    application_number: null,
+    stage_code: null,
+    status_code: null,
+    applied_date: null
+  });
+
+  const applied = await mapCandidateMatchRow({
+    CANDIDATE_GUID: '53F8CDD520DAD58AE0631718000ADEDC',
+    APPLIED_FLAG: 'Y',
+    APPLICATION_STATUS: 'APPLIED',
+    CAN_ADD_AS_APPLICANT: 'N',
+    APPLICATION_COUNT: 1,
+    APPLICATION_ID: 105,
+    APPLICATION_GUID: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    APPLICATION_NUMBER: 'APP-2026-000105',
+    APPLICATION_STAGE_CODE: 'SCREENING',
+    APPLICATION_STATUS_CODE: 'ACTIVE',
+    APPLICATION_APPLIED_DATE: '2026-08-20'
+  });
+  assert.equal(applied.already_applied, true);
+  assert.equal(applied.can_add_as_applicant, 'N');
+  assert.equal(applied.application_guid, 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+  assert.equal(applied.application_stage_code, 'SCREENING');
+  assert.equal(applied.application_status_code, 'ACTIVE');
+  assert.equal(applied.application_applied_date, '2026-08-20');
+  assert.deepEqual(applied.application, {
+    applied_flag: 'Y',
+    application_status: 'APPLIED',
+    can_add_as_applicant: 'N',
+    application_count: 1,
+    application_id: 105,
+    application_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    application_number: 'APP-2026-000105',
+    stage_code: 'SCREENING',
+    status_code: 'ACTIVE',
+    applied_date: '2026-08-20'
+  });
 });
 
 test('skills parse Oracle JSON and stay empty when the view has none', () => {

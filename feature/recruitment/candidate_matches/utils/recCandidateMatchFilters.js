@@ -5,10 +5,12 @@ import { optionalEqClause, setBindValue } from '../../shared/recViewListSql.js';
 import { isNonEmptyTrimmed } from '../../shared/recViewModelUtils.js';
 import {
   parseAvailabilityCodeFilter,
+  parseAppliedStatusFilter,
   parseFindCandidatesSortSql,
   parseMatchLevelFilter,
   parseMinAvailabilityScore,
   parseMinMatchScore,
+  parseOptionalUpperCode,
   parseWillingToRelocateFilter
 } from './recCandidateMatchValidators.js';
 import { SEARCH_COLUMNS } from './recCandidateMatchConstants.js';
@@ -32,7 +34,10 @@ function createListBinds(enterpriseId, requisitionGuidHex) {
     p_availability_code: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
     p_location_pat: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 500 },
     p_willing_to_relocate: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
-    p_search_pat: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 }
+    p_search_pat: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
+    p_applied_flag: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
+    p_application_stage_code: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
+    p_application_status_code: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 }
   };
 }
 
@@ -103,6 +108,26 @@ export function buildCandidateMatchListFilters(requisitionGuidHex, enterpriseId,
     parseWillingToRelocateFilter(query?.willing_to_relocate ?? query?.willingToRelocate)
   );
   parts.push(optionalEqClause('p_willing_to_relocate', 'WILLING_TO_RELOCATE'));
+
+  const appliedFlag = parseAppliedStatusFilter(query?.applied_status ?? query?.appliedStatus);
+  if (appliedFlag) {
+    setBindValue(binds, 'p_applied_flag', appliedFlag);
+  }
+  parts.push(optionalEqClause('p_applied_flag', 'APPLIED_FLAG'));
+
+  setBindValue(
+    binds,
+    'p_application_stage_code',
+    parseOptionalUpperCode(query?.application_stage_code ?? query?.applicationStageCode)
+  );
+  parts.push(optionalEqClause('p_application_stage_code', 'APPLICATION_STAGE_CODE'));
+
+  setBindValue(
+    binds,
+    'p_application_status_code',
+    parseOptionalUpperCode(query?.application_status_code ?? query?.applicationStatusCode)
+  );
+  parts.push(optionalEqClause('p_application_status_code', 'APPLICATION_STATUS_CODE'));
 
   const searchPat = toLikePattern(query?.search ?? query?.q);
   if (searchPat) {

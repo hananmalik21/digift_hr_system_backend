@@ -20,6 +20,9 @@ export const CANDIDATE_NOT_FOUND_MESSAGE = 'Candidate not found';
 
 /** Oracle ADD_AS_APPLICANT_PKG business messages (keep in sync with package). */
 export const ALREADY_APPLIED_MESSAGE = 'Candidate is already an applicant for this requisition.';
+/** Conflict response copy for Add as Applicant (package still authoritative). */
+export const ALREADY_APPLIED_CONFLICT_MESSAGE =
+  'Candidate has already applied to this requisition';
 export const ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE = 'Requisition does not exist.';
 export const ADD_AS_APPLICANT_CANDIDATE_NOT_FOUND_MESSAGE = 'Candidate does not exist.';
 export const REQUISITION_NOT_APPROVED_MESSAGE =
@@ -35,6 +38,7 @@ export const NO_ACTIVE_POSTING_MESSAGE =
  */
 export const ADD_AS_APPLICANT_PACKAGE_ERROR_KINDS = Object.freeze({
   [ALREADY_APPLIED_MESSAGE]: 'conflict',
+  [ALREADY_APPLIED_CONFLICT_MESSAGE]: 'conflict',
   [ADD_AS_APPLICANT_REQUISITION_NOT_FOUND_MESSAGE]: 'not_found',
   [ADD_AS_APPLICANT_CANDIDATE_NOT_FOUND_MESSAGE]: 'not_found',
   [REQUISITION_NOT_APPROVED_MESSAGE]: 'validation',
@@ -53,9 +57,6 @@ export const MAX_PAGE_SIZE = 100;
 
 export const DEFAULT_SORT_BY = 'match_score';
 export const DEFAULT_SORT_ORDER = 'desc';
-
-/** Withdrawn applications do not block re-adding a candidate. */
-export const INACTIVE_APPLICATION_STATUS_CODES = Object.freeze(['WITHDRAWN']);
 
 export const LOCATION_UNSPECIFIED_DISPLAY = 'Not specified';
 
@@ -90,5 +91,18 @@ export const MATCH_VIEW_UI_COLUMNS = Object.freeze([
   'RECOMMENDATION_CODE',
   'CANDIDATE_SUBTITLE',
   'EXPERIENCE_DISPLAY',
-  'LOCATION_DISPLAY'
+  'LOCATION_DISPLAY',
+  'APPLIED_FLAG',
+  'APPLICATION_STATUS',
+  'CAN_ADD_AS_APPLICANT',
+  'APPLICATION_COUNT',
+  'APPLICATION_ID',
+  'APPLICATION_GUID',
+  'APPLICATION_NUMBER',
+  'APPLICATION_STAGE_CODE',
+  'APPLICATION_STATUS_CODE',
+  'APPLICATION_APPLIED_DATE'
 ]);
+
+/** Find-candidates applied_status filter values. */
+export const APPLIED_STATUS_FILTERS = Object.freeze(['ALL', 'APPLIED', 'NOT_APPLIED']);

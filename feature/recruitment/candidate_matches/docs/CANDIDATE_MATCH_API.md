@@ -47,6 +47,9 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
 | `availability_code` | — | Exact view `AVAILABILITY_CODE` (e.g. `IMMEDIATE`) |
 | `location` | — | LIKE on `CURRENT_LOCATION` / `LOCATION_DISPLAY` |
 | `willing_to_relocate` | — | `Y` or `N` |
+| `applied_status` | `ALL` | `ALL`, `APPLIED` (`APPLIED_FLAG=Y`), `NOT_APPLIED` (`APPLIED_FLAG=N`) |
+| `application_stage_code` | — | Exact view `APPLICATION_STAGE_CODE` |
+| `application_status_code` | — | Exact view `APPLICATION_STATUS_CODE` |
 | `search` | — | `CANDIDATE_NAME`, `CURRENT_TITLE`, `CURRENT_EMPLOYER`, `EMAIL`, `CURRENT_LOCATION` |
 | `sort_by` | `match_score` | `match_score`, `years_experience`, `availability_score`, `candidate_name` |
 | `sort_order` | `desc` | `asc` or `desc` |
@@ -118,8 +121,28 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
       "talent_pool": null,
       "education": null,
       "already_applied": false,
+      "applied_flag": "N",
+      "application_status": "NOT_APPLIED",
+      "can_add_as_applicant": "Y",
+      "application_count": 0,
+      "application_id": null,
       "application_guid": null,
-      "can_add_as_applicant": true,
+      "application_number": null,
+      "application_stage_code": null,
+      "application_status_code": null,
+      "application_applied_date": null,
+      "application": {
+        "applied_flag": "N",
+        "application_status": "NOT_APPLIED",
+        "can_add_as_applicant": "Y",
+        "application_count": 0,
+        "application_id": null,
+        "application_guid": null,
+        "application_number": null,
+        "stage_code": null,
+        "status_code": null,
+        "applied_date": null
+      },
       "match_score": 82,
       "match_display": "82% Match",
       "availability_score": 80,
@@ -131,7 +154,7 @@ curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
-Flat match/availability fields are returned alongside nested objects so existing clients keep working.
+Flat match/availability/application fields are returned alongside nested objects so existing clients keep working. Application status comes from `REC.V_REQUISITION_CANDIDATE_MATCH` (`APPLIED_FLAG`, `CAN_ADD_AS_APPLICANT`, etc.) — Node does not join `REC.REC_APPLICATIONS` or invent flags.
 
 ### GET find-candidates — 404
 
@@ -210,8 +233,9 @@ The API does **not** look up `posting_guid`. `REC.ADD_AS_APPLICANT_PKG` finds th
 ## View columns
 
 Reads `SELECT v.*` from `REC.V_REQUISITION_CANDIDATE_MATCH`, with
-`ESTIMATED_AVAILABLE_DATE` also projected as `YYYY-MM-DD`, plus a
-`REC.V_APPLICATIONS` join for `already_applied`.
+`ESTIMATED_AVAILABLE_DATE` and `APPLICATION_APPLIED_DATE` also projected as
+`YYYY-MM-DD`. Application status is provided by the view — no per-row
+`REC.REC_APPLICATIONS` lookup.
 
 | API field | View source |
 | --------- | ----------- |
@@ -228,6 +252,16 @@ Reads `SELECT v.*` from `REC.V_REQUISITION_CANDIDATE_MATCH`, with
 | `candidate_subtitle` | `CANDIDATE_SUBTITLE` |
 | `experience.display` | `EXPERIENCE_DISPLAY` |
 | `location.display` | `LOCATION_DISPLAY` |
+| `applied_flag` / `application.applied_flag` | `APPLIED_FLAG` |
+| `application_status` / `application.application_status` | `APPLICATION_STATUS` |
+| `can_add_as_applicant` / `application.can_add_as_applicant` | `CAN_ADD_AS_APPLICANT` |
+| `application_count` | `APPLICATION_COUNT` |
+| `application_id` / `application.application_id` | `APPLICATION_ID` |
+| `application_guid` / `application.application_guid` | `APPLICATION_GUID` |
+| `application_number` | `APPLICATION_NUMBER` |
+| `application_stage_code` / `application.stage_code` | `APPLICATION_STAGE_CODE` |
+| `application_status_code` / `application.status_code` | `APPLICATION_STATUS_CODE` |
+| `application_applied_date` / `application.applied_date` | `APPLICATION_APPLIED_DATE` (`YYYY-MM-DD`) |
 
 `INITIALS` is presentation-only and is derived in Node from `FIRST_NAME` / `LAST_NAME`.
 
