@@ -7,7 +7,7 @@
  * PUT    /api/employer-info/:guid    (multipart/form-data; logo optional)
  * DELETE /api/employer-info/:guid
  * PATCH  /api/employer-info/:guid/status
- * GET    /api/employer-info/:guid/logo
+ * GET    /api/employer-info/:guid/logo   (public — no JWT; inline image)
  * DELETE /api/employer-info/:guid/logo
  */
 
@@ -35,9 +35,11 @@ import {
 } from '../utils/recEmployerInfoValidators.js';
 import { extractGuidFromPackageResult } from '../utils/recEmployerInfoMapper.js';
 import { MESSAGES, packageStatusIsSuccess } from '../utils/recEmployerInfoDb.js';
+import { withPublicLogoUrls } from '../utils/recEmployerInfoLogoUrl.js';
 import {
   handleEmployerInfoError,
   sendFail,
+  sendLogoBinary,
   sendOk,
   sendPackageOutcome
 } from '../utils/recEmployerInfoResponses.js';
@@ -83,34 +85,27 @@ async function resolveMutationData(pkg, guidHint = null) {
 
 /**
  * Package outcome with view refresh on success.
+ * @param {import('express').Request} req
  * @param {import('express').Response} res
  * @param {{ status?: string, message?: string, data?: unknown, rawData?: unknown }} pkg
  * @param {{ successMessage: string, successHttpStatus?: number, guidHint?: string|null }} options
  */
-async function sendMutatedPackage(res, pkg, { successMessage, successHttpStatus = 200, guidHint = null }) {
+async function sendMutatedPackage(req, res, pkg, { successMessage, successHttpStatus = 200, guidHint = null }) {
   if (!packageStatusIsSuccess(pkg?.status)) {
     return sendPackageOutcome(res, pkg);
   }
+  const data = withPublicLogoUrls(await resolveMutationData(pkg, guidHint), req);
   return sendPackageOutcome(res, pkg, {
     successMessage,
     successHttpStatus,
-    data: await resolveMutationData(pkg, guidHint)
+    data
   });
-}
-
-function sendLogoBinary(res, file) {
-  const fileName = file.logo_file_name || 'logo';
-  res.setHeader('Content-Type', file.logo_mime_type || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
-  res.setHeader('Cache-Control', 'public, max-age=3600');
-  res.setHeader('Content-Length', String(file.logo.length));
-  return res.status(200).send(file.logo);
 }
 
 router.get(
   '/',
   run(async (req, res) => {
-    const data = await listEmployerInfo(parseListQuery(req.query));
+    const data = withPublicLogoUrls(await listEmployerInfo(parseListQuery(req.query)), req);
     return sendOk(res, MESSAGES.LIST_OK, data);
   })
 );
@@ -140,7 +135,7 @@ router.patch(
   run(async (req, res) => {
     const guid = parseEmployerInfoGuid(req.params.guid);
     const pkg = await setEmployerInfoStatus(guid, parseActiveFlag(req.body?.active_flag));
-    return sendMutatedPackage(res, pkg, {
+    return sendMutatedPackage(req, res, pkg, {
       successMessage: pkg.message || MESSAGES.STATUS_OK,
       guidHint: guid
     });
@@ -150,7 +145,10 @@ router.patch(
 router.get(
   '/:guid',
   run(async (req, res) => {
-    const data = await getEmployerInfoByGuid(parseEmployerInfoGuid(req.params.guid));
+    const data = withPublicLogoUrls(
+      await getEmployerInfoByGuid(parseEmployerInfoGuid(req.params.guid)),
+      req
+    );
     return sendOk(res, MESSAGES.GET_OK, data);
   })
 );
@@ -162,7 +160,7 @@ router.post(
     const payload = buildEmployerInfoPayload(req.body || {});
     const logo = validateLogoUpload(getUploadedLogoFile(req), { required: true });
     const pkg = await createEmployerInfo(payload, logo);
-    return sendMutatedPackage(res, pkg, {
+    return sendMutatedPackage(req, res, pkg, {
       successMessage: MESSAGES.CREATE_OK,
       successHttpStatus: 201
     });
@@ -177,7 +175,7 @@ router.put(
     const payload = buildEmployerInfoPayload(req.body || {}, { employerInfoGuid: guid });
     const logo = validateLogoUpload(getUploadedLogoFile(req));
     const pkg = await updateEmployerInfo(payload, logo);
-    return sendMutatedPackage(res, pkg, {
+    return sendMutatedPackage(req, res, pkg, {
       successMessage: MESSAGES.UPDATE_OK,
       guidHint: guid
     });

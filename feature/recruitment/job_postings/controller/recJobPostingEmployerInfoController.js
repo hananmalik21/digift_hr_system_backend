@@ -5,6 +5,7 @@
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
 import { handleReadError, sendPackageResponse } from '../../shared/recControllerHelpers.js';
+import { withPublicLogoUrls } from '../../employer_info/utils/recEmployerInfoLogoUrl.js';
 import { getJobPostingEmployerInfoByGuid } from '../model/recJobPostingEmployerInfoModel.js';
 import { MESSAGES } from '../utils/recJobPostingEmployerInfoConstants.js';
 import { parseJobPostingEmployerInfoGuid } from '../utils/recJobPostingEmployerInfoValidators.js';
@@ -20,7 +21,7 @@ router.get(
       return sendPackageResponse(res, 200, {
         success: true,
         message: result.message,
-        data: result.data
+        data: withPublicLogoUrls(result.data, req)
       });
     } catch (err) {
       return handleReadError(res, err, MESSAGES.READ_ERROR);

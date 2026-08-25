@@ -1,4 +1,5 @@
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { employerInfoLogoPath } from './recEmployerInfoLogoUrl.js';
 
 const HEX_32 = /^[0-9A-Fa-f]{32}$/;
 
@@ -66,11 +67,13 @@ function resolveLogoAvailable(m) {
 
 /**
  * Map one REC.V_EMPLOYER_INFO row to API JSON (no BLOB).
+ * logo_url is relative; controllers call withPublicLogoUrls for absolute URLs.
  * @param {Record<string, unknown>} row
  */
 export function mapEmployerInfoViewRow(row) {
   const m = rowKeyMap(row);
   const employerInfoGuid = normalizeGuidValue(m.employer_info_guid);
+  const logoAvailable = resolveLogoAvailable(m);
 
   return {
     employer_info_id: safeFiniteNumber(m.employer_info_id),
@@ -90,10 +93,13 @@ export function mapEmployerInfoViewRow(row) {
     industry: strOrNull(m.industry),
     about_company: strOrNull(m.about_company),
 
-    logo_available: resolveLogoAvailable(m),
+    logo_available: logoAvailable,
     logo_file_name: strOrNull(m.logo_file_name),
     logo_mime_type: strOrNull(m.logo_mime_type),
-    logo_url: employerInfoGuid ? `/api/employer-info/${employerInfoGuid}/logo` : null,
+    logo_url:
+      employerInfoGuid && logoAvailable === 'Y'
+        ? employerInfoLogoPath(employerInfoGuid)
+        : null,
 
     active_flag: normalizeYnFlag(m.active_flag),
     creation_date: formatDateTime(m.creation_date),

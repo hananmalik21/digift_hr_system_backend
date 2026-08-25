@@ -17,6 +17,10 @@ import {
 } from '../utils/recEmployerInfoValidators.js';
 import { mapEmployerInfoViewRow } from '../utils/recEmployerInfoMapper.js';
 import {
+  buildEmployerInfoLogoUrl,
+  withPublicLogoUrls
+} from '../utils/recEmployerInfoLogoUrl.js';
+import {
   packageFailureHttpStatus,
   packageStatusIsSuccess
 } from '../utils/recEmployerInfoResponses.js';
@@ -165,7 +169,7 @@ test('validateLogoUpload accepts png and rejects bad mime / oversized', () => {
   assert.throws(() => validateLogoUpload(null, { required: true }), ValidationError);
 });
 
-test('mapEmployerInfoViewRow builds logo_url and omits blob', () => {
+test('mapEmployerInfoViewRow builds relative logo_url and omits blob', () => {
   const mapped = mapEmployerInfoViewRow({
     EMPLOYER_INFO_ID: 1,
     EMPLOYER_INFO_GUID: VALID_GUID,
@@ -197,6 +201,64 @@ test('mapEmployerInfoViewRow builds logo_url and omits blob', () => {
   assert.equal(mapped.logo_url, `/api/employer-info/${VALID_GUID}/logo`);
   assert.equal(mapped.logo, undefined);
   assert.equal(mapped.LOGO, undefined);
+});
+
+test('withPublicLogoUrls absolutizes from API_BASE_URL', () => {
+  const prev = process.env.API_BASE_URL;
+  process.env.API_BASE_URL = 'https://api.example.com';
+  try {
+    const mapped = withPublicLogoUrls({
+      employer_info_guid: VALID_GUID,
+      logo_available: 'Y',
+      logo_url: `/api/employer-info/${VALID_GUID}/logo`
+    });
+    assert.equal(
+      mapped.logo_url,
+      `https://api.example.com/api/employer-info/${VALID_GUID}/logo`
+    );
+    assert.equal(
+      buildEmployerInfoLogoUrl(VALID_GUID),
+      `https://api.example.com/api/employer-info/${VALID_GUID}/logo`
+    );
+  } finally {
+    if (prev === undefined) delete process.env.API_BASE_URL;
+    else process.env.API_BASE_URL = prev;
+  }
+});
+
+test('withPublicLogoUrls absolutizes from request host', () => {
+  const prev = process.env.API_BASE_URL;
+  delete process.env.API_BASE_URL;
+  try {
+    const req = {
+      protocol: 'https',
+      get: (name) => (name === 'host' ? 'careers.synexis.com' : undefined)
+    };
+    const mapped = withPublicLogoUrls(
+      {
+        employer_info_guid: VALID_GUID,
+        logo_available: 'Y',
+        logo_url: `/api/employer-info/${VALID_GUID}/logo`
+      },
+      req
+    );
+    assert.equal(
+      mapped.logo_url,
+      `https://careers.synexis.com/api/employer-info/${VALID_GUID}/logo`
+    );
+  } finally {
+    if (prev === undefined) delete process.env.API_BASE_URL;
+    else process.env.API_BASE_URL = prev;
+  }
+});
+
+test('withPublicLogoUrls skips rows without an available logo', () => {
+  const row = {
+    employer_info_guid: VALID_GUID,
+    logo_available: 'N',
+    logo_url: null
+  };
+  assert.equal(withPublicLogoUrls(row).logo_url, null);
 });
 
 test('packageFailureHttpStatus maps duplicates to 409 and not-found to 404', () => {

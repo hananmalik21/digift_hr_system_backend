@@ -62,7 +62,8 @@ const PUBLIC_PATHS = [
 ];
 
 function requestPathname(req) {
-  const raw = req.path || req.originalUrl || req.url || '';
+  // Prefer originalUrl so global auth matches full public paths reliably.
+  const raw = req.originalUrl || req.url || req.path || '';
   const withoutQuery = String(raw).split('?')[0].split('#')[0];
   return withoutQuery.replace(/\/+$/, '') || '/';
 }

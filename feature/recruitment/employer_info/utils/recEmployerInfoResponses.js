@@ -30,6 +30,28 @@ export function sendFail(res, message, httpStatus = 400, data = null) {
 }
 
 /**
+ * Serve logo bytes for public viewing (inline; CORS-friendly for <img src>).
+ * @param {import('express').Response} res
+ * @param {{ logo: Buffer, logo_file_name?: string, logo_mime_type?: string }} file
+ */
+export function sendLogoBinary(res, file) {
+  const rawName = String(file.logo_file_name || 'logo').trim() || 'logo';
+  const asciiName = rawName.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, '');
+  const utf8Name = encodeURIComponent(rawName);
+
+  res.setHeader('Content-Type', file.logo_mime_type || 'application/octet-stream');
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${asciiName}"; filename*=UTF-8''${utf8Name}`
+  );
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Content-Length', String(file.logo.length));
+  return res.status(200).send(file.logo);
+}
+
+/**
  * @param {import('express').Response} res
  * @param {{ status?: string, message?: string, data?: unknown }|null|undefined} pkg
  * @param {{ successMessage?: string, successHttpStatus?: number, data?: unknown }} [options]
