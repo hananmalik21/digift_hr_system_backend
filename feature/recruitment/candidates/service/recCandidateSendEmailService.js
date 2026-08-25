@@ -1,12 +1,12 @@
 import { sendEmail } from '../../../../services/email.service.js';
 import { getCandidateByGuidFromView } from '../model/recCandidateViewModel.js';
-import { parseCandidateGuidParam } from './recCandidateValidators.js';
-import { CANDIDATE_SEND_EMAIL_ERROR } from './recCandidateSendEmailConstants.js';
+import { parseCandidateGuidParam } from '../utils/recCandidateValidators.js';
+import { CANDIDATE_SEND_EMAIL_ERROR } from '../utils/recCandidateSendEmailConstants.js';
 import {
   buildPlainTextEmailHtml,
   mapAttachmentMeta
-} from './recCandidateSendEmailContent.js';
-import { validateSendCandidateEmailBody } from './recCandidateSendEmailValidators.js';
+} from '../utils/recCandidateSendEmailContent.js';
+import { validateSendCandidateEmailBody } from '../utils/recCandidateSendEmailValidators.js';
 
 /**
  * Send an email to a candidate (Send Message modal).
