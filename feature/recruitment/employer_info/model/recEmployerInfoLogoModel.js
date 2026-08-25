@@ -6,14 +6,14 @@ import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
 import { TABLE } from '../utils/recEmployerInfoConstants.js';
-import { MESSAGES, withConnection } from '../utils/recEmployerInfoDb.js';
+import { MESSAGES, compactEmployerInfoGuid, withConnection } from '../utils/recEmployerInfoDb.js';
 
 /**
  * @param {string} employerInfoGuidHex — validated 32-char hex
  * @returns {Promise<{ logo: Buffer, logo_file_name: string, logo_mime_type: string }|null>}
  */
 export async function getEmployerInfoLogoByGuid(employerInfoGuidHex) {
-  const hex = String(employerInfoGuidHex).trim().replace(/-/g, '').toUpperCase();
+  const hex = compactEmployerInfoGuid(employerInfoGuidHex);
 
   try {
     return await withConnection(async (connection) => {

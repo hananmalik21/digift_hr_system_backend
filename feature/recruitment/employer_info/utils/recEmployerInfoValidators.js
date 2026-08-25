@@ -51,7 +51,7 @@ export function parseAssignmentType(raw, fieldName = 'assignment_type') {
   if (!isNonEmpty(raw)) validationFailed(`${fieldName} is required`);
   const v = String(raw).trim().toUpperCase();
   if (!ASSIGNMENT_TYPES.includes(v)) {
-    validationFailed(`${fieldName} must be ENTERPRISE_LEVEL or COMPANY_LEVEL`);
+    validationFailed(`${fieldName} must be one of: ${ASSIGNMENT_TYPES.join(', ')}`);
   }
   return v;
 }
@@ -75,18 +75,19 @@ export function parseOptionalText(raw) {
 }
 
 /**
- * Build CREATE/UPDATE package payload from form fields (no logo binary).
+ * Build CREATE/UPDATE package payload from multipart form fields (no logo binary).
  * @param {Record<string, unknown>} body
  * @param {{ employerInfoGuid?: string }} [options]
  */
 export function buildEmployerInfoPayload(body, options = {}) {
   const { employerInfoGuid = null } = options;
+  const isUpdate = Boolean(employerInfoGuid);
   const payload = {
     enterprise_id: parseRequiredEnterpriseId(body?.enterprise_id),
     assignment_type: parseAssignmentType(body?.assignment_type)
   };
 
-  if (employerInfoGuid) {
+  if (isUpdate) {
     payload.employer_info_guid = parseEmployerInfoGuid(employerInfoGuid);
   }
 
@@ -111,7 +112,7 @@ export function buildEmployerInfoPayload(body, options = {}) {
 
   if (isNonEmpty(body?.active_flag)) {
     payload.active_flag = parseActiveFlag(body.active_flag);
-  } else if (!employerInfoGuid) {
+  } else if (!isUpdate) {
     payload.active_flag = 'Y';
   }
 

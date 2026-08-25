@@ -7,7 +7,7 @@ import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
 import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
 import { VIEW } from '../utils/recEmployerInfoConstants.js';
-import { MESSAGES, withConnection } from '../utils/recEmployerInfoDb.js';
+import { MESSAGES, compactEmployerInfoGuid, withConnection } from '../utils/recEmployerInfoDb.js';
 import { mapEmployerInfoViewRow } from '../utils/recEmployerInfoMapper.js';
 
 const ROW_OPTS = { outFormat: oracledb.OUT_FORMAT_OBJECT };
@@ -137,7 +137,7 @@ export async function listEmployerInfo(filters) {
  * @param {string} employerInfoGuidHex — validated 32-char hex
  */
 export async function getEmployerInfoByGuid(employerInfoGuidHex) {
-  const hex = String(employerInfoGuidHex).trim().replace(/-/g, '').toUpperCase();
+  const hex = compactEmployerInfoGuid(employerInfoGuidHex);
   const binds = { guid: raw16Bind(hex) };
 
   try {

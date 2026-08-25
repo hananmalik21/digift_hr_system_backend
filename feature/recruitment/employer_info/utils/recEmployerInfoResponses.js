@@ -29,6 +29,11 @@ export function sendFail(res, message, httpStatus = 400, data = null) {
   return res.status(httpStatus).json(body);
 }
 
+/**
+ * @param {import('express').Response} res
+ * @param {{ status?: string, message?: string, data?: unknown }|null|undefined} pkg
+ * @param {{ successMessage?: string, successHttpStatus?: number, data?: unknown }} [options]
+ */
 export function sendPackageOutcome(res, pkg, { successMessage, successHttpStatus = 200, data } = {}) {
   if (!packageStatusIsSuccess(pkg?.status)) {
     const message = pkg?.message || MESSAGES.FALLBACK;

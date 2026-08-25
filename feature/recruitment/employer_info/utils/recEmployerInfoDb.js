@@ -19,10 +19,19 @@ export const MESSAGES = Object.freeze({
   LIST_FAIL: 'Unable to list employer information. Please try again.',
   GET_FAIL: 'Unable to fetch employer information. Please try again.',
   MULTIPART_REQUIRED:
-    'Content-Type must be multipart/form-data. Send employer fields and the logo file in one request.',
+    'Content-Type must be multipart/form-data. Send employer fields as form fields; include the logo file when uploading a logo.',
   LOGO_REQUIRED:
     'logo file is required. Send it in the same multipart/form-data request as the employer fields.'
 });
+
+/**
+ * Normalize a validated employer-info GUID to uppercase 32-char hex (no hyphens).
+ * @param {string} raw
+ * @returns {string}
+ */
+export function compactEmployerInfoGuid(raw) {
+  return String(raw).trim().replace(/-/g, '').toUpperCase();
+}
 
 /**
  * @param {string|null|undefined} status
