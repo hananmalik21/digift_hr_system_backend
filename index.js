@@ -101,6 +101,7 @@ import recApplicationsController from './feature/recruitment/applications/contro
 import recDashboardController from './feature/recruitment/dashboard/controller/recDashboardController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
+import testEmailRoutes from './routes/testEmail.routes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
 import recEmployerInfoController from './feature/recruitment/employer_info/controller/recEmployerInfoController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
@@ -373,6 +374,9 @@ app.use('/api/security/users', fndsecUsersController);
 
 // Security - Auth (FNDSEC.FNDSEC_AUTH_PKG)
 app.use('/api/security/auth', fndsecAuthController);
+
+// Email — Brevo SMTP test endpoint (same setup as digify_apps_backend)
+app.use('/api', testEmailRoutes);
 
 // Recruitment — find candidates / add as applicant (mounted before catch-all GUID routes)
 app.use('/api/rec/requisitions', recCandidateMatchRequisitionRouter);

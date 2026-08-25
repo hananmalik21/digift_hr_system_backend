@@ -7,6 +7,9 @@ import {
 } from '../../shared/recValidationUtils.js';
 import { validateCandidateProfileFieldsInErrors } from './recCandidateProfileValidation.js';
 
+export { validateSendCandidateEmailBody } from './recCandidateSendEmailValidators.js';
+export { ALLOWED_MESSAGE_TYPES } from './recCandidateSendEmailConstants.js';
+
 export function parseCandidateGuidParam(value) {
   return parseHexGuidParam(value, {
     requiredMessage: 'candidate_guid is required',

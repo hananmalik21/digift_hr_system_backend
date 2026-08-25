@@ -95,6 +95,12 @@ import {
   parseResumeGuidParam,
   validateCandidateGuidEnterpriseParams
 } from '../utils/recCandidateViewValidators.js';
+import {
+  getSendCandidateEmailAttachments,
+  maybeMulterSendCandidateEmail
+} from '../utils/recCandidateSendEmailMultipart.js';
+import { CANDIDATE_SEND_EMAIL_ERROR } from '../utils/recCandidateSendEmailConstants.js';
+import { sendCandidateEmail } from '../service/recCandidateSendEmailService.js';
 
 const router = express.Router();
 
@@ -256,6 +262,30 @@ router.post(
       return sendPackageActionResponse(res, pkg);
     } catch (err) {
       return handleMutationError(res, err, SYNC_POOLS_MUTATION_ERROR);
+    }
+  })
+);
+
+/**
+ * POST /api/rec/candidates/:candidate_guid/send-email
+ * POST /api/recruitment/candidates/:candidate_guid/send-email
+ * JSON body: { enterprise_id, subject, message, message_type?, template? }
+ * Or multipart/form-data with the same fields plus optional document(s):
+ *   document | documents | attachment | file (max 5 files, 10MB each)
+ */
+router.post(
+  '/:candidate_guid/send-email',
+  maybeMulterSendCandidateEmail,
+  asyncHandler(async (req, res) => {
+    try {
+      const { httpStatus, payload } = await sendCandidateEmail({
+        candidateGuidParam: req.params.candidate_guid,
+        body: req.body || {},
+        attachments: getSendCandidateEmailAttachments(req)
+      });
+      return sendPackageResponse(res, httpStatus, payload);
+    } catch (err) {
+      return handleMutationError(res, err, CANDIDATE_SEND_EMAIL_ERROR);
     }
   })
 );
