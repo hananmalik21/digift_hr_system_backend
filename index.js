@@ -375,6 +375,8 @@ app.use('/api/security/users', fndsecUsersController);
 
 // Security - Auth (FNDSEC.FNDSEC_AUTH_PKG)
 app.use('/api/security/auth', fndsecAuthController);
+// Alias for main-user password reset (same controller)
+app.use('/api/auth', fndsecAuthController);
 
 // Email — Brevo SMTP test endpoint (same setup as digify_apps_backend)
 app.use('/api', testEmailRoutes);

@@ -5,10 +5,11 @@ import {
   PASSWORD_RESET_OTP_MAX_ATTEMPTS,
   PASSWORD_RESET_OTP_TTL_MS,
   PASSWORD_RESET_PURPOSE,
-  PASSWORD_RESET_TOKEN_TTL_MS
+  PASSWORD_RESET_TOKEN_TTL_MS,
+  PASSWORD_RESET_USER_TYPE
 } from './recCandidatePortalConstants.js';
 
-/** @typedef {{ enterprise_id: number, candidate_user_guid: string, email: string, purpose: string, expires_at: number, created_at: number, used_flag: boolean }} ResetTokenRecord */
+/** @typedef {{ enterprise_id: number, candidate_user_guid: string, email: string, purpose: string, user_type: string, expires_at: number, created_at: number, used_flag: boolean }} ResetTokenRecord */
 /** @typedef {ResetTokenRecord & { otp_hash: string, attempt_count: number }} OtpRecord */
 
 /** @type {Map<string, OtpRecord>} */
@@ -38,7 +39,7 @@ function timingSafeEqualHex(a, b) {
 }
 
 /**
- * @param {{ used_flag?: boolean, purpose?: string, expires_at?: number } | null | undefined} rec
+ * @param {{ used_flag?: boolean, purpose?: string, user_type?: string, expires_at?: number } | null | undefined} rec
  * @param {number} now
  */
 function isActivePasswordResetRecord(rec, now) {
@@ -46,18 +47,21 @@ function isActivePasswordResetRecord(rec, now) {
     rec &&
       !rec.used_flag &&
       rec.purpose === PASSWORD_RESET_PURPOSE &&
+      rec.user_type === PASSWORD_RESET_USER_TYPE &&
       Number(rec.expires_at) > now
   );
 }
 
 /**
- * @param {{ enterprise_id: number, candidate_user_guid: string, email: string }} rec
+ * @param {{ enterprise_id: number, candidate_user_guid: string, email: string, user_type: string }} rec
  */
 function toAccountSnapshot(rec) {
   return {
     enterprise_id: rec.enterprise_id,
     candidate_user_guid: rec.candidate_user_guid,
-    email: rec.email
+    email: rec.email,
+    user_type: rec.user_type,
+    purpose: PASSWORD_RESET_PURPOSE
   };
 }
 
@@ -186,6 +190,7 @@ export function storePasswordResetOtp(input) {
     email,
     otp_hash: hashSecret(input.otp),
     purpose: input.purpose || PASSWORD_RESET_PURPOSE,
+    user_type: PASSWORD_RESET_USER_TYPE,
     expires_at: now + PASSWORD_RESET_OTP_TTL_MS,
     attempt_count: 0,
     created_at: now,
@@ -247,6 +252,7 @@ export function storePasswordResetToken(input) {
     candidate_user_guid: String(input.candidate_user_guid).toUpperCase(),
     email,
     purpose: input.purpose || PASSWORD_RESET_PURPOSE,
+    user_type: PASSWORD_RESET_USER_TYPE,
     expires_at: now + PASSWORD_RESET_TOKEN_TTL_MS,
     created_at: now,
     used_flag: false

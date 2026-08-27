@@ -95,7 +95,7 @@ test('resolvePasswordResetPackageResult maps CANDIDATE_NOT_FOUND', () => {
   const out = resolvePasswordResetPackageResult(
     {
       result_code: 'CANDIDATE_NOT_FOUND',
-      result_message: 'This email does not exist with any candidate.'
+      result_message: 'This email does not exist with any candidate user.'
     },
     'fallback'
   );
@@ -107,26 +107,18 @@ test('resolvePasswordResetPackageResult maps CANDIDATE_NOT_FOUND', () => {
 test('mapPasswordResetPackageFailure maps CANDIDATE_NOT_FOUND to 404', () => {
   const out = mapPasswordResetPackageFailure(
     'CANDIDATE_NOT_FOUND',
-    'This email does not exist with any candidate.',
+    'This email does not exist with any candidate user.',
     'fallback'
   );
   assert.equal(out.httpStatus, 404);
   assert.deepEqual(out.payload, {
     success: false,
     code: 'CANDIDATE_NOT_FOUND',
-    message: 'This email does not exist with any candidate.'
+    message: 'This email does not exist with any candidate user.'
   });
 });
 
-test('mapPasswordResetPackageFailure maps USER_ACCOUNT_NOT_FOUND and ACCOUNT_INACTIVE', () => {
-  const missingUser = mapPasswordResetPackageFailure(
-    'USER_ACCOUNT_NOT_FOUND',
-    'Candidate exists, but no user account exists for this email.',
-    'fallback'
-  );
-  assert.equal(missingUser.httpStatus, 404);
-  assert.equal(missingUser.payload.code, 'USER_ACCOUNT_NOT_FOUND');
-
+test('mapPasswordResetPackageFailure maps ACCOUNT_INACTIVE and MULTIPLE_CANDIDATE_USERS', () => {
   const inactive = mapPasswordResetPackageFailure(
     'ACCOUNT_INACTIVE',
     'Candidate user account is inactive.',
@@ -134,15 +126,13 @@ test('mapPasswordResetPackageFailure maps USER_ACCOUNT_NOT_FOUND and ACCOUNT_INA
   );
   assert.equal(inactive.httpStatus, 403);
   assert.equal(inactive.payload.code, 'ACCOUNT_INACTIVE');
-});
 
-test('mapPasswordResetPackageFailure uses default message when Oracle message empty', () => {
-  const out = mapPasswordResetPackageFailure('MULTIPLE_CANDIDATES', '', 'fallback');
-  assert.equal(out.httpStatus, 409);
-  assert.equal(out.payload.code, 'MULTIPLE_CANDIDATES');
+  const multiple = mapPasswordResetPackageFailure('MULTIPLE_CANDIDATE_USERS', '', 'fallback');
+  assert.equal(multiple.httpStatus, 409);
+  assert.equal(multiple.payload.code, 'MULTIPLE_CANDIDATE_USERS');
   assert.equal(
-    out.payload.message,
-    'Multiple candidates exist with this email address.'
+    multiple.payload.message,
+    'Multiple candidate user accounts exist with this email address.'
   );
 });
 

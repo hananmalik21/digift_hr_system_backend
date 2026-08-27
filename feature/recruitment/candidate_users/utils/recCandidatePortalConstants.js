@@ -11,6 +11,7 @@ export const LOGIN_INACTIVE_USER = 'Candidate user is not active.';
 
 /** Password reset / forgot-password (career portal) */
 export const PASSWORD_RESET_PURPOSE = 'PASSWORD_RESET';
+export const PASSWORD_RESET_USER_TYPE = 'CANDIDATE';
 export const PASSWORD_RESET_OTP_TTL_MS = 10 * 60 * 1000;
 export const PASSWORD_RESET_TOKEN_TTL_MS = 10 * 60 * 1000;
 export const PASSWORD_RESET_TOKEN_EXPIRES_IN_SEC = Math.floor(
