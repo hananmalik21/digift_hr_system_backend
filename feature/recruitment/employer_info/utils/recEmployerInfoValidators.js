@@ -151,10 +151,17 @@ export function validateLogoUpload(file, options = {}) {
 
 /**
  * @param {Record<string, unknown>} query
+ * @param {{ enterprise_id?: number }} [overrides] — when set, skips query enterprise_id parsing
+ *   (use with resolveEnterpriseIdFromRequestQuery for tenant/hostname/JWT resolution).
  */
-export function parseListQuery(query) {
+export function parseListQuery(query, overrides = {}) {
+  const enterprise_id =
+    overrides.enterprise_id != null
+      ? overrides.enterprise_id
+      : parseRequiredEnterpriseId(query?.enterprise_id);
+
   return {
-    enterprise_id: parseRequiredEnterpriseId(query?.enterprise_id),
+    enterprise_id,
     assignment_type: isNonEmpty(query?.assignment_type)
       ? parseAssignmentType(query.assignment_type)
       : null,

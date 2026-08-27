@@ -147,10 +147,16 @@ export async function executePackagePlsql(plsql, binds, parseOut, logLabel, erro
   }
 }
 
+/**
+ * Oracle packages in this codebase typically return SUCCESS; some REC/FND packages
+ * still emit the short status code S.
+ * @param {string|null|undefined} status
+ */
 export function packageStatusIsSuccess(status) {
-  return String(status ?? '')
+  const s = String(status ?? '')
     .trim()
-    .toUpperCase() === 'SUCCESS';
+    .toUpperCase();
+  return s === 'SUCCESS' || s === 'S';
 }
 
 export function statusOutBinds() {

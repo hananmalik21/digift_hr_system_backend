@@ -64,10 +64,7 @@ function normalizeOutNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export function packageStatusIsSuccess(status) {
-  const s = String(status ?? '').trim().toUpperCase();
-  return s === 'S' || s === 'SUCCESS';
-}
+export { packageStatusIsSuccess } from '../../../../utils/oraclePackageUtils.js';
 
 function numOrNull(v) {
   if (v === undefined || v === null || v === '') return null;

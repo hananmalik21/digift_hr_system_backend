@@ -83,7 +83,7 @@ function buildListWhere(filters) {
 }
 
 /**
- * Prefer typed SELECT; fall back to v.* if view column shapes differ.
+ * Typed SELECT against REC.V_EMPLOYER_INFO (no silent v.* fallback — surface schema errors).
  * @param {import('oracledb').Connection} connection
  * @param {string} whereSql
  * @param {Record<string, unknown>} binds
@@ -91,21 +91,12 @@ function buildListWhere(filters) {
  */
 async function selectRows(connection, whereSql, binds, tailSql = '') {
   const orderAndTail = `${tailSql}`.trim();
-  try {
-    const result = await connection.execute(
-      `SELECT ${SELECT_COLUMNS} FROM ${VIEW} v ${whereSql} ${orderAndTail}`,
-      binds,
-      ROW_OPTS
-    );
-    return result.rows || [];
-  } catch (_) {
-    const result = await connection.execute(
-      `SELECT v.* FROM ${VIEW} v ${whereSql} ${orderAndTail}`,
-      binds,
-      ROW_OPTS
-    );
-    return result.rows || [];
-  }
+  const result = await connection.execute(
+    `SELECT ${SELECT_COLUMNS} FROM ${VIEW} v ${whereSql} ${orderAndTail}`,
+    binds,
+    ROW_OPTS
+  );
+  return result.rows || [];
 }
 
 function wrapDbError(err, message) {

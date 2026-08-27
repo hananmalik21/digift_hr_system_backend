@@ -144,6 +144,15 @@ test('parseListQuery requires enterprise_id and supports filters', () => {
   });
 });
 
+test('parseListQuery accepts resolved enterprise_id override', () => {
+  const filters = parseListQuery(
+    { assignment_type: 'ENTERPRISE_LEVEL' },
+    { enterprise_id: 7 }
+  );
+  assert.equal(filters.enterprise_id, 7);
+  assert.equal(filters.assignment_type, 'ENTERPRISE_LEVEL');
+});
+
 test('validateLogoUpload accepts png and rejects bad mime / oversized', () => {
   const ok = validateLogoUpload({
     buffer: Buffer.from([1, 2, 3]),

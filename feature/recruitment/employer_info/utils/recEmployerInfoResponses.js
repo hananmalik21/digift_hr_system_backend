@@ -1,5 +1,8 @@
 import { AppError, DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
-import { firstValidationMessage } from '../../shared/recControllerHelpers.js';
+import {
+  firstValidationMessage,
+  handlePortalError
+} from '../../shared/recControllerHelpers.js';
 import { MESSAGES, packageStatusIsSuccess } from './recEmployerInfoDb.js';
 
 export { packageStatusIsSuccess };
@@ -70,18 +73,12 @@ export function sendPackageOutcome(res, pkg, { successMessage, successHttpStatus
 }
 
 export function handleEmployerInfoError(res, err, fallback = MESSAGES.FALLBACK) {
-  if (err instanceof ValidationError) {
-    return sendFail(res, firstValidationMessage(err), 400);
-  }
-  if (err instanceof NotFoundError) {
-    return sendFail(res, err.userMessage || err.message || MESSAGES.NOT_FOUND, 404);
-  }
+  // DatabaseError can carry a non-500 status; handle before shared portal path.
   if (err instanceof DatabaseError) {
     return sendFail(res, err.userMessage || err.message || fallback, err.statusCode || 500);
   }
-  if (err instanceof AppError) {
+  if (err instanceof AppError && !(err instanceof ValidationError) && !(err instanceof NotFoundError)) {
     return sendFail(res, err.userMessage || err.message || fallback, err.statusCode || 500);
   }
-  console.error('[recEmployerInfo]', err?.errorNum != null ? `ORA-${err.errorNum}` : '', '[redacted]');
-  return sendFail(res, fallback, 500);
+  return handlePortalError(res, err, fallback);
 }

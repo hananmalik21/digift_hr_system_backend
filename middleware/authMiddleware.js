@@ -52,7 +52,8 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/rec\/job-offers\/[^/]+\/pdf\/?$/ },
   // Public document download by GUID (deep-linkable URLs).
   { method: 'GET', pattern: /^\/documents\/[^/]+\/download\/?$/ },
-  // Employer info list / detail reads (no JWT)
+  // Employer info list / detail — public for career-portal branding (mutations still require JWT).
+  // Prefer hostname/JWT tenant resolution via resolveEnterpriseIdFromRequestQuery on list.
   { method: 'GET', pattern: /^\/api\/employer-info\/?$/ },
   { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/?$/ },
   // Employer logo binary (deep-linkable / <img src> without Bearer header).

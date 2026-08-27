@@ -2,28 +2,13 @@
  * Map REC.V_JOB_POSTING_EMPLOYER_INFO row → API JSON (no LOGO BLOB).
  */
 
+import {
+  rowKeyMap,
+  safeFiniteNumber,
+  strOrNull
+} from '../../applications/utils/recApplicationRowUtils.js';
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 import { employerInfoLogoPath } from '../../employer_info/utils/recEmployerInfoLogoUrl.js';
-
-function rowKeyMap(row) {
-  const m = {};
-  if (!row || typeof row !== 'object') return m;
-  for (const [k, v] of Object.entries(row)) {
-    m[String(k).toLowerCase()] = v;
-  }
-  return m;
-}
-
-function num(val) {
-  if (val == null || val === '') return null;
-  const n = Number(val);
-  return Number.isFinite(n) ? n : null;
-}
-
-function str(v) {
-  if (v == null || v === '') return null;
-  return String(v);
-}
 
 function guid(v) {
   if (v == null || v === '') return null;
@@ -42,7 +27,7 @@ function yn(v) {
 }
 
 function source(v) {
-  const s = str(v);
+  const s = strOrNull(v);
   if (!s) return null;
   const u = s.toUpperCase();
   return u === 'COMPANY_LEVEL' || u === 'ENTERPRISE_LEVEL' ? u : null;
@@ -71,29 +56,29 @@ export function mapJobPostingEmployerInfoRow(row) {
 
   return {
     posting_guid: guid(m.posting_guid),
-    enterprise_id: num(m.enterprise_id),
+    enterprise_id: safeFiniteNumber(m.enterprise_id),
 
-    requisition_id: num(m.requisition_id),
+    requisition_id: safeFiniteNumber(m.requisition_id),
     requisition_org_unit_id: guid(m.requisition_org_unit_id),
     requisition_found: yn(m.requisition_found) || 'Y',
 
     company_id: guid(m.company_id),
-    company_code: str(m.company_code),
-    company_name: str(m.company_name),
-    company_name_ar: str(m.company_name_ar),
+    company_code: strOrNull(m.company_code),
+    company_name: strOrNull(m.company_name),
+    company_name_ar: strOrNull(m.company_name_ar),
 
     employer_info_source: source(m.employer_info_source),
-    employer_info_id: num(m.employer_info_id),
+    employer_info_id: safeFiniteNumber(m.employer_info_id),
     employer_info_guid: employerInfoGuid,
 
-    employee_info: str(m.employee_info),
-    information: str(m.information),
-    industry: str(m.industry),
-    about_company: str(m.about_company),
+    employee_info: strOrNull(m.employee_info),
+    information: strOrNull(m.information),
+    industry: strOrNull(m.industry),
+    about_company: strOrNull(m.about_company),
 
     logo_available: logoAvailable,
-    logo_file_name: employerInfoGuid ? str(m.logo_file_name) : null,
-    logo_mime_type: employerInfoGuid ? str(m.logo_mime_type) : null,
+    logo_file_name: employerInfoGuid ? strOrNull(m.logo_file_name) : null,
+    logo_mime_type: employerInfoGuid ? strOrNull(m.logo_mime_type) : null,
     logo_url:
       employerInfoGuid && logoAvailable === 'Y'
         ? employerInfoLogoPath(employerInfoGuid)

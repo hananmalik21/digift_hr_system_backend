@@ -1,30 +1,13 @@
+import {
+  formatDateTimeIso,
+  rowKeyMap,
+  safeFiniteNumber,
+  strOrNull
+} from '../../applications/utils/recApplicationRowUtils.js';
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 import { employerInfoLogoPath } from './recEmployerInfoLogoUrl.js';
 
 const HEX_32 = /^[0-9A-Fa-f]{32}$/;
-
-/**
- * @param {Record<string, unknown>} row
- */
-function rowKeyMap(row) {
-  const m = {};
-  if (!row || typeof row !== 'object') return m;
-  for (const [k, v] of Object.entries(row)) {
-    m[String(k).toLowerCase()] = v;
-  }
-  return m;
-}
-
-function safeFiniteNumber(val) {
-  if (val == null || val === '') return null;
-  const n = Number(val);
-  return Number.isFinite(n) ? n : null;
-}
-
-function strOrNull(v) {
-  if (v == null || v === '') return null;
-  return String(v);
-}
 
 function normalizeGuidValue(v) {
   if (v == null || v === '') return null;
@@ -39,20 +22,13 @@ function tryExactHex32(raw) {
   return HEX_32.test(compact) ? compact.toUpperCase() : null;
 }
 
+/** Employer-info flags may arrive as Y/N or boolean-ish package values. */
 function normalizeYnFlag(v) {
   if (v == null || v === '') return null;
   const s = String(v).trim().toUpperCase();
   if (s === 'Y' || s === 'N') return s;
   if (s === '1' || s === 'TRUE') return 'Y';
   if (s === '0' || s === 'FALSE') return 'N';
-  return String(v);
-}
-
-function formatDateTime(v) {
-  if (v == null || v === '') return null;
-  if (v instanceof Date) {
-    return Number.isFinite(v.getTime()) ? v.toISOString() : null;
-  }
   return String(v);
 }
 
@@ -102,9 +78,9 @@ export function mapEmployerInfoViewRow(row) {
         : null,
 
     active_flag: normalizeYnFlag(m.active_flag),
-    creation_date: formatDateTime(m.creation_date),
+    creation_date: formatDateTimeIso(m.creation_date),
     created_by: strOrNull(m.created_by),
-    last_update_date: formatDateTime(m.last_update_date ?? m.last_updated_date),
+    last_update_date: formatDateTimeIso(m.last_update_date ?? m.last_updated_date),
     last_updated_by: strOrNull(m.last_updated_by)
   };
 }

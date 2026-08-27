@@ -1,7 +1,9 @@
 import oracledb from 'oracledb';
-import db from '../../../../config/db.js';
 import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { packageStatusIsSuccess, withConnection } from '../../../../utils/oraclePackageUtils.js';
 import { applyRequisitionDefaults } from '../utils/recRequisitionValidators.js';
+
+export { packageStatusIsSuccess };
 
 const PKG = 'REC.CREATE_REQUISITION_PKG';
 const CREATE_PROC = `${PKG}.create_requisition`;
@@ -15,17 +17,6 @@ const REOPEN_PROC = `${PKG}.reopen_requisition`;
 const REJECT_PROC = `${PKG}.reject_requisition`;
 
 const GENERIC_ERROR_MESSAGE = 'Unable to process requisition. Please try again.';
-
-async function withConnection(fn) {
-  const connection = await db.getConnection();
-  try {
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.close();
-    } catch (_) {}
-  }
-}
 
 function numOrNull(v) {
   if (v === undefined || v === null || v === '') return null;
@@ -119,12 +110,6 @@ function normalizeOutGuidHex(v) {
   if (v == null) return null;
   if (Array.isArray(v)) return normalizeOutGuidHex(v[0]);
   return bufferToHex(v);
-}
-
-export function packageStatusIsSuccess(status) {
-  return String(status ?? '')
-    .trim()
-    .toUpperCase() === 'SUCCESS';
 }
 
 /** @param {unknown} value @returns {'DRAFT'|'SUBMIT'} */

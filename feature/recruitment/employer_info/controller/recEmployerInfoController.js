@@ -13,6 +13,7 @@
 
 import express from 'express';
 import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { resolveEnterpriseIdFromRequestQuery } from '../../shared/recControllerHelpers.js';
 import {
   clearEmployerInfoLogo,
   createEmployerInfo,
@@ -72,8 +73,11 @@ async function resolveMutationData(pkg, guidHint = null) {
   if (guid) {
     try {
       return await getEmployerInfoByGuid(String(guid));
-    } catch (_) {
-      /* fall through to package data */
+    } catch (err) {
+      console.warn(
+        '[recEmployerInfo] view refresh after mutation failed; using package data',
+        err?.message || err
+      );
     }
   }
 
@@ -105,7 +109,11 @@ async function sendMutatedPackage(req, res, pkg, { successMessage, successHttpSt
 router.get(
   '/',
   run(async (req, res) => {
-    const data = withPublicLogoUrls(await listEmployerInfo(parseListQuery(req.query)), req);
+    const enterprise_id = resolveEnterpriseIdFromRequestQuery(req);
+    const data = withPublicLogoUrls(
+      await listEmployerInfo(parseListQuery(req.query, { enterprise_id })),
+      req
+    );
     return sendOk(res, MESSAGES.LIST_OK, data);
   })
 );
