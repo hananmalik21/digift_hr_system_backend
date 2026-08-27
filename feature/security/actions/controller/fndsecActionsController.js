@@ -7,11 +7,20 @@ import {
   updateAction,
   deleteAction,
   getActionByGuidOrId,
-  listActiveActionsBySubModulePaginated
+  listActiveActionsBySubModulePaginated,
+  upsertActionsBulk
 } from '../model/fndsecActionsModel.js';
-import { resolveActor, mapActionConflict } from '../utils/requestParsers.js';
+import { resolveActor, mapActionConflict, parseBulkActionsBody } from '../utils/requestParsers.js';
 
 const router = express.Router();
+
+async function runMutating(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    throw mapActionConflict(err) || err;
+  }
+}
 
 /**
  * POST /api/security/actions
@@ -19,13 +28,22 @@ const router = express.Router();
 router.post(
   '/',
   asyncHandler(async (req, res) => {
-    const actor = resolveActor(req);
-    try {
-      const data = await createAction(req.body || {}, actor);
-      return sendCreated(res, { message: 'Action created successfully', data });
-    } catch (err) {
-      throw mapActionConflict(err) || err;
-    }
+    const data = await runMutating(() => createAction(req.body || {}, resolveActor(req)));
+    return sendCreated(res, { message: 'Action created successfully', data });
+  })
+);
+
+/**
+ * POST /api/security/actions/bulk
+ * Insert and/or update multiple actions for one sub-module in a single transaction.
+ * Body: { sub_module_id, actions: [{ action_guid?, action_id?, action_code, action_name, ... }] }
+ */
+router.post(
+  '/bulk',
+  asyncHandler(async (req, res) => {
+    const { sub_module_id, actions } = parseBulkActionsBody(req.body);
+    const data = await runMutating(() => upsertActionsBulk(sub_module_id, actions, resolveActor(req)));
+    return sendCreated(res, { message: 'Actions upserted successfully', data });
   })
 );
 
@@ -36,13 +54,10 @@ router.post(
 router.put(
   '/:actionGuidOrId',
   asyncHandler(async (req, res) => {
-    const actor = resolveActor(req);
-    try {
-      const data = await updateAction(req.params.actionGuidOrId, req.body || {}, actor);
-      return sendUpdated(res, { message: 'Action updated successfully', data });
-    } catch (err) {
-      throw mapActionConflict(err) || err;
-    }
+    const data = await runMutating(() =>
+      updateAction(req.params.actionGuidOrId, req.body || {}, resolveActor(req))
+    );
+    return sendUpdated(res, { message: 'Action updated successfully', data });
   })
 );
 
@@ -52,8 +67,7 @@ router.put(
 router.delete(
   '/:actionGuidOrId',
   asyncHandler(async (req, res) => {
-    const actor = resolveActor(req);
-    const data = await deleteAction(req.params.actionGuidOrId, actor);
+    const data = await deleteAction(req.params.actionGuidOrId, resolveActor(req));
     return sendDeleted(res, { message: 'Action deleted successfully', data });
   })
 );
@@ -98,4 +112,3 @@ router.get(
 );
 
 export default router;
-
