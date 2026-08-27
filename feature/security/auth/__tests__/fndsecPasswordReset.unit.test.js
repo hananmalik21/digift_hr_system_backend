@@ -122,7 +122,7 @@ test('validateFndsecForgotPasswordBody normalizes email', () => {
     enterprise_id: 1,
     email: '  Employee@Company.COM '
   });
-  assert.deepEqual(out, { enterprise_id: 1, email: 'employee@company.com' });
+  assert.deepEqual(out, { enterprise_id: 1, email: 'user@company.com' });
 });
 
 test('validateFndsecVerifyResetOtpBody requires 6-digit otp', () => {
@@ -160,7 +160,7 @@ test('OTP store verifies once and rejects reuse', () => {
   storePasswordResetOtp({
     enterprise_id: 1,
     user_guid: '501D19D3B5CF219CE0633519000AF268',
-    email: 'employee@company.com',
+    email: 'user@company.com',
     otp: '482731'
   });
 
