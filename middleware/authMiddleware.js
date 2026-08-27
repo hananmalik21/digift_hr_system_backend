@@ -36,6 +36,8 @@ const PUBLIC_PATHS = [
   // Career portal — token-free (register, login, apply-related public flows)
   { method: '*', pattern: /^\/api\/candidate(\/.*)?\/?$/ },
   { method: '*', pattern: /^\/candidate(\/.*)?\/?$/ },
+  // Career portal — forgot / verify OTP / reset password
+  { method: '*', pattern: /^\/api\/rec\/candidate-auth(\/.*)?\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/rec\/job-postings\/[^/]+\/?$/ },
   { method: 'POST', pattern: /^\/api\/rec\/job-postings\/[^/]+\/apply\/?$/ },
@@ -66,7 +68,8 @@ function requestPathname(req) {
   // Prefer originalUrl so global auth matches full public paths reliably.
   const raw = req.originalUrl || req.url || req.path || '';
   const withoutQuery = String(raw).split('?')[0].split('#')[0];
-  return withoutQuery.replace(/\/+$/, '') || '/';
+  // Collapse accidental duplicate slashes (e.g. //api/... from Postman).
+  return withoutQuery.replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/';
 }
 
 function isPublicRequest(req) {

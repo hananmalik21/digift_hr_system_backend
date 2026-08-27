@@ -103,6 +103,7 @@ import recJobOffersController from './feature/recruitment/job_offers/controller/
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import testEmailRoutes from './routes/testEmail.routes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
+import recCandidateAuthController from './feature/recruitment/candidate_users/controller/recCandidateAuthController.js';
 import recEmployerInfoController from './feature/recruitment/employer_info/controller/recEmployerInfoController.js';
 import compensationProcessController from './feature/compensation/process/controller/compensationProcessController.js';
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
@@ -398,6 +399,9 @@ app.use('/api/recruitment/candidates', recCandidatesController);
 
 // Career portal — token-free (register, etc.)
 app.use('/api/candidate', recCandidateUserController);
+
+// Career portal — forgot / reset password (public, no JWT)
+app.use('/api/rec/candidate-auth', recCandidateAuthController);
 
 // Recruitment — talent pools (REC.TALENT_POOL_PKG)
 app.use('/api/rec/talent-pools', recTalentPoolsController);
