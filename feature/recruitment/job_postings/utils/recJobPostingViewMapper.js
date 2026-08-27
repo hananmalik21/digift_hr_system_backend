@@ -19,6 +19,13 @@ function safeFiniteNumber(val) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Non-negative integer from view counts; null/invalid → 0. */
+function countOrZero(val) {
+  const n = safeFiniteNumber(val);
+  if (n == null) return 0;
+  return Math.max(0, Math.trunc(n));
+}
+
 function strOrNull(v) {
   if (v == null || v === '') return null;
   return String(v);
@@ -117,6 +124,8 @@ export async function mapJobPostingViewRow(row) {
     position_id: normalizeGuidValue(m.position_id) ?? safeFiniteNumber(m.position_id),
     position_name: strOrNull(m.position_name),
     org_unit_id: normalizeGuidValue(m.org_unit_id),
+
+    application_count: countOrZero(m.application_count),
 
     portal_visible_flag: normalizeYnFlag(m.portal_visible_flag),
 

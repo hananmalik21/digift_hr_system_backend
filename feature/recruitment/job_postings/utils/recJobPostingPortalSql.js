@@ -9,6 +9,7 @@ import { isHex32 } from '../../../../utils/guidUtils.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   INVALID_CANDIDATE_GUID_MESSAGE,
+  JOB_POSTING_SELECT_SQL,
   REC_APPLICATIONS_TABLE,
   REC_CANDIDATES_TABLE,
   REC_JOB_POSTINGS_VIEW
@@ -166,7 +167,7 @@ export function buildPortalListSelectSql(whereSql, { orderBy = '', fetchFirst = 
   return `
 ${CANDIDATE_APPLICATION_CTES}
 SELECT
-    v.*,
+    ${JOB_POSTING_SELECT_SQL},
 ${APPLICATION_STATUS_COLUMNS}
 ${PORTAL_FROM_JOIN}
 ${whereSql}
