@@ -16,7 +16,53 @@ const NESTED_GUID_KEYS = new Set([
   'user_id',
   'grade_id',
   'job_family_id',
-  'job_level_id'
+  'job_level_id',
+  'primary_location_id'
+]);
+
+/** @type {ReadonlyArray<{ key: string, asArray?: boolean }>} */
+const VIEW_JSON_COLUMNS = Object.freeze([
+  { key: 'position_obj' },
+  { key: 'org_unit_obj' },
+  { key: 'org_hierarchy_json', asArray: true },
+  { key: 'job_family_obj' },
+  { key: 'job_level_obj' },
+  { key: 'grade_obj' },
+  { key: 'requisition_detail_obj' },
+  { key: 'status_obj' },
+  { key: 'justification_obj' },
+  { key: 'justification_org_hierarchy_json', asArray: true },
+  { key: 'position_detail_obj' },
+  { key: 'education_experience_obj' },
+  { key: 'hiring_team_obj' },
+  { key: 'interview_panel_json', asArray: true },
+  { key: 'skills_json', asArray: true },
+  { key: 'budget_obj' },
+  { key: 'audit_obj' },
+  { key: 'quick_stats_obj' }
+]);
+
+const QUICK_STATS_KEYS = Object.freeze([
+  'applications',
+  'shortlisted',
+  'in_interview',
+  'days_open'
+]);
+
+const STATUS_SCALAR_KEYS = Object.freeze([
+  'approval_status_code',
+  'open_status_code',
+  'submitted_by',
+  'submitted_date',
+  'approved_by',
+  'approved_date',
+  'opened_by',
+  'opened_date',
+  'closed_by',
+  'closed_date',
+  'rejected_by',
+  'rejected_date',
+  'rejection_reason'
 ]);
 
 export function rowKeyMap(row) {
@@ -102,6 +148,22 @@ export async function parseJsonColumn(raw, label, asArray = false) {
   }
 }
 
+/**
+ * Parse all known JSON/CLOB columns from a view row (lowercase key map).
+ * @param {Record<string, unknown>} m
+ */
+async function parseViewJsonColumns(m) {
+  const values = await Promise.all(
+    VIEW_JSON_COLUMNS.map(({ key, asArray = false }) => parseJsonColumn(m[key], key, asArray))
+  );
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  VIEW_JSON_COLUMNS.forEach(({ key }, i) => {
+    out[key] = values[i];
+  });
+  return out;
+}
+
 function resolveDisplayStatus(approvalCode, openCode) {
   const a = String(approvalCode ?? '').trim().toUpperCase();
   const o = String(openCode ?? '').trim().toUpperCase();
@@ -176,6 +238,16 @@ function shapeJobLevel(obj) {
   };
 }
 
+/** QUICK_STATS_OBJ from the view — values are not recalculated in Node. */
+function shapeQuickStats(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const out = {};
+  for (const key of QUICK_STATS_KEYS) {
+    out[key] = safeFiniteNumber(obj[key]);
+  }
+  return out;
+}
+
 function shapeGenericParsedObject(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const out = {};
@@ -209,21 +281,11 @@ function pickScalar(m, statusObj, field) {
 }
 
 function buildStatusScalars(m, statusObj) {
-  return {
-    approval_status_code: pickScalar(m, statusObj, 'approval_status_code'),
-    open_status_code: pickScalar(m, statusObj, 'open_status_code'),
-    submitted_by: pickScalar(m, statusObj, 'submitted_by'),
-    submitted_date: pickScalar(m, statusObj, 'submitted_date'),
-    approved_by: pickScalar(m, statusObj, 'approved_by'),
-    approved_date: pickScalar(m, statusObj, 'approved_date'),
-    opened_by: pickScalar(m, statusObj, 'opened_by'),
-    opened_date: pickScalar(m, statusObj, 'opened_date'),
-    closed_by: pickScalar(m, statusObj, 'closed_by'),
-    closed_date: pickScalar(m, statusObj, 'closed_date'),
-    rejected_by: pickScalar(m, statusObj, 'rejected_by'),
-    rejected_date: pickScalar(m, statusObj, 'rejected_date'),
-    rejection_reason: pickScalar(m, statusObj, 'rejection_reason')
-  };
+  const out = {};
+  for (const key of STATUS_SCALAR_KEYS) {
+    out[key] = pickScalar(m, statusObj, key);
+  }
+  return out;
 }
 
 function shapeStatus(statusObj, scalars) {
@@ -258,47 +320,10 @@ function shapeStatus(statusObj, scalars) {
  */
 export async function mapViewRowToListItem(row) {
   const m = rowKeyMap(row);
+  const json = await parseViewJsonColumns(m);
 
-  const [
-    positionRaw,
-    orgUnitRaw,
-    orgHierarchyRaw,
-    jobFamilyRaw,
-    jobLevelRaw,
-    gradeRaw,
-    requisitionDetailRaw,
-    statusRaw,
-    justificationRaw,
-    justificationOrgHierarchyRaw,
-    positionDetailRaw,
-    educationExperienceRaw,
-    hiringTeamRaw,
-    interviewPanelRaw,
-    skillsRaw,
-    budgetRaw,
-    auditRaw
-  ] = await Promise.all([
-    parseJsonColumn(m.position_obj, 'position_obj', false),
-    parseJsonColumn(m.org_unit_obj, 'org_unit_obj', false),
-    parseJsonColumn(m.org_hierarchy_json, 'org_hierarchy_json', true),
-    parseJsonColumn(m.job_family_obj, 'job_family_obj', false),
-    parseJsonColumn(m.job_level_obj, 'job_level_obj', false),
-    parseJsonColumn(m.grade_obj, 'grade_obj', false),
-    parseJsonColumn(m.requisition_detail_obj, 'requisition_detail_obj', false),
-    parseJsonColumn(m.status_obj, 'status_obj', false),
-    parseJsonColumn(m.justification_obj, 'justification_obj', false),
-    parseJsonColumn(m.justification_org_hierarchy_json, 'justification_org_hierarchy_json', true),
-    parseJsonColumn(m.position_detail_obj, 'position_detail_obj', false),
-    parseJsonColumn(m.education_experience_obj, 'education_experience_obj', false),
-    parseJsonColumn(m.hiring_team_obj, 'hiring_team_obj', false),
-    parseJsonColumn(m.interview_panel_json, 'interview_panel_json', true),
-    parseJsonColumn(m.skills_json, 'skills_json', true),
-    parseJsonColumn(m.budget_obj, 'budget_obj', false),
-    parseJsonColumn(m.audit_obj, 'audit_obj', false)
-  ]);
-
-  const statusScalars = buildStatusScalars(m, statusRaw);
-  const status = shapeStatus(statusRaw, statusScalars);
+  const statusScalars = buildStatusScalars(m, json.status_obj);
+  const status = shapeStatus(json.status_obj, statusScalars);
 
   return {
     requisition_id: safeFiniteNumber(m.requisition_id),
@@ -319,23 +344,25 @@ export async function mapViewRowToListItem(row) {
     rejected_by: status.rejected_by,
     rejected_date: status.rejected_date,
     rejection_reason: status.rejection_reason,
-    position: shapeGenericParsedObject(positionRaw),
-    org_unit: shapeOrgUnit(orgUnitRaw),
-    org_hierarchy: shapeOrgHierarchy(orgHierarchyRaw),
-    job_family: shapeGenericParsedObject(jobFamilyRaw),
-    job_level: shapeJobLevel(jobLevelRaw),
-    grade: shapeGenericParsedObject(gradeRaw),
-    requisition_detail: shapeGenericParsedObject(requisitionDetailRaw),
+    position: shapeGenericParsedObject(json.position_obj),
+    org_unit: shapeOrgUnit(json.org_unit_obj),
+    org_hierarchy: shapeOrgHierarchy(json.org_hierarchy_json),
+    job_family: shapeGenericParsedObject(json.job_family_obj),
+    job_level: shapeJobLevel(json.job_level_obj),
+    grade: shapeGenericParsedObject(json.grade_obj),
+    // Location bilingual fields + primary_location_id come from REQUISITION_DETAIL_OBJ.
+    requisition_detail: shapeGenericParsedObject(json.requisition_detail_obj),
     status,
-    justification: shapeJustification(justificationRaw),
-    justification_org_hierarchy: shapeOrgHierarchy(justificationOrgHierarchyRaw),
-    position_detail: shapeGenericParsedObject(positionDetailRaw),
-    education_experience: shapeGenericParsedObject(educationExperienceRaw),
-    hiring_team: shapeGenericParsedObject(hiringTeamRaw),
-    interview_panel: shapeGenericParsedArray(interviewPanelRaw),
-    skills: shapeGenericParsedArray(skillsRaw),
-    budget: shapeGenericParsedObject(budgetRaw),
-    audit: shapeGenericParsedObject(auditRaw)
+    justification: shapeJustification(json.justification_obj),
+    justification_org_hierarchy: shapeOrgHierarchy(json.justification_org_hierarchy_json),
+    position_detail: shapeGenericParsedObject(json.position_detail_obj),
+    education_experience: shapeGenericParsedObject(json.education_experience_obj),
+    hiring_team: shapeGenericParsedObject(json.hiring_team_obj),
+    interview_panel: shapeGenericParsedArray(json.interview_panel_json),
+    skills: shapeGenericParsedArray(json.skills_json),
+    budget: shapeGenericParsedObject(json.budget_obj),
+    audit: shapeGenericParsedObject(json.audit_obj),
+    quick_stats: shapeQuickStats(json.quick_stats_obj)
   };
 }
 

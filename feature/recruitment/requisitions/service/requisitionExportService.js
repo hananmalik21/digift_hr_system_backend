@@ -35,7 +35,8 @@ const KEY_ORDER = [
   'interview_panel',
   'skills',
   'budget',
-  'audit'
+  'audit',
+  'quick_stats'
 ];
 
 /** @param {{ rows: object[], enterpriseId?: number|string|null }} params */

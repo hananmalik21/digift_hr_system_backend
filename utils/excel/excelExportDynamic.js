@@ -17,6 +17,7 @@ const DEFAULT_WIDE_COLUMN_KEYS = new Set([
   'grade',
   'interview_panel',
   'skills',
+  'quick_stats',
   'location_obj',
   'structure',
   'advanced_settings',
