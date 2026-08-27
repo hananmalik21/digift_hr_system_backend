@@ -1,9 +1,6 @@
 async function readLobVal(v) {
   if (v == null) return null;
   if (typeof v === 'string') return v;
-  if (typeof v === 'object' && !Buffer.isBuffer(v) && !Array.isArray(v)) {
-    return v;
-  }
   if (typeof v.getData === 'function') {
     try {
       const p = v.getData();
@@ -16,7 +13,13 @@ async function readLobVal(v) {
       return null;
     }
   }
+  if (Buffer.isBuffer(v)) return v.toString('utf8');
+  if (typeof v === 'object' && !Array.isArray(v)) return v;
   return String(v);
+}
+
+function isPlainObject(v) {
+  return v != null && typeof v === 'object' && !Buffer.isBuffer(v) && !Array.isArray(v);
 }
 
 /**
@@ -26,13 +29,17 @@ async function readLobVal(v) {
 export async function parseJsonColumn(raw, asArray = false) {
   if (raw == null) return asArray ? [] : null;
   if (asArray && Array.isArray(raw)) return raw;
-  if (!asArray && typeof raw === 'object' && !Buffer.isBuffer(raw) && !Array.isArray(raw)) {
+  // Already-parsed object (not a LOB). LOBs expose getData() and must be read first.
+  if (!asArray && isPlainObject(raw) && typeof raw.getData !== 'function') {
     return raw;
   }
 
   const text = await readLobVal(raw);
   if (text == null) return asArray ? [] : null;
-  if (typeof text === 'object') return text;
+  if (typeof text === 'object') {
+    if (asArray) return Array.isArray(text) ? text : [];
+    return text;
+  }
 
   const s = String(text).trim();
   if (!s) return asArray ? [] : null;

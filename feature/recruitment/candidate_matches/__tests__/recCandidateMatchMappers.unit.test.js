@@ -4,7 +4,8 @@ import {
   candidateInitials,
   formatDateOnly,
   mapCandidateMatchRow,
-  mapEducation,
+  mapEducationHistory,
+  mapExperienceHistory,
   mapSkills,
   mapTalentPool
 } from '../utils/recCandidateMatchMappers.js';
@@ -82,7 +83,10 @@ test('availability display comes from the view, not notice-period rules', async 
   });
   assert.deepEqual(mapped.skills, []);
   assert.equal(mapped.talent_pool, null);
-  assert.equal(mapped.education, null);
+  assert.equal(mapped.experience_history_count, 0);
+  assert.deepEqual(mapped.experience_history, []);
+  assert.equal(mapped.education_count, 0);
+  assert.deepEqual(mapped.education, []);
 });
 
 test('maps WITHIN_2_WEEKS availability directly from the view', async () => {
@@ -218,24 +222,138 @@ test('talent pool is null unless view columns are present', () => {
   );
 });
 
-test('education uses view fields and does not invent a degree', () => {
-  assert.equal(mapEducation({}, null), null);
-  assert.deepEqual(
-    mapEducation(
+test('experience_history and education parse view JSON arrays and counts', async () => {
+  const mapped = await mapCandidateMatchRow({
+    EXPERIENCE_HISTORY_COUNT: 1,
+    EXPERIENCE_HISTORY_JSON: JSON.stringify([
       {
-        highest_education_level: 'MASTER',
+        experience_id: 10,
+        experience_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        company_name: 'Tech Synergy Ltd',
+        job_title: 'Senior Software Engineer',
+        location: 'Austin, TX',
+        start_date: '2020-01-15',
+        end_date: null,
+        current_job_flag: 'Y',
+        description: 'Built platforms'
+      }
+    ]),
+    EDUCATION_COUNT: 1,
+    EDUCATION_JSON: JSON.stringify([
+      {
+        education_id: 5,
+        education_guid: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
         degree_name: "Master's",
+        institution_name: 'Example University',
         field_of_study: 'Computer Science',
-        institution_name: 'Example University'
-      },
-      null
-    ),
+        start_date: '2016-09-01',
+        end_date: '2018-06-01',
+        grade: '3.8',
+        description: null
+      }
+    ])
+  });
+
+  assert.equal(mapped.experience_history_count, 1);
+  assert.deepEqual(mapped.experience_history, [
     {
-      level: 'MASTER',
-      degree: "Master's",
-      field_of_study: 'Computer Science',
-      institution: 'Example University',
-      display: "Master's in Computer Science"
+      experience_id: 10,
+      experience_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+      company_name: 'Tech Synergy Ltd',
+      job_title: 'Senior Software Engineer',
+      location: 'Austin, TX',
+      start_date: '2020-01-15',
+      end_date: null,
+      current_job_flag: 'Y',
+      description: 'Built platforms'
     }
-  );
+  ]);
+  assert.equal(mapped.education_count, 1);
+  assert.deepEqual(mapped.education, [
+    {
+      education_id: 5,
+      education_guid: 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+      degree_name: "Master's",
+      institution_name: 'Example University',
+      field_of_study: 'Computer Science',
+      start_date: '2016-09-01',
+      end_date: '2018-06-01',
+      grade: '3.8',
+      description: null
+    }
+  ]);
+});
+
+test('null or empty experience/education JSON returns empty arrays', async () => {
+  const mapped = await mapCandidateMatchRow({
+    EXPERIENCE_HISTORY_COUNT: 0,
+    EXPERIENCE_HISTORY_JSON: null,
+    EDUCATION_COUNT: 0,
+    EDUCATION_JSON: ''
+  });
+  assert.equal(mapped.experience_history_count, 0);
+  assert.deepEqual(mapped.experience_history, []);
+  assert.equal(mapped.education_count, 0);
+  assert.deepEqual(mapped.education, []);
+});
+
+test('missing counts fall back to parsed array length', async () => {
+  const mapped = await mapCandidateMatchRow({
+    EXPERIENCE_HISTORY_JSON: JSON.stringify([{ company_name: 'Acme', job_title: 'Dev' }]),
+    EDUCATION_JSON: JSON.stringify([{ degree_name: 'BSc' }, { degree_name: 'MSc' }])
+  });
+  assert.equal(mapped.experience_history_count, 1);
+  assert.equal(mapped.education_count, 2);
+});
+
+test('CLOB-like getData values are read before JSON parse', async () => {
+  const mapped = await mapCandidateMatchRow({
+    EXPERIENCE_HISTORY_COUNT: 1,
+    EXPERIENCE_HISTORY_JSON: {
+      getData: async () =>
+        JSON.stringify([
+          {
+            experience_id: 1,
+            company_name: 'Acme',
+            job_title: 'Engineer',
+            current_job_flag: 'N'
+          }
+        ])
+    },
+    EDUCATION_JSON: {
+      getData: () =>
+        Promise.resolve(
+          JSON.stringify([
+            {
+              education_id: 2,
+              degree_name: 'BSc',
+              institution_name: 'State U'
+            }
+          ])
+        )
+    }
+  });
+
+  assert.equal(mapped.experience_history.length, 1);
+  assert.equal(mapped.experience_history[0].company_name, 'Acme');
+  assert.equal(mapped.education_count, 1);
+  assert.equal(mapped.education[0].degree_name, 'BSc');
+});
+
+test('mapExperienceHistory and mapEducationHistory ignore non-objects', () => {
+  assert.deepEqual(mapExperienceHistory(null), []);
+  assert.deepEqual(mapEducationHistory([]), []);
+  assert.deepEqual(mapExperienceHistory(['skip', null, { company_name: 'Acme' }]), [
+    {
+      experience_id: null,
+      experience_guid: null,
+      company_name: 'Acme',
+      job_title: null,
+      location: null,
+      start_date: null,
+      end_date: null,
+      current_job_flag: null,
+      description: null
+    }
+  ]);
 });

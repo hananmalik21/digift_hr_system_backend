@@ -103,46 +103,60 @@ export function mapTalentPool(m) {
   };
 }
 
-function composeEducationDisplay(degree, field) {
-  if (degree && field) return `${degree} in ${field}`;
-  return degree || field || null;
+/**
+ * @template T
+ * @param {unknown} parsedJson
+ * @param {(item: unknown) => T|null} normalizeItem
+ * @returns {T[]}
+ */
+function mapJsonObjectArray(parsedJson, normalizeItem) {
+  if (!Array.isArray(parsedJson) || !parsedJson.length) return [];
+  return parsedJson.map((item) => normalizeItem(item)).filter(Boolean);
 }
 
-function educationFromJson(items) {
-  if (!Array.isArray(items) || !items.length) return null;
-  const first = items.find((item) => item && typeof item === 'object') || items[0];
-  if (!first || typeof first !== 'object' || Array.isArray(first)) return null;
-  const row = rowKeyMap(first);
-  const degree = strOrNull(pick(row, 'degree_name', 'degree', 'education_level_meaning'));
-  const field = strOrNull(pick(row, 'field_of_study', 'field', 'major'));
-  const institution = strOrNull(pick(row, 'institution_name', 'institution', 'school'));
-  const level = strOrNull(pick(row, 'education_level', 'level', 'highest_education_level'));
-  if (!degree && !field && !institution && !level) return null;
+/** Prefer view count; fall back to parsed array length when the count column is null. */
+function viewCountOrLength(rawCount, items) {
+  return safeFiniteNumber(rawCount) ?? items.length;
+}
+
+function normalizeExperienceHistoryItem(item) {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) return null;
+  const row = rowKeyMap(item);
   return {
-    level,
-    degree,
-    field_of_study: field,
-    institution,
-    display: composeEducationDisplay(degree, field)
+    experience_id: safeFiniteNumber(row.experience_id),
+    experience_guid: normalizeGuidValue(row.experience_guid),
+    company_name: strOrNull(row.company_name),
+    job_title: strOrNull(row.job_title),
+    location: strOrNull(row.location),
+    start_date: formatDateOnly(row.start_date),
+    end_date: formatDateOnly(row.end_date),
+    current_job_flag: normalizeYnFlag(row.current_job_flag),
+    description: strOrNull(row.description)
   };
 }
 
-export function mapEducation(m, parsedEducationJson) {
-  const level = strOrNull(m.highest_education_level);
-  const degree = strOrNull(m.degree_name);
-  const field = strOrNull(m.field_of_study);
-  const institution = strOrNull(m.institution_name);
-  const displayFromView = strOrNull(m.education_display);
-  if (level || degree || field || institution || displayFromView) {
-    return {
-      level,
-      degree,
-      field_of_study: field,
-      institution,
-      display: displayFromView || composeEducationDisplay(degree, field)
-    };
-  }
-  return educationFromJson(parsedEducationJson);
+function normalizeEducationHistoryItem(item) {
+  if (item == null || typeof item !== 'object' || Array.isArray(item)) return null;
+  const row = rowKeyMap(item);
+  return {
+    education_id: safeFiniteNumber(row.education_id),
+    education_guid: normalizeGuidValue(row.education_guid),
+    degree_name: strOrNull(row.degree_name),
+    institution_name: strOrNull(row.institution_name),
+    field_of_study: strOrNull(row.field_of_study),
+    start_date: formatDateOnly(row.start_date),
+    end_date: formatDateOnly(row.end_date),
+    grade: strOrNull(row.grade),
+    description: strOrNull(row.description)
+  };
+}
+
+export function mapExperienceHistory(parsedJson) {
+  return mapJsonObjectArray(parsedJson, normalizeExperienceHistoryItem);
+}
+
+export function mapEducationHistory(parsedJson) {
+  return mapJsonObjectArray(parsedJson, normalizeEducationHistoryItem);
 }
 
 /**
@@ -152,11 +166,19 @@ export function mapEducation(m, parsedEducationJson) {
  */
 export async function mapCandidateMatchRow(row) {
   const m = rowKeyMap(row);
-  const [skillsJson, educationJson] = await Promise.all([
+  const [skillsJson, educationJson, experienceHistoryJson] = await Promise.all([
     parseJsonColumn(pick(m, 'skills_json', 'key_skills_json'), true),
-    parseJsonColumn(m.education_json, true)
+    parseJsonColumn(m.education_json, true),
+    parseJsonColumn(m.experience_history_json, true)
   ]);
 
+  const experience_history = mapExperienceHistory(experienceHistoryJson);
+  const education = mapEducationHistory(educationJson);
+  const experience_history_count = viewCountOrLength(
+    m.experience_history_count,
+    experience_history
+  );
+  const education_count = viewCountOrLength(m.education_count, education);
   const candidate_name = strOrNull(m.candidate_name);
   const first_name = strOrNull(m.first_name);
   const last_name = strOrNull(m.last_name);
@@ -289,7 +311,10 @@ export async function mapCandidateMatchRow(row) {
     profile_completeness_score: safeFiniteNumber(m.profile_completeness_score),
     skills: mapSkills(skillsJson, m.key_skills_text),
     talent_pool: mapTalentPool(m),
-    education: mapEducation(m, educationJson),
+    experience_history_count,
+    experience_history,
+    education_count,
+    education,
     application,
     // Flat fields for backward-compatible Flutter clients
     applied_flag,
