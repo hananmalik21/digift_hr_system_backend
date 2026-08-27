@@ -1,6 +1,7 @@
 /**
- * ISO 4217 currency metadata used by the shared conversion service.
- * Minor units follow the ISO 4217 standard (KWD/BHD/OMR = 3, JPY = 0, most = 2).
+ * ISO 4217 code validation used by the shared conversion service.
+ * Decimal precision comes from ENT.CURRENCIES via GET /api/enterprise/currencies
+ * (do not hardcode minor units here).
  */
 
 export const FRANKFURTER_RATE_SOURCE = 'FRANKFURTER';
@@ -15,17 +16,6 @@ export const ERROR_CODES = Object.freeze({
 
 /** Display scale for the provider rate before it is returned to clients. */
 export const RATE_DISPLAY_SCALE = 8;
-
-const MINOR_UNITS_0 = [
-  'BIF', 'CLP', 'DJF', 'GNF', 'ISK', 'JPY', 'KMF', 'KRW', 'PYG',
-  'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF',
-];
-
-const MINOR_UNITS_3 = [
-  'BHD', 'IQD', 'JOD', 'KWD', 'LYD', 'OMR', 'TND',
-];
-
-const MINOR_UNITS_4 = ['CLF', 'UYW'];
 
 /**
  * Active ISO 4217 alphabetic codes commonly used in HR/payroll, plus GCC and major trading currencies.
@@ -50,19 +40,6 @@ export const ISO_4217_CODES = new Set([
   'UYU', 'UZS', 'VES', 'VND', 'VUV', 'WST', 'XAF', 'XCD', 'XOF', 'XPF',
   'YER', 'ZAR', 'ZMW', 'ZWG',
 ]);
-
-const MINOR_UNIT_MAP = new Map();
-for (const code of MINOR_UNITS_0) MINOR_UNIT_MAP.set(code, 0);
-for (const code of MINOR_UNITS_3) MINOR_UNIT_MAP.set(code, 3);
-for (const code of MINOR_UNITS_4) MINOR_UNIT_MAP.set(code, 4);
-
-/**
- * @param {string} currencyCode uppercase ISO 4217
- * @returns {number} ISO minor units (decimal places)
- */
-export function getCurrencyMinorUnits(currencyCode) {
-  return MINOR_UNIT_MAP.get(currencyCode) ?? 2;
-}
 
 export function isKnownIso4217(code) {
   return ISO_4217_CODES.has(code);

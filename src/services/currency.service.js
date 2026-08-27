@@ -1,6 +1,5 @@
 import {
   FRANKFURTER_RATE_SOURCE,
-  getCurrencyMinorUnits,
   RATE_DISPLAY_SCALE,
   SAME_CURRENCY_SOURCE,
 } from '../constants/currency.constants.js';
@@ -13,13 +12,27 @@ import {
   roundHalfUp,
   toNumber,
 } from '../utils/currencyDecimal.js';
+import CurrenciesModel from '../../feature/enterprise_structure/currencies/model/currenciesModel.js';
 
 function formatRate(decimal) {
   return toNumber(roundHalfUp(decimal, RATE_DISPLAY_SCALE));
 }
 
-function formatAmount(decimal, currencyCode) {
-  return toNumber(roundHalfUp(decimal, getCurrencyMinorUnits(currencyCode)));
+/**
+ * Format a monetary amount using ENT.CURRENCIES.decimal_places.
+ * When decimal_places is null, do not assume a default precision (e.g. 2).
+ * @param {{ units: bigint, scale: number }} decimal
+ * @param {number|null|undefined} decimalPlaces
+ */
+function formatAmount(decimal, decimalPlaces) {
+  if (decimalPlaces == null) {
+    return toNumber(decimal);
+  }
+  return toNumber(roundHalfUp(decimal, decimalPlaces));
+}
+
+async function defaultResolveDecimalPlaces(currencyCode) {
+  return CurrenciesModel.getDecimalPlaces(currencyCode);
 }
 
 function parseProviderRate(rate, fromCurrency, toCurrency, conversionDate) {
@@ -69,10 +82,16 @@ export async function getExchangeRate(
 /**
  * Shared conversion used by Payroll, Compensation, Job Offers, Expenses, and reports.
  * Persist `exchange_rate` on finalized payroll so later provider revisions do not change history.
+ * Rounding uses `decimal_places` from ENT.CURRENCIES (source of truth).
+ *
+ * @param {{ amount: number|string, fromCurrency: string, toCurrency: string, conversionDate?: string|null }} params
+ * @param {typeof defaultFetchPair} [fetchPair]
+ * @param {(code: string) => Promise<number|null>} [resolveDecimalPlaces]
  */
 export async function convertCurrency(
   { amount, fromCurrency, toCurrency, conversionDate },
-  fetchPair = defaultFetchPair
+  fetchPair = defaultFetchPair,
+  resolveDecimalPlaces = defaultResolveDecimalPlaces
 ) {
   const amountDecimal = parseDecimal(amount);
   const rateData = await getExchangeRate(fromCurrency, toCurrency, conversionDate, fetchPair);
@@ -81,22 +100,24 @@ export async function convertCurrency(
       ? amountDecimal
       : multiply(amountDecimal, rateData.exchangeRate);
 
+  const decimalPlaces = await resolveDecimalPlaces(toCurrency);
+
   return {
     original_amount: toNumber(amountDecimal),
     from_currency: fromCurrency,
     to_currency: toCurrency,
     exchange_rate: formatRate(rateData.exchangeRate),
-    converted_amount: formatAmount(convertedDecimal, toCurrency),
+    converted_amount: formatAmount(convertedDecimal, decimalPlaces),
     conversion_date: conversionDate,
     rate_effective_date: rateData.effectiveDate,
     rate_source: rateData.source,
   };
 }
 
-export function createCurrencyService(fetchPair) {
+export function createCurrencyService(fetchPair, resolveDecimalPlaces = defaultResolveDecimalPlaces) {
   return {
     getExchangeRate: (fromCurrency, toCurrency, conversionDate) =>
       getExchangeRate(fromCurrency, toCurrency, conversionDate, fetchPair),
-    convertCurrency: (params) => convertCurrency(params, fetchPair),
+    convertCurrency: (params) => convertCurrency(params, fetchPair, resolveDecimalPlaces),
   };
 }

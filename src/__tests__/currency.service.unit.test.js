@@ -1,6 +1,6 @@
 /**
  * Currency conversion service tests.
- * Uses an injected Frankfurter stub — no network and no Oracle table.
+ * Uses injected Frankfurter + decimal_places stubs — no network and no Oracle table.
  */
 
 import test from 'node:test';
@@ -14,6 +14,19 @@ import {
 import { fetchPairRate } from '../clients/frankfurter.client.js';
 import { parseConvertBody } from '../validators/currency.validator.js';
 import { multiply, parseDecimal, toPlainString, toNumber } from '../utils/currencyDecimal.js';
+
+/** Mirrors ENT.CURRENCIES.decimal_places for unit tests (source of truth is Oracle). */
+const ENT_DECIMAL_PLACES = {
+  PKR: 2,
+  KWD: 3,
+  USD: 2,
+  JPY: 0,
+};
+
+function stubDecimalPlaces(map = ENT_DECIMAL_PLACES) {
+  return async (code) =>
+    Object.prototype.hasOwnProperty.call(map, code) ? map[code] : null;
+}
 
 function stubFrankfurter({ rate = 904.96, date = '2026-08-14', calls } = {}) {
   return async ({ fromCurrency, toCurrency, conversionDate }) => {
@@ -40,7 +53,8 @@ test('KWD → PKR multiplies amount by the provider rate', async () => {
       toCurrency: 'PKR',
       conversionDate: '2026-08-16',
     },
-    stubFrankfurter({ rate: 904.96, date: '2026-08-14' })
+    stubFrankfurter({ rate: 904.96, date: '2026-08-14' }),
+    stubDecimalPlaces()
   );
   assert.equal(result.exchange_rate, 904.96);
   assert.equal(result.converted_amount, 904.96);
@@ -52,7 +66,7 @@ test('KWD → PKR multiplies amount by the provider rate', async () => {
   assert.equal('rate_type' in result, false);
 });
 
-test('converted amount rounds to the destination currency minor units', async () => {
+test('converted amount rounds to destination currency decimal_places', async () => {
   const result = await convertCurrency(
     {
       amount: 5000,
@@ -60,9 +74,24 @@ test('converted amount rounds to the destination currency minor units', async ()
       toCurrency: 'KWD',
       conversionDate: '2026-08-23',
     },
-    stubFrankfurter({ rate: 0.3075, date: '2026-08-22' })
+    stubFrankfurter({ rate: 0.3075, date: '2026-08-22' }),
+    stubDecimalPlaces()
   );
   assert.equal(result.converted_amount, 1537.5);
+});
+
+test('null decimal_places does not assume precision 2', async () => {
+  const result = await convertCurrency(
+    {
+      amount: 1,
+      fromCurrency: 'USD',
+      toCurrency: 'XXX',
+      conversionDate: '2026-08-23',
+    },
+    stubFrankfurter({ rate: 1.23456789, date: '2026-08-22' }),
+    stubDecimalPlaces({ XXX: null })
+  );
+  assert.equal(result.converted_amount, 1.23456789);
 });
 
 test('same currency returns rate 1 without calling the provider', async () => {
@@ -74,7 +103,8 @@ test('same currency returns rate 1 without calling the provider', async () => {
       toCurrency: 'USD',
       conversionDate: '2026-08-23',
     },
-    stubFrankfurter({ calls })
+    stubFrankfurter({ calls }),
+    stubDecimalPlaces()
   );
   assert.equal(calls.length, 0);
   assert.equal(result.exchange_rate, 1);
@@ -93,7 +123,8 @@ test('missing provider rate returns EXCHANGE_RATE_NOT_FOUND', async () => {
           toCurrency: 'JPY',
           conversionDate: '2026-08-23',
         },
-        stubFrankfurter({ rate: null })
+        stubFrankfurter({ rate: null }),
+        stubDecimalPlaces()
       ),
     (err) => {
       assert.equal(err instanceof ExchangeRateNotFoundError, true);
@@ -116,7 +147,8 @@ test('provider HTTP failure is EXCHANGE_RATE_PROVIDER_ERROR', async () => {
         },
         async () => {
           throw new CurrencyProviderError('KWD', 'PKR');
-        }
+        },
+        stubDecimalPlaces()
       ),
     (err) => {
       assert.equal(err instanceof CurrencyProviderError, true);
@@ -135,12 +167,12 @@ test('zero amount converts to zero', async () => {
       toCurrency: 'PKR',
       conversionDate: '2026-08-16',
     },
-    stubFrankfurter({ rate: 904.96, date: '2026-08-14' })
+    stubFrankfurter({ rate: 904.96, date: '2026-08-14' }),
+    stubDecimalPlaces()
   );
   assert.equal(result.original_amount, 0);
   assert.equal(result.converted_amount, 0);
 });
-
 test('negative amount is rejected by the validator', () => {
   assert.throws(
     () => parseConvertBody({ amount: -10, from_currency: 'KWD', to_currency: 'PKR' }),
@@ -185,7 +217,10 @@ test('getExchangeRate returns SAME_CURRENCY for identity pairs', async () => {
 });
 
 test('createCurrencyService injects a provider for other HR modules', async () => {
-  const service = createCurrencyService(stubFrankfurter({ rate: 904.96, date: '2026-08-14' }));
+  const service = createCurrencyService(
+    stubFrankfurter({ rate: 904.96, date: '2026-08-14' }),
+    stubDecimalPlaces()
+  );
   const result = await service.convertCurrency({
     amount: 1,
     fromCurrency: 'KWD',
@@ -206,7 +241,8 @@ test('malformed provider rate is EXCHANGE_RATE_PROVIDER_ERROR', async () => {
           toCurrency: 'PKR',
           conversionDate: '2026-08-16',
         },
-        async () => ({ date: '2026-08-14', rate: 'not-a-rate' })
+        async () => ({ date: '2026-08-14', rate: 'not-a-rate' }),
+        stubDecimalPlaces()
       ),
     (err) => {
       assert.equal(err instanceof CurrencyProviderError, true);
@@ -216,7 +252,6 @@ test('malformed provider rate is EXCHANGE_RATE_PROVIDER_ERROR', async () => {
     }
   );
 });
-
 test('null convert body is treated as missing required fields', () => {
   assert.throws(
     () => parseConvertBody(null),

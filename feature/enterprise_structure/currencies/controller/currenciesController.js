@@ -10,7 +10,8 @@ const router = express.Router();
 
 /**
  * GET /api/enterprise/currencies
- * List ENT.CURRENCIES (code + name), ordered by name then code.
+ * List ENT.CURRENCIES (code, name, decimal_places), ordered by name then code.
+ * decimal_places is the source of truth for monetary display precision (may be null).
  *
  * @query search - Optional partial match on CURRENCY_CODE or CURRENCY_NAME
  */

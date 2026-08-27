@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildCurrencyByCodeQuery,
   buildCurrenciesListQuery,
   mapCurrencyRows,
+  mapDecimalPlaces,
   normalizeCurrencySearch
 } from '../utils/currenciesQuery.js';
 import {
@@ -32,11 +34,21 @@ test('normalizeCurrencySearch trims, blanks to null, and caps length', () => {
   assert.equal(normalizeCurrencySearch('x'.repeat(120)).length, 100);
 });
 
-test('buildCurrenciesListQuery selects code+name and orders by name then code', () => {
+test('mapDecimalPlaces preserves null and zero; coerces finite numbers', () => {
+  assert.equal(mapDecimalPlaces(null), null);
+  assert.equal(mapDecimalPlaces(undefined), null);
+  assert.equal(mapDecimalPlaces(''), null);
+  assert.equal(mapDecimalPlaces(0), 0);
+  assert.equal(mapDecimalPlaces(2), 2);
+  assert.equal(mapDecimalPlaces('3'), 3);
+  assert.equal(mapDecimalPlaces(Number.NaN), null);
+});
+
+test('buildCurrenciesListQuery selects code+name+decimal_places and orders by name then code', () => {
   const { sql, binds } = buildCurrenciesListQuery();
   assert.equal(
     sql,
-    'SELECT CURRENCY_CODE, CURRENCY_NAME FROM ENT.CURRENCIES ORDER BY CURRENCY_NAME, CURRENCY_CODE'
+    'SELECT CURRENCY_CODE, CURRENCY_NAME, DECIMAL_PLACES FROM ENT.CURRENCIES ORDER BY CURRENCY_NAME, CURRENCY_CODE'
   );
   assert.deepEqual(binds, {});
 });
@@ -48,26 +60,69 @@ test('buildCurrenciesListQuery searches code and name with :search bind only', (
     /WHERE \(UPPER\(CURRENCY_CODE\) LIKE '%' \|\| UPPER\(:search\) \|\| '%' OR UPPER\(CURRENCY_NAME\) LIKE '%' \|\| UPPER\(:search\) \|\| '%'\)/
   );
   assert.match(sql, /ORDER BY CURRENCY_NAME, CURRENCY_CODE/);
+  assert.match(sql, /DECIMAL_PLACES/);
   assert.deepEqual(binds, { search: 'Kuwait' });
   assert.doesNotMatch(sql, /Kuwait/);
 });
 
-test('mapCurrencyRows shapes payload and empty input', () => {
+test('buildCurrencyByCodeQuery uses exact code bind', () => {
+  const { sql, binds } = buildCurrencyByCodeQuery('kwd');
+  assert.equal(
+    sql,
+    'SELECT CURRENCY_CODE, CURRENCY_NAME, DECIMAL_PLACES FROM ENT.CURRENCIES WHERE UPPER(CURRENCY_CODE) = UPPER(:currency_code)'
+  );
+  assert.deepEqual(binds, { currency_code: 'KWD' });
+});
+
+test('mapCurrencyRows shapes payload including decimal_places and empty input', () => {
   assert.deepEqual(mapCurrencyRows(null), []);
   assert.deepEqual(
     mapCurrencyRows([
-      { currency_code: 'KWD', currency_name: 'Kuwaiti Dinar', extra: 1 }
+      {
+        currency_code: 'KWD',
+        currency_name: 'Kuwaiti Dinar',
+        decimal_places: 3,
+        extra: 1
+      }
     ]),
-    [{ currency_code: 'KWD', currency_name: 'Kuwaiti Dinar' }]
+    [
+      {
+        currency_code: 'KWD',
+        currency_name: 'Kuwaiti Dinar',
+        decimal_places: 3
+      }
+    ]
+  );
+  assert.deepEqual(
+    mapCurrencyRows([
+      { currency_code: 'JPY', currency_name: 'Yen', decimal_places: 0 }
+    ]),
+    [{ currency_code: 'JPY', currency_name: 'Yen', decimal_places: 0 }]
+  );
+  assert.deepEqual(
+    mapCurrencyRows([
+      { currency_code: 'XXX', currency_name: 'No precision', decimal_places: null }
+    ]),
+    [
+      {
+        currency_code: 'XXX',
+        currency_name: 'No precision',
+        decimal_places: null
+      }
+    ]
   );
   assert.deepEqual(mapCurrencyRows([{}]), [
-    { currency_code: null, currency_name: null }
+    { currency_code: null, currency_name: null, decimal_places: null }
   ]);
 });
 
 test('sendCurrenciesList returns success envelope', () => {
   const res = mockRes();
-  const row = { currency_code: 'AED', currency_name: 'UAE Dirham' };
+  const row = {
+    currency_code: 'AED',
+    currency_name: 'UAE Dirham',
+    decimal_places: 2
+  };
   sendCurrenciesList(res, [row]);
   assert.equal(res.statusCode, 200);
   assert.deepEqual(res.body, { success: true, data: [row] });
