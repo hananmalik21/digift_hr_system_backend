@@ -16,6 +16,7 @@
     "test:employer-info": "node --test feature/recruitment/employer_info/__tests__/recEmployerInfo.unit.test.js",
     "test:candidate-email": "node --test feature/recruitment/candidates/__tests__/recCandidateSendEmail.unit.test.js",
     "test:candidate-auth": "node --test feature/recruitment/candidate_users/__tests__/recCandidatePasswordReset.unit.test.js",
+    "test:fndsec-auth-reset": "node --test feature/security/auth/__tests__/fndsecPasswordReset.unit.test.js",
     "test:requisition-company-info": "node --test feature/recruitment/requisitions/__tests__/recRequisitionCompanyInfo.unit.test.js",
     "test:payroll": "node --test feature/payroll/__tests__/payrollShared.unit.test.js feature/payroll/__tests__/payTestReset.unit.test.js feature/payroll/__tests__/tmPayroll.bindings.unit.test.js feature/payroll/__tests__/tmPayroll.sourceMapping.v2.unit.test.js feature/payroll/__tests__/tmPayroll.transferBatch.reopen.unit.test.js feature/payroll/__tests__/tmPayroll.transferLifecycle.response.unit.test.js feature/payroll/__tests__/payrollApis.integration.test.js feature/payroll/person_results/__tests__/payPersonResults.unit.test.js feature/payroll/person_results/__tests__/payPersonResultDashboard.unit.test.js src/__tests__/tmOvertimeRequests.lifecycle.unit.test.js",
     "lint": "eslint .",

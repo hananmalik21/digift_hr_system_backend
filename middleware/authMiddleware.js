@@ -23,6 +23,13 @@ import { isHex32 } from '../utils/guidUtils.js';
 const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
   { method: 'POST', pattern: /^\/api\/security\/auth\/login\/?$/ },
+  { method: 'POST', pattern: /^\/api\/security\/auth\/forgot-password\/?$/ },
+  { method: 'POST', pattern: /^\/api\/security\/auth\/verify-reset-otp\/?$/ },
+  { method: 'POST', pattern: /^\/api\/security\/auth\/reset-password\/?$/ },
+  // Alias paths for main-user password reset
+  { method: 'POST', pattern: /^\/api\/auth\/forgot-password\/?$/ },
+  { method: 'POST', pattern: /^\/api\/auth\/verify-reset-otp\/?$/ },
+  { method: 'POST', pattern: /^\/api\/auth\/reset-password\/?$/ },
   // Public enterprise context (hostname → tenant)
   { method: 'GET', pattern: /^\/api\/public\/enterprise-context\/?$/ },
   // Enterprise CRUD — no JWT required
