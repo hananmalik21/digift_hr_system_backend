@@ -120,7 +120,7 @@ test('resolveFndsecPasswordResetPackageResult requires user_guid on SUCCESS', ()
 test('validateFndsecForgotPasswordBody normalizes email', () => {
   const out = validateFndsecForgotPasswordBody({
     enterprise_id: 1,
-    email: '  Employee@Company.COM '
+    email: '  User@Company.COM '
   });
   assert.deepEqual(out, { enterprise_id: 1, email: 'user@company.com' });
 });
@@ -164,8 +164,8 @@ test('OTP store verifies once and rejects reuse', () => {
     otp: '482731'
   });
 
-  assert.equal(verifyPasswordResetOtp(1, 'employee@company.com', '482731').ok, true);
-  assert.equal(verifyPasswordResetOtp(1, 'employee@company.com', '482731').ok, false);
+  assert.equal(verifyPasswordResetOtp(1, 'user@company.com', '482731').ok, true);
+  assert.equal(verifyPasswordResetOtp(1, 'user@company.com', '482731').ok, false);
 });
 
 test('OTP store locks after max failed attempts', () => {
