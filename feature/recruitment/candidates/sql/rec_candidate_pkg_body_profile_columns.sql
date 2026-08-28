@@ -42,6 +42,11 @@
   END resolve_willing_to_relocate;
 */
 
+-- ----- CREATE_CANDIDATE / UPDATE_CANDIDATE: demographic binds -----
+-- p_date_of_birth, p_gender, p_nationality, p_visa_status,
+-- p_alternate_phone, p_alternate_email, p_preferred_location, p_source_from
+-- (API field `dob` maps to p_date_of_birth)
+
 -- ----- CREATE_CANDIDATE: add to INSERT -----
 -- CURRENT_SALARY, PORTFOLIO_LINK, GITHUB_LINK, WILLING_TO_RELOCATE
 -- p_current_salary, trim_link(p_portfolio_link), trim_link(p_github_link), v_willing_to_relocate

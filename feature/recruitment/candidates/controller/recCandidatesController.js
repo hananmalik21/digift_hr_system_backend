@@ -569,8 +569,12 @@ router.post(
  * POST /api/rec/candidates
  * Body: application/json or multipart/form-data.
  * Resume optional: field "resume", "file", "attachment", or "document"; or file_content (base64).
- * education_json / experience_json: JSON arrays (or JSON strings in multipart).
+ * education / experience / skills: JSON arrays (or JSON strings in multipart).
+ * Legacy aliases education_json and experience_json are still accepted.
+ * On update: omit a child array to keep existing rows; send [] to delete all; send items to replace.
  * Optional: current_salary, portfolio_link, github_link, willing_to_relocate (Y|N, default N).
+ * Optional demographic: dob (YYYY-MM-DD), gender, nationality, visa_status,
+ * alternate_phone, alternate_email, preferred_location, source_from.
  */
 router.post(
   '/',
@@ -600,7 +604,11 @@ router.post(
  * PUT /api/rec/candidates/:candidate_guid
  * Body: application/json or multipart/form-data.
  * Resume optional: field "resume", "file", "attachment", or "document"; or file_content (base64).
+ * education / experience / skills: JSON arrays; omit to keep existing, [] deletes all, items replace.
+ * Legacy aliases education_json and experience_json are still accepted.
  * Optional: current_salary, portfolio_link, github_link, willing_to_relocate (Y|N).
+ * Optional demographic: dob (YYYY-MM-DD), gender, nationality, visa_status,
+ * alternate_phone, alternate_email, preferred_location, source_from.
  */
 router.put(
   '/:candidate_guid',

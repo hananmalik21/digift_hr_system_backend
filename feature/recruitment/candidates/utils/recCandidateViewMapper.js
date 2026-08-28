@@ -1,8 +1,14 @@
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { formatDateOnly } from '../../candidate_matches/utils/recCandidateMatchMappers.js';
+import { CANDIDATE_DOB_VIEW_COLUMN } from './recCandidateProfileFields.js';
+import {
+  CANDIDATE_CHILD_JSON_VIEW_COLUMNS,
+  CANDIDATE_CHILD_JSON_VIEW_TO_API,
+  CANDIDATE_SKILLS_VIEW_COLUMN
+} from './recCandidateChildJsonUtils.js';
+import { mapCandidateSkillsResponse } from './recCandidateSkillMappers.js';
 
 const JSON_ARRAY_COLUMNS = new Set([
-  'education_json',
-  'experience_json',
   'resumes_json',
   'background_checks_json',
   'talent_pools_json',
@@ -138,12 +144,25 @@ export async function mapCandidateViewRow(row, options = {}) {
   for (const [k, v] of Object.entries(row)) {
     const key = String(k).toLowerCase();
     if (omit.has(key)) continue;
+    if (CANDIDATE_CHILD_JSON_VIEW_COLUMNS.has(key)) {
+      const parsed = await parseJsonColumn(v, true);
+      if (key === CANDIDATE_SKILLS_VIEW_COLUMN) {
+        out.skills = mapCandidateSkillsResponse(parsed);
+      } else {
+        out[CANDIDATE_CHILD_JSON_VIEW_TO_API[key]] = parsed;
+      }
+      continue;
+    }
     if (JSON_ARRAY_COLUMNS.has(key)) {
       let parsed = await parseJsonColumn(v, true);
       if (key === 'assessments_json') {
         parsed = normalizeNestedJsonArrayFields(parsed);
       }
       out[key] = parsed;
+      continue;
+    }
+    if (key === CANDIDATE_DOB_VIEW_COLUMN) {
+      out.dob = formatDateOnly(v);
       continue;
     }
     out[key] = normalizeScalar(key, v);

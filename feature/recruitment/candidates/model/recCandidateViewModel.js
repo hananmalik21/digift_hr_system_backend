@@ -15,6 +15,7 @@ import {
   pickQueryFilterValue,
   resolveExperienceBand
 } from '../utils/recCandidateListFilters.js';
+import { CANDIDATE_DEMOGRAPHIC_VIEW_COLS } from '../utils/recCandidateProfileFields.js';
 
 const VIEW = process.env.REC_CANDIDATES_FULL_V || 'REC.CANDIDATES_FULL_V';
 const LOG_TAG = 'recCandidateViewModel';
@@ -44,10 +45,12 @@ const LIST_SELECT_COLS = [
   'PORTFOLIO_LINK',
   'GITHUB_LINK',
   'WILLING_TO_RELOCATE',
+  ...CANDIDATE_DEMOGRAPHIC_VIEW_COLS,
   'STATUS',
   'ACTIVE_FLAG',
   'EDUCATION_JSON',
   'EXPERIENCE_JSON',
+  'SKILLS_JSON',
   'RESUMES_JSON',
   'TALENT_POOLS_JSON',
   'ASSESSMENTS_JSON',

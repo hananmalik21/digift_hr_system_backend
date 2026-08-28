@@ -1,7 +1,9 @@
 -- =============================================================================
 -- REC.CANDIDATES_FULL_V — expose profile & compensation columns on list/detail
 -- Prerequisite: REC.CANDIDATES has CURRENT_SALARY, PORTFOLIO_LINK, GITHUB_LINK,
---               WILLING_TO_RELOCATE (see alter_rec_candidates_add_profile_columns.sql).
+--               WILLING_TO_RELOCATE, DATE_OF_BIRTH, GENDER, NATIONALITY,
+--               VISA_STATUS, ALTERNATE_PHONE, ALTERNATE_EMAIL, PREFERRED_LOCATION,
+--               SOURCE_FROM.
 -- Run as REC or a user with CREATE OR REPLACE VIEW on REC.CANDIDATES_FULL_V.
 -- =============================================================================
 
@@ -31,6 +33,14 @@ SELECT
     c.portfolio_link,
     c.github_link,
     c.willing_to_relocate,
+    c.date_of_birth,
+    c.gender,
+    c.nationality,
+    c.visa_status,
+    c.alternate_phone,
+    c.alternate_email,
+    c.preferred_location,
+    c.source_from,
     c.status,
     c.active_flag,
 
@@ -71,6 +81,19 @@ SELECT
         WHERE x.enterprise_id = c.enterprise_id
         AND x.candidate_id = c.candidate_id
     ) AS experience_json,
+
+    (
+        SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+                'candidate_skill_guid' VALUE RAWTOHEX(s.candidate_skill_guid),
+                'skill_name' VALUE s.skill_name
+            ) RETURNING CLOB
+            ORDER BY s.skill_name
+        )
+        FROM REC.CANDIDATE_SKILLS s
+        WHERE s.enterprise_id = c.enterprise_id
+        AND s.candidate_id = c.candidate_id
+    ) AS skills_json,
 
     (
         SELECT JSON_ARRAYAGG(

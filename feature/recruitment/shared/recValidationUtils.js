@@ -1,5 +1,14 @@
 import { ValidationError } from '../../../utils/errors/index.js';
+import {
+  isFutureDateOnly,
+  isValidCalendarDateOnly,
+  parseCalendarDateOnlyBind
+} from '../../../utils/dateOnlyUtils.js';
 import { ensureHex32, normalizeHex32 } from '../../../utils/guidUtils.js';
+
+export { isFutureDateOnly, isValidCalendarDateOnly, parseCalendarDateOnlyBind };
+
+export const BASIC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isBlank(v) {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
@@ -11,6 +20,83 @@ export function asObject(body) {
 
 export function normalizeEmailLower(raw) {
   return String(raw ?? '').trim().toLowerCase();
+}
+
+/** @param {string} email */
+export function isValidBasicEmail(email) {
+  return BASIC_EMAIL_RE.test(String(email ?? '').trim());
+}
+
+/**
+ * Trim optional string field on body; blank values become null when the key was sent.
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ */
+export function normalizeOptionalTrimmedField(body, field) {
+  if (!isBlank(body[field])) {
+    body[field] = String(body[field]).trim();
+    return;
+  }
+  if (body[field] !== undefined && body[field] !== null) {
+    body[field] = null;
+  }
+}
+
+/**
+ * Uppercase optional code-style field on body; blank values become null when the key was sent.
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ */
+export function normalizeOptionalUppercaseCode(body, field) {
+  if (!isBlank(body[field])) {
+    body[field] = String(body[field]).trim().toUpperCase();
+    return;
+  }
+  if (body[field] !== undefined && body[field] !== null) {
+    body[field] = null;
+  }
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ * @param {{ notFuture?: boolean }} [options]
+ */
+export function validateOptionalCalendarDateInErrors(errors, body, field, options = {}) {
+  const { notFuture = false } = options;
+  if (isBlank(body[field])) {
+    if (body[field] !== undefined && body[field] !== null) body[field] = null;
+    return;
+  }
+  const s = String(body[field]).trim();
+  if (!isValidCalendarDateOnly(s)) {
+    errors.push(`${field} must be a valid date (YYYY-MM-DD)`);
+    return;
+  }
+  if (notFuture && isFutureDateOnly(s)) {
+    errors.push(`${field} must not be a future date`);
+    return;
+  }
+  body[field] = s;
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ * @param {string} field
+ */
+export function validateOptionalEmailInErrors(errors, body, field) {
+  if (isBlank(body[field])) {
+    if (body[field] !== undefined && body[field] !== null) body[field] = null;
+    return;
+  }
+  const email = normalizeEmailLower(body[field]);
+  if (!isValidBasicEmail(email)) {
+    errors.push(`${field} must be a valid email address`);
+    return;
+  }
+  body[field] = email;
 }
 
 /** @param {string[]} errors @param {Record<string, unknown>} body @param {number} [minLen] */
