@@ -214,20 +214,27 @@ export async function mapCandidateViewRow(row, options = {}) {
   return out;
 }
 
+/** JSON view columns omitted from slim list responses (skills are kept). */
+const LIST_OMIT_JSON_VIEW_COLUMNS = Object.keys(CANDIDATE_JSON_COLLECTION_VIEW_TO_API).filter(
+  (column) => column !== CANDIDATE_SKILLS_VIEW_COLUMN
+);
+
 /**
- * Map one REC.CANDIDATES_FULL_V list row to the slim list API shape (no JSON collections).
+ * Map one REC.CANDIDATES_FULL_V list row to the slim list API shape.
+ * Includes `skills`; omits other large JSON collections.
  * @param {Record<string, unknown>} row
  */
 export async function mapCandidateListViewRow(row) {
   if (!row || typeof row !== 'object') return null;
 
   const detail = await mapCandidateViewRow(row, {
-    omitColumns: Object.keys(CANDIDATE_JSON_COLLECTION_VIEW_TO_API)
+    omitColumns: LIST_OMIT_JSON_VIEW_COLUMNS
   });
 
   const out = {};
   for (const field of CANDIDATE_LIST_API_FIELDS) {
     if (field in detail) out[field] = detail[field];
   }
+  if (detail.skills != null) out.skills = detail.skills;
   return out;
 }

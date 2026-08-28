@@ -27,6 +27,7 @@ export const CANDIDATE_LIST_API_FIELDS = [
   'source_from',
   'status',
   'active_flag',
+  'skills',
   'creation_date'
 ];
 
@@ -52,5 +53,6 @@ export const CANDIDATE_LIST_VIEW_COLUMNS = [
   'SOURCE_FROM',
   'STATUS',
   'ACTIVE_FLAG',
+  'SKILLS_JSON',
   'CREATION_DATE'
 ];
