@@ -9,6 +9,7 @@ export const CANDIDATE_SKILLS_FIELD = 'skills';
 /** Legacy request aliases kept for backward compatibility. */
 export const CANDIDATE_EDUCATION_LEGACY_FIELD = 'education_json';
 export const CANDIDATE_EXPERIENCE_LEGACY_FIELD = 'experience_json';
+export const CANDIDATE_SKILLS_LEGACY_FIELD = 'skills_json';
 
 /** View column names on REC.CANDIDATES_FULL_V. */
 export const CANDIDATE_EDUCATION_VIEW_COLUMN = 'education_json';
@@ -80,6 +81,28 @@ export function normalizeCandidateChildJsonRequestFields(body) {
       body[canonical] = body[legacy];
     }
   }
+
+  if (!bodyHasField(body, CANDIDATE_SKILLS_FIELD) && bodyHasField(body, CANDIDATE_SKILLS_LEGACY_FIELD)) {
+    body[CANDIDATE_SKILLS_FIELD] = body[CANDIDATE_SKILLS_LEGACY_FIELD];
+  }
+}
+
+/**
+ * Parse skills from multipart/form-data JSON strings (or legacy alias) into a JS array.
+ * Safe to call for application/json requests — arrays pass through unchanged.
+ * @param {Record<string, unknown>} body
+ */
+export function normalizeSkillsFieldInBody(body) {
+  normalizeCandidateChildJsonRequestFields(body);
+
+  if (!bodyHasField(body, CANDIDATE_SKILLS_FIELD)) {
+    return;
+  }
+
+  const value = body[CANDIDATE_SKILLS_FIELD];
+  if (typeof value === 'string') {
+    body[CANDIDATE_SKILLS_FIELD] = parseChildJsonArrayField(value, CANDIDATE_SKILLS_FIELD);
+  }
 }
 
 /**
@@ -107,7 +130,8 @@ export function parseChildJsonArrayField(value, fieldName) {
 }
 
 /**
- * Parse education, experience, and skills from multipart form fields.
+ * Parse education, experience, and skills from request body.
+ * Skills/education/experience may arrive as JSON strings (multipart/form-data).
  * @param {Record<string, unknown>} body
  */
 export function parseCandidateMultipartChildJsonFields(body) {
@@ -121,9 +145,56 @@ export function parseCandidateMultipartChildJsonFields(body) {
     }
   }
 
-  if (bodyHasField(body, CANDIDATE_SKILLS_FIELD)) {
-    body[CANDIDATE_SKILLS_FIELD] = parseChildJsonArrayField(body[CANDIDATE_SKILLS_FIELD], CANDIDATE_SKILLS_FIELD);
+  normalizeSkillsFieldInBody(body);
+}
+
+/**
+ * Parse skills request value to a JS array (or null when empty).
+ * @param {unknown} value
+ * @returns {unknown[]|null|undefined} undefined when value is invalid
+ */
+function parseSkillsArrayInput(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
   }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * Coerce skills to a JS array for validation (parses JSON strings once).
+ * @param {unknown} value
+ * @param {string[]} errors
+ * @returns {unknown[]|null|undefined} undefined when invalid
+ */
+function coerceSkillsArrayValue(value, errors) {
+  const parsed = parseSkillsArrayInput(value);
+  if (parsed === undefined) {
+    if (typeof value === 'string') {
+      errors.push('skills must be valid JSON');
+    } else {
+      errors.push('skills must be an array');
+    }
+    return undefined;
+  }
+  return parsed;
 }
 
 /**
@@ -148,6 +219,26 @@ export function candidateChildJsonToClobString(body, fieldName) {
   }
 
   return JSON.stringify(value);
+}
+
+/**
+ * Bind helper for P_SKILLS_JSON.
+ * Parses JSON strings once, then stringifies the array once — never double-encodes.
+ * Omitted key -> NULL; explicit [] -> '[]'; items -> JSON.stringify.
+ * @param {Record<string, unknown>} body
+ * @returns {string|null}
+ */
+export function candidateSkillsToClobString(body) {
+  if (!bodyHasField(body, CANDIDATE_SKILLS_FIELD)) {
+    return null;
+  }
+
+  const skillsArray = parseSkillsArrayInput(body[CANDIDATE_SKILLS_FIELD]);
+  if (skillsArray == null) {
+    return null;
+  }
+
+  return JSON.stringify(skillsArray);
 }
 
 /**
@@ -198,14 +289,22 @@ function validateSkillItemInErrors(item, index, errors) {
  * @param {Record<string, unknown>} body
  */
 export function validateCandidateSkillsInErrors(errors, body) {
-  validateCandidateChildJsonArrayInErrors(errors, body, CANDIDATE_SKILLS_FIELD);
-  if (errors.length || !bodyHasField(body, CANDIDATE_SKILLS_FIELD)) return;
+  if (!bodyHasField(body, CANDIDATE_SKILLS_FIELD)) {
+    return;
+  }
 
-  const skills = body[CANDIDATE_SKILLS_FIELD];
-  if (!Array.isArray(skills)) return;
+  const coerced = coerceSkillsArrayValue(body[CANDIDATE_SKILLS_FIELD], errors);
+  if (errors.length || coerced === undefined) {
+    return;
+  }
+
+  if (coerced === null) {
+    body[CANDIDATE_SKILLS_FIELD] = null;
+    return;
+  }
 
   const normalized = [];
-  skills.forEach((item, index) => {
+  coerced.forEach((item, index) => {
     const row = validateSkillItemInErrors(item, index, errors);
     if (row) normalized.push(row);
   });

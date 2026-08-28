@@ -9,7 +9,10 @@ import {
   CANDIDATE_EXPERIENCE_FIELD,
   CANDIDATE_SKILLS_FIELD,
   candidateChildJsonToClobString,
+  candidateSkillsToClobString,
   normalizeCandidateChildJsonRequestFields,
+  normalizeSkillsFieldInBody,
+  parseCandidateMultipartChildJsonFields,
   validateCandidateChildJsonArrayInErrors,
   validateCandidateChildJsonFieldsInErrors,
   validateCandidateSkillsInErrors
@@ -39,6 +42,53 @@ describe('candidateChildJsonToClobString', () => {
   });
 });
 
+describe('candidateSkillsToClobString', () => {
+  it('returns null when skills omitted', () => {
+    assert.equal(candidateSkillsToClobString({}), null);
+  });
+
+  it('stringifies a JS array once', () => {
+    assert.equal(
+      candidateSkillsToClobString({ skills: [{ skill_name: 'Oracle PL/SQL' }] }),
+      '[{"skill_name":"Oracle PL/SQL"}]'
+    );
+  });
+
+  it('parses a JSON string and stringifies once (no double encoding)', () => {
+    const jsonString = '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]';
+    const bind = candidateSkillsToClobString({ skills: jsonString });
+    assert.equal(bind, jsonString);
+    assert.notEqual(bind, JSON.stringify(jsonString));
+  });
+
+  it('returns [] when empty array is explicitly supplied', () => {
+    assert.equal(candidateSkillsToClobString({ skills: [] }), '[]');
+  });
+
+  it('returns null for empty skills string', () => {
+    assert.equal(candidateSkillsToClobString({ skills: '' }), null);
+    assert.equal(candidateSkillsToClobString({ skills: '   ' }), null);
+  });
+});
+
+describe('parseCandidateMultipartChildJsonFields / normalizeSkillsFieldInBody', () => {
+  it('parses multipart skills JSON string into an array', () => {
+    const body = {
+      skills: '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]'
+    };
+    parseCandidateMultipartChildJsonFields(body);
+    assert.deepEqual(body.skills, [{ skill_name: 'Oracle PL/SQL' }, { skill_name: 'Flutter' }]);
+  });
+
+  it('maps legacy skills_json alias', () => {
+    const body = {
+      skills_json: '[{"skill_name":"Python"}]'
+    };
+    normalizeSkillsFieldInBody(body);
+    assert.deepEqual(body.skills, [{ skill_name: 'Python' }]);
+  });
+});
+
 describe('buildCandidateChildJsonInBinds', () => {
   it('binds all child JSON fields from canonical body keys', () => {
     const binds = buildCandidateChildJsonInBinds({
@@ -50,6 +100,16 @@ describe('buildCandidateChildJsonInBinds', () => {
     assert.equal(binds.p_education_json.val, JSON.stringify([{ degree_name: 'MBA', institution_name: 'Example University' }]));
     assert.equal(binds.p_experience_json.val, JSON.stringify([{ company_name: 'ABC', job_title: 'Architect' }]));
     assert.equal(binds.p_skills_json.val, JSON.stringify([{ skill_name: 'Oracle PL/SQL' }]));
+  });
+
+  it('binds skills from multipart JSON string without double encoding', () => {
+    const binds = buildCandidateChildJsonInBinds({
+      skills: '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]'
+    });
+    assert.equal(
+      binds.p_skills_json.val,
+      '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]'
+    );
   });
 });
 
@@ -91,10 +151,26 @@ describe('validateCandidateSkillsInErrors', () => {
     assert.deepEqual(body.skills, [{ skill_name: 'Oracle PL/SQL' }]);
   });
 
-  it('rejects non-array skills', () => {
+  it('parses JSON string skills and validates items', () => {
+    const errors = [];
+    const body = {
+      skills: '[{"skill_name":" Oracle PL/SQL "}]'
+    };
+    validateCandidateSkillsInErrors(errors, body);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(body.skills, [{ skill_name: 'Oracle PL/SQL' }]);
+  });
+
+  it('rejects plain string skills (not a JSON array)', () => {
     const errors = [];
     validateCandidateSkillsInErrors(errors, { skills: 'Oracle PL/SQL' });
-    assert.ok(errors.some((e) => e.includes('skills must be an array')));
+    assert.ok(errors.some((e) => e.includes('skills must be valid JSON')));
+  });
+
+  it('rejects string items in skills array', () => {
+    const errors = [];
+    validateCandidateSkillsInErrors(errors, { skills: ['Oracle PL/SQL'] });
+    assert.ok(errors.some((e) => e.includes('must be an object')));
   });
 
   it('rejects empty skill_name', () => {

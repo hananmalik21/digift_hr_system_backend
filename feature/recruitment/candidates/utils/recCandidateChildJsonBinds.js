@@ -4,12 +4,23 @@ import {
   CANDIDATE_EXPERIENCE_FIELD,
   CANDIDATE_SKILLS_FIELD,
   candidateChildJsonToClobString,
-  normalizeCandidateChildJsonRequestFields
+  candidateSkillsToClobString,
+  normalizeCandidateChildJsonRequestFields,
+  normalizeSkillsFieldInBody
 } from './recCandidateChildJsonUtils.js';
 
 function childJsonClobBind(body, fieldName) {
   return {
     val: candidateChildJsonToClobString(body, fieldName),
+    dir: oracledb.BIND_IN,
+    type: oracledb.CLOB
+  };
+}
+
+function skillsJsonClobBind(body) {
+  normalizeSkillsFieldInBody(body);
+  return {
+    val: candidateSkillsToClobString(body),
     dir: oracledb.BIND_IN,
     type: oracledb.CLOB
   };
@@ -26,6 +37,6 @@ export function buildCandidateChildJsonInBinds(b) {
   return {
     p_education_json: childJsonClobBind(b, CANDIDATE_EDUCATION_FIELD),
     p_experience_json: childJsonClobBind(b, CANDIDATE_EXPERIENCE_FIELD),
-    p_skills_json: childJsonClobBind(b, CANDIDATE_SKILLS_FIELD)
+    p_skills_json: skillsJsonClobBind(b)
   };
 }

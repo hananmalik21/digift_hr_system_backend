@@ -8,6 +8,7 @@ import { buildCandidateChildJsonInBinds } from '../utils/recCandidateChildJsonBi
 import { buildCandidateDemographicInBinds } from '../utils/recCandidateDemographicBinds.js';
 import {
   candidateChildJsonToClobString,
+  candidateSkillsToClobString,
   validateCandidateChildJsonFieldsInErrors
 } from '../utils/recCandidateChildJsonUtils.js';
 import { mapCandidateSkillsResponse } from '../utils/recCandidateSkillMappers.js';
@@ -149,6 +150,18 @@ describe('skills validation', () => {
     );
   });
 
+  it('binds skills from multipart JSON string on create', () => {
+    const binds = childBinds({
+      enterprise_id: 1,
+      skills: '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]'
+    });
+    assert.equal(
+      binds.p_skills_json.val,
+      '[{"skill_name":"Oracle PL/SQL"},{"skill_name":"Flutter"}]'
+    );
+    assert.notEqual(binds.p_skills_json.val, JSON.stringify('[{"skill_name":"Oracle PL/SQL"}]'));
+  });
+
   it('strips removed skill fields before bind', () => {
     const body = {
       enterprise_id: 1,
@@ -167,7 +180,7 @@ describe('skills validation', () => {
     assert.deepEqual(errors, []);
     assert.deepEqual(body.skills, [{ skill_name: 'Oracle PL/SQL' }]);
     assert.equal(
-      candidateChildJsonToClobString(body, 'skills'),
+      candidateSkillsToClobString(body),
       JSON.stringify([{ skill_name: 'Oracle PL/SQL' }])
     );
   });
