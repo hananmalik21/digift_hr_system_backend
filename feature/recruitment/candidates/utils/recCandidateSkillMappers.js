@@ -14,14 +14,8 @@ export function mapCandidateSkillItem(row) {
       field in row ? field : Object.keys(row).find((k) => String(k).toLowerCase() === field);
     const raw = key != null ? row[key] : null;
 
-    if (field === 'candidate_skill_guid') {
-      out[field] = normalizeApiGuidString(raw);
-    } else if (field === 'candidate_skill_id') {
-      const n = Number(raw);
-      out[field] = Number.isFinite(n) ? n : raw ?? null;
-    } else {
-      out[field] = raw ?? null;
-    }
+    out[field] =
+      field === 'candidate_skill_guid' ? normalizeApiGuidString(raw) : raw ?? null;
   }
 
   return out;

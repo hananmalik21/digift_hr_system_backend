@@ -94,6 +94,9 @@ paths:
       description: |
         Calls `REC.CANDIDATE_PKG.CREATE_CANDIDATE`. URL fields are trimmed before save.
         `willing_to_relocate` must be Y or N when sent; omitted values default to N in the database package.
+
+        Child arrays (`education`, `experience`, `skills`): omit to bind NULL; send `[]` to clear;
+        send items to persist via the package JSON CLOB parameters.
       requestBody:
         required: true
         content:
@@ -121,6 +124,15 @@ paths:
               preferred_location: Kuwait City
               source: CAREER_PORTAL
               source_from: LinkedIn Campaign
+              education:
+                - degree_name: MBA
+                  institution_name: Example University
+              experience:
+                - company_name: ABC Company
+                  job_title: Enterprise Architect
+              skills:
+                - skill_name: Oracle PL/SQL
+                - skill_name: Flutter
               created_by: ADMIN
           multipart/form-data:
             schema:
@@ -172,6 +184,9 @@ paths:
       description: |
         Calls `REC.CANDIDATE_PKG.UPDATE_CANDIDATE`. URL fields are trimmed before save.
         Invalid `willing_to_relocate` returns validation error (Y or N only).
+
+        Child arrays (`education`, `experience`, `skills`): omit to keep existing rows;
+        send `[]` to delete all; send items to replace. Skills request items require `skill_name` only.
       requestBody:
         required: true
         content:
@@ -300,17 +315,15 @@ components:
       type: object
       required: [skill_name]
       properties:
-        candidate_skill_id:
-          type: integer
-          nullable: true
-          description: Present on GET responses after persist
         candidate_skill_guid:
           type: string
           nullable: true
+          readOnly: true
           description: Present on GET responses after persist
         skill_name:
           type: string
           example: Oracle PL/SQL
+          description: Required on create/update requests; trimmed before bind
     CandidateEducationItem:
       type: object
       properties:

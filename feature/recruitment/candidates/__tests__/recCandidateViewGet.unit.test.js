@@ -57,7 +57,6 @@ describe('mapCandidateViewRow detail JSON collections', () => {
     assert.deepEqual(mapped.experience, [{ experience_id: 1, company_name: 'ABC', job_title: 'Architect' }]);
     assert.deepEqual(mapped.skills, [
       {
-        candidate_skill_id: 21,
         candidate_skill_guid: '72E8B30EA00E4F26A78FA4D22A3E35C7',
         skill_name: 'Oracle PL/SQL'
       }
@@ -123,12 +122,12 @@ describe('mapCandidateListViewRow', () => {
     assert.equal(mapped.full_name, 'John Smith');
     assert.equal(mapped.preferred_location, 'Dubai');
     assert.equal(mapped.education, undefined);
-    assert.equal(mapped.skills, undefined);
+    assert.deepEqual(mapped.skills, []);
   });
 });
 
 describe('mapCandidateSkillsResponse', () => {
-  it('returns candidate_skill_id, candidate_skill_guid, and skill_name only', () => {
+  it('returns candidate_skill_guid and skill_name only', () => {
     const mapped = mapCandidateSkillsResponse([
       {
         candidate_skill_id: 22,
@@ -141,7 +140,6 @@ describe('mapCandidateSkillsResponse', () => {
 
     assert.deepEqual(mapped, [
       {
-        candidate_skill_id: 22,
         candidate_skill_guid: '1DBDE33483A746EEB703D9FA45C5A9F6',
         skill_name: 'Flutter'
       }

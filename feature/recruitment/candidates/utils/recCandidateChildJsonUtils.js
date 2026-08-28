@@ -22,12 +22,8 @@ export const CANDIDATE_CHILD_JSON_API_FIELDS = [
   CANDIDATE_SKILLS_FIELD
 ];
 
-/** Skill fields returned on candidate detail/list GET. */
-export const CANDIDATE_SKILL_RESPONSE_FIELDS = [
-  'candidate_skill_id',
-  'candidate_skill_guid',
-  'skill_name'
-];
+/** Skill fields returned on candidate detail/list GET (request accepts skill_name only). */
+export const CANDIDATE_SKILL_RESPONSE_FIELDS = ['candidate_skill_guid', 'skill_name'];
 
 /** View column -> API response field for all JSON collections on REC.CANDIDATES_FULL_V. */
 export const CANDIDATE_JSON_COLLECTION_VIEW_TO_API = {
