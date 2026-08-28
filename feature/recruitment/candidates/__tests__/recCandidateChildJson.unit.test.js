@@ -128,6 +128,7 @@ describe('mapCandidateViewRow child JSON fields', () => {
       EXPERIENCE_JSON: [{ company_name: 'ABC', job_title: 'Architect' }],
       SKILLS_JSON: [
         {
+          candidate_skill_id: 21,
           candidate_skill_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
           skill_name: 'Oracle PL/SQL',
           skill_type_code: 'TECHNICAL'
@@ -141,6 +142,7 @@ describe('mapCandidateViewRow child JSON fields', () => {
     assert.equal(mapped.experience_json, undefined);
     assert.deepEqual(mapped.skills, [
       {
+        candidate_skill_id: 21,
         candidate_skill_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         skill_name: 'Oracle PL/SQL'
       }
@@ -149,9 +151,10 @@ describe('mapCandidateViewRow child JSON fields', () => {
 });
 
 describe('mapCandidateSkillsResponse', () => {
-  it('returns only candidate_skill_guid and skill_name', () => {
+  it('returns candidate_skill_id, candidate_skill_guid, and skill_name only', () => {
     const mapped = mapCandidateSkillsResponse([
       {
+        candidate_skill_id: 22,
         candidate_skill_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         skill_name: 'Flutter',
         skill_type_code: 'TECHNICAL',
@@ -161,6 +164,7 @@ describe('mapCandidateSkillsResponse', () => {
 
     assert.deepEqual(mapped, [
       {
+        candidate_skill_id: 22,
         candidate_skill_guid: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
         skill_name: 'Flutter'
       }

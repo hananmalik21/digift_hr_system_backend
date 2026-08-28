@@ -22,14 +22,34 @@ export const CANDIDATE_CHILD_JSON_API_FIELDS = [
   CANDIDATE_SKILLS_FIELD
 ];
 
-/** Skill fields returned on candidate detail/list. */
-export const CANDIDATE_SKILL_RESPONSE_FIELDS = ['candidate_skill_guid', 'skill_name'];
+/** Skill fields returned on candidate detail/list GET. */
+export const CANDIDATE_SKILL_RESPONSE_FIELDS = [
+  'candidate_skill_id',
+  'candidate_skill_guid',
+  'skill_name'
+];
 
-/** View column -> API response field (education/experience only; skills handled separately). */
+/** View column -> API response field for all JSON collections on REC.CANDIDATES_FULL_V. */
+export const CANDIDATE_JSON_COLLECTION_VIEW_TO_API = {
+  [CANDIDATE_EDUCATION_VIEW_COLUMN]: CANDIDATE_EDUCATION_FIELD,
+  [CANDIDATE_EXPERIENCE_VIEW_COLUMN]: CANDIDATE_EXPERIENCE_FIELD,
+  [CANDIDATE_SKILLS_VIEW_COLUMN]: CANDIDATE_SKILLS_FIELD,
+  resumes_json: 'resumes',
+  background_checks_json: 'background_checks',
+  assessments_json: 'assessments',
+  talent_pools_json: 'talent_pools'
+};
+
+/** @deprecated Use CANDIDATE_JSON_COLLECTION_VIEW_TO_API */
 export const CANDIDATE_CHILD_JSON_VIEW_TO_API = {
   [CANDIDATE_EDUCATION_VIEW_COLUMN]: CANDIDATE_EDUCATION_FIELD,
   [CANDIDATE_EXPERIENCE_VIEW_COLUMN]: CANDIDATE_EXPERIENCE_FIELD
 };
+
+/** Canonical API JSON collection field names returned on detail GET. */
+export const CANDIDATE_JSON_COLLECTION_API_FIELDS = Object.values(
+  CANDIDATE_JSON_COLLECTION_VIEW_TO_API
+);
 
 /** Education/experience canonical + legacy alias pairs. */
 export const CANDIDATE_CHILD_JSON_ALIASES = [
@@ -37,12 +57,13 @@ export const CANDIDATE_CHILD_JSON_ALIASES = [
   { canonical: CANDIDATE_EXPERIENCE_FIELD, legacy: CANDIDATE_EXPERIENCE_LEGACY_FIELD }
 ];
 
-/** All child JSON view columns mapped in GET responses. */
-export const CANDIDATE_CHILD_JSON_VIEW_COLUMNS = new Set([
-  CANDIDATE_EDUCATION_VIEW_COLUMN,
-  CANDIDATE_EXPERIENCE_VIEW_COLUMN,
-  CANDIDATE_SKILLS_VIEW_COLUMN
-]);
+/** All JSON collection view columns mapped in GET detail responses. */
+export const CANDIDATE_JSON_COLLECTION_VIEW_COLUMNS = new Set(
+  Object.keys(CANDIDATE_JSON_COLLECTION_VIEW_TO_API)
+);
+
+/** @deprecated Use CANDIDATE_JSON_COLLECTION_VIEW_COLUMNS */
+export const CANDIDATE_CHILD_JSON_VIEW_COLUMNS = CANDIDATE_JSON_COLLECTION_VIEW_COLUMNS;
 
 /**
  * @param {Record<string, unknown>} body

@@ -85,6 +85,7 @@ SELECT
     (
         SELECT JSON_ARRAYAGG(
             JSON_OBJECT(
+                'candidate_skill_id' VALUE s.candidate_skill_id,
                 'candidate_skill_guid' VALUE RAWTOHEX(s.candidate_skill_guid),
                 'skill_name' VALUE s.skill_name
             ) RETURNING CLOB

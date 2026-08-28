@@ -39,9 +39,36 @@ paths:
         - name: status
           in: query
           schema: { type: string }
+        - name: active_flag
+          in: query
+          schema: { $ref: '#/components/schemas/YnFlag' }
+        - name: source
+          in: query
+          schema: { type: string }
+        - name: source_from
+          in: query
+          schema: { type: string }
+        - name: nationality
+          in: query
+          schema: { type: string }
+        - name: visa_status
+          in: query
+          schema: { type: string }
+        - name: current_location
+          in: query
+          schema: { type: string }
+        - name: preferred_location
+          in: query
+          schema: { type: string }
+        - name: current_title
+          in: query
+          schema: { type: string }
+        - name: current_employer
+          in: query
+          schema: { type: string }
         - name: search
           in: query
-          description: Matches name, email, title, education/experience JSON, portfolio_link, github_link.
+          description: Matches name, email, phone, title, employer, education/experience JSON, portfolio_link, github_link.
           schema: { type: string }
         - name: page
           in: query
@@ -133,7 +160,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: '#/components/schemas/CandidateNotFoundError'
         '400':
           $ref: '#/components/responses/ValidationOrPackageError'
         '500':
@@ -273,6 +300,10 @@ components:
       type: object
       required: [skill_name]
       properties:
+        candidate_skill_id:
+          type: integer
+          nullable: true
+          description: Present on GET responses after persist
         candidate_skill_guid:
           type: string
           nullable: true
@@ -425,21 +456,92 @@ components:
         status: { type: string, example: SUCCESS }
         message: { type: string, example: Candidate updated successfully. }
     CandidateListItem:
+      type: object
+      properties:
+        candidate_id: { type: integer }
+        candidate_guid: { type: string }
+        enterprise_id: { type: integer }
+        first_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string }
+        full_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        current_title: { type: string, nullable: true }
+        current_employer: { type: string, nullable: true }
+        years_experience: { type: number, nullable: true }
+        current_location: { type: string, nullable: true }
+        preferred_location: { type: string, nullable: true }
+        nationality: { type: string, nullable: true }
+        visa_status: { type: string, nullable: true }
+        source: { type: string, nullable: true }
+        source_from: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        active_flag: { $ref: '#/components/schemas/YnFlag' }
+        creation_date: { type: string, format: date-time, nullable: true }
+    CandidateDetailData:
       allOf:
         - $ref: '#/components/schemas/CandidateProfileCompensationFields'
         - $ref: '#/components/schemas/CandidateDemographicFields'
         - type: object
           properties:
+            candidate_id: { type: integer }
             candidate_guid: { type: string }
-            full_name: { type: string }
-            email: { type: string, format: email }
-            current_title: { type: string }
-            current_employer: { type: string }
-            years_experience: { type: number }
-            expected_salary: { type: number }
-            salary_currency: { type: string }
-            source: { type: string }
-            current_location: { type: string }
+            enterprise_id: { type: integer }
+            first_name: { type: string, nullable: true }
+            middle_name: { type: string, nullable: true }
+            last_name: { type: string, nullable: true }
+            full_name: { type: string, nullable: true }
+            email: { type: string, format: email, nullable: true }
+            phone: { type: string, nullable: true }
+            current_title: { type: string, nullable: true }
+            current_employer: { type: string, nullable: true }
+            years_experience: { type: number, nullable: true }
+            current_location: { type: string, nullable: true }
+            source: { type: string, nullable: true }
+            expected_salary: { type: number, nullable: true }
+            salary_currency: { type: string, nullable: true }
+            notice_period: { type: string, nullable: true }
+            linkedin_profile: { type: string, nullable: true }
+            status: { type: string, nullable: true }
+            active_flag: { $ref: '#/components/schemas/YnFlag' }
+            education:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateEducationItem'
+            experience:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateExperienceItem'
+            skills:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateSkillItem'
+            resumes:
+              type: array
+              description: Resume metadata from REC.CANDIDATES_FULL_V (no file_content)
+              items:
+                type: object
+                additionalProperties: true
+            background_checks:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            assessments:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            talent_pools:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            created_by: { type: string, nullable: true }
+            creation_date: { type: string, format: date-time, nullable: true }
+            last_updated_by: { type: string, nullable: true }
+            last_update_date: { type: string, format: date-time, nullable: true }
     CandidateListResponse:
       type: object
       properties:
@@ -479,13 +581,14 @@ components:
       type: object
       properties:
         success: { type: boolean, example: true }
-        message: { type: string }
         data:
-          allOf:
-            - $ref: '#/components/schemas/CandidateProfileCompensationFields'
-            - $ref: '#/components/schemas/CandidateDemographicFields'
-            - type: object
-              additionalProperties: true
+          $ref: '#/components/schemas/CandidateDetailData'
+    CandidateNotFoundError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        code: { type: string, example: CANDIDATE_NOT_FOUND }
+        message: { type: string, example: Candidate not found. }
     ErrorEnvelope:
       type: object
       properties:

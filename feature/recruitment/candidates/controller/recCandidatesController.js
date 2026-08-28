@@ -100,7 +100,10 @@ import {
   maybeMulterSendCandidateEmail
 } from '../utils/recCandidateSendEmailMultipart.js';
 import { CANDIDATE_SEND_EMAIL_ERROR } from '../utils/recCandidateSendEmailConstants.js';
-import { sendCandidateEmail } from '../service/recCandidateSendEmailService.js';
+import {
+  CANDIDATE_NOT_FOUND_CODE,
+  CANDIDATE_NOT_FOUND_MESSAGE
+} from '../utils/recCandidateViewConstants.js';
 
 const router = express.Router();
 
@@ -445,7 +448,8 @@ router.get(
       if (!data) {
         return sendPackageResponse(res, 404, {
           success: false,
-          message: 'Candidate not found.'
+          code: CANDIDATE_NOT_FOUND_CODE,
+          message: CANDIDATE_NOT_FOUND_MESSAGE
         });
       }
 
