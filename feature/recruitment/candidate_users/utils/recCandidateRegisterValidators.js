@@ -12,8 +12,9 @@ import {
   validateCandidateProfileFieldsInErrors
 } from '../../candidates/utils/recCandidateProfileValidation.js';
 import {
-  normalizeSkillsFieldInBody,
-  validateCandidateSkillsInErrors
+  normalizeCandidateChildJsonRequestFields,
+  parseCandidateMultipartChildJsonFields,
+  validateCandidateChildJsonFieldsInErrors
 } from '../../candidates/utils/recCandidateChildJsonUtils.js';
 import { PORTAL_MIN_PASSWORD_LENGTH } from './recCandidatePortalConstants.js';
 
@@ -34,8 +35,9 @@ export function validateRegisterCandidateUserBody(body) {
 
   validateCandidateProfileFieldsInErrors(errors, b);
   validateCandidateDemographicFieldsInErrors(errors, b);
-  normalizeSkillsFieldInBody(b);
-  validateCandidateSkillsInErrors(errors, b);
+  parseCandidateMultipartChildJsonFields(b);
+  normalizeCandidateChildJsonRequestFields(b);
+  validateCandidateChildJsonFieldsInErrors(errors, b);
   validateOptionalNumberInErrors(errors, b, 'expected_salary');
 
   throwIfValidationErrors(errors);

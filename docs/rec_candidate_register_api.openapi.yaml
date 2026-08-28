@@ -20,8 +20,10 @@ info:
     Passwords on register are hashed server-side (Argon2id) before Oracle storage.
 
     **Optional profile fields:** `alternate_phone`, `alternate_email`, `dob` (YYYY-MM-DD, not future),
-    `gender`, `nationality`, `visa_status`, `preferred_location`, `source_from`, `skills`
-    (array of `{ skill_name }` → `P_SKILLS_JSON`). Multipart may send `skills` as a JSON string.
+    `gender`, `nationality`, `visa_status`, `preferred_location`, `source_from`,
+    `education` → `P_EDUCATION_JSON`, `experience` → `P_EXPERIENCE_JSON`,
+    `skills` (array of `{ skill_name }` → `P_SKILLS_JSON`).
+    Multipart may send child arrays as JSON strings (parsed once, then stringified once).
 
     **Defaults when omitted:** `source` → `CAREER_PORTAL`, `salary_currency` → `USD`,
     `willing_to_relocate` → `N`, `created_by` → `CAREER_PORTAL`.
@@ -319,6 +321,18 @@ components:
         github_link: { type: string, format: uri, maxLength: 1000, nullable: true }
         willing_to_relocate:
           $ref: '#/components/schemas/YnFlag'
+        education:
+          type: array
+          nullable: true
+          description: Optional education history → P_EDUCATION_JSON
+          items:
+            $ref: '#/components/schemas/CandidateRegisterEducationItem'
+        experience:
+          type: array
+          nullable: true
+          description: Optional work history → P_EXPERIENCE_JSON
+          items:
+            $ref: '#/components/schemas/CandidateRegisterExperienceItem'
         skills:
           type: array
           nullable: true
@@ -328,6 +342,27 @@ components:
           items:
             $ref: '#/components/schemas/CandidateRegisterSkillItem'
         created_by: { type: string }
+    CandidateRegisterEducationItem:
+      type: object
+      properties:
+        degree_name: { type: string, nullable: true, example: MBA }
+        institution_name: { type: string, nullable: true, example: Example University }
+        field_of_study: { type: string, nullable: true, example: Business Administration }
+        start_date: { type: string, format: date, nullable: true, example: '2020-09-01' }
+        end_date: { type: string, format: date, nullable: true, example: '2021-08-31' }
+        grade: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+    CandidateRegisterExperienceItem:
+      type: object
+      properties:
+        company_name: { type: string, nullable: true, example: ABC Company }
+        job_title: { type: string, nullable: true, example: Software Engineer }
+        location: { type: string, nullable: true, example: Kuwait }
+        start_date: { type: string, format: date, nullable: true, example: '2021-01-01' }
+        end_date: { type: string, format: date, nullable: true }
+        current_job_flag:
+          $ref: '#/components/schemas/YnFlag'
+        description: { type: string, nullable: true }
     CandidateRegisterSkillItem:
       type: object
       required: [skill_name]

@@ -184,14 +184,14 @@ describe('validateCandidateChildJsonFieldsInErrors', () => {
   it('rejects non-array education', () => {
     const errors = [];
     validateCandidateChildJsonFieldsInErrors(errors, { education: 'bad' });
-    assert.ok(errors.some((e) => e.includes('education must be an array')));
+    assert.ok(errors.some((e) => e.includes('education must be valid JSON')));
   });
 });
 
 describe('validateCandidateChildJsonArrayInErrors', () => {
   it('rejects non-array education', () => {
     const errors = [];
-    validateCandidateChildJsonArrayInErrors(errors, { education: 'bad' }, CANDIDATE_EDUCATION_FIELD);
+    validateCandidateChildJsonArrayInErrors(errors, { education: { x: 1 } }, CANDIDATE_EDUCATION_FIELD);
     assert.ok(errors.some((e) => e.includes('education must be an array')));
   });
 });

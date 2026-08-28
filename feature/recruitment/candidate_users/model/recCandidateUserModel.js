@@ -44,6 +44,8 @@ BEGIN
     p_portfolio_link      => :p_portfolio_link,
     p_github_link         => :p_github_link,
     p_willing_to_relocate => :p_willing_to_relocate,
+    p_education_json      => :p_education_json,
+    p_experience_json     => :p_experience_json,
     p_skills_json         => :p_skills_json,
     p_created_by          => :p_created_by,
     p_candidate_id        => :p_candidate_id,

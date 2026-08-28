@@ -38,7 +38,8 @@ const router = express.Router();
  * POST /api/candidate/register
  * REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER — public, no JWT.
  * Optional: alternate_phone, alternate_email, dob, gender, nationality, visa_status,
- * preferred_location, source_from, skills (skill_name only; multipart may send JSON string).
+ * preferred_location, source_from, education, experience, skills
+ * (skill_name only; multipart may send child arrays as JSON strings).
  */
 router.post(
   '/register',

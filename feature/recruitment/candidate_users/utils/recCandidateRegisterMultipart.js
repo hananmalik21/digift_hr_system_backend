@@ -3,7 +3,7 @@ import {
   mergeResumeUploadIntoBody,
   multerResumeUploadErrorMessage
 } from '../../shared/recResumeFileUtils.js';
-import { normalizeSkillsFieldInBody } from '../../candidates/utils/recCandidateChildJsonUtils.js';
+import { parseCandidateMultipartChildJsonFields } from '../../candidates/utils/recCandidateChildJsonUtils.js';
 import { applyRegisterPortalDefaults } from './recCandidateRegisterDefaults.js';
 
 const uploadRegisterResume = createCandidateResumeMulter();
@@ -35,7 +35,7 @@ export function multerRegisterCandidate(req, res, next) {
 export function buildRegisterBodyFromRequest(req, extra = {}) {
   const body = { ...(req.body || {}), ...extra };
   mergeResumeUploadIntoBody(req, body);
-  normalizeSkillsFieldInBody(body);
+  parseCandidateMultipartChildJsonFields(body);
   applyRegisterPortalDefaults(body);
   return body;
 }

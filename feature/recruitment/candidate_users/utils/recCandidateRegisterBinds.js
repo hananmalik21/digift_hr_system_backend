@@ -7,7 +7,7 @@ import {
   ynInBind
 } from '../../shared/oraclePackageUtils.js';
 import { buildCandidateDemographicInBinds } from '../../candidates/utils/recCandidateDemographicBinds.js';
-import { buildCandidateSkillsJsonClobBind } from '../../candidates/utils/recCandidateChildJsonBinds.js';
+import { buildCandidateChildJsonInBinds } from '../../candidates/utils/recCandidateChildJsonBinds.js';
 
 /** REGISTER_CANDIDATE_USER exposes P_NOTICE_PERIOD as VARCHAR2. */
 export function noticePeriodBind(v) {
@@ -19,7 +19,8 @@ export function noticePeriodBind(v) {
 
 /**
  * Profile + credential IN binds for REC.CANDIDATE_USER_PKG.REGISTER_CANDIDATE_USER.
- * Optional demographics / skills omitted → NULL. Do not use skills || [].
+ * Optional demographics / education / experience / skills omitted → NULL.
+ * Do not use education || [] / experience || [] / skills || [].
  * @param {Record<string, unknown>} b
  */
 export function buildRegisterProfileInBinds(b) {
@@ -65,7 +66,7 @@ export function buildRegisterProfileInBinds(b) {
     p_portfolio_link: strLinkInBind(b.portfolio_link),
     p_github_link: strLinkInBind(b.github_link),
     p_willing_to_relocate: ynInBind(b.willing_to_relocate, 'N'),
-    p_skills_json: buildCandidateSkillsJsonClobBind(b),
+    ...buildCandidateChildJsonInBinds(b),
     p_created_by: { val: strOrNull(b.created_by), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 }
   };
 }

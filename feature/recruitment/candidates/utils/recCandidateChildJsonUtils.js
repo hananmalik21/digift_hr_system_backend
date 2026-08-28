@@ -1,4 +1,5 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
+import { isValidCalendarDateOnly } from '../../../../utils/dateOnlyUtils.js';
 import { isBlank } from '../../shared/recValidationUtils.js';
 
 /** Canonical API child-array fields (map to Oracle P_*_JSON CLOB binds). */
@@ -198,7 +199,33 @@ function coerceSkillsArrayValue(value, errors) {
 }
 
 /**
+ * Parse a child JSON array field value (array or JSON string) for binds / validation.
+ * @param {unknown} value
+ * @returns {unknown[]|null|undefined} undefined when invalid
+ */
+export function parseChildJsonArrayInput(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      return Array.isArray(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Bind helper for P_EDUCATION_JSON / P_EXPERIENCE_JSON / P_SKILLS_JSON.
+ * Parses JSON strings once, then stringifies once — never double-encodes.
  * Omitted key -> NULL; explicit [] -> '[]'; items -> JSON.stringify.
  * @param {Record<string, unknown>} body
  * @param {string} fieldName
@@ -209,16 +236,12 @@ export function candidateChildJsonToClobString(body, fieldName) {
     return null;
   }
 
-  const value = body[fieldName];
-  if (value === null || value === undefined || value === '') {
+  const parsed = parseChildJsonArrayInput(body[fieldName]);
+  if (parsed == null) {
     return null;
   }
 
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  return JSON.stringify(value);
+  return JSON.stringify(parsed);
 }
 
 /**
@@ -229,16 +252,7 @@ export function candidateChildJsonToClobString(body, fieldName) {
  * @returns {string|null}
  */
 export function candidateSkillsToClobString(body) {
-  if (!bodyHasField(body, CANDIDATE_SKILLS_FIELD)) {
-    return null;
-  }
-
-  const skillsArray = parseSkillsArrayInput(body[CANDIDATE_SKILLS_FIELD]);
-  if (skillsArray == null) {
-    return null;
-  }
-
-  return JSON.stringify(skillsArray);
+  return candidateChildJsonToClobString(body, CANDIDATE_SKILLS_FIELD);
 }
 
 /**
@@ -257,8 +271,190 @@ export function validateCandidateChildJsonArrayInErrors(errors, body, fieldName)
     return;
   }
 
+  if (typeof value === 'string') {
+    const parsed = parseChildJsonArrayInput(value);
+    if (parsed === undefined) {
+      errors.push(`${fieldName} must be valid JSON`);
+      return;
+    }
+    if (parsed === null) {
+      body[fieldName] = null;
+      return;
+    }
+    body[fieldName] = parsed;
+    return;
+  }
+
   if (!Array.isArray(value)) {
     errors.push(`${fieldName} must be an array`);
+  }
+}
+
+/**
+ * @param {string} label
+ * @param {unknown} value
+ * @param {string[]} errors
+ * @returns {string|null|undefined} undefined when invalid; null when blank
+ */
+function optionalDateOnlyOnItem(label, value, errors) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const s = String(value).trim();
+  if (!isValidCalendarDateOnly(s)) {
+    errors.push(`${label} must be a valid date (YYYY-MM-DD)`);
+    return undefined;
+  }
+  return s;
+}
+
+/**
+ * @param {string} label
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+function optionalTrimmedStringOnItem(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  return String(value).trim();
+}
+
+/**
+ * @param {unknown} item
+ * @param {number} index
+ * @param {string[]} errors
+ * @returns {Record<string, unknown>|null}
+ */
+function validateEducationItemInErrors(item, index, errors) {
+  const label = `education[${index}]`;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    errors.push(`${label} must be an object`);
+    return null;
+  }
+
+  const row = /** @type {Record<string, unknown>} */ (item);
+  const startRaw = row.start_date ?? row.startDate;
+  const endRaw = row.end_date ?? row.endDate;
+  const start = optionalDateOnlyOnItem(`${label}.start_date`, startRaw, errors);
+  const end = optionalDateOnlyOnItem(`${label}.end_date`, endRaw, errors);
+  if (start === undefined || end === undefined) {
+    return null;
+  }
+  if (start && end && end < start) {
+    errors.push(`${label}.end_date must be on or after start_date`);
+    return null;
+  }
+
+  return {
+    degree_name: optionalTrimmedStringOnItem(row.degree_name ?? row.degreeName ?? row.degree),
+    institution_name: optionalTrimmedStringOnItem(
+      row.institution_name ?? row.institutionName ?? row.institution ?? row.school
+    ),
+    field_of_study: optionalTrimmedStringOnItem(row.field_of_study ?? row.fieldOfStudy ?? row.field),
+    start_date: start,
+    end_date: end,
+    grade: optionalTrimmedStringOnItem(row.grade),
+    description: optionalTrimmedStringOnItem(row.description)
+  };
+}
+
+/**
+ * @param {unknown} item
+ * @param {number} index
+ * @param {string[]} errors
+ * @returns {Record<string, unknown>|null}
+ */
+function validateExperienceItemInErrors(item, index, errors) {
+  const label = `experience[${index}]`;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    errors.push(`${label} must be an object`);
+    return null;
+  }
+
+  const row = /** @type {Record<string, unknown>} */ (item);
+  const currentRaw = row.current_job_flag ?? row.currentJobFlag ?? row.isCurrent ?? row.current;
+  let currentFlag = null;
+  if (!isBlank(currentRaw)) {
+    const u = String(currentRaw).trim().toUpperCase();
+    if (u === 'TRUE' || u === 'YES' || u === '1') {
+      currentFlag = 'Y';
+    } else if (u === 'FALSE' || u === 'NO' || u === '0') {
+      currentFlag = 'N';
+    } else if (u === 'Y' || u === 'N') {
+      currentFlag = u;
+    } else {
+      errors.push(`${label}.current_job_flag must be Y or N`);
+      return null;
+    }
+  }
+
+  const startRaw = row.start_date ?? row.startDate;
+  const endRaw = row.end_date ?? row.endDate;
+  const start = optionalDateOnlyOnItem(`${label}.start_date`, startRaw, errors);
+  let end = optionalDateOnlyOnItem(`${label}.end_date`, endRaw, errors);
+  if (start === undefined || end === undefined) {
+    return null;
+  }
+  if (currentFlag === 'Y') {
+    end = null;
+  } else if (start && end && end < start) {
+    errors.push(`${label}.end_date must be on or after start_date`);
+    return null;
+  }
+
+  return {
+    company_name: optionalTrimmedStringOnItem(
+      row.company_name ?? row.companyName ?? row.company ?? row.employer
+    ),
+    job_title: optionalTrimmedStringOnItem(row.job_title ?? row.jobTitle ?? row.title),
+    location: optionalTrimmedStringOnItem(row.location),
+    start_date: start,
+    end_date: end,
+    current_job_flag: currentFlag,
+    description: optionalTrimmedStringOnItem(row.description)
+  };
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ */
+export function validateCandidateEducationInErrors(errors, body) {
+  validateCandidateChildJsonArrayInErrors(errors, body, CANDIDATE_EDUCATION_FIELD);
+  if (errors.length || !bodyHasField(body, CANDIDATE_EDUCATION_FIELD)) return;
+
+  const education = body[CANDIDATE_EDUCATION_FIELD];
+  if (!Array.isArray(education)) return;
+
+  const normalized = [];
+  education.forEach((item, index) => {
+    const row = validateEducationItemInErrors(item, index, errors);
+    if (row) normalized.push(row);
+  });
+  if (!errors.length) {
+    body[CANDIDATE_EDUCATION_FIELD] = normalized;
+  }
+}
+
+/**
+ * @param {string[]} errors
+ * @param {Record<string, unknown>} body
+ */
+export function validateCandidateExperienceInErrors(errors, body) {
+  validateCandidateChildJsonArrayInErrors(errors, body, CANDIDATE_EXPERIENCE_FIELD);
+  if (errors.length || !bodyHasField(body, CANDIDATE_EXPERIENCE_FIELD)) return;
+
+  const experience = body[CANDIDATE_EXPERIENCE_FIELD];
+  if (!Array.isArray(experience)) return;
+
+  const normalized = [];
+  experience.forEach((item, index) => {
+    const row = validateExperienceItemInErrors(item, index, errors);
+    if (row) normalized.push(row);
+  });
+  if (!errors.length) {
+    body[CANDIDATE_EXPERIENCE_FIELD] = normalized;
   }
 }
 
@@ -320,7 +516,7 @@ export function validateCandidateSkillsInErrors(errors, body) {
  * @param {Record<string, unknown>} body
  */
 export function validateCandidateChildJsonFieldsInErrors(errors, body) {
-  validateCandidateChildJsonArrayInErrors(errors, body, CANDIDATE_EDUCATION_FIELD);
-  validateCandidateChildJsonArrayInErrors(errors, body, CANDIDATE_EXPERIENCE_FIELD);
+  validateCandidateEducationInErrors(errors, body);
+  validateCandidateExperienceInErrors(errors, body);
   validateCandidateSkillsInErrors(errors, body);
 }
