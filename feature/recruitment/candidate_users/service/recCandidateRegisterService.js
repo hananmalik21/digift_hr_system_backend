@@ -1,8 +1,8 @@
 import { hashPasswordArgon2id } from '../../../security/users/service/fndsecUsersService.js';
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 import { registerCandidateUserViaPackage } from '../model/recCandidateUserModel.js';
+import { applyRegisterPortalDefaults } from '../utils/recCandidateRegisterDefaults.js';
 import {
-  PORTAL_DEFAULT_CREATED_BY,
   REGISTER_GENERIC_ERROR,
   REGISTER_SUCCESS_MESSAGE
 } from '../utils/recCandidatePortalConstants.js';
@@ -13,9 +13,7 @@ import {
 export async function registerCandidateUserService(body) {
   const plainPassword = body.password;
   const payload = { ...body };
-  if (payload.created_by == null || String(payload.created_by).trim() === '') {
-    payload.created_by = PORTAL_DEFAULT_CREATED_BY;
-  }
+  applyRegisterPortalDefaults(payload);
   payload.password_hash = await hashPasswordArgon2id(plainPassword);
   delete payload.password;
 

@@ -7,7 +7,14 @@ import {
   validateRequiredEmailInErrors,
   validateRequiredPasswordInErrors
 } from '../../shared/recValidationUtils.js';
-import { validateCandidateProfileFieldsInErrors } from '../../candidates/utils/recCandidateProfileValidation.js';
+import {
+  validateCandidateDemographicFieldsInErrors,
+  validateCandidateProfileFieldsInErrors
+} from '../../candidates/utils/recCandidateProfileValidation.js';
+import {
+  normalizeSkillsFieldInBody,
+  validateCandidateSkillsInErrors
+} from '../../candidates/utils/recCandidateChildJsonUtils.js';
 import { PORTAL_MIN_PASSWORD_LENGTH } from './recCandidatePortalConstants.js';
 
 /**
@@ -26,6 +33,9 @@ export function validateRegisterCandidateUserBody(body) {
   if (isBlank(b.phone)) errors.push('phone is required');
 
   validateCandidateProfileFieldsInErrors(errors, b);
+  validateCandidateDemographicFieldsInErrors(errors, b);
+  normalizeSkillsFieldInBody(b);
+  validateCandidateSkillsInErrors(errors, b);
   validateOptionalNumberInErrors(errors, b, 'expected_salary');
 
   throwIfValidationErrors(errors);

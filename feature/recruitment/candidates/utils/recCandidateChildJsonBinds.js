@@ -2,7 +2,6 @@ import oracledb from 'oracledb';
 import {
   CANDIDATE_EDUCATION_FIELD,
   CANDIDATE_EXPERIENCE_FIELD,
-  CANDIDATE_SKILLS_FIELD,
   candidateChildJsonToClobString,
   candidateSkillsToClobString,
   normalizeCandidateChildJsonRequestFields,
@@ -17,7 +16,11 @@ function childJsonClobBind(body, fieldName) {
   };
 }
 
-function skillsJsonClobBind(body) {
+/**
+ * P_SKILLS_JSON CLOB bind — parse string once, stringify once (no double encoding).
+ * @param {Record<string, unknown>} body
+ */
+export function buildCandidateSkillsJsonClobBind(body) {
   normalizeSkillsFieldInBody(body);
   return {
     val: candidateSkillsToClobString(body),
@@ -37,6 +40,6 @@ export function buildCandidateChildJsonInBinds(b) {
   return {
     p_education_json: childJsonClobBind(b, CANDIDATE_EDUCATION_FIELD),
     p_experience_json: childJsonClobBind(b, CANDIDATE_EXPERIENCE_FIELD),
-    p_skills_json: skillsJsonClobBind(b)
+    p_skills_json: buildCandidateSkillsJsonClobBind(b)
   };
 }

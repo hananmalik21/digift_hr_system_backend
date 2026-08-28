@@ -3,7 +3,8 @@ import {
   mergeResumeUploadIntoBody,
   multerResumeUploadErrorMessage
 } from '../../shared/recResumeFileUtils.js';
-import { PORTAL_DEFAULT_CREATED_BY } from './recCandidatePortalConstants.js';
+import { normalizeSkillsFieldInBody } from '../../candidates/utils/recCandidateChildJsonUtils.js';
+import { applyRegisterPortalDefaults } from './recCandidateRegisterDefaults.js';
 
 const uploadRegisterResume = createCandidateResumeMulter();
 
@@ -34,8 +35,9 @@ export function multerRegisterCandidate(req, res, next) {
 export function buildRegisterBodyFromRequest(req, extra = {}) {
   const body = { ...(req.body || {}), ...extra };
   mergeResumeUploadIntoBody(req, body);
-  if (body.created_by == null || String(body.created_by).trim() === '') {
-    body.created_by = PORTAL_DEFAULT_CREATED_BY;
-  }
+  normalizeSkillsFieldInBody(body);
+  applyRegisterPortalDefaults(body);
   return body;
 }
+
+export { applyRegisterPortalDefaults };

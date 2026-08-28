@@ -19,6 +19,13 @@ info:
 
     Passwords on register are hashed server-side (Argon2id) before Oracle storage.
 
+    **Optional profile fields:** `alternate_phone`, `alternate_email`, `dob` (YYYY-MM-DD, not future),
+    `gender`, `nationality`, `visa_status`, `preferred_location`, `source_from`, `skills`
+    (array of `{ skill_name }` → `P_SKILLS_JSON`). Multipart may send `skills` as a JSON string.
+
+    **Defaults when omitted:** `source` → `CAREER_PORTAL`, `salary_currency` → `USD`,
+    `willing_to_relocate` → `N`, `created_by` → `CAREER_PORTAL`.
+
     ## Hostname tenant resolution (preferred)
 
     Prefer tenant hostnames such as `{tenant}.careers.digifyhr.com`.
@@ -240,29 +247,94 @@ components:
       properties:
         enterprise_id: { type: integer, minimum: 1 }
         first_name: { type: string }
-        middle_name: { type: string }
+        middle_name: { type: string, nullable: true }
         last_name: { type: string }
         email: { type: string, format: email }
         phone: { type: string }
+        alternate_phone:
+          type: string
+          nullable: true
+          description: Optional alternate phone (string; preserves +)
+          example: '+96551111111'
+        alternate_email:
+          type: string
+          format: email
+          nullable: true
+          description: Optional alternate email (trimmed, lowercased)
+          example: john.alt@example.com
         password:
           type: string
           minLength: 8
           description: Plain password (hashed server-side; never stored)
+        dob:
+          type: string
+          format: date
+          nullable: true
+          description: Date of birth YYYY-MM-DD (maps to P_DATE_OF_BIRTH; not future)
+          example: '1990-05-15'
+        gender:
+          type: string
+          nullable: true
+          example: MALE
+        nationality:
+          type: string
+          nullable: true
+          example: Pakistani
+        visa_status:
+          type: string
+          nullable: true
+          example: TRANSFERABLE_RESIDENCY
         current_title: { type: string }
         current_employer: { type: string }
-        years_experience: { type: number }
+        years_experience:
+          type: number
+          description: Candidate-level years of experience (not skill-level)
         current_location: { type: string }
-        source: { type: string }
+        preferred_location:
+          type: string
+          nullable: true
+          description: Preferred work location (separate from current_location)
+          example: Dubai
+        source:
+          type: string
+          description: Defaults to CAREER_PORTAL when omitted
+          example: CAREER_PORTAL
+        source_from:
+          type: string
+          nullable: true
+          description: Source detail / campaign (separate from source)
+          example: LinkedIn Campaign
         current_salary: { type: number, minimum: 0 }
         expected_salary: { type: number }
-        salary_currency: { type: string }
-        notice_period: { type: integer }
-        linkedin_profile: { type: string, maxLength: 1000 }
-        portfolio_link: { type: string, format: uri, maxLength: 1000 }
-        github_link: { type: string, format: uri, maxLength: 1000 }
+        salary_currency:
+          type: string
+          description: Defaults to USD when omitted
+          example: KWD
+        notice_period:
+          type: string
+          description: Notice period text (VARCHAR2 in package)
+          example: 30 Days
+        linkedin_profile: { type: string, maxLength: 1000, nullable: true }
+        portfolio_link: { type: string, format: uri, maxLength: 1000, nullable: true }
+        github_link: { type: string, format: uri, maxLength: 1000, nullable: true }
         willing_to_relocate:
           $ref: '#/components/schemas/YnFlag'
+        skills:
+          type: array
+          nullable: true
+          description: |
+            Optional skills → P_SKILLS_JSON. Items require skill_name only.
+            Multipart may send a JSON string; API parses once then stringifies once.
+          items:
+            $ref: '#/components/schemas/CandidateRegisterSkillItem'
         created_by: { type: string }
+    CandidateRegisterSkillItem:
+      type: object
+      required: [skill_name]
+      properties:
+        skill_name:
+          type: string
+          example: Oracle PL/SQL
     CandidateRegisterMultipart:
       allOf:
         - $ref: '#/components/schemas/CandidateRegisterFields'
