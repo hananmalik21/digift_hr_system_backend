@@ -5,7 +5,14 @@ import {
   throwIfValidationErrors,
   validateHexGuidInErrors
 } from '../../shared/recValidationUtils.js';
-import { validateCandidateProfileFieldsInErrors } from './recCandidateProfileValidation.js';
+import {
+  validateCandidateDemographicFieldsInErrors,
+  validateCandidateProfileFieldsInErrors
+} from './recCandidateProfileValidation.js';
+import {
+  normalizeCandidateChildJsonRequestFields,
+  validateCandidateChildJsonFieldsInErrors
+} from './recCandidateChildJsonUtils.js';
 
 export { validateSendCandidateEmailBody } from './recCandidateSendEmailValidators.js';
 export { ALLOWED_MESSAGE_TYPES } from './recCandidateSendEmailConstants.js';
@@ -32,7 +39,11 @@ export function validateCandidateBody(body, options = {}) {
     validateHexGuidInErrors(errors, candidateGuid ?? b.candidate_guid, 'candidate_guid');
   }
 
+  normalizeCandidateChildJsonRequestFields(b);
+
   validateCandidateProfileFieldsInErrors(errors, b);
+  validateCandidateDemographicFieldsInErrors(errors, b);
+  validateCandidateChildJsonFieldsInErrors(errors, b);
 
   throwIfValidationErrors(errors);
 }

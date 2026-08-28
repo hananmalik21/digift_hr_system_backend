@@ -1,13 +1,15 @@
 import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { formatDateOnly } from '../../candidate_matches/utils/recCandidateMatchMappers.js';
+import { CANDIDATE_DOB_VIEW_COLUMN } from './recCandidateProfileFields.js';
+import {
+  CANDIDATE_JSON_COLLECTION_API_FIELDS,
+  CANDIDATE_JSON_COLLECTION_VIEW_TO_API,
+  CANDIDATE_SKILLS_VIEW_COLUMN
+} from './recCandidateChildJsonUtils.js';
+import { mapCandidateSkillsResponse } from './recCandidateSkillMappers.js';
+import { CANDIDATE_LIST_API_FIELDS } from './recCandidateViewConstants.js';
 
-const JSON_ARRAY_COLUMNS = new Set([
-  'education_json',
-  'experience_json',
-  'resumes_json',
-  'background_checks_json',
-  'talent_pools_json',
-  'assessments_json'
-]);
+const RESUME_EXCLUDED_FIELDS = new Set(['file_content']);
 
 async function readLobVal(v) {
   if (v == null) return null;
@@ -31,10 +33,13 @@ async function readLobVal(v) {
 }
 
 /**
+ * Safe parse for Oracle JSON/CLOB columns.
+ * NULL, invalid JSON, or non-array when `asArray` → [].
  * @param {unknown} raw
  * @param {boolean} asArray
+ * @param {string} [columnName]
  */
-export async function parseJsonColumn(raw, asArray = false) {
+export async function parseJsonColumn(raw, asArray = false, columnName = 'json') {
   if (raw == null) return asArray ? [] : null;
   if (asArray && Array.isArray(raw)) return raw;
   if (!asArray && typeof raw === 'object' && !Buffer.isBuffer(raw) && !Array.isArray(raw)) {
@@ -46,13 +51,14 @@ export async function parseJsonColumn(raw, asArray = false) {
   if (typeof text === 'object') return text;
 
   const s = String(text).trim();
-  if (!s) return asArray ? [] : null;
+  if (!s || s.toLowerCase() === 'null') return asArray ? [] : null;
 
   try {
     const parsed = JSON.parse(s);
     if (asArray) return Array.isArray(parsed) ? parsed : [];
     return parsed;
-  } catch {
+  } catch (err) {
+    console.error(`[recCandidateViewMapper] Failed to parse ${columnName}:`, err?.message ?? err);
     return asArray ? [] : null;
   }
 }
@@ -104,6 +110,23 @@ function normalizeNestedJsonArrayFields(items) {
   });
 }
 
+/**
+ * Strip binary resume content from view JSON; detail GET uses resume_link instead.
+ * @param {unknown[]} resumes
+ */
+function sanitizeResumeCollection(resumes) {
+  if (!Array.isArray(resumes)) return [];
+  return resumes.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    const out = {};
+    for (const [k, v] of Object.entries(item)) {
+      if (RESUME_EXCLUDED_FIELDS.has(String(k).toLowerCase())) continue;
+      out[k] = v;
+    }
+    return out;
+  });
+}
+
 function formatDateValue(v) {
   if (v == null) return null;
   if (v instanceof Date) return Number.isFinite(v.getTime()) ? v.toISOString() : null;
@@ -125,7 +148,33 @@ function normalizeScalar(key, v) {
 }
 
 /**
- * Map one view row to API JSON (Oracle types only — no business rules).
+ * @param {Record<string, unknown>} row
+ * @param {string} viewColumn
+ * @param {unknown} raw
+ */
+async function mapJsonCollectionColumn(row, viewColumn, raw) {
+  const apiField = CANDIDATE_JSON_COLLECTION_VIEW_TO_API[viewColumn];
+  let parsed = await parseJsonColumn(raw, true, viewColumn);
+
+  if (viewColumn === CANDIDATE_SKILLS_VIEW_COLUMN) {
+    parsed = mapCandidateSkillsResponse(parsed);
+  } else if (viewColumn === 'assessments_json') {
+    parsed = normalizeNestedJsonArrayFields(parsed);
+  } else if (viewColumn === 'resumes_json') {
+    parsed = sanitizeResumeCollection(parsed);
+  }
+
+  return { apiField, parsed };
+}
+
+function ensureJsonCollectionDefaults(out) {
+  for (const field of CANDIDATE_JSON_COLLECTION_API_FIELDS) {
+    if (out[field] == null) out[field] = [];
+  }
+}
+
+/**
+ * Map one REC.CANDIDATES_FULL_V row to API detail JSON.
  * @param {Record<string, unknown>} row
  * @param {{ omitColumns?: string[] }} [options]
  */
@@ -138,14 +187,19 @@ export async function mapCandidateViewRow(row, options = {}) {
   for (const [k, v] of Object.entries(row)) {
     const key = String(k).toLowerCase();
     if (omit.has(key)) continue;
-    if (JSON_ARRAY_COLUMNS.has(key)) {
-      let parsed = await parseJsonColumn(v, true);
-      if (key === 'assessments_json') {
-        parsed = normalizeNestedJsonArrayFields(parsed);
-      }
-      out[key] = parsed;
+
+    const jsonMapping = CANDIDATE_JSON_COLLECTION_VIEW_TO_API[key];
+    if (jsonMapping) {
+      const { apiField, parsed } = await mapJsonCollectionColumn(row, key, v);
+      out[apiField] = parsed;
       continue;
     }
+
+    if (key === CANDIDATE_DOB_VIEW_COLUMN) {
+      out.dob = formatDateOnly(v);
+      continue;
+    }
+
     out[key] = normalizeScalar(key, v);
   }
 
@@ -156,5 +210,24 @@ export async function mapCandidateViewRow(row, options = {}) {
     }
   }
 
+  ensureJsonCollectionDefaults(out);
+  return out;
+}
+
+/**
+ * Map one REC.CANDIDATES_FULL_V list row to the slim list API shape (no JSON collections).
+ * @param {Record<string, unknown>} row
+ */
+export async function mapCandidateListViewRow(row) {
+  if (!row || typeof row !== 'object') return null;
+
+  const detail = await mapCandidateViewRow(row, {
+    omitColumns: Object.keys(CANDIDATE_JSON_COLLECTION_VIEW_TO_API)
+  });
+
+  const out = {};
+  for (const field of CANDIDATE_LIST_API_FIELDS) {
+    if (field in detail) out[field] = detail[field];
+  }
   return out;
 }

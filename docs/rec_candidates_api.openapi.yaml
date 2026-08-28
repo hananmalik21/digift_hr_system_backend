@@ -11,6 +11,10 @@ info:
     **Profile & compensation fields:** `current_salary` (>= 0), `portfolio_link`, `github_link`
     (http/https URLs), `willing_to_relocate` (Y or N; defaults to N on create when omitted).
 
+    **Demographic fields (optional):** `dob` (YYYY-MM-DD, not future), `gender`, `nationality`,
+    `visa_status`, `alternate_phone`, `alternate_email` (lowercased), `preferred_location`,
+    `source_from` (separate from `source`).
+
     **Search:** `search` matches name, email, title, education/experience JSON, `portfolio_link`, `github_link`.
 
     Supports `application/json` or `multipart/form-data` (resume upload).
@@ -35,9 +39,36 @@ paths:
         - name: status
           in: query
           schema: { type: string }
+        - name: active_flag
+          in: query
+          schema: { $ref: '#/components/schemas/YnFlag' }
+        - name: source
+          in: query
+          schema: { type: string }
+        - name: source_from
+          in: query
+          schema: { type: string }
+        - name: nationality
+          in: query
+          schema: { type: string }
+        - name: visa_status
+          in: query
+          schema: { type: string }
+        - name: current_location
+          in: query
+          schema: { type: string }
+        - name: preferred_location
+          in: query
+          schema: { type: string }
+        - name: current_title
+          in: query
+          schema: { type: string }
+        - name: current_employer
+          in: query
+          schema: { type: string }
         - name: search
           in: query
-          description: Matches name, email, title, education/experience JSON, portfolio_link, github_link.
+          description: Matches name, email, phone, title, employer, education/experience JSON, portfolio_link, github_link.
           schema: { type: string }
         - name: page
           in: query
@@ -81,6 +112,15 @@ paths:
               portfolio_link: https://portfolio.example.com/john
               github_link: https://github.com/johndoe
               willing_to_relocate: Y
+              dob: '1990-05-15'
+              gender: MALE
+              nationality: Pakistani
+              visa_status: TRANSFERABLE
+              alternate_phone: '+96551111111'
+              alternate_email: Candidate.Alt@Example.com
+              preferred_location: Kuwait City
+              source: CAREER_PORTAL
+              source_from: LinkedIn Campaign
               created_by: ADMIN
           multipart/form-data:
             schema:
@@ -120,7 +160,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: '#/components/schemas/CandidateNotFoundError'
         '400':
           $ref: '#/components/responses/ValidationOrPackageError'
         '500':
@@ -212,6 +252,85 @@ components:
         willing_to_relocate:
           $ref: '#/components/schemas/YnFlag'
           description: Defaults to N on create when omitted
+    CandidateDemographicFields:
+      type: object
+      properties:
+        dob:
+          type: string
+          format: date
+          nullable: true
+          description: Date of birth (YYYY-MM-DD). Maps to P_DATE_OF_BIRTH. Must not be a future date.
+          example: '1990-05-15'
+        gender:
+          type: string
+          nullable: true
+          description: Normalized to uppercase when supplied (e.g. MALE)
+          example: MALE
+        nationality:
+          type: string
+          nullable: true
+          example: Pakistani
+        visa_status:
+          type: string
+          nullable: true
+          description: Visa / work authorization status
+          example: TRANSFERABLE
+        alternate_phone:
+          type: string
+          nullable: true
+          description: Alternate phone as string (preserves + prefix)
+          example: '+96551111111'
+        alternate_email:
+          type: string
+          format: email
+          nullable: true
+          description: Alternate email — trimmed and lowercased before save
+          example: candidate.alt@example.com
+        preferred_location:
+          type: string
+          nullable: true
+          description: Preferred work location (separate from current_location)
+          example: Kuwait City
+        source_from:
+          type: string
+          nullable: true
+          description: Source detail / campaign (separate from source)
+          example: LinkedIn Campaign
+    CandidateSkillItem:
+      type: object
+      required: [skill_name]
+      properties:
+        candidate_skill_id:
+          type: integer
+          nullable: true
+          description: Present on GET responses after persist
+        candidate_skill_guid:
+          type: string
+          nullable: true
+          description: Present on GET responses after persist
+        skill_name:
+          type: string
+          example: Oracle PL/SQL
+    CandidateEducationItem:
+      type: object
+      properties:
+        degree_name: { type: string }
+        institution_name: { type: string }
+        field_of_study: { type: string, nullable: true }
+        start_date: { type: string, format: date, nullable: true }
+        end_date: { type: string, format: date, nullable: true }
+        grade: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+    CandidateExperienceItem:
+      type: object
+      properties:
+        company_name: { type: string }
+        job_title: { type: string }
+        location: { type: string, nullable: true }
+        start_date: { type: string, format: date, nullable: true }
+        end_date: { type: string, format: date, nullable: true }
+        current_job_flag: { $ref: '#/components/schemas/YnFlag' }
+        description: { type: string, nullable: true }
     CandidateCoreFields:
       type: object
       required: [enterprise_id]
@@ -236,12 +355,39 @@ components:
           type: string
           maxLength: 1000
           description: LinkedIn URL (trimmed before save)
+        education:
+          type: array
+          description: |
+            Education history (maps to P_EDUCATION_JSON). On update: omit to keep existing;
+            send [] to delete all; send items to replace.
+          items:
+            $ref: '#/components/schemas/CandidateEducationItem'
+        experience:
+          type: array
+          description: |
+            Work experience (maps to P_EXPERIENCE_JSON). On update: omit to keep existing;
+            send [] to delete all; send items to replace.
+          items:
+            $ref: '#/components/schemas/CandidateExperienceItem'
         education_json:
           type: array
-          items: { type: object }
+          deprecated: true
+          description: Legacy alias for `education`
+          items:
+            $ref: '#/components/schemas/CandidateEducationItem'
         experience_json:
           type: array
-          items: { type: object }
+          deprecated: true
+          description: Legacy alias for `experience`
+          items:
+            $ref: '#/components/schemas/CandidateExperienceItem'
+        skills:
+          type: array
+          description: |
+            Candidate skills (maps to P_SKILLS_JSON). On update: omit to keep existing;
+            send [] to delete all; send items to replace.
+          items:
+            $ref: '#/components/schemas/CandidateSkillItem'
         file_name: { type: string }
         file_type: { type: string }
         file_size: { type: integer }
@@ -252,6 +398,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/CandidateCoreFields'
         - $ref: '#/components/schemas/CandidateProfileCompensationFields'
+        - $ref: '#/components/schemas/CandidateDemographicFields'
         - type: object
           properties:
             created_by: { type: string }
@@ -259,6 +406,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/CandidateCoreFields'
         - $ref: '#/components/schemas/CandidateProfileCompensationFields'
+        - $ref: '#/components/schemas/CandidateDemographicFields'
         - type: object
           properties:
             candidate_guid:
@@ -308,18 +456,92 @@ components:
         status: { type: string, example: SUCCESS }
         message: { type: string, example: Candidate updated successfully. }
     CandidateListItem:
+      type: object
+      properties:
+        candidate_id: { type: integer }
+        candidate_guid: { type: string }
+        enterprise_id: { type: integer }
+        first_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string }
+        full_name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        current_title: { type: string, nullable: true }
+        current_employer: { type: string, nullable: true }
+        years_experience: { type: number, nullable: true }
+        current_location: { type: string, nullable: true }
+        preferred_location: { type: string, nullable: true }
+        nationality: { type: string, nullable: true }
+        visa_status: { type: string, nullable: true }
+        source: { type: string, nullable: true }
+        source_from: { type: string, nullable: true }
+        status: { type: string, nullable: true }
+        active_flag: { $ref: '#/components/schemas/YnFlag' }
+        creation_date: { type: string, format: date-time, nullable: true }
+    CandidateDetailData:
       allOf:
         - $ref: '#/components/schemas/CandidateProfileCompensationFields'
+        - $ref: '#/components/schemas/CandidateDemographicFields'
         - type: object
           properties:
+            candidate_id: { type: integer }
             candidate_guid: { type: string }
-            full_name: { type: string }
-            email: { type: string, format: email }
-            current_title: { type: string }
-            current_employer: { type: string }
-            years_experience: { type: number }
-            expected_salary: { type: number }
-            salary_currency: { type: string }
+            enterprise_id: { type: integer }
+            first_name: { type: string, nullable: true }
+            middle_name: { type: string, nullable: true }
+            last_name: { type: string, nullable: true }
+            full_name: { type: string, nullable: true }
+            email: { type: string, format: email, nullable: true }
+            phone: { type: string, nullable: true }
+            current_title: { type: string, nullable: true }
+            current_employer: { type: string, nullable: true }
+            years_experience: { type: number, nullable: true }
+            current_location: { type: string, nullable: true }
+            source: { type: string, nullable: true }
+            expected_salary: { type: number, nullable: true }
+            salary_currency: { type: string, nullable: true }
+            notice_period: { type: string, nullable: true }
+            linkedin_profile: { type: string, nullable: true }
+            status: { type: string, nullable: true }
+            active_flag: { $ref: '#/components/schemas/YnFlag' }
+            education:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateEducationItem'
+            experience:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateExperienceItem'
+            skills:
+              type: array
+              items:
+                $ref: '#/components/schemas/CandidateSkillItem'
+            resumes:
+              type: array
+              description: Resume metadata from REC.CANDIDATES_FULL_V (no file_content)
+              items:
+                type: object
+                additionalProperties: true
+            background_checks:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            assessments:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            talent_pools:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            created_by: { type: string, nullable: true }
+            creation_date: { type: string, format: date-time, nullable: true }
+            last_updated_by: { type: string, nullable: true }
+            last_update_date: { type: string, format: date-time, nullable: true }
     CandidateListResponse:
       type: object
       properties:
@@ -349,16 +571,24 @@ components:
               portfolio_link: https://portfolio.example.com
               github_link: https://github.com/johndoe
               willing_to_relocate: Y
+              dob: '1990-05-15'
+              gender: MALE
+              nationality: Pakistani
+              visa_status: TRANSFERABLE
+              preferred_location: Kuwait City
+              source_from: LinkedIn Campaign
     CandidateDetailResponse:
       type: object
       properties:
         success: { type: boolean, example: true }
-        message: { type: string }
         data:
-          allOf:
-            - $ref: '#/components/schemas/CandidateProfileCompensationFields'
-            - type: object
-              additionalProperties: true
+          $ref: '#/components/schemas/CandidateDetailData'
+    CandidateNotFoundError:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        code: { type: string, example: CANDIDATE_NOT_FOUND }
+        message: { type: string, example: Candidate not found. }
     ErrorEnvelope:
       type: object
       properties:

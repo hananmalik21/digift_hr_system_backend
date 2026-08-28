@@ -1,13 +1,12 @@
 import {
   asObject,
   isBlank,
+  isValidBasicEmail,
   normalizeEmailLower,
   requirePositiveEnterpriseId,
   throwIfValidationErrors
 } from '../../shared/recValidationUtils.js';
 import { PORTAL_MIN_PASSWORD_LENGTH } from './recCandidatePortalConstants.js';
-
-const BASIC_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
  * @param {string[]} errors
@@ -19,7 +18,7 @@ function validateEmailFormatInErrors(errors, body) {
     return;
   }
   const email = normalizeEmailLower(body.email);
-  if (!BASIC_EMAIL_RE.test(email)) {
+  if (!isValidBasicEmail(email)) {
     errors.push('email must be a valid email address');
   }
 }

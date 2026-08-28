@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../config/db.js';
 import { bufferToHex, hexToRawBuffer } from './guidUtils.js';
+import { parseCalendarDateOnlyBind } from './dateOnlyUtils.js';
 import { toAuditActorId } from './requestUtils.js';
 import {
   ValidationError,
@@ -99,6 +100,33 @@ export function clobInBind(v) {
     val: strOrNull(v),
     dir: oracledb.BIND_IN,
     type: oracledb.CLOB
+  };
+}
+
+/**
+ * Lowercase email VARCHAR2 bind (trimmed). Used for alternate / secondary emails.
+ * @param {unknown} v
+ * @param {number} [maxSize]
+ */
+export function emailInBind(v, maxSize = 320) {
+  const s = strOrNull(v);
+  return {
+    val: s ? s.toLowerCase() : null,
+    dir: oracledb.BIND_IN,
+    type: oracledb.STRING,
+    maxSize
+  };
+}
+
+/**
+ * Oracle DATE bind from API YYYY-MM-DD (local calendar day; no implicit string conversion).
+ * @param {unknown} v
+ */
+export function dateOnlyInBind(v) {
+  return {
+    val: parseCalendarDateOnlyBind(v),
+    dir: oracledb.BIND_IN,
+    type: oracledb.DATE
   };
 }
 

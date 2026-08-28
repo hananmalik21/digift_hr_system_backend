@@ -1,7 +1,6 @@
 import oracledb from 'oracledb';
 import {
   guidInBind,
-  jsonArrayToClobString,
   numOrNull,
   parseActionOut,
   parseCreateOut,
@@ -11,7 +10,12 @@ import {
   withConnection,
   ynInBind
 } from '../../shared/oraclePackageUtils.js';
-import { CANDIDATE_PROFILE_PLSQL_ARGS } from '../utils/recCandidateProfileFields.js';
+import {
+  CANDIDATE_DEMOGRAPHIC_PLSQL_ARGS,
+  CANDIDATE_PROFILE_PLSQL_ARGS
+} from '../utils/recCandidateProfileFields.js';
+import { buildCandidateDemographicInBinds } from '../utils/recCandidateDemographicBinds.js';
+import { buildCandidateChildJsonInBinds } from '../utils/recCandidateChildJsonBinds.js';
 import { parseResumeFileContent } from '../../shared/recResumeFileUtils.js';
 
 export { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
@@ -70,16 +74,8 @@ function buildSharedInBinds(b, options = {}) {
     p_portfolio_link: strLinkInBind(b.portfolio_link),
     p_github_link: strLinkInBind(b.github_link),
     p_willing_to_relocate: ynInBind(b.willing_to_relocate, willingToRelocateDefault),
-    p_education_json: {
-      val: jsonArrayToClobString(b.education_json),
-      dir: oracledb.BIND_IN,
-      type: oracledb.CLOB
-    },
-    p_experience_json: {
-      val: jsonArrayToClobString(b.experience_json),
-      dir: oracledb.BIND_IN,
-      type: oracledb.CLOB
-    },
+    ...buildCandidateDemographicInBinds(b),
+    ...buildCandidateChildJsonInBinds(b),
     p_file_name: { val: strOrNull(b.file_name), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 500 },
     p_file_type: { val: strOrNull(b.file_type), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
     p_file_size: { val: numOrNull(b.file_size), dir: oracledb.BIND_IN, type: oracledb.NUMBER }
@@ -130,9 +126,10 @@ BEGIN
     p_expected_salary    => :p_expected_salary,
     p_salary_currency    => :p_salary_currency,
     p_notice_period      => :p_notice_period,
-    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},
+    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},${CANDIDATE_DEMOGRAPHIC_PLSQL_ARGS},
     p_education_json     => :p_education_json,
     p_experience_json    => :p_experience_json,
+    p_skills_json        => :p_skills_json,
     p_file_name          => :p_file_name,
     p_file_type          => :p_file_type,
     p_file_size          => :p_file_size,
@@ -163,10 +160,11 @@ BEGIN
     p_expected_salary    => :p_expected_salary,
     p_salary_currency    => :p_salary_currency,
     p_notice_period      => :p_notice_period,
-    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},
+    p_linkedin_profile   => :p_linkedin_profile,${CANDIDATE_PROFILE_PLSQL_ARGS},${CANDIDATE_DEMOGRAPHIC_PLSQL_ARGS},
     p_status_code        => :p_status_code,
     p_education_json     => :p_education_json,
     p_experience_json    => :p_experience_json,
+    p_skills_json        => :p_skills_json,
     p_file_name          => :p_file_name,
     p_file_type          => :p_file_type,
     p_file_size          => :p_file_size,

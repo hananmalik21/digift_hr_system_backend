@@ -1,4 +1,8 @@
 import { buildDynamicApiExcelBuffer } from '../../../../utils/excel/index.js';
+import {
+  CANDIDATE_DEMOGRAPHIC_API_FIELDS,
+  CANDIDATE_JSON_COLLECTION_API_FIELDS
+} from '../utils/recCandidateProfileFields.js';
 
 const KEY_ORDER = [
   'candidate_id',
@@ -23,13 +27,10 @@ const KEY_ORDER = [
   'portfolio_link',
   'github_link',
   'willing_to_relocate',
+  ...CANDIDATE_DEMOGRAPHIC_API_FIELDS,
+  ...CANDIDATE_JSON_COLLECTION_API_FIELDS,
   'status',
   'active_flag',
-  'education_json',
-  'experience_json',
-  'resumes_json',
-  'talent_pools_json',
-  'assessments_json',
   'created_by',
   'creation_date',
   'last_updated_by',
