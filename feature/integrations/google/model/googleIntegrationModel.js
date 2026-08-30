@@ -171,6 +171,54 @@ async function clearCorruptTokenExpiryDate(enterpriseId, userId) {
 }
 
 /**
+ * Lightweight lookup used by reconnect/upsert — does not decrypt tokens.
+ * @param {number} enterpriseId
+ * @param {number} userId
+ * @returns {Promise<{ integration_id: number, google_email: string|null, token_scope: string|null }|null>}
+ */
+export async function getGoogleIntegrationMeta(enterpriseId, userId) {
+  if (!Number.isFinite(Number(enterpriseId)) || !Number.isFinite(Number(userId))) {
+    return null;
+  }
+
+  const sql = `
+    SELECT INTEGRATION_ID, GOOGLE_EMAIL, TOKEN_SCOPE
+      FROM ${TABLE}
+     WHERE ENTERPRISE_ID = :p_enterprise_id
+       AND USER_ID = :p_user_id
+       AND PROVIDER_CODE = :p_provider_code
+     FETCH FIRST 1 ROWS ONLY`;
+
+  try {
+    return await withConnection(async (connection) => {
+      const result = await connection.execute(
+        sql,
+        {
+          p_enterprise_id: { val: Number(enterpriseId), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+          p_user_id: { val: Number(userId), dir: oracledb.BIND_IN, type: oracledb.NUMBER },
+          p_provider_code: {
+            val: GOOGLE_OAUTH_PROVIDER_CODE,
+            dir: oracledb.BIND_IN,
+            type: oracledb.STRING,
+            maxSize: 50
+          }
+        },
+        ROW_OPTS
+      );
+      const row = result.rows?.[0];
+      if (!row) return null;
+      return {
+        integration_id: Number(row.INTEGRATION_ID ?? row.integration_id),
+        google_email: row.GOOGLE_EMAIL ?? row.google_email ?? null,
+        token_scope: row.TOKEN_SCOPE ?? row.token_scope ?? null
+      };
+    });
+  } catch (err) {
+    rethrowIntegrationDbError(err, 'getGoogleIntegrationMeta');
+  }
+}
+
+/**
  * @param {{
  *   enterprise_id: number,
  *   user_id: number,
@@ -183,21 +231,44 @@ async function clearCorruptTokenExpiryDate(enterpriseId, userId) {
  * }} payload
  */
 export async function upsertGoogleIntegration(payload) {
-  const existing = await getActiveGoogleIntegration(payload.enterprise_id, payload.user_id);
+  // Avoid decrypting existing ciphertext during reconnect (wrong/rotated key must not block OAuth).
+  const existingMeta = await getGoogleIntegrationMeta(payload.enterprise_id, payload.user_id);
   const refreshToken =
     payload.refresh_token != null && String(payload.refresh_token).trim() !== ''
       ? payload.refresh_token
-      : existing?.refresh_token ?? null;
+      : null;
 
   if (!refreshToken && !payload.access_token) {
     throw new Error('Google refresh token is required to persist integration');
   }
 
-  const actor = payload.actor ?? 'SYSTEM';
-  const encryptedAccess = encryptSecret(payload.access_token ?? existing?.access_token ?? null);
-  const encryptedRefresh = encryptSecret(refreshToken);
+  if (!refreshToken) {
+    throw new AppError(
+      'Google did not return a refresh token. Please reconnect and grant offline access.',
+      400,
+      'GOOGLE_RECONNECT_REQUIRED'
+    );
+  }
 
-  if (existing) {
+  const actor = payload.actor ?? 'SYSTEM';
+  let encryptedAccess;
+  let encryptedRefresh;
+  try {
+    encryptedAccess = encryptSecret(payload.access_token ?? null);
+    encryptedRefresh = encryptSecret(refreshToken);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/GOOGLE_TOKEN_ENCRYPTION_KEY is required/i.test(message)) {
+      throw new AppError(
+        'Google token encryption is not configured on this server. Set GOOGLE_TOKEN_ENCRYPTION_KEY.',
+        503,
+        'GOOGLE_TOKEN_ENCRYPTION_NOT_CONFIGURED'
+      );
+    }
+    throw err;
+  }
+
+  if (existingMeta) {
     const sql = `
       UPDATE ${TABLE}
          SET GOOGLE_EMAIL = :p_google_email,
@@ -221,7 +292,7 @@ export async function upsertGoogleIntegration(payload) {
           sql,
           {
             p_google_email: {
-              val: payload.google_email ?? existing.google_email,
+              val: payload.google_email ?? existingMeta.google_email,
               dir: oracledb.BIND_IN,
               type: oracledb.STRING,
               maxSize: 320
@@ -230,14 +301,14 @@ export async function upsertGoogleIntegration(payload) {
             p_refresh_token: { val: encryptedRefresh, dir: oracledb.BIND_IN, type: oracledb.CLOB },
             p_token_expiry_date: tokenExpiryTimestampBind(payload.token_expiry_date),
             p_token_scope: {
-              val: payload.token_scope ?? existing.token_scope,
+              val: payload.token_scope ?? existingMeta.token_scope,
               dir: oracledb.BIND_IN,
               type: oracledb.STRING,
               maxSize: 1000
             },
             p_actor: { val: actor, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 200 },
             p_integration_id: {
-              val: existing.integration_id,
+              val: existingMeta.integration_id,
               dir: oracledb.BIND_IN,
               type: oracledb.NUMBER
             }
