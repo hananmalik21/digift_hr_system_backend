@@ -30,14 +30,35 @@ function rethrowIntegrationDbError(err, action) {
 function mapIntegrationRow(row) {
   if (!row) return null;
   const expiry = row.TOKEN_EXPIRY_DATE ?? row.token_expiry_date;
+  let accessToken = null;
+  let refreshToken = null;
+  try {
+    accessToken = decryptSecret(row.ACCESS_TOKEN ?? row.access_token);
+    refreshToken = decryptSecret(row.REFRESH_TOKEN ?? row.refresh_token);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (/GOOGLE_TOKEN_ENCRYPTION_KEY is required/i.test(message)) {
+      throw new AppError(
+        'Google token encryption is not configured on this server. Set GOOGLE_TOKEN_ENCRYPTION_KEY.',
+        503,
+        'GOOGLE_TOKEN_ENCRYPTION_NOT_CONFIGURED'
+      );
+    }
+    throw new AppError(
+      'Stored Google tokens could not be decrypted. Reconnect Google or verify GOOGLE_TOKEN_ENCRYPTION_KEY.',
+      503,
+      'GOOGLE_TOKEN_DECRYPT_FAILED',
+      message
+    );
+  }
   return {
     integration_id: Number(row.INTEGRATION_ID ?? row.integration_id),
     enterprise_id: Number(row.ENTERPRISE_ID ?? row.enterprise_id),
     user_id: Number(row.USER_ID ?? row.user_id),
     provider_code: row.PROVIDER_CODE ?? row.provider_code,
     google_email: row.GOOGLE_EMAIL ?? row.google_email ?? null,
-    access_token: decryptSecret(row.ACCESS_TOKEN ?? row.access_token),
-    refresh_token: decryptSecret(row.REFRESH_TOKEN ?? row.refresh_token),
+    access_token: accessToken,
+    refresh_token: refreshToken,
     token_expiry_date: expiry instanceof Date ? expiry : expiry ? new Date(expiry) : null,
     token_scope: row.TOKEN_SCOPE ?? row.token_scope ?? null,
     active_flag: row.ACTIVE_FLAG ?? row.active_flag ?? 'Y'
