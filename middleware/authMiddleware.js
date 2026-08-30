@@ -68,7 +68,9 @@ const PUBLIC_PATHS = [
   // Employer logo binary (deep-linkable / <img src> without Bearer header).
   { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/logo\/?$/ },
   // GRC — no JWT required for now
-  { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ }
+  { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ },
+  // Google OAuth callback (browser redirect from Google; state validates user context)
+  { method: 'GET', pattern: /^\/api\/google\/callback\/?$/ }
 ];
 
 function requestPathname(req) {

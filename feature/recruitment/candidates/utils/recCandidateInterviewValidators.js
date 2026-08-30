@@ -113,8 +113,13 @@ function validateInterviewers(errors, body, required = false) {
   }
 
   const list = parseInterviewersArray(raw);
-  if (!list || list.length === 0) {
-    errors.push('interviewers must be a non-empty JSON array');
+  if (!list) {
+    errors.push('interviewers must be a JSON array');
+    return;
+  }
+
+  if (list.length === 0) {
+    if (required) errors.push('interviewers must be a non-empty JSON array');
     return;
   }
 
@@ -184,12 +189,12 @@ export function validateInterviewGuidEnterpriseParams(interviewGuidParam, enterp
  */
 export function parseInterviewGuidParam(value) {
   if (isBlank(value)) {
-    throw new ValidationError('Validation failed', ['interview_guid is required']);
+    throw new ValidationError('Invalid interview_guid format.', ['interview_guid is required']);
   }
   try {
     return ensureHex32(normalizeHex32(value));
   } catch {
-    throw new ValidationError('Validation failed', ['interview_guid must be a valid 32-character hex GUID']);
+    throw new ValidationError('Invalid interview_guid format.', ['Invalid interview_guid format.']);
   }
 }
 
@@ -202,13 +207,10 @@ export function validateScheduleInterviewBody(body) {
 
   requirePositiveEnterpriseId(errors, b);
   requireField(errors, b, 'candidate_guid');
-  requireField(errors, b, 'interview_title');
   requireField(errors, b, 'interview_type');
-  requirePositiveInteger(errors, b, 'interview_round');
   validateInterviewDate(errors, b, true);
   validateUtcTimestampField(errors, b, 'interview_start_utc', 'interview_start_utc', true);
   validateUtcTimestampField(errors, b, 'interview_end_utc', 'interview_end_utc', true);
-  requireField(errors, b, 'interview_mode');
   validateInterviewers(errors, b, true);
   requireField(errors, b, 'created_by');
 
@@ -216,7 +218,7 @@ export function validateScheduleInterviewBody(body) {
     try {
       ensureHex32(normalizeHex32(b.candidate_guid));
     } catch {
-      errors.push('candidate_guid must be a valid 32-character hex GUID');
+      errors.push('Invalid candidate_guid format.');
     }
   }
 
@@ -224,6 +226,13 @@ export function validateScheduleInterviewBody(body) {
     const mode = String(b.interview_mode).trim().toUpperCase();
     if (!INTERVIEW_MODES.has(mode)) {
       errors.push('interview_mode must be ONSITE, ONLINE, or PHONE');
+    }
+  }
+
+  if (!isBlank(b.interview_round)) {
+    const n = Number(b.interview_round);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
+      errors.push('interview_round must be a positive integer');
     }
   }
 
@@ -239,6 +248,9 @@ export function validateScheduleInterviewBody(body) {
  */
 export function normalizeScheduleInterviewBody(body) {
   const b = applyInterviewUtcBodyAliases(asObject(body));
+  if (isBlank(b.interview_round)) {
+    b.interview_round = 1;
+  }
   if (!isBlank(b.interview_mode)) b.interview_mode = String(b.interview_mode).trim().toUpperCase();
   if (!isBlank(b.interview_type)) b.interview_type = String(b.interview_type).trim().toUpperCase();
   if (!isBlank(b.candidate_guid)) {
@@ -248,8 +260,22 @@ export function normalizeScheduleInterviewBody(body) {
     const s = String(b.interview_date).trim();
     b.interview_date = DATE_ONLY_RE.test(s) ? s : s.slice(0, 10);
   }
+  if (Object.prototype.hasOwnProperty.call(b, 'create_google_meet')) {
+    b.create_google_meet = coerceBooleanFlag(b.create_google_meet);
+  }
   applyInterviewersNormalization(b);
   return b;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function coerceBooleanFlag(value) {
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0 || value == null) return false;
+  const s = String(value).trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'y' || s === 'yes';
 }
 
 /**
@@ -275,7 +301,7 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
   if (!isBlank(b.status_code)) {
     const code = String(b.status_code).trim().toUpperCase();
     if (!INTERVIEW_STATUS_CODES.has(code)) {
-      errors.push('status_code must be SCHEDULED, COMPLETED, CANCELLED, or RESCHEDULED');
+      errors.push('status must be SCHEDULED, COMPLETED, CANCELLED, or RESCHEDULED');
     }
   }
 
@@ -314,10 +340,29 @@ export function validateUpdateInterviewBody(body, interviewGuid) {
 /**
  * @param {Record<string, unknown>} body
  * @param {string} [interviewGuid]
+ * @param {{ interviewersProvided?: boolean }} [options]
  */
-export function normalizeUpdateInterviewBody(body, interviewGuid) {
+export function normalizeUpdateInterviewBody(body, interviewGuid, options = {}) {
   const b = applyInterviewUtcBodyAliases(asObject(body));
   if (interviewGuid) b.interview_guid = ensureHex32(normalizeHex32(interviewGuid));
+
+  if (!isBlank(b.status) && isBlank(b.status_code)) {
+    b.status_code = String(b.status).trim().toUpperCase();
+  }
+  delete b.status;
+
+  if (options.interviewersProvided) {
+    b._interviewers_provided = true;
+    if (b.interviewers != null && b.interviewers !== '') {
+      applyInterviewersNormalization(b);
+    } else if (Array.isArray(b.interviewers) && b.interviewers.length === 0) {
+      b.interviewers = [];
+    }
+  } else {
+    delete b.interviewers;
+    b._interviewers_provided = false;
+  }
+
   if (!isBlank(b.interview_mode)) b.interview_mode = String(b.interview_mode).trim().toUpperCase();
   if (!isBlank(b.interview_type)) b.interview_type = String(b.interview_type).trim().toUpperCase();
   if (!isBlank(b.status_code)) b.status_code = String(b.status_code).trim().toUpperCase();
@@ -329,7 +374,6 @@ export function normalizeUpdateInterviewBody(body, interviewGuid) {
     const s = String(b.interview_date).trim();
     b.interview_date = DATE_ONLY_RE.test(s) ? s : s.slice(0, 10);
   }
-  applyInterviewersNormalization(b);
   return b;
 }
 

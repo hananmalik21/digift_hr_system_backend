@@ -307,3 +307,39 @@ export async function getCandidateByGuidFromView(candidateGuidHex, enterpriseId)
     rethrowUnlessOperational(err, `${LOG_TAG} getCandidateByGuidFromView`, FETCH_ERROR_MESSAGE);
   }
 }
+
+/**
+ * @param {string} candidateGuidHex
+ * @returns {Promise<number|null>}
+ */
+export async function findCandidateEnterpriseIdByGuid(candidateGuidHex) {
+  const candidateGuid = ensureHex32(normalizeHex32(candidateGuidHex));
+  const sql = `
+    SELECT ENTERPRISE_ID
+      FROM REC.CANDIDATES
+     WHERE UPPER(RAWTOHEX(CANDIDATE_GUID)) = :p_candidate_guid
+     FETCH FIRST 1 ROWS ONLY`;
+
+  try {
+    return await withConnection(async (connection) => {
+      const r = await connection.execute(
+        sql,
+        {
+          p_candidate_guid: {
+            val: candidateGuid,
+            dir: oracledb.BIND_IN,
+            type: oracledb.STRING,
+            maxSize: 32
+          }
+        },
+        ROW_OPTS
+      );
+      const row = r.rows?.[0];
+      if (!row) return null;
+      const enterpriseId = Number(row.ENTERPRISE_ID ?? row.enterprise_id);
+      return Number.isFinite(enterpriseId) ? enterpriseId : null;
+    });
+  } catch (err) {
+    rethrowUnlessOperational(err, `${LOG_TAG} findCandidateEnterpriseIdByGuid`, FETCH_ERROR_MESSAGE);
+  }
+}

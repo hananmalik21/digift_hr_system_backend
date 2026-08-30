@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import { createPool, closePool } from './config/db.js';
 import { initializeFirebase } from './config/firebase.js';
+import { isGoogleOAuthConfigured } from './config/googleOAuth.js';
 import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
 import hrOrgHierarchyLevelController from './feature/enterprise_structure/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
 import hrOrgStructureController from './feature/enterprise_structure/hr_org_structures/controller/hrOrgStructureController.js';
@@ -93,6 +94,8 @@ import recRequisitionsController from './feature/recruitment/requisitions/contro
 import recRequisitionCompanyInfoController from './feature/recruitment/requisitions/controller/recRequisitionCompanyInfoController.js';
 import { recCandidateMatchRequisitionRouter } from './feature/recruitment/candidate_matches/controller/recCandidateMatchController.js';
 import recCandidatesController from './feature/recruitment/candidates/controller/recCandidatesController.js';
+import recCandidateInterviewsController from './feature/recruitment/candidates/controller/recCandidateInterviewsController.js';
+import googleOAuthController from './feature/integrations/google/controller/googleOAuthController.js';
 import recCandidateNotesController from './feature/recruitment/candidates/controller/recCandidateNotesController.js';
 import recTalentPoolsController from './feature/recruitment/talent_pools/controller/recTalentPoolsController.js';
 import recJobPostingsController from './feature/recruitment/job_postings/controller/recJobPostingsController.js';
@@ -394,6 +397,14 @@ app.use('/api/recruiting/requisitions', recRequisitionCompanyInfoController);
 // Recruitment — requisitions (REC.CREATE_REQUISITION_PKG)
 app.use('/api/rec/requisitions', recRequisitionsController);
 
+// Google OAuth — Calendar/Meet (per-user OAuth, not service account)
+app.use('/api/google', googleOAuthController);
+
+// Recruitment — candidate interviews (REC.CANDIDATE_INTERVIEW_PKG reads/writes)
+app.use('/api/rec/candidate-interviews', recCandidateInterviewsController);
+app.use('/api/rec/candidates/interviews', recCandidateInterviewsController);
+app.use('/api/recruitment/candidates/interviews', recCandidateInterviewsController);
+
 // Recruitment — candidates (REC.CANDIDATE_PKG)
 app.use('/api/rec/candidates', recCandidatesController);
 app.use('/api/recruitment/candidates', recCandidateNotesController);
@@ -575,6 +586,14 @@ try {
 } catch (err) {
   console.error('[startup] Firebase initialization failed:', err?.message || err);
   process.exit(1);
+}
+
+if (isGoogleOAuthConfigured()) {
+  console.info('[startup] Google OAuth configured for Calendar/Meet integration');
+} else {
+  console.info(
+    '[startup] Google OAuth not configured (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)'
+  );
 }
 
 try {

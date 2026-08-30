@@ -24,6 +24,12 @@ export function normalizeInterviewListQuery(query) {
   if (q.active_flag == null || String(q.active_flag).trim() === '') {
     q.active_flag = 'Y';
   }
+  if (q.from_date != null && q.interview_date_from == null) {
+    q.interview_date_from = q.from_date;
+  }
+  if (q.to_date != null && q.interview_date_to == null) {
+    q.interview_date_to = q.to_date;
+  }
   return q;
 }
 
@@ -64,6 +70,8 @@ export function buildInterviewListFilters(query) {
     p_candidate_guid: { val: null, dir: oracledb.BIND_IN, type: oracledb.BUFFER, maxSize: 16 },
     p_status: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
     p_result_status: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
+    p_interview_type: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
+    p_interview_mode: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 20 },
     p_active_flag: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 1 },
     p_search_pat: { val: null, dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 4000 },
     p_interview_date_from: { val: null, dir: oracledb.BIND_IN, type: oracledb.DATE },
@@ -109,6 +117,22 @@ export function buildInterviewListFilters(query) {
     setBindValue(binds, 'p_result_status', rs);
   }
   parts.push(optionalEqClause('p_result_status', 'RESULT_STATUS'));
+
+  if (isNonEmptyTrimmed(query?.interview_type)) {
+    setBindValue(binds, 'p_interview_type', String(query.interview_type).trim().toUpperCase());
+  }
+  parts.push(optionalEqClause('p_interview_type', 'INTERVIEW_TYPE'));
+
+  if (isNonEmptyTrimmed(query?.interview_mode)) {
+    const mode = String(query.interview_mode).trim().toUpperCase();
+    if (!['ONSITE', 'ONLINE', 'PHONE'].includes(mode)) {
+      throw new ValidationError('Validation failed', [
+        'interview_mode must be ONSITE, ONLINE, or PHONE'
+      ]);
+    }
+    setBindValue(binds, 'p_interview_mode', mode);
+  }
+  parts.push(optionalEqClause('p_interview_mode', 'INTERVIEW_MODE'));
 
   if (isNonEmptyTrimmed(query?.active_flag)) {
     const flag = String(query.active_flag).trim().toUpperCase();
