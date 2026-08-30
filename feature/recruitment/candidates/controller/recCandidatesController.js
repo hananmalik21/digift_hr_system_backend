@@ -32,16 +32,6 @@ import {
   createBackgroundCheckViaPackage
 } from '../model/recCandidateBgCheckModel.js';
 import {
-  deleteInterviewViaPackage,
-  scheduleInterviewViaPackage,
-  submitInterviewFeedbackViaPackage,
-  updateInterviewViaPackage
-} from '../model/recCandidateInterviewModel.js';
-import {
-  getInterviewByGuidFromView,
-  listInterviewsFromView
-} from '../model/recCandidateInterviewViewModel.js';
-import {
   createCandidateViaPackage,
   deleteCandidateViaPackage,
   updateCandidateViaPackage
@@ -68,23 +58,6 @@ import {
   normalizeBackgroundCheckBody,
   validateCreateBackgroundCheckBody
 } from '../utils/recCandidateBgCheckValidators.js';
-import { INTERVIEW_MUTATION_ERRORS } from '../utils/recCandidateInterviewConstants.js';
-import {
-  handleInterviewMutation,
-  sendInterviewActionResponse
-} from '../utils/recCandidateInterviewControllerHelpers.js';
-import {
-  normalizeDeleteInterviewBody,
-  normalizeScheduleInterviewBody,
-  normalizeSubmitInterviewFeedbackBody,
-  normalizeUpdateInterviewBody,
-  parseInterviewGuidParam,
-  validateDeleteInterviewBody,
-  validateInterviewGuidEnterpriseParams,
-  validateScheduleInterviewBody,
-  validateSubmitInterviewFeedbackBody,
-  validateUpdateInterviewBody
-} from '../utils/recCandidateInterviewValidators.js';
 import {
   parseCandidateGuidParam,
   validateCandidateBody,
@@ -290,145 +263,6 @@ router.post(
     } catch (err) {
       return handleMutationError(res, err, CANDIDATE_SEND_EMAIL_ERROR);
     }
-  })
-);
-
-/**
- * GET /api/rec/candidates/interviews
- * Query: enterprise_id (required), candidate_guid, status|status_code, result_status,
- *   active_flag (default Y), search, interview_date_from, interview_date_to,
- *   sort_by, sort_dir, page, page_size|limit
- * Reads from REC.CANDIDATE_INTERVIEWS_V.
- */
-router.get(
-  '/interviews',
-  asyncHandler(async (req, res) => {
-    try {
-      const { rows, total, page, limit } = await listInterviewsFromView(req.query);
-      return sendPackageResponse(res, 200, {
-        success: true,
-        message: 'Interviews fetched successfully',
-        meta: buildListPaginationMeta(page, limit, total),
-        data: rows
-      });
-    } catch (err) {
-      return handleReadError(res, err, 'Unable to fetch interviews. Please try again.');
-    }
-  })
-);
-
-/**
- * GET /api/rec/candidates/interviews/:interview_guid
- * Query: enterprise_id (required)
- */
-router.get(
-  '/interviews/:interview_guid',
-  asyncHandler(async (req, res) => {
-    try {
-      const { interview_guid, enterprise_id } = validateInterviewGuidEnterpriseParams(
-        req.params.interview_guid,
-        req.query?.enterprise_id
-      );
-
-      const data = await getInterviewByGuidFromView(interview_guid, enterprise_id);
-      if (!data) {
-        return sendPackageResponse(res, 404, {
-          success: false,
-          message: 'Interview not found.'
-        });
-      }
-
-      return sendPackageResponse(res, 200, { success: true, data });
-    } catch (err) {
-      return handleReadError(res, err, 'Unable to fetch interview. Please try again.');
-    }
-  })
-);
-
-/**
- * POST /api/rec/candidates/interviews
- * Body: JSON — schedule interview via REC.CANDIDATE_INTERVIEW_PKG.SCHEDULE_INTERVIEW.
- */
-router.post(
-  '/interviews',
-  asyncHandler(async (req, res) => {
-    return handleInterviewMutation(
-      res,
-      async () => {
-        const body = normalizeScheduleInterviewBody({ ...(req.body || {}) });
-        body.created_by = resolveAuditActor(req, body, 'created_by');
-        validateScheduleInterviewBody(body);
-        const pkg = await scheduleInterviewViaPackage(body);
-        return sendInterviewActionResponse(res, pkg, { includeIds: true });
-      },
-      INTERVIEW_MUTATION_ERRORS.schedule
-    );
-  })
-);
-
-/**
- * POST /api/rec/candidates/interviews/:interview_guid/feedback
- * Body: JSON — REC.CANDIDATE_INTERVIEW_PKG.SUBMIT_FEEDBACK.
- */
-router.post(
-  '/interviews/:interview_guid/feedback',
-  asyncHandler(async (req, res) => {
-    return handleInterviewMutation(
-      res,
-      async () => {
-        const interview_guid = parseInterviewGuidParam(req.params.interview_guid);
-        const body = normalizeSubmitInterviewFeedbackBody({ ...(req.body || {}) }, interview_guid);
-        body.created_by = resolveAuditActor(req, body, 'created_by');
-        validateSubmitInterviewFeedbackBody(body, interview_guid);
-        const pkg = await submitInterviewFeedbackViaPackage(body);
-        return sendInterviewActionResponse(res, pkg);
-      },
-      INTERVIEW_MUTATION_ERRORS.feedback
-    );
-  })
-);
-
-/**
- * PUT /api/rec/candidates/interviews/:interview_guid
- * Body: JSON — update interview via REC.CANDIDATE_INTERVIEW_PKG.UPDATE_INTERVIEW.
- */
-router.put(
-  '/interviews/:interview_guid',
-  asyncHandler(async (req, res) => {
-    return handleInterviewMutation(
-      res,
-      async () => {
-        const interview_guid = parseInterviewGuidParam(req.params.interview_guid);
-        const body = normalizeUpdateInterviewBody({ ...(req.body || {}) }, interview_guid);
-        body.updated_by = resolveAuditActor(req, body, 'updated_by');
-        validateUpdateInterviewBody(body, interview_guid);
-        const pkg = await updateInterviewViaPackage(body);
-        return sendInterviewActionResponse(res, pkg);
-      },
-      INTERVIEW_MUTATION_ERRORS.update
-    );
-  })
-);
-
-/**
- * DELETE /api/rec/candidates/interviews/:interview_guid
- * Body: { enterprise_id, deleted_by } — REC.CANDIDATE_INTERVIEW_PKG.DELETE_INTERVIEW.
- */
-router.delete(
-  '/interviews/:interview_guid',
-  asyncHandler(async (req, res) => {
-    return handleInterviewMutation(
-      res,
-      async () => {
-        const interview_guid = parseInterviewGuidParam(req.params.interview_guid);
-        const body = normalizeDeleteInterviewBody({ ...(req.body || {}) }, interview_guid);
-        body.deleted_by = resolveAuditActor(req, body, 'deleted_by');
-        validateDeleteInterviewBody(body, interview_guid);
-        const pkg = await deleteInterviewViaPackage(body);
-        return sendInterviewActionResponse(res, pkg);
-      },
-      INTERVIEW_MUTATION_ERRORS.delete
-    );
   })
 );
 

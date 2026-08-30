@@ -1,4 +1,4 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, formatGuidWithHyphens, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
 import { normalizeGuidInJsonObject } from '../../shared/recViewJsonUtils.js';
 import { formatDateOnly } from '../../job_postings/utils/recJobPostingViewMapper.js';
 import {
@@ -19,10 +19,20 @@ function formatDateTime(v) {
   return v;
 }
 
+function formatApiGuid(value) {
+  const hex = normalizeApiGuidString(value) ?? (Buffer.isBuffer(value) ? bufferToHex(value) : null);
+  if (hex == null) return null;
+  try {
+    return formatGuidWithHyphens(hex);
+  } catch {
+    return hex;
+  }
+}
+
 function normalizeScalar(key, v) {
   if (v == null) return null;
   if (key.endsWith('_guid') || Buffer.isBuffer(v)) {
-    return normalizeApiGuidString(v) ?? bufferToHex(v);
+    return formatApiGuid(v);
   }
   if (DATE_ONLY_KEYS.has(key)) return formatDateOnly(v);
   if (DATE_TIME_KEYS.has(key) || v instanceof Date) return formatDateTime(v);
@@ -59,9 +69,25 @@ export async function mapCandidateInterviewViewRow(row) {
     if (out[guidKey] == null) {
       const raw = row[guidKey.toUpperCase()] ?? row[guidKey];
       if (raw != null) {
-        out[guidKey] = normalizeApiGuidString(raw) ?? bufferToHex(raw);
+        out[guidKey] = formatApiGuid(raw);
       }
     }
+  }
+
+  if (out.interviewers_json != null) {
+    out.interviewers = out.interviewers_json;
+  }
+
+  if (out.candidate_id != null || out.candidate_guid != null || out.candidate_name != null) {
+    out.candidate = {
+      candidate_id: out.candidate_id ?? null,
+      candidate_guid: out.candidate_guid ?? null,
+      candidate_name: out.candidate_name ?? null,
+      first_name: out.first_name ?? null,
+      last_name: out.last_name ?? null,
+      email: out.email ?? null,
+      phone: out.phone ?? null
+    };
   }
 
   return out;

@@ -37,9 +37,9 @@ function utcTimestampZBind(value) {
   };
 }
 
-function interviewersJsonBind(value) {
+function interviewersJsonBind(value, options = {}) {
   return {
-    val: jsonArrayToClobString(value),
+    val: jsonArrayToClobString(value, options),
     dir: oracledb.BIND_IN,
     type: oracledb.CLOB
   };
@@ -56,7 +56,13 @@ function buildInterviewGuidBinds(b) {
   };
 }
 
-function buildSharedInterviewInBinds(b) {
+function buildSharedInterviewInBinds(b, options = {}) {
+  const { forUpdate = false } = options;
+  const interviewersBind =
+    forUpdate && !b._interviewers_provided
+      ? { val: null, dir: oracledb.BIND_IN, type: oracledb.CLOB }
+      : interviewersJsonBind(b.interviewers, { allowEmptyArray: forUpdate && b._interviewers_provided });
+
   return {
     p_interview_title: {
       val: strOrNull(b.interview_title),
@@ -91,7 +97,7 @@ function buildSharedInterviewInBinds(b) {
       type: oracledb.STRING,
       maxSize: 1000
     },
-    p_interviewers_json: interviewersJsonBind(b.interviewers)
+    p_interviewers_json: interviewersBind
   };
 }
 
@@ -214,7 +220,7 @@ export async function updateInterviewViaPackage(body) {
     UPDATE_PLSQL,
     {
       ...buildInterviewGuidBinds(b),
-      ...buildSharedInterviewInBinds(b),
+      ...buildSharedInterviewInBinds(b, { forUpdate: true }),
       p_status_code: { val: strOrNull(b.status_code), dir: oracledb.BIND_IN, type: oracledb.STRING, maxSize: 50 },
       p_result_status: {
         val: strOrNull(b.result_status),

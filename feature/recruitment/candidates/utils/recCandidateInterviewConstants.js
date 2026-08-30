@@ -29,6 +29,24 @@ export const INTERVIEW_MUTATION_ERRORS = {
   feedback: 'Unable to submit interview feedback. Please try again.'
 };
 
+/** Mirrors REC.CANDIDATE_INTERVIEW_PKG.MAP_RECOMMENDATION_TO_RESULT for API responses. */
+export function mapRecommendationToResultStatus(recommendation) {
+  const rec = String(recommendation ?? '').trim().toUpperCase();
+  switch (rec) {
+    case 'HIRE':
+    case 'SELECTED':
+      return 'SELECTED';
+    case 'NO_HIRE':
+    case 'REJECTED':
+      return 'REJECTED';
+    case 'HOLD':
+    case 'ON_HOLD':
+      return 'ON_HOLD';
+    default:
+      return 'PENDING';
+  }
+}
+
 /** CLOB/JSON columns on REC.CANDIDATE_INTERVIEWS_V parsed for API responses. */
 export const INTERVIEW_VIEW_JSON_ARRAY_COLUMNS = ['interviewers_json'];
 export const INTERVIEW_VIEW_JSON_OBJECT_COLUMNS = ['feedback_obj'];
