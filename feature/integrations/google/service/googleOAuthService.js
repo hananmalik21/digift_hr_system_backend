@@ -7,6 +7,10 @@ import {
   isGoogleOAuthConfigured
 } from '../../../../config/googleOAuth.js';
 import {
+  extractGoogleApiError,
+  sanitizeGoogleError
+} from '../../../../utils/sanitizeGoogleError.js';
+import {
   createOAuthStateToken,
   deactivateGoogleIntegration,
   getActiveGoogleIntegration,
@@ -107,7 +111,7 @@ export async function completeGoogleOAuthCallback(params) {
   const stateContext = await consumeOAuthState(state);
   if (!stateContext) {
     throw new AppError(
-      'Invalid or expired OAuth state. Start Google connect again from Postman.',
+      'Invalid or expired OAuth state. Start Google connect again.',
       400,
       'INVALID_OAUTH_STATE'
     );
@@ -230,6 +234,19 @@ export async function getGoogleOAuthCalendarClient(context) {
 }
 
 /**
+ * Disconnect Google for the authenticated user (deactivate stored tokens).
+ * @param {{ enterpriseId: number, userId: number, actor?: string|null }} context
+ */
+export async function disconnectGoogleAccount(context) {
+  await deactivateGoogleIntegration(
+    context.enterpriseId,
+    context.userId,
+    context.actor ?? 'SYSTEM'
+  );
+  return { connected: false };
+}
+
+/**
  * @param {import('google-auth-library').OAuth2Client} oauth2
  * @param {import('google-auth-library').Credentials} tokens
  * @returns {Promise<string|null>}
@@ -265,30 +282,4 @@ function extractEmailFromIdToken(idToken) {
   } catch {
     return null;
   }
-}
-
-/**
- * @param {unknown} err
- */
-function extractGoogleApiError(err) {
-  const data = err?.response?.data;
-  if (data && typeof data === 'object') {
-    const code = data.error ?? data.error_code;
-    const desc = data.error_description ?? data.error_message;
-    if (code) {
-      return `${code}${desc ? `: ${desc}` : ''}`;
-    }
-  }
-  return sanitizeGoogleError(err);
-}
-
-/**
- * @param {unknown} err
- */
-function sanitizeGoogleError(err) {
-  const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-  return message
-    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/ya29\.[A-Za-z0-9\-._~+/]+/gi, '[REDACTED_ACCESS_TOKEN]')
-    .slice(0, 500);
 }
