@@ -141,7 +141,9 @@ router.get(
       console.error('[googleOAuthController] status failed', sanitizeGoogleError(err));
       return sendPackageResponse(res, 500, {
         success: false,
-        message: 'Unable to read Google connection status.'
+        code: 'GOOGLE_STATUS_FAILED',
+        message: 'Unable to read Google connection status.',
+        error_details: { detail: sanitizeGoogleError(err) }
       });
     }
   })

@@ -137,28 +137,47 @@ export async function completeGoogleOAuthCallback(params) {
 
   const expiryDate = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
 
-  const existing = await getActiveGoogleIntegration(
-    stateContext.enterprise_id,
-    stateContext.user_id
-  );
-  if (!tokens.refresh_token && !existing?.refresh_token) {
-    throw new AppError(
-      'Google did not return a refresh token. Please reconnect and grant offline access.',
-      400,
-      'GOOGLE_RECONNECT_REQUIRED'
-    );
+  if (!tokens.refresh_token) {
+    // Without a new refresh token we cannot safely overwrite an undecryptable stored row.
+    let existing = null;
+    try {
+      existing = await getActiveGoogleIntegration(
+        stateContext.enterprise_id,
+        stateContext.user_id
+      );
+    } catch (err) {
+      if (err instanceof AppError && err.code === 'GOOGLE_TOKEN_DECRYPT_FAILED') {
+        throw new AppError(
+          'Google did not return a refresh token and stored tokens are unreadable. Revoke Digify access in Google Account permissions, then connect again with consent.',
+          400,
+          'GOOGLE_RECONNECT_REQUIRED',
+          err.technicalMessage
+        );
+      }
+      throw err;
+    }
+    if (!existing?.refresh_token) {
+      throw new AppError(
+        'Google did not return a refresh token. Please reconnect and grant offline access.',
+        400,
+        'GOOGLE_RECONNECT_REQUIRED'
+      );
+    }
   }
 
-  await upsertGoogleIntegration({
-    enterprise_id: stateContext.enterprise_id,
-    user_id: stateContext.user_id,
-    google_email: googleEmail,
-    access_token: tokens.access_token ?? null,
-    refresh_token: tokens.refresh_token ?? null,
-    token_expiry_date: expiryDate,
-    token_scope: tokens.scope ?? getGoogleOAuthConfig().scope,
-    actor: params.actor ?? 'SYSTEM'
-  }).catch((err) => {
+  try {
+    await upsertGoogleIntegration({
+      enterprise_id: stateContext.enterprise_id,
+      user_id: stateContext.user_id,
+      google_email: googleEmail,
+      access_token: tokens.access_token ?? null,
+      refresh_token: tokens.refresh_token ?? null,
+      token_expiry_date: expiryDate,
+      token_scope: tokens.scope ?? getGoogleOAuthConfig().scope,
+      actor: params.actor ?? 'SYSTEM'
+    });
+  } catch (err) {
+    if (err instanceof AppError) throw err;
     console.error(`[${LOG_TAG}] failed to store Google integration`, sanitizeGoogleError(err));
     throw new AppError(
       'Google authorization succeeded but token storage failed.',
@@ -166,7 +185,7 @@ export async function completeGoogleOAuthCallback(params) {
       'GOOGLE_AUTH_FAILED',
       sanitizeGoogleError(err)
     );
-  });
+  }
 
   return {
     enterprise_id: stateContext.enterprise_id,
