@@ -10,10 +10,10 @@ import {
   POSITION_GUID_FIELDS,
   POSITION_NUMERIC_FIELDS,
 } from '../constants/positions_constants.js';
-import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
+import { toUpperCaseKeys } from '@digifyhr/common';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
-import { parsePagination, buildSnakeListMeta } from '../../../../utils/paginationUtils.js';
+import { getUserId } from '@digifyhr/common';
+import { parsePagination, buildSnakeListMeta } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { validateGetPositionsByOrgUnit, parsePositionListFilters, parseReportingRelationshipsQuery } from '../validators/positionValidator.js';
 import { buildPositionsExcelBuffer, buildReportingRelationshipsExcelBuffer } from '../service/positionExportService.js';

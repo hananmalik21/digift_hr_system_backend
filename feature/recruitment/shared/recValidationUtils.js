@@ -3,8 +3,8 @@ import {
   isFutureDateOnly,
   isValidCalendarDateOnly,
   parseCalendarDateOnlyBind
-} from '../../../utils/dateOnlyUtils.js';
-import { ensureHex32, normalizeHex32 } from '../../../utils/guidUtils.js';
+} from '@digifyhr/common';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
 
 export { isFutureDateOnly, isValidCalendarDateOnly, parseCalendarDateOnlyBind };
 

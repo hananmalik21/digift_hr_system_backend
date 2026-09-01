@@ -3,7 +3,7 @@
  * Reads: PAY.V_EMPLOYEE_BALANCE_INQUIRY
  * As-of (read-only): PAY.PAY_BALANCE_INITIALIZATIONS, PAY.PAY_BALANCE_DIMENSIONS
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { getEmployeeBalanceInquiry } from '../services/payEmployeeBalanceInquiryService.js';
 import {
   sendInquiryOutcome,

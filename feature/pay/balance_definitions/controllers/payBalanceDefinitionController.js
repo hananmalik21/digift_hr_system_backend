@@ -2,7 +2,7 @@
  * Payroll Balance Definitions API.
  * Reads: PAY.V_PAY_BALANCE_DEFINITIONS | DML: PAY.PAY_BALANCE_DEFINITIONS_PKG
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createBalanceDefinition,
   deleteBalanceDefinition,

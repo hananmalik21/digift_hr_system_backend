@@ -3,8 +3,8 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { asyncHandler } from '@digifyhr/common';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { parseAdjustmentListQuery } from '../utils/parseAdjustmentListQuery.js';
 import { listAdjustmentDetailsFullViewPaged } from '../model/compAdjustmentDetailsFullViewModel.js';

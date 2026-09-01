@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
 import { pruneBindsForSql } from '../../shared/recViewListSql.js';
 import { parseEnterpriseIdFromQuery } from '../../shared/recViewQueryValidators.js';
 import {

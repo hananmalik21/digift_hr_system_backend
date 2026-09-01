@@ -11,10 +11,10 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/leaveTypeView.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import { getTenantId } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
-import { parsePagination, buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { getUserId } from '@digifyhr/common';
+import { parsePagination, buildPaginationMeta } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 
 const router = express.Router();

@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
-import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import { hexToRawBuffer } from '@digifyhr/common';
+import { escapeLikePattern } from '@digifyhr/common';
 import {
   fetchPaginatedRows,
   isNonEmptyTrimmed,

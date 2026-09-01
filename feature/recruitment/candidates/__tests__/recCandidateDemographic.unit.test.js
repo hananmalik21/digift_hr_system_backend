@@ -7,7 +7,7 @@ import {
   isFutureDateOnly,
   isValidCalendarDateOnly,
   parseCalendarDateOnlyBind
-} from '../../../../utils/dateOnlyUtils.js';
+} from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { buildCandidateDemographicInBinds } from '../utils/recCandidateDemographicBinds.js';
 import { validateCandidateBody } from '../utils/recCandidateValidators.js';

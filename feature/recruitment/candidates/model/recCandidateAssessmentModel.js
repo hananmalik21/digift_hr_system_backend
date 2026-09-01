@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { bufferToHex, hexToRawBuffer } from '@digifyhr/common';
 import { jsonArrayToClobString as sharedJsonArrayToClobString, packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 
 export { packageStatusIsSuccess };

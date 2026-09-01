@@ -1,6 +1,6 @@
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { DatabaseError, ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   CREATE_SUCCESS_MESSAGE,
   DELETE_CONFLICT_MESSAGE,

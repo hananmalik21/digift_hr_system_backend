@@ -1,10 +1,10 @@
 import oracledb from 'oracledb';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
-import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
+import { escapeLikePattern } from '@digifyhr/common';
 import { bindRawGuid16, withDbSession, ORACLE_OBJECT_ROW } from '../utils/dbUtils.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const VIEW = 'FNDSEC.FNDSEC_FUNCTION_ROLES_JSON_V';
 

@@ -3,7 +3,7 @@ import {
   defineExcelColumns,
   formatYnActiveFlag,
   mapToExcelRows
-} from '../../../../utils/excel/index.js';
+} from '@digifyhr/common/excel';
 
 const EXPORT_COLUMNS = defineExcelColumns([
   { header: 'Component Code', key: 'component_code', width: 20 },

@@ -2,8 +2,8 @@
  * Employee components from COMP.COMP_EMP_COMPONENTS_JSON_V — parse, filter, group, sort.
  */
 
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   oracleTextToString,
   formatOracleDateToIsoDay,

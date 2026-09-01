@@ -19,7 +19,7 @@ import {
   listElementDepartmentCostingFromView,
   updateElementDepartmentCosting
 } from '../model/payElementDepartmentCostingModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createElementDepartmentCostingService(payload, createdBy) {
   const result = await createElementDepartmentCosting(payload, createdBy);

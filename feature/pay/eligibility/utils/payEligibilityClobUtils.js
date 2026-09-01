@@ -1,4 +1,4 @@
-import { readClobOut } from '../../../compensation/utils/oracleClobBinds.js';
+import { readClobOut } from '../../../../utils/oracleClobBinds.js';
 
 /**
  * Read an Oracle CLOB OUT bind fully and return text.

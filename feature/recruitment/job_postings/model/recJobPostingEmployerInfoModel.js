@@ -5,7 +5,7 @@
 
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import { withConnection } from '../../../../utils/oraclePackageUtils.js';
 import { MESSAGES } from '../utils/recJobPostingEmployerInfoConstants.js';
 import {

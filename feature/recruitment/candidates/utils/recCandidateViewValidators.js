@@ -1,5 +1,5 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
 import { isBlank } from '../../shared/recValidationUtils.js';
 import {
   parseEnterpriseIdFromQuery,

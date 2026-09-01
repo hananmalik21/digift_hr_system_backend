@@ -1,8 +1,8 @@
 import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
-import { validateDisplaySequence } from '../../../../utils/validationUtils.js';
+import { validateDisplaySequence } from '@digifyhr/common';
 
 export const FLEXFIELD_SEGMENTS_LIST_DEFAULT_PAGE = 1;
 export const FLEXFIELD_SEGMENTS_LIST_DEFAULT_LIMIT = 20;

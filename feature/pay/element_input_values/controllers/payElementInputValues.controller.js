@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_INPUT_VALUES_PKG / PAY.V_PAY_ELEMENT_INPUT_VALUES
  */
 import '../swagger/payElementInputValues.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementInputValue,
   deleteElementInputValue,

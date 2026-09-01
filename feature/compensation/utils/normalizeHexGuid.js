@@ -1,8 +1,8 @@
 /**
- * Compensation employee GUID parsing — delegates to shared `utils/guidUtils.js`.
+ * Compensation employee GUID parsing — delegates to @digifyhr/common.
  */
 
-import { isHex32, normalizeHex32 as normalizeHex32Core } from '../../../utils/guidUtils.js';
+import { isHex32, normalizeHex32 as normalizeHex32Core } from '@digifyhr/common';
 
 /** Max employee GUIDs per bulk compensation read/adjust request. */
 export const MAX_EMPLOYEE_GUIDS = 500;

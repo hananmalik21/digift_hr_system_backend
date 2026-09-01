@@ -1,5 +1,5 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   firstValidationMessage,

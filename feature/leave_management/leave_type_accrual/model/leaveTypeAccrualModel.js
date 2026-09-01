@@ -2,7 +2,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { ensureHex32, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { ensureHex32, hexToRawBuffer } from '@digifyhr/common';
 
 /**
  * Leave Type Accrual Mapping Model

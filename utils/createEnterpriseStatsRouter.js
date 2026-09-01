@@ -1,7 +1,6 @@
 import express from 'express';
 import { requireEnterpriseIdFromQuery } from './tenantUtils.js';
-import { asyncHandler } from '../middleware/asyncHandler.js';
-import { sendSuccess } from './response.js';
+import { asyncHandler, sendSuccess } from '@digifyhr/common';
 
 /**
  * Create a GET / router that returns enterprise-scoped stats.

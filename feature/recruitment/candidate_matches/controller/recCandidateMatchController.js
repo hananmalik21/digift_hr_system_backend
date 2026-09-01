@@ -1,5 +1,5 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { UnauthorizedError } from '../../../../utils/errors/index.js';
 import { resolveRequestEnterpriseId } from '../../../../utils/requestEnterprise.js';
 import { getActingUsername } from '../../../../utils/userContext.js';

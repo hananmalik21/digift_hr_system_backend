@@ -1,9 +1,8 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { AppError } from '../../../../utils/errors/index.js';
 import { sanitizeGoogleError } from '../../../../utils/sanitizeGoogleError.js';
 import { getActingEnterpriseId, getActingUserId, getActingUsername } from '../../../../utils/userContext.js';
-import { sendPackageResponse } from '../../../recruitment/shared/recControllerHelpers.js';
 import { getActiveGoogleIntegration } from '../model/googleIntegrationModel.js';
 import {
   buildGoogleConnectAuthorizationUrl,
@@ -12,6 +11,10 @@ import {
 } from '../service/googleOAuthService.js';
 
 const router = express.Router();
+
+function sendPackageResponse(res, httpStatus, payload) {
+  return res.status(httpStatus).json(payload);
+}
 
 function requireAuthenticatedUserContext(req) {
   const userId = getActingUserId(req);

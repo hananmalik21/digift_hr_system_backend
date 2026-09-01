@@ -16,9 +16,9 @@ import {
   deleteRateTypeWithMultipliers
 } from '../model/overtimeRateTypeModel.js';
 import { getOvertimeConfiguration } from '../../tm_overtime_configs/model/overtimeConfigurationModel.js';
-import { sendCreated, sendUpdated } from '../../../../utils/response.js';
+import { sendCreated, sendUpdated } from '@digifyhr/common';
 import { ValidationError, ConflictError, DatabaseError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { optNum, optStr, parseReturnFullConfig } from '../../../../utils/overtimeHelpers.js';
 
 const router = express.Router();

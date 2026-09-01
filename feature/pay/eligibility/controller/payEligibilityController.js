@@ -2,7 +2,7 @@
  * Payroll Eligibility Evaluation API.
  * Simulator only — calls PAY.PAY_ELIGIBILITY_EVALUATION_PKG and returns UI-ready JSON as-is.
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { validateEvaluateEligibility } from '../middleware/payEligibility.validation.middleware.js';
 import { evaluateEmployeeEligibility } from '../model/payEligibilityModel.js';
 import {

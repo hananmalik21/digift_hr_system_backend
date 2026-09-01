@@ -25,9 +25,24 @@ jobs:
             set -e
             cd /home/ubuntu/apps/backend
 
+            PRESERVE_DIR="$(mktemp -d)"
+            for item in Wallet TESTDB .env firebase-service-account.json; do
+              if [ -e "$item" ]; then
+                cp -a "$item" "$PRESERVE_DIR/"
+              fi
+            done
+
             echo "[CI] Synchronizing production source..."
             git fetch origin main
             git reset --hard origin/main
+
+            for item in Wallet TESTDB .env firebase-service-account.json; do
+              if [ -e "$PRESERVE_DIR/$item" ]; then
+                rm -rf "$item"
+                cp -a "$PRESERVE_DIR/$item" "$item"
+              fi
+            done
+            rm -rf "$PRESERVE_DIR"
 
             echo "[CI] Starting production deployment..."
             bash ./deploy.sh

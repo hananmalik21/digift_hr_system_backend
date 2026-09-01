@@ -1,5 +1,5 @@
 import { AppError, DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
-import { formatGuidWithHyphens } from '../../../../utils/guidUtils.js';
+import { formatGuidWithHyphens } from '@digifyhr/common';
 import {
   handleMutationError,
   sendPackageResponse

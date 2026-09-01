@@ -2,7 +2,7 @@
  * Employee / run balance results API.
  * Mounted at /api/payroll/balances.
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   parseGuidParam,
   parsePaginationQuery,

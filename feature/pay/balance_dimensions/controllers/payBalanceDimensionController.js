@@ -2,7 +2,7 @@
  * Payroll Balance Dimensions API.
  * Reads: PAY.V_PAY_BALANCE_DIMENSIONS | DML: PAY.PAY_BALANCE_DIMENSIONS_PKG
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createBalanceDimension,
   deleteBalanceDimension,

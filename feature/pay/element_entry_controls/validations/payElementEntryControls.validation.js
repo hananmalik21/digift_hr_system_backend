@@ -1,5 +1,5 @@
 import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
 

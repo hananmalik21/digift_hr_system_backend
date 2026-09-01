@@ -19,7 +19,7 @@ import {
   listPositionCostingAllocationsFromView,
   updatePositionCostingAllocation
 } from '../model/payPositionCostingAllocationModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createPositionCostingAllocationService(payload, createdBy) {
   const result = await createPositionCostingAllocation(payload, createdBy);

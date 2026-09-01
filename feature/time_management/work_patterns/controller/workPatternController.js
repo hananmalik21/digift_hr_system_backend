@@ -1,6 +1,6 @@
 import express from 'express';
 import WorkPatternModel from '../model/workPatternModel.js';
-import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
+import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
 import { VALID_DAY_TYPES, VALID_DAY_OF_WEEKS } from '../../constants.js';
 import {
   sendWorkPatternList,
@@ -10,8 +10,8 @@ import {
   sendDeleted
 } from '../view/workPatternView.js';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { asyncHandler } from '@digifyhr/common';
+import { getUserId } from '@digifyhr/common';
 
 const router = express.Router();
 
@@ -121,7 +121,7 @@ function convertToUpperCase(data) {
  * @throws {NotFoundError} If enterprise does not exist
  */
 async function validateEnterpriseExists(tenantId) {
-  const enterprise = await EnterpriseModel.findById(tenantId);
+  const enterprise = await getEnterpriseById(tenantId);
   if (!enterprise) {
     throw new NotFoundError(`Enterprise with ID ${tenantId} does not exist`);
   }

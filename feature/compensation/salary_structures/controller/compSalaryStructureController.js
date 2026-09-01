@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createSalaryStructure,
   updateSalaryStructure,
@@ -21,7 +21,7 @@ import {
   getSalaryStructureDetail
 } from '../service/compSalaryStructureJsonViewService.js';
 import { buildSalaryStructureDetailsExcelBuffer } from '../service/salaryStructureDetailExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import {
   normalizeOrgScopeLegacy,
   resolveEmploymentTypes,
@@ -29,7 +29,7 @@ import {
 } from '../utils/salaryStructureOrgScope.js';
 import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 const router = express.Router();
 const HTTP = { BAD_REQUEST: 400, OK: 200, CREATED: 201, NOT_FOUND: 404, CONFLICT: 409, SERVER_ERROR: 500 };

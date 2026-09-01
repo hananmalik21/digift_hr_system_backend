@@ -2,7 +2,7 @@
  * Payroll operations dashboard API.
  * Mounted at /api/payroll/dashboard.
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   parsePaginationQuery,
   pickFilters,

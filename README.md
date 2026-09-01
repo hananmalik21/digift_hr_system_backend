@@ -1,24 +1,25 @@
-# Digify ERP Starter
+# Digify ERP
 
-Lightweight Node/Express skeleton focused on the requested `feature > companies > model|view|controller` structure.
+Node.js (ESM) Express 5 backend for Digify HR. Flutter clients call this API. Business domains live under `feature/`. Oracle holds most business logic; this process is transport, validation, and orchestration.
 
-## Project Layout
+GRC (`/api/grc/*`) is served by the private npm package `digify-hr-grc-backend`, not by local feature code.
 
-- `feature/companies/model`: domain logic and fake data store for the Companies domain.
-- `feature/companies/view`: presentation helpers that format responses consistently.
-- `feature/companies/controller`: Express routes that glue the model and view layers together.
-- `index.js`: Express app entry point that wires the companies controller under `/api/companies` and boots the Oracle pool.
-
-## Getting Started
+## Setup
 
 ```bash
-npm install
-npm run dev    # or `npm start` in production
+cp .env.example .env
+# Fill Oracle, JWT, and integration values.
+# Place the Oracle wallet in ./Wallet (cwallet.sso). Do not commit it.
+npm ci
+npm start
 ```
 
-After startup, the API endpoints are:
+`GET /health` should return `{ "status": true, ... }`. Default port is `3000`.
 
-- `GET /api/companies` — list seeded companies
-- `GET /api/companies/:id` — fetch a single company
-- `POST /api/companies` — register a company (body: `{ name, industry?, employees? }`)
+## Production
 
+- Do not commit `.env`, `Wallet/`, `TESTDB/`, or credential JSON.
+- Docker Compose mounts `./Wallet` and Firebase credentials at runtime.
+- Deploy: `bash ./deploy.sh` (requires `.env`, `Wallet/cwallet.sso`, and `firebase-service-account.json` on the host).
+
+See `docs/CODEBASE_ARCHITECTURE.md` for modules and route prefixes.

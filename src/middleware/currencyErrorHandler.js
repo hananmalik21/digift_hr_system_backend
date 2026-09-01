@@ -1,4 +1,4 @@
-import { AppError } from '../../utils/errors/AppError.js';
+import { AppError } from '@digifyhr/common';
 import { ERROR_CODES } from '../constants/currency.constants.js';
 
 /**

@@ -11,7 +11,7 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/compLookupValueView.js';
-import { parseGuid } from '../../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 
 const router = express.Router();
 

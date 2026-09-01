@@ -12,9 +12,7 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/entLookupValueView.js';
-import { parseGuid } from '../../../../../utils/guidUtils.js';
-import { parsePagination, buildPaginationMeta, LOOKUP_PAGE_OPTS } from '../../../../../utils/paginationUtils.js';
-import { getUserId } from '../../../../../utils/requestUtils.js';
+import { parseGuid, parsePagination, buildPaginationMeta, getUserId } from '@digifyhr/common';
 import {
   normalizeEnterpriseId,
   resolveLookupListEnterpriseId
@@ -27,6 +25,8 @@ import {
   toDateValue,
   validateLookupValueData
 } from '../../entLookupValueRequestUtils.js';
+
+const LOOKUP_PAGE_OPTS = { maxPageSize: 1000 };
 
 const router = express.Router();
 

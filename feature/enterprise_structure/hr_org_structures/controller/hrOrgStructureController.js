@@ -1,6 +1,6 @@
 // feature/hr_org_structures/controller/hrOrgStructureController.js
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import HrOrgStructureModel from '../model/hrOrgStructureModel.js';
 import {
   sendStructureList,

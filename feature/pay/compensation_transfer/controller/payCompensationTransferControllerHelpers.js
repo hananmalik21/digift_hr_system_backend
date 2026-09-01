@@ -14,7 +14,7 @@ import {
   assertEnterpriseAccess,
   firstValidationMessage
 } from '../validators/payCompensationTransferValidator.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 
 export function sendSuccess(res, { message, data, status = HTTP.OK }) {
   return res.status(status).json({

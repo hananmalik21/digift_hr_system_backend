@@ -1,16 +1,46 @@
 node_modules
-npm-debug.log
+npm-debug.log*
 .git
 .gitignore
-.env
-.env.*
 .DS_Store
 *.md
 .cursor
 .vscode
 coverage
 .eslintcache
+*.log
+server.log
 
+# Environment files
 .env
+.env.*
+!.env.example
+
+# Firebase / service credentials
 firebase-service-account.json
+*firebase-adminsdk*.json
+*-credentials.json
+
+# Deployment backups
 deploy.sh.backup-*
+
+# Secrets must be mounted at runtime, never copied into image
+Wallet/
+Wallet_OLD/
+TESTDB/
+TESTDB.zip
+Wallet*.zip
+wallet/
+
+# Oracle wallet / certificate material
+**/cwallet.sso
+**/*.p12
+**/*.pfx
+**/*.pem
+**/*.key
+**/keystore.jks
+**/truststore.jks
+
+# Oracle network configuration should come from runtime wallet mount
+**/tnsnames.ora
+**/sqlnet.ora

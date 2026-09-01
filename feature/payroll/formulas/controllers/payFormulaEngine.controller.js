@@ -2,7 +2,7 @@
  * Formula engine API.
  * Mounted at /api/payroll/formulas (engine ops only — CRUD lives at feature/pay/formulas).
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   parseGuidParam,
   parsePaginationQuery,

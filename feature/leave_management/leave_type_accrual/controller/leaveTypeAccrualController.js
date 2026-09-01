@@ -1,6 +1,6 @@
 import express from 'express';
 import LeaveTypeAccrualModel from '../model/leaveTypeAccrualModel.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import {
   sendMappingList,
   sendMapping,
@@ -13,7 +13,7 @@ import {
   sendConflict
 } from '../view/leaveTypeAccrualView.js';
 import { getTenantId } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { getUserId } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 
 const router = express.Router();

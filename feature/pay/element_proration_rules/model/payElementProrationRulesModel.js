@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { textClobBind } from '../../../compensation/utils/oracleClobBinds.js';
+import { textClobBind } from '../../../../utils/oracleClobBinds.js';
 import {
   auditInBind,
   guidHexInBind,

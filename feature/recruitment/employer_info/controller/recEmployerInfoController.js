@@ -12,7 +12,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { resolveEnterpriseIdFromRequestQuery } from '../../shared/recControllerHelpers.js';
 import {
   clearEmployerInfoLogo,

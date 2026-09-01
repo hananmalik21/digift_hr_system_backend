@@ -1,4 +1,4 @@
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 import { CANDIDATE_SKILL_RESPONSE_FIELDS } from './recCandidateChildJsonUtils.js';
 
 /**

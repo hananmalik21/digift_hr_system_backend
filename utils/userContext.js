@@ -34,6 +34,15 @@ import { IS_DEV_MODE } from './env.js';
 import { AppError, ValidationError, NotFoundError } from './errors/index.js';
 import { executeQuery } from '../config/db.js';
 import { bypassesEmployeeDataAccess } from './adminAccess.js';
+import { getActingUserId } from '@digifyhr/common';
+
+export {
+  getActingUserId,
+  getActingEnterpriseId,
+  getActingUsername,
+  getActingUserGuid,
+  getActingUser
+} from '@digifyhr/common';
 
 // Single reference to userIdBind — duplicate placeholders (e.g. :2 twice) make
 // node-oracledb positional binds expect one array entry per occurrence (ORA-01008).
@@ -62,103 +71,6 @@ export function employeeAccessBypassBindClause(userIdBind) {
  */
 export function employeeAccessOptionsFromReq(req) {
   return { bypass: bypassesEmployeeDataAccess(req) };
-}
-
-/**
- * Internal: pick the first defined candidate that resolves to a positive
- * integer. Used for numeric IDs.
- *
- * @param {Array<unknown>} candidates
- * @returns {number|null}
- */
-function pickPositiveInt(candidates) {
-  for (const c of candidates) {
-    if (c == null || c === '') continue;
-    const n = Number(c);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-}
-
-/**
- * Return the acting numeric `user_id` from the verified JWT, or null when no
- * authenticated user is present.
- *
- * @param {import('express').Request} req
- * @returns {number|null}
- */
-export function getActingUserId(req) {
-  return pickPositiveInt([
-    req?.user?.user_id,
-    req?.user?.id,
-    req?.user?.userId
-  ]);
-}
-
-/**
- * Return the acting `enterprise_id` from the verified JWT, or null when not
- * present in the token. Callers that scope by tenant should generally prefer
- * this over an `?enterprise_id=` query param.
- *
- * @param {import('express').Request} req
- * @returns {number|null}
- */
-export function getActingEnterpriseId(req) {
-  const hostId = Number(req?.enterprise?.enterpriseId);
-  if (Number.isFinite(hostId) && hostId > 0) return hostId;
-
-  return pickPositiveInt([
-    req?.user?.enterprise_id,
-    req?.user?.enterpriseId
-  ]);
-}
-
-/**
- * Return the acting username from the verified JWT, or null when absent.
- * Useful as a `created_by` / `last_updated_by` audit value.
- *
- * @param {import('express').Request} req
- * @returns {string|null}
- */
-export function getActingUsername(req) {
-  const u = req?.user?.username ?? req?.user?.userName ?? null;
-  if (u == null) return null;
-  const s = String(u).trim();
-  return s ? s : null;
-}
-
-/**
- * Return the acting user_guid from the verified JWT, or null when absent.
- *
- * @param {import('express').Request} req
- * @returns {string|null}
- */
-export function getActingUserGuid(req) {
-  const g = req?.user?.user_guid ?? req?.user?.userGuid ?? null;
-  if (g == null) return null;
-  const s = String(g).trim();
-  return s ? s : null;
-}
-
-/**
- * Return a snapshot of the acting user context from the verified JWT.
- * All fields are null when not present on the token.
- *
- * @param {import('express').Request} req
- * @returns {{
- *   user_id: number|null,
- *   user_guid: string|null,
- *   enterprise_id: number|null,
- *   username: string|null
- * }}
- */
-export function getActingUser(req) {
-  return {
-    user_id: getActingUserId(req),
-    user_guid: getActingUserGuid(req),
-    enterprise_id: getActingEnterpriseId(req),
-    username: getActingUsername(req)
-  };
 }
 
 /**

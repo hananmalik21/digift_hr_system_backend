@@ -1,8 +1,7 @@
 import { AppError } from '../../../../utils/errors/index.js';
 import { sanitizeGoogleError } from '../../../../utils/sanitizeGoogleError.js';
-import EmployeeModel from '../../../employee_management/employees/model/employeeModel.js';
-import { createConferenceRequestId } from '../../../integrations/google/model/googleIntegrationModel.js';
-import { getGoogleOAuthCalendarClient } from '../../../integrations/google/service/googleOAuthService.js';
+import { getEmployeeById } from '../../../employee_management/employee.facade.js';
+import { createConferenceRequestId, getGoogleOAuthCalendarClient } from '../../../integrations/google/google.facade.js';
 import { getCandidateByGuidFromView } from '../model/recCandidateViewModel.js';
 import {
   getInterviewMeetingMetadata,
@@ -46,7 +45,7 @@ async function resolveInterviewerEmails(interviewers, enterpriseId) {
   for (const item of interviewers || []) {
     const employeeId = Number(item?.employee_id);
     if (!Number.isFinite(employeeId) || employeeId < 1) continue;
-    const employee = await EmployeeModel.findById(enterpriseId, employeeId);
+    const employee = await getEmployeeById(enterpriseId, employeeId);
     const email = employee?.email ?? employee?.EMAIL ?? null;
     if (isValidEmail(email)) emails.push(String(email).trim().toLowerCase());
   }

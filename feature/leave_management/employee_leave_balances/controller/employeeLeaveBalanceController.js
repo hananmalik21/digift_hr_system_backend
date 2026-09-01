@@ -19,10 +19,10 @@ import {
   sendAccrualRunSuccess,
   sendLeaveBalanceExport
 } from '../view/employeeLeaveBalanceView.js';
-import { ensureHex32 } from '../../../../utils/guidUtils.js';
+import { ensureHex32 } from '@digifyhr/common';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
 import { getTenantId } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { getUserId } from '@digifyhr/common';
 import {
   requireActingUserId,
   canAccessEmployee,

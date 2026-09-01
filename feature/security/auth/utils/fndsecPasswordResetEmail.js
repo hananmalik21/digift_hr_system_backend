@@ -2,7 +2,7 @@
  * Main Digify HR user password-reset email content (not career portal).
  */
 
-import { escapeHtml } from '../../../recruitment/candidates/utils/recCandidateSendEmailContent.js';
+import { escapeHtml } from '@digifyhr/common';
 
 /**
  * @param {unknown} enterpriseName

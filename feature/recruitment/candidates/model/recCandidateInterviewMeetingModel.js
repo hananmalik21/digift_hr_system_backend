@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import { withConnection, ROW_OPTS } from '../../shared/recViewModelUtils.js';
 
 const TABLE = 'REC.CANDIDATE_INTERVIEWS';

@@ -1,4 +1,4 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 
 /**
  * Normalize a GUID field inside a parsed JSON object (e.g. feedback_obj.feedback_guid).

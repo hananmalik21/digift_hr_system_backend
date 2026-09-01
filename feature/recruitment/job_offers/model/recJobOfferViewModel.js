@@ -13,7 +13,7 @@ import {
   READ_ERROR_MESSAGE,
   REC_JOB_OFFER_MANAGEMENT_VIEW
 } from '../utils/recJobOfferConstants.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 import { buildJobOfferManagementListFilters } from '../utils/recJobOfferManagementListFilters.js';
 import { mapJobOfferManagementListRow } from '../utils/recJobOfferManagementMappers.js';
 import {

@@ -1,5 +1,5 @@
-import { ValidationError } from '../../utils/errors/ValidationError.js';
-import { AppError } from '../../utils/errors/AppError.js';
+import { ValidationError } from '@digifyhr/common';
+import { AppError } from '@digifyhr/common';
 import { ERROR_CODES } from '../constants/currency.constants.js';
 
 export class CurrencyValidationError extends ValidationError {

@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 
 const T_REQ = 'REC.REC_REQUISITION';
 const T_BUDGET = 'REC.REC_REQUISITION_BUDGET';

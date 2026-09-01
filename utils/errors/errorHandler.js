@@ -1,12 +1,18 @@
-import { AppError } from './AppError.js';
-import { ValidationError } from './ValidationError.js';
+import { AppError } from '@digifyhr/common';
+import { ValidationError } from '@digifyhr/common';
 import { DatabaseError } from './DatabaseError.js';
 import { isTenantErrorCode } from '../tenantErrors.js';
+import { logger } from '../logger.js';
+import { getRequestId } from '../tenantLogger.js';
+
+function exposeClientDiagnostics() {
+  return String(process.env.NODE_ENV || '').trim().toLowerCase() === 'development';
+}
 
 /**
  * Centralized Error Handler
  * Formats error responses consistently across all APIs
- * 
+ *
  * Required Error Response Format:
  * {
  *   "status": false,
@@ -14,10 +20,10 @@ import { isTenantErrorCode } from '../tenantErrors.js';
  *   "error": {
  *     "code": "<APP_ERROR_CODE or HTTP_CODE_NAME>",
  *     "details": <object|array|string|null>,
- *     "stack": <only in non-production>
+ *     "stack": <only in development>
  *   }
  * }
- * 
+ *
  * @param {Error} err - Error object
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
@@ -40,7 +46,7 @@ export function sendErrorResponse(err, req, res) {
 
   // Get user-friendly message
   let userMessage = err.userMessage || err.message || 'An error occurred';
-  
+
   // Build error details object
   let errorDetails = null;
 
@@ -74,7 +80,7 @@ export function sendErrorResponse(err, req, res) {
     if (err.columns) {
       errorDetails.columns = err.columns;
     }
-    if (err.oracleError) {
+    if (exposeClientDiagnostics() && err.oracleError) {
       errorDetails.original_error = {
         message: err.oracleError.message,
         errorNum: err.oracleError.errorNum,
@@ -93,8 +99,8 @@ export function sendErrorResponse(err, req, res) {
     details: errorDetails
   };
 
-  // Add stack trace only in non-production
-  if (process.env.NODE_ENV !== 'production' && err.stack) {
+  // Add stack trace only in development (unset NODE_ENV is treated as production-safe)
+  if (exposeClientDiagnostics() && err.stack) {
     errorObject.stack = err.stack;
   }
 
@@ -114,24 +120,16 @@ export function sendErrorResponse(err, req, res) {
     error: errorObject
   };
 
-  // Log error to console for server-side debugging
-  console.error('\n❌ Error occurred:');
-  console.error('Error Type:', err.name || 'Error');
-  console.error('User Message:', userMessage);
-  console.error('Status Code:', err.statusCode || 500);
-  console.error('Error Code:', err.code);
-  
-  if (err.stack) {
-    console.error('\nStack Trace:');
-    console.error(err.stack);
-  }
-
-  if (err instanceof DatabaseError && err.oracleError) {
-    console.error('\nOracle Error Details:');
-    console.error('Error Number:', err.oracleError.errorNum);
-    console.error('Oracle Code:', err.oracleCode);
-    console.error('Original Message:', err.oracleError.message);
-  }
+  logger.error('Request failed', {
+    request_id: req ? getRequestId(req) : null,
+    error_type: err.name || 'Error',
+    message: userMessage,
+    status_code: err.statusCode || 500,
+    error_code: err.code,
+    stack: err.stack,
+    oracle_code: err instanceof DatabaseError ? err.oracleCode : undefined,
+    oracle_error_num: err instanceof DatabaseError ? err.oracleError?.errorNum : undefined
+  }, req);
 
   // Send formatted error response
   res.status(err.statusCode || 500).json(response);
@@ -141,7 +139,7 @@ export function sendErrorResponse(err, req, res) {
  * Format error response (kept for backward compatibility, but not used in new format)
  * @deprecated Use sendErrorResponse directly
  */
-export function formatErrorResponse(err, req = null) {
+export function formatErrorResponse(err, _req = null) {
   // This function is kept for backward compatibility
   // but the new format is handled directly in sendErrorResponse
   return {

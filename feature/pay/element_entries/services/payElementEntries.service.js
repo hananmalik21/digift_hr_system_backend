@@ -11,7 +11,7 @@ import {
   listElementEntriesFromView
 } from '../model/payElementEntriesViewModel.js';
 import { mapPackageBusinessMessage } from '../utils/payElementEntriesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { buildElementEntriesExcelBuffer } from './payElementEntriesExportService.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Element entry created successfully';

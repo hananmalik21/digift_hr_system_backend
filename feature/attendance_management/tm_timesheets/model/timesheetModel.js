@@ -2,7 +2,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const SCHEMA = 'TM';
 const STATUS_CODES = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'WITHDRAWN'];

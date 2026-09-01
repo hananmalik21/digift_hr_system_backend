@@ -188,6 +188,12 @@ export async function ensureSeedAdminUsers() {
     return { ok: false, errors };
   }
 
+  if (password === 'Admin!ChangeMe') {
+    console.warn(
+      `${LOG} Using the default seed password. Set ADMIN_SEED_PASSWORD (and rotate this account) before production use.`
+    );
+  }
+
   const passwordHash = await hashPasswordArgon2id(password);
   const payload = buildSeedPackagePayload(cfg, passwordHash);
 

@@ -1,4 +1,4 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 
 function pick(row, ...keys) {
   for (const k of keys) {

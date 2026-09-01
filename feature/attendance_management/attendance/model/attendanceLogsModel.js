@@ -6,7 +6,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 const VIEW = 'TM.V_ATTENDANCE_FULL';
 
 /**

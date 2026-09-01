@@ -2,6 +2,8 @@
  * Structured logging for tenant / hostname resolution (no secrets / PII).
  */
 
+export { getRequestId } from '@digifyhr/common';
+
 /**
  * @param {object} fields
  */
@@ -18,16 +20,6 @@ export function logTenantResolution(fields) {
   };
   // eslint-disable-next-line no-console
   console.info('[tenant-resolve]', JSON.stringify(safe));
-}
-
-/**
- * @param {import('express').Request} req
- * @returns {string|null}
- */
-export function getRequestId(req) {
-  const h = req.headers?.['x-request-id'] ?? req.headers?.['x-correlation-id'];
-  if (h != null && String(h).trim()) return String(h).trim().slice(0, 128);
-  return null;
 }
 
 /**

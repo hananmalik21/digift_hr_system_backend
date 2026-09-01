@@ -4,8 +4,8 @@ import moment from 'moment-timezone';
 import FaceAttendanceRepository from '../repository/faceAttendanceRepository.js';
 import canvas from 'canvas';
 import { getFaceDescriptor } from '../../../../utils/faceProcess.js';
-import { sendCreated, sendSuccess } from '../../../../utils/response.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { sendCreated, sendSuccess } from '@digifyhr/common';
+import { asyncHandler } from '@digifyhr/common';
 import {
   ValidationError,
   ForbiddenError

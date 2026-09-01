@@ -4,7 +4,7 @@
 
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { parseJsonClobOut, textClobBind } from '../../../compensation/utils/oracleClobBinds.js';
+import { parseJsonClobOut, textClobBind } from '../../../../utils/oracleClobBinds.js';
 import { oraclePlsqlErrorMessage } from '../../../../utils/oraclePackageUtils.js';
 import { ACTIONS, PKG } from '../utils/recEmployerInfoConstants.js';
 import { MESSAGES, packageStatusIsSuccess } from '../utils/recEmployerInfoDb.js';

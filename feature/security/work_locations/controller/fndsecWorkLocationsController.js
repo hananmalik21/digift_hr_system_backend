@@ -1,8 +1,8 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { NotFoundError } from '../../../../utils/errors/index.js';
-import { sendCreated, sendDeleted, sendSuccess, sendUpdated } from '../../../../utils/response.js';
-import { buildPaginationMeta, parsePagination } from '../../../../utils/paginationUtils.js';
+import { sendCreated, sendDeleted, sendSuccess, sendUpdated } from '@digifyhr/common';
+import { buildPaginationMeta, parsePagination } from '@digifyhr/common';
 import {
   createWorkLocation,
   deleteWorkLocation,

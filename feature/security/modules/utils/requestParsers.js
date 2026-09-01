@@ -1,5 +1,5 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { parsePagination } from '../../../../utils/paginationUtils.js';
+import { parsePagination } from '@digifyhr/common';
 import { parseModuleGuidHexOrThrow } from './moduleGuid.js';
 
 export const DEFAULT_ACTOR = 'SYSTEM';

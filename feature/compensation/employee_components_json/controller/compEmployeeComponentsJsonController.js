@@ -53,7 +53,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { parseBulkEmployeeComponentsBody } from '../validation/empComponentsJsonQuery.js';
 import { listEmployeeComponentsJson } from '../service/empComponentsJsonService.js';

@@ -6,9 +6,9 @@
 
 import express from 'express';
 import { getOvertimeConfiguration } from '../model/overtimeConfigurationModel.js';
-import { sendSuccess } from '../../../../utils/response.js';
+import { sendSuccess } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { optNum } from '../../../../utils/overtimeHelpers.js';
 
 const router = express.Router();

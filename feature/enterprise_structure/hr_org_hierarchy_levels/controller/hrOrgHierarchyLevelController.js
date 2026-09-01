@@ -1,6 +1,6 @@
 import express from 'express';
 import HrOrgHierarchyLevelModel from '../model/hrOrgHierarchyLevelModel.js';
-import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/users/service/enterpriseAdminProvisioningService.js';
+import { provisionEnterpriseAdminOnEnterpriseCreate } from '../../../security/security.facade.js';
 import {
   sendLevelList,
   sendLevel,

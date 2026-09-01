@@ -14,7 +14,7 @@ import {
   mapPackageBusinessMessage,
   RETRO_RULE_ALREADY_EXISTS_MESSAGE
 } from '../utils/payElementRetroRulesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { assertEnterpriseAccess } from '../validations/payElementRetroRules.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Retro rule created successfully.';

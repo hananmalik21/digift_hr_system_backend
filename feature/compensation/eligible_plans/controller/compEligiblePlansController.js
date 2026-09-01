@@ -60,7 +60,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { parseBulkEmployeeAssignedComponentsBody } from '../../employee_assigned_components/validation/bulkEmployeeAssignedComponentsQuery.js';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { API_FALLBACK_ERROR } from '../constants.js';

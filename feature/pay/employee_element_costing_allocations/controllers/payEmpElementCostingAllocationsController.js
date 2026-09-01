@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_EMP_ELEMENT_COSTING_PKG
  * Reads:     PAY.V_PAY_EMP_ELEMENT_COSTING_ALLOCATIONS
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createEmpElementCostingAllocationService,
   deleteEmpElementCostingAllocationService,

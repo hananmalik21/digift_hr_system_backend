@@ -4,7 +4,7 @@ import {
   bindInString,
   ROW_OPTS,
   withConnection
-} from '../../../notifications/utils/notification.oracle.js';
+} from '../../../notifications/index.js';
 
 function readUserId(row) {
   const userId = row?.USER_ID ?? row?.user_id;

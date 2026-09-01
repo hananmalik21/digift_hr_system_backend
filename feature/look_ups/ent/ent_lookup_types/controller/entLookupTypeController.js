@@ -11,8 +11,8 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/entLookupTypeView.js';
-import { parseGuid } from '../../../../../utils/guidUtils.js';
-import { getUserId } from '../../../../../utils/requestUtils.js';
+import { parseGuid } from '@digifyhr/common';
+import { getUserId } from '@digifyhr/common';
 import {
   normalizeEnterpriseId,
   resolveLookupListEnterpriseId

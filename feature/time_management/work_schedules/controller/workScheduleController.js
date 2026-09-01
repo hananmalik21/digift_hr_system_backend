@@ -9,13 +9,13 @@ import express from 'express';
 import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
-import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
+import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
 import { normalizeDayType, VALID_DAY_TYPE_INPUTS, VALID_DAY_OF_WEEKS } from '../constants.js';
-import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '../../../../utils/response.js';
-import { toLowerCaseKeys } from '../../../../utils/stringUtils.js';
+import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '@digifyhr/common';
+import { toLowerCaseKeys } from '@digifyhr/common';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { asyncHandler } from '@digifyhr/common';
+import { getUserId } from '@digifyhr/common';
 
 const router = express.Router();
 
@@ -178,7 +178,7 @@ function convertToUpperCase(data) {
  * Validate that tenant_id exists in enterprise table
  */
 async function validateEnterpriseExists(tenantId) {
-  const enterprise = await EnterpriseModel.findById(tenantId);
+  const enterprise = await getEnterpriseById(tenantId);
   if (!enterprise) throw new NotFoundError(`Enterprise with ID ${tenantId} does not exist`);
   return true;
 }

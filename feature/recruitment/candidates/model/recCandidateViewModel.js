@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
-import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
-import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
+import { escapeLikePattern } from '@digifyhr/common';
 import {
   fetchPaginatedRows,
   isNonEmptyTrimmed,
@@ -9,7 +9,7 @@ import {
   withConnection
 } from '../../shared/recViewModelUtils.js';
 import { parseEnterpriseIdFromQuery, parseListPagination } from '../../shared/recViewQueryValidators.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 import { mapCandidateListViewRow, mapCandidateViewRow } from '../utils/recCandidateViewMapper.js';
 import {
   pickQueryFilterValue,

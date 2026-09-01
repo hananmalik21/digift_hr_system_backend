@@ -10,7 +10,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { handleReadError, sendPackageResponse } from '../../shared/recControllerHelpers.js';
 import { parseEnterpriseIdFromQuery } from '../../shared/recViewQueryValidators.js';
 import {

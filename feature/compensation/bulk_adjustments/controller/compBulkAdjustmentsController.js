@@ -3,7 +3,7 @@
  * Calls COMP.EMPLOYEE_COMPENSATION.bulk_adjust_components
  */
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { IS_DEV_MODE } from '../../../../utils/env.js';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { classifyEmployeeCompOracleError } from '../../employee_compensation/service/employeeCompensationService.js';

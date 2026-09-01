@@ -1,16 +1,6 @@
-/**
- * Escape plain text for safe HTML email bodies.
- * @param {unknown} value
- * @returns {string}
- */
-export function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { escapeHtml } from '@digifyhr/common';
+
+export { escapeHtml };
 
 /**
  * Build a simple HTML body from plain-text message content.

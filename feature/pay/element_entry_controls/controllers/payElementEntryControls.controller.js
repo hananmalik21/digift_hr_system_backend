@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_ENTRY_CONTROLS_PKG / PAY.V_PAY_ELEMENT_ENTRY_CONTROLS
  */
 import '../swagger/payElementEntryControls.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementEntryControl,
   deleteElementEntryControl,

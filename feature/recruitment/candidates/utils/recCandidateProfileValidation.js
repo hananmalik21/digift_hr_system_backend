@@ -14,11 +14,11 @@ const PROFILE_URL_FIELDS = ['portfolio_link', 'github_link'];
 const PROFILE_LINK_FIELDS = [...PROFILE_URL_FIELDS, 'linkedin_profile'];
 
 /** @deprecated Use parseCalendarDateOnlyBind from shared utils. */
-export { parseCalendarDateOnlyBind as parseDobDateBind } from '../../../../utils/dateOnlyUtils.js';
+export { parseCalendarDateOnlyBind as parseDobDateBind } from '@digifyhr/common';
 export {
   isFutureDateOnly,
   isValidCalendarDateOnly
-} from '../../../../utils/dateOnlyUtils.js';
+} from '@digifyhr/common';
 
 /**
  * Shared validation for candidate profile / compensation fields.

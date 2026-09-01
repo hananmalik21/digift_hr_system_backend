@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { bufferToHex, hexToRawBuffer, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, hexToRawBuffer, normalizeApiGuidString } from '@digifyhr/common';
 
 /**
  * @param {Record<string, unknown>} row

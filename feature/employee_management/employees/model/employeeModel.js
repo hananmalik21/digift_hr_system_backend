@@ -1,7 +1,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { generateSysGuid } from '../../../../utils/guidUtils.js';
+import { generateSysGuid } from '@digifyhr/common';
 
 class EmployeeModel {
   static TABLE_NAME = 'EMPL.EMPLOYEES';

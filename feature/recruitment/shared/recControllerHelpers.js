@@ -5,7 +5,7 @@ import {
   NotFoundError,
   ValidationError
 } from '../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { getActingUsername } from '../../../utils/userContext.js';
 import { isTenantErrorCode, sendTenantError } from '../../../utils/tenantErrors.js';
 import { resolveRequestEnterpriseId } from '../../../utils/requestEnterprise.js';

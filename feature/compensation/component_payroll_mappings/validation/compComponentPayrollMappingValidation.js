@@ -1,5 +1,5 @@
 import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.js';
-import { normalizeHex32, isHex32 } from '../../../../utils/guidUtils.js';
+import { normalizeHex32, isHex32 } from '@digifyhr/common';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 

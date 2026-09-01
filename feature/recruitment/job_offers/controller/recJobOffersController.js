@@ -1,5 +1,5 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   handleMutationError,
   handleReadError,
@@ -17,7 +17,7 @@ import {
 } from '../model/recJobOffersModel.js';
 import { getJobOfferByGuid, jobOfferExists, listJobOffersFromView, listJobOffersForExport } from '../model/recJobOfferViewModel.js';
 import { buildJobOffersExcelBuffer } from '../service/jobOfferExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import { MUTATION_ERROR_MESSAGE, READ_ERROR_MESSAGE } from '../utils/recJobOfferConstants.js';
 import {
   sendCreateJobOfferResponse,

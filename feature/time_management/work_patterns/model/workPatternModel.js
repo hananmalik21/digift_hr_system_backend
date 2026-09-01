@@ -2,7 +2,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { toAuditActorId } from '../../../../utils/requestUtils.js';
+import { toAuditActorId } from '@digifyhr/common';
 
 /**
  * Work Pattern Model

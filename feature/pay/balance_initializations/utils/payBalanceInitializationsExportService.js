@@ -2,7 +2,7 @@ import {
   buildExcelExport,
   defineExcelColumns,
   mapToExcelRows
-} from '../../../../utils/excel/index.js';
+} from '@digifyhr/common/excel';
 
 export const BALANCE_INITIALIZATIONS_EXPORT_SHEET_NAME = 'Balance Initializations';
 

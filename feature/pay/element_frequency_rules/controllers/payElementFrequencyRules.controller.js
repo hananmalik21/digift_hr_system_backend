@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_FREQUENCY_RULES_PKG / PAY.V_PAY_ELEMENT_FREQUENCY_RULES
  */
 import '../swagger/payElementFrequencyRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementFrequencyRule,
   deleteElementFrequencyRule,

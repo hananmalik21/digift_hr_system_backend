@@ -1,4 +1,4 @@
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 
 const API_VERSION = '1.0.0';
 

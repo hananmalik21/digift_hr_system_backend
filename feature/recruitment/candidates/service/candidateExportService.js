@@ -1,4 +1,4 @@
-import { buildDynamicApiExcelBuffer } from '../../../../utils/excel/index.js';
+import { buildDynamicApiExcelBuffer } from '@digifyhr/common/excel';
 import {
   CANDIDATE_DEMOGRAPHIC_API_FIELDS,
   CANDIDATE_JSON_COLLECTION_API_FIELDS

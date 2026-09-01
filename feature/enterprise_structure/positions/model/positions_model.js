@@ -16,7 +16,7 @@ import {
   entUpdateRecord,
 } from '../../shared/entModelBridge.js';
 import { entInvokeWithConnection, toSnakeCaseDeep } from '../../shared/entDbClient.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 /** @returns {Error & { code: string, statusCode: number }} */
 function validationError(message) {

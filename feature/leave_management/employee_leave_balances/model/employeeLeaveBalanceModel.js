@@ -1,9 +1,9 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { ensureHex32, generateSysGuid, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { ensureHex32, generateSysGuid, hexToRawBuffer } from '@digifyhr/common';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 /**
  * Employee Leave Balance Model

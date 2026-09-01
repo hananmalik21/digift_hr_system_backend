@@ -3,7 +3,7 @@
  * OpenAPI: docs/pay_elements_api.openapi.yaml
  */
 import '../swagger/payElements.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElement,
   deleteElement,

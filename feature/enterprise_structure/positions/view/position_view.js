@@ -2,7 +2,7 @@
  * HTTP responses for the positions router (shape, status codes, meta envelope).
  * @module feature/enterprise_structure/positions/view/position_view
  */
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 
 const API_VERSION = '1.0.0';
 

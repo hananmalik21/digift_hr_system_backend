@@ -7,7 +7,7 @@ import {
   safeFiniteNumber,
   strOrNull
 } from '../../applications/utils/recApplicationRowUtils.js';
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 import { employerInfoLogoPath } from '../../employer_info/utils/recEmployerInfoLogoUrl.js';
 
 function guid(v) {

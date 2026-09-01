@@ -3,7 +3,7 @@
  * Reads: PAY.V_PAY_ELEMENT_PROFILES | DML: PAY.PAY_ELEMENT_PROFILES_PKG
  */
 import '../swagger/payElementEligProfiles.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementEligProfile,
   deleteElementEligProfile,

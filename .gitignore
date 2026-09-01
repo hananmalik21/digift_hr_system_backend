@@ -1,18 +1,44 @@
 node_modules/
 .DS_Store
 uploads/
+coverage/
+.eslintcache
+npm-debug.log*
+*.log
+server.log
+
+# Environment files (keep .env.example tracked)
 .env
+.env.dev
+.env.*
+!.env.example
 
 scripts/seed-admin.local.js
 
-.env.dev
-.env
-
-# Firebase private credentials
+# Firebase / Google private credentials
 *firebase-adminsdk*.json
 firebase-admin*.json
-service-account*.jsonfirebase-service-account.json
-
-.env
+service-account*.json
 firebase-service-account.json
+*-credentials.json
+
+# Oracle Instant Client wallets and keystores (do not commit)
+Wallet/
+wallet/
+Wallet_OLD/
+Wallet_Old/
+Wallet.zip
+Wallet*.zip
+TESTDB/
+TESTDB.zip
+**/cwallet.sso
+**/*.p12
+**/ewallet.pem
+**/keystore.jks
+**/truststore.jks
+*.wallet
+*.pem
+*.key
+!.env.example
+
 deploy.sh.backup-*

@@ -1,9 +1,9 @@
 import express from 'express';
 import { z } from 'zod';
 import { executeQuery } from '../../../../config/db.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendSuccess } from '../../../../utils/response.js';
-import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { asyncHandler } from '@digifyhr/common';
+import { sendSuccess } from '@digifyhr/common';
+import { convertKeysToSnakeCase } from '@digifyhr/common';
 import { parseBulkEmployeeAssignedComponentsQuery, parseBulkEmployeeAssignedComponentsBody } from '../validation/bulkEmployeeAssignedComponentsQuery.js';
 import { queryEmployeeAssignedComponents } from '../utils/buildEmployeeAssignedComponentsSql.js';
 

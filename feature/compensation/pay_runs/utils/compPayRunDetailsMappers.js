@@ -3,7 +3,7 @@
  * and nest flat header+line rows into payRun → employees → lines.
  */
 
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { rowKeysUpper } from '../../salary_structures/utils/rowKeysUpper.js';
 
 const SEARCH_HEADER_KEYS = [

@@ -19,7 +19,7 @@ import {
   listElementDefaultCostingFromView,
   updateElementDefaultCosting
 } from '../model/payElementDefaultCostingModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createElementDefaultCostingService(payload, createdBy) {
   const result = await createElementDefaultCosting(payload, createdBy);

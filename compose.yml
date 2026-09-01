@@ -17,6 +17,7 @@ services:
 
     volumes:
       - ./firebase-service-account.json:/run/secrets/firebase-service-account.json:ro
+      - ./Wallet:/app/Wallet
 
     ports:
       - "127.0.0.1:3000:3000"

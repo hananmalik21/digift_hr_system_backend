@@ -5,7 +5,7 @@
  */
 
 import oracledb from 'oracledb';
-import { isHex32 } from '../../../../utils/guidUtils.js';
+import { isHex32 } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   INVALID_CANDIDATE_GUID_MESSAGE,

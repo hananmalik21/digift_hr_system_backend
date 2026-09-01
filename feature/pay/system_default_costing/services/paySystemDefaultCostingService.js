@@ -19,7 +19,7 @@ import {
   systemDefaultCostingExistsByGuid,
   updateSystemDefaultCosting
 } from '../model/paySystemDefaultCostingModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createSystemDefaultCostingService(payload, createdBy) {
   const result = await createSystemDefaultCosting(payload, createdBy);

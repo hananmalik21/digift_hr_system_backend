@@ -3,7 +3,7 @@
  * Test/admin wrapper around PAY.PAYROLL_TEST_RESET_PKG.RESET_ENTERPRISE_RUNTIME.
  */
 
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { ACTION } from '../constants.js';
 import { validateTestReset } from '../middleware/payTestResetValidation.js';
 import * as defaultPayTestResetService from '../services/payTestResetService.js';

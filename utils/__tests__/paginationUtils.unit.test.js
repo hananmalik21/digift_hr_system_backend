@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  parsePagination,
-  LOOKUP_PAGE_OPTS,
-  DEFAULT_MAX_PAGE_SIZE
-} from '../paginationUtils.js';
+import { parsePagination, DEFAULT_MAX_PAGE_SIZE } from '@digifyhr/common';
+
+const LOOKUP_PAGE_OPTS = { maxPageSize: 1000 };
 
 test('parsePagination defaults to page 1 and page_size 10', () => {
   assert.deepEqual(parsePagination({}), { page: 1, pageSize: 10 });
