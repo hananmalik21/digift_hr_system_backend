@@ -11,13 +11,25 @@ services:
 
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-service-account.json
+
+      # Oracle wallet is mounted externally at runtime.
+      # These values override any old ./Wallet values in .env.
+      TNS_ADMIN: /app/Wallet
+      ORACLE_WALLET_PATH: /app/Wallet
+
       # Google Meet (per-user OAuth — set in .env):
-      # GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI
+      # GOOGLE_CLIENT_ID
+      # GOOGLE_CLIENT_SECRET
+      # GOOGLE_REDIRECT_URI
       # GOOGLE_TOKEN_ENCRYPTION_KEY
 
     volumes:
+      # Firebase credentials are never copied into the Docker image.
       - ./firebase-service-account.json:/run/secrets/firebase-service-account.json:ro
-      - ./Wallet:/app/Wallet
+
+      # Oracle wallet is stored outside the Git repository
+      # and mounted read-only into the container.
+      - /home/ubuntu/secrets/digify-wallet:/app/Wallet:ro
 
     ports:
       - "127.0.0.1:3000:3000"
