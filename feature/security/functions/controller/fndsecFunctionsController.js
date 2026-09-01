@@ -1,6 +1,6 @@
 import express from 'express';
 import '../swagger/fndsecFunctions.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { ValidationError, NotFoundError, DatabaseError } from '../../../../utils/errors/index.js';
 import {
   createFunction,

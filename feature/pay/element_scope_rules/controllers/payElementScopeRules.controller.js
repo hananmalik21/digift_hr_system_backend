@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_SCOPE_RULES_PKG / PAY.V_PAY_ELEMENT_SCOPE_RULES
  */
 import '../swagger/payElementScopeRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementScopeRule,
   deleteElementScopeRule,

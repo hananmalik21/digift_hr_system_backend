@@ -14,7 +14,7 @@ import { parseSalaryStructurePageLimit } from '../../salary_structures/utils/par
 import { parseRequiredEnterpriseId } from '../../salary_structures/utils/parseSalaryStructureEnterpriseId.js';
 import { rowKeysUpper } from '../../salary_structures/utils/rowKeysUpper.js';
 import { normalizePlanComponentForGetResponse } from '../utils/planComponentAdvancedSettings.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const JSON_COLUMN_NAMES_UPPER = new Set([
   'OWNER_OBJ',

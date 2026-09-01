@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_SYSTEM_DEFAULT_COSTING_PKG
  * Reads:     PAY.V_PAY_SYSTEM_DEFAULT_COSTING
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createSystemDefaultCostingService,
   deleteSystemDefaultCostingService,

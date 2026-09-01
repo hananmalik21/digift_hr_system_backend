@@ -4,7 +4,7 @@ import { safeJson } from '../../services/emplEmployeeListService.js';
 import { DatabaseError, NotFoundError } from '../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../utils/userContext.js';
 import { guidToBuffer, bufferToGuidHex } from '../utils/oracleGuid.js';
-import { paginateForExport } from '../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const SCHEMA = 'TM';
 

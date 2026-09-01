@@ -1,5 +1,5 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
 
 const CHECK_TYPES = new Set(['STANDARD', 'COMPREHENSIVE']);
 const PRIORITIES = new Set(['STANDARD', 'HIGH', 'URGENT']);

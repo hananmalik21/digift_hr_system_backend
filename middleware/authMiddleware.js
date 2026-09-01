@@ -18,7 +18,7 @@
  */
 
 import jwt from 'jsonwebtoken';
-import { isHex32 } from '../utils/guidUtils.js';
+import { isHex32 } from '@digifyhr/common';
 
 const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/health\/?$/ },
@@ -67,7 +67,7 @@ const PUBLIC_PATHS = [
   { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/?$/ },
   // Employer logo binary (deep-linkable / <img src> without Bearer header).
   { method: 'GET', pattern: /^\/api\/employer-info\/[A-Fa-f0-9]{32}\/logo\/?$/ },
-  // GRC — no JWT required for now
+  // GRC — no JWT required for now (GitHub package on /api/grc)
   { method: '*', pattern: /^\/api\/grc(\/.*)?\/?$/ },
   // Google OAuth callback (browser redirect from Google; state validates user context)
   { method: 'GET', pattern: /^\/api\/google\/callback\/?$/ }

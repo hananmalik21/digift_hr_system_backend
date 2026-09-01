@@ -2,7 +2,7 @@
  * Payroll Flexfield Segment Values API.
  */
 import '../swagger/payFlexfieldSegmentValues.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createSegmentValue,
   deleteSegmentValue,

@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { isHex32, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { isHex32, normalizeApiGuidString } from '@digifyhr/common';
 import { NotFoundError, ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
 import {
   normalizeCreateInput,

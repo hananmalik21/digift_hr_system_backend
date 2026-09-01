@@ -1,8 +1,8 @@
 import express from 'express';
 import JobLevelsModel from '../model/job_levels_model.js';
-import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
+import { toUpperCaseKeys } from '@digifyhr/common';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { getUserId } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   sendJobLevelList,

@@ -19,7 +19,7 @@ import {
   listCostingAllocationsFromView,
   updateCostingAllocation
 } from '../model/payCostingAllocationModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createCostingAllocationService(payload, createdBy) {
   const result = await createCostingAllocation(payload, createdBy, { retrieveFromView: true });

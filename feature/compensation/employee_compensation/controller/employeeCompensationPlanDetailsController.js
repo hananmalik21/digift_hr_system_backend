@@ -1,6 +1,6 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendSuccess } from '../../../../utils/response.js';
+import { asyncHandler } from '@digifyhr/common';
+import { sendSuccess } from '@digifyhr/common';
 import { safeDatabaseMessageForApi } from '../utils/oracleErrorMessage.js';
 import { parseEmployeeCompensationPlanDetailsQuery } from '../validation/employeeCompensationPlanDetailsQuery.js';
 import { getEmployeeCompensationPlanDetails } from '../service/employeeCompensationPlanDetailsService.js';

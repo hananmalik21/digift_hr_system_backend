@@ -19,7 +19,7 @@ import {
   listEmpElementCostingAllocationsFromView,
   updateEmpElementCostingAllocation
 } from '../model/payEmpElementCostingAllocationModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createEmpElementCostingAllocationService(payload, createdBy) {
   const result = await createEmpElementCostingAllocation(payload, createdBy);

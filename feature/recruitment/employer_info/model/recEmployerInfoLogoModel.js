@@ -4,7 +4,7 @@
 
 import oracledb from 'oracledb';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import { TABLE } from '../utils/recEmployerInfoConstants.js';
 import { MESSAGES, compactEmployerInfoGuid, withConnection } from '../utils/recEmployerInfoDb.js';
 

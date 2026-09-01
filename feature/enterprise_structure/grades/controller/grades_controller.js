@@ -3,9 +3,9 @@ import GradeModel from '../model/grades_model.js';
 import EntLookupValueModel from '../../../look_ups/ent/ent_lookup_values/model/entLookupValueModel.js';
 import { validateGradeNumberForCategory } from '../../../../utils/gradeUtils.js';
 import { applyGradeCurrencyCode } from '../utils/gradeCurrency.js';
-import { toUpperCaseKeys } from '../../../../utils/stringUtils.js';
+import { toUpperCaseKeys } from '@digifyhr/common';
 import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtils.js';
-import { getUserId } from '../../../../utils/requestUtils.js';
+import { getUserId } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   sendGradeList,

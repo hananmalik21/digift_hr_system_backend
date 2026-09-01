@@ -14,7 +14,7 @@ import {
   ENTRY_CONTROL_ALREADY_EXISTS_MESSAGE,
   mapPackageBusinessMessage
 } from '../utils/payElementEntryControlsOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { assertEnterpriseAccess } from '../validations/payElementEntryControls.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Entry controls created successfully.';

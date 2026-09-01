@@ -5,7 +5,7 @@
 
 import oracledb from 'oracledb';
 import { DatabaseError, NotFoundError } from '../../../../utils/errors/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import { VIEW } from '../utils/recEmployerInfoConstants.js';
 import { MESSAGES, compactEmployerInfoGuid, withConnection } from '../utils/recEmployerInfoDb.js';
 import { mapEmployerInfoViewRow } from '../utils/recEmployerInfoMapper.js';

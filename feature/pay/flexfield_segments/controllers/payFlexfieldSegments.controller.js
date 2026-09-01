@@ -3,7 +3,7 @@
  * OpenAPI: docs/pay_flexfield_segments_api.openapi.yaml
  */
 import '../swagger/payFlexfieldSegments.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createSegment,
   deleteSegment,

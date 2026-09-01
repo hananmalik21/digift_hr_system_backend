@@ -1,4 +1,4 @@
-import { hashPasswordArgon2id } from '../../../security/users/service/fndsecUsersService.js';
+import { hashPasswordArgon2id } from '../../../security/security.facade.js';
 import { packageStatusIsSuccess } from '../../shared/oraclePackageUtils.js';
 import { registerCandidateUserViaPackage } from '../model/recCandidateUserModel.js';
 import { applyRegisterPortalDefaults } from '../utils/recCandidateRegisterDefaults.js';

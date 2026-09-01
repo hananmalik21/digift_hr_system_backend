@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_RETRO_RULES_PKG / PAY.V_PAY_ELEMENT_RETRO_RULES
  */
 import '../swagger/payElementRetroRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementRetroRule,
   deleteElementRetroRule,

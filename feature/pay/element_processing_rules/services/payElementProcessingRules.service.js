@@ -16,7 +16,7 @@ import {
   PROCESSING_RULE_ALREADY_EXISTS_MESSAGE,
   PROCESSING_RULE_NOT_FOUND_MESSAGE
 } from '../utils/payElementProcessingRulesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   assertEnterpriseAccess,
   hasOwn

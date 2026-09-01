@@ -11,7 +11,7 @@ import {
   varcharInBind,
   ynInBind
 } from '../../../../utils/oraclePackageUtils.js';
-import { nullableTextClobBind, parseJsonClobOut } from '../../../compensation/utils/oracleClobBinds.js';
+import { nullableTextClobBind, parseJsonClobOut } from '../../../../utils/oracleClobBinds.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
 import { mapPackageBusinessMessage } from '../utils/payFormulasOracleErrors.js';
 

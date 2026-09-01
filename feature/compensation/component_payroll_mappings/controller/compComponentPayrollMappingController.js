@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   DatabaseError,
   ForbiddenError,
@@ -12,7 +12,7 @@ import {
   ValidationError
 } from '../../../../utils/errors/index.js';
 import { getActingUsername } from '../../../../utils/userContext.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   createMapping,
   updateMapping,

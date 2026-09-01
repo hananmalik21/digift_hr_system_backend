@@ -1,4 +1,4 @@
-import { ensureHex32, normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { ensureHex32, normalizeHex32 } from '@digifyhr/common';
 import {
   asObject,
   isBlank,

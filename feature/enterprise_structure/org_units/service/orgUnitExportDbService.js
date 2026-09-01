@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { parseJsonClobOut } from '../../../compensation/utils/oracleClobBinds.js';
-import { oraclePlsqlErrorMessage } from '../../../recruitment/shared/oraclePackageUtils.js';
+import { parseJsonClobOut } from '../../../../utils/oracleClobBinds.js';
+import { oraclePlsqlErrorMessage } from '../../../../utils/oraclePackageUtils.js';
 
 const EXPORT_PLSQL = `
 BEGIN

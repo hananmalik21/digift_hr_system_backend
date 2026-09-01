@@ -10,7 +10,7 @@ import {
   listPayElementInputValuesFromView
 } from '../model/payElementInputValuesViewModel.js';
 import { mapPackageBusinessMessage } from '../utils/payElementInputValuesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { assertEnterpriseAccess } from '../validations/payElementInputValues.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Input value created successfully.';

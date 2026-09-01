@@ -12,7 +12,7 @@ import {
   sendNotFound,
   sendConflict
 } from '../view/leaveDocumentView.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 
 // Configure multer for file uploads (memory storage - files stored in memory as Buffer)
 const upload = multer({

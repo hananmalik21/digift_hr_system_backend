@@ -1,7 +1,7 @@
 import { parseTenantId } from '../../../../utils/tenantUtils.js';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
-import { ensureHex32 } from '../../../../utils/guidUtils.js';
-import { parsePagination } from '../../../../utils/paginationUtils.js';
+import { ensureHex32 } from '@digifyhr/common';
+import { parsePagination } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { POSITION_ORG_UNIT_SCOPE } from '../constants/positions_constants.js';
 

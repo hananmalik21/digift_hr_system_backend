@@ -1,35 +1,10 @@
 /**
- * UTC ISO-8601 timestamps for Oracle TO_TIMESTAMP_TZ (no local timezone conversion).
+ * Interview UTC timestamp helpers.
+ * Generic ISO normalization lives in @digifyhr/common.
  */
+import { normalizeUtcIsoTimestamp } from '@digifyhr/common';
 
-const ISO_OFFSET_RE = /(Z|[+-]\d{2}:\d{2})$/i;
-
-/**
- * Normalize frontend UTC ISO string for Oracle TO_TIMESTAMP_TZ mask YYYY-MM-DD"T"HH24:MI:SSTZH:TZM.
- * Preserves instant in UTC; does not apply local timezone.
- * @param {unknown} value
- * @returns {string|null}
- */
-export function normalizeUtcIsoTimestamp(value) {
-  if (value === undefined || value === null) return null;
-  let s = String(value).trim();
-  if (!s) return null;
-
-  if (s.endsWith('Z')) {
-    s = `${s.slice(0, -1)}+00:00`;
-  }
-
-  s = s.replace(/\.\d+(?=[+-]\d{2}:\d{2}$)/, '');
-
-  if (!ISO_OFFSET_RE.test(s)) {
-    return null;
-  }
-
-  const ms = Date.parse(s.includes('T') ? s : `${s}T00:00:00+00:00`);
-  if (!Number.isFinite(ms)) return null;
-
-  return s;
-}
+export { normalizeUtcIsoTimestamp, normalizeUtcIsoTimestampZ } from '@digifyhr/common';
 
 /**
  * @param {string[]} errors
@@ -85,14 +60,4 @@ export function applyInterviewUtcBodyAliases(body) {
   return b;
 }
 
-/**
- * UTC ISO string for Oracle mask YYYY-MM-DD"T"HH24:MI:SS"Z" (literal Z suffix).
- * @param {unknown} value
- * @returns {string|null}
- */
-export function normalizeUtcIsoTimestampZ(value) {
-  const offset = normalizeUtcIsoTimestamp(value);
-  if (!offset) return null;
-  return offset.replace(/\+00:00$/i, 'Z');
-}
 

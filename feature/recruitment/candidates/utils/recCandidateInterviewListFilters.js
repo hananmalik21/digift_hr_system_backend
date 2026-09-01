@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
-import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import { hexToRawBuffer } from '@digifyhr/common';
+import { escapeLikePattern } from '@digifyhr/common';
 import {
   optionalEqClause,
   pruneBindsForSql,

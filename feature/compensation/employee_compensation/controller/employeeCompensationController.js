@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendSuccess } from '../../../../utils/response.js';
+import { asyncHandler } from '@digifyhr/common';
+import { sendSuccess } from '@digifyhr/common';
 import {
   createEmployeeCompensationComponents,
   editEmployeeCompensationComponents,
@@ -10,7 +10,7 @@ import {
 } from '../service/employeeCompensationService.js';
 import { getEmployeePlanFullDetails, getEmployeePlanFullDetailsForExport } from '../service/employeePlanFullDetailsService.js';
 import { buildEmployeeCompensationExcelBuffer } from '../service/employeeCompensationExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import { parsePlanFullDetailsQuery } from '../validation/employeePlanFullDetailsQuery.js';
 import {
   requireActingUserId,

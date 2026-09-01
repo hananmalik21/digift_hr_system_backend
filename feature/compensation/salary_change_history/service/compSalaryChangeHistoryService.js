@@ -1,7 +1,7 @@
 import { executeQuery } from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 import {
   formatOracleDateToIsoDay,
   oracleTextToString,

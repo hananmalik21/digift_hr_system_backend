@@ -17,6 +17,11 @@ if [ ! -f "$APP_DIR/.env" ]; then
     exit 1
 fi
 
+if [ ! -f "$APP_DIR/Wallet/cwallet.sso" ]; then
+    echo "[deploy] ERROR: Wallet/cwallet.sso not found (keep the Oracle wallet on the host; it is not in git)"
+    exit 1
+fi
+
 if [ ! -f "$APP_DIR/firebase-service-account.json" ]; then
     echo "[deploy] ERROR: firebase-service-account.json not found"
     exit 1

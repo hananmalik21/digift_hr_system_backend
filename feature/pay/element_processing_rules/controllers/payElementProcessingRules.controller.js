@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_PROCESSING_RULES_PKG / PAY.V_PAY_ELEMENT_PROCESSING_RULES
  */
 import '../swagger/payElementProcessingRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementProcessingRule,
   deleteElementProcessingRule,

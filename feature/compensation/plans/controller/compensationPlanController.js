@@ -1,5 +1,5 @@
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 /**
  * Compensation plan write/read APIs.
  * OpenAPI: docs/compensation_plans_api.openapi.yaml

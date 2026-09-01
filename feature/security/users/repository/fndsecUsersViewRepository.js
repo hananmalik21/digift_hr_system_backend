@@ -2,7 +2,7 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
 import { nullableEmployeeAccessPredicate } from '../../../../utils/userContext.js';
-import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
+import { escapeLikePattern } from '@digifyhr/common';
 
 const VIEW = process.env.FNDSEC_USERS_FULL_V || 'FNDSEC.V_USERS_FULL_DETAILS';
 const LOG_TAG = 'fndsecUsersViewRepository';

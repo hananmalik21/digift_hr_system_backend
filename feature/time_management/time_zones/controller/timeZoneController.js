@@ -1,8 +1,8 @@
 import express from 'express';
 import TimeZoneModel from '../model/timeZoneModel.js';
-import { sendList } from '../../../../utils/response.js';
+import { sendList } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 
 const router = express.Router();
 

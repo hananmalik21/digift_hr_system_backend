@@ -6,7 +6,7 @@
 
 import { AppError, DatabaseError, ForbiddenError, ValidationError } from '../../../utils/errors/index.js';
 import { getActingUsername } from '../../../utils/userContext.js';
-import { buildPaginationMeta } from '../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export const FALLBACK_ERROR = 'Unable to process payroll request. Please try again.';
 

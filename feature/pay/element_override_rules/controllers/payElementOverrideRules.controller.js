@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_OVERRIDE_RULES_PKG / PAY.V_PAY_ELEMENT_OVERRIDE_RULES
  */
 import '../swagger/payElementOverrideRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementOverrideRule,
   deleteElementOverrideRule,

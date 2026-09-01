@@ -1,8 +1,8 @@
 import express from 'express';
 import ProjectModel from '../model/projectModel.js';
-import { sendSuccess, sendCreated, sendUpdated, sendDeleted, sendList } from '../../../../utils/response.js';
+import { sendSuccess, sendCreated, sendUpdated, sendDeleted, sendList } from '@digifyhr/common';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 
 const router = express.Router();
 

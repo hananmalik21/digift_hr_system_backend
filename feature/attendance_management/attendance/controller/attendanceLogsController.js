@@ -8,10 +8,10 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { getAttendanceLogsList, getAttendanceLogById, getAttendanceLogsForExport } from '../model/attendanceLogsModel.js';
 import { buildAttendanceLogsExcelBuffer } from '../services/attendanceLogsExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import { sendLogsListSuccess, sendLogDetailSuccess, sendValidationError, sendDatabaseError, sendError } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 
 const router = express.Router();
 

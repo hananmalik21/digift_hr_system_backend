@@ -7,7 +7,7 @@
  * - Internal numeric IDs (employee_id, leave_type_id, tenant_id) may remain for now but should be removed from public API
  * - This is a future enhancement to improve API consistency
  */
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 
 const API_VERSION = '1.0.0';
 

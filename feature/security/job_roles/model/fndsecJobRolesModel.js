@@ -1,10 +1,10 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { guidToBuffer } from '../../../../src/utils/oracleGuid.js';
-import { normalizeHex32 } from '../../../../utils/guidUtils.js';
+import { normalizeHex32 } from '@digifyhr/common';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { buildPaginationMeta } from '@digifyhr/common';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const PKG_CREATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.CREATE_JOB_ROLE';
 const PKG_UPDATE = 'FNDSEC.FNDSEC_JOB_ROLES_PKG.UPDATE_JOB_ROLE';

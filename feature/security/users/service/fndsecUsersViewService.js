@@ -1,5 +1,5 @@
 import { bufferToGuidHex } from '../../../../src/utils/oracleGuid.js';
-import { parsePagination } from '../../../../utils/paginationUtils.js';
+import { parsePagination } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import { buildOptionalLikeInner, queryUsersList } from '../repository/fndsecUsersViewRepository.js';
 

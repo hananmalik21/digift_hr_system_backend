@@ -14,7 +14,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createComponent,
   updateComponent,
@@ -28,7 +28,7 @@ import {
   getComponentByIdFromView,
   COMPONENTS_VIEW_SORT_COLUMNS
 } from '../model/compComponentsViewModel.js';
-import { parsePagination, buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { parsePagination, buildPaginationMeta } from '@digifyhr/common';
 import {
   sendCreateSuccess,
   sendUpdateSuccess,
@@ -37,7 +37,7 @@ import {
   sendError
 } from '../view/compComponentView.js';
 import { buildComponentsExcelBuffer } from '../service/componentExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import { DatabaseError, ForbiddenError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { getMappingByComponentGuid } from '../../component_payroll_mappings/model/compComponentPayrollMappingModel.js';
 import {

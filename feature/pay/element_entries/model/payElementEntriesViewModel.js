@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { DatabaseError } from '../../../../utils/errors/index.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 import { normalizeOutGuidHex } from '../../../../utils/oraclePackageUtils.js';
 import { buildPayElementEntriesListWhereClause } from '../utils/payElementEntriesFilterBuilder.js';
 import { resolvePayElementEntriesUserMessage } from '../utils/payElementEntriesOracleErrors.js';

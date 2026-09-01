@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_ELEMENT_DEPT_COSTING_PKG
  * Reads:     PAY.V_PAY_ELEMENT_DEPT_COSTING
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementDepartmentCostingService,
   deleteElementDepartmentCostingService,

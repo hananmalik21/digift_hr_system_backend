@@ -299,7 +299,7 @@ export function sendOrgUnitHierarchySuccess(res, data) {
   });
 }
 
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 
 /**
  * Stream an org units Excel export.

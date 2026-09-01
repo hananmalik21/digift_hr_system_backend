@@ -1,6 +1,6 @@
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { getActingUsername } from '../../../../utils/userContext.js';
-import { parsePageLimit } from '../../../../utils/paginationUtils.js';
+import { parsePageLimit } from '@digifyhr/common';
 
 export const ROUTE_TAG = 'payLookups';
 export const FALLBACK_ERROR = 'Unable to process payroll lookup. Please try again.';

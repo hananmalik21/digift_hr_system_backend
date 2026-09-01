@@ -2,7 +2,7 @@
  * Payroll Formulas API.
  * DML/reads: PAY.PAY_FORMULAS_PKG
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createFormula,
   deleteFormula,

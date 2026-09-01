@@ -5,7 +5,7 @@
  */
 import express from 'express';
 import oracledb from 'oracledb';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementEligibilityRuleHandler,
   deleteElementEligibilityRuleHandler,

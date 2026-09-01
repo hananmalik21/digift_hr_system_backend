@@ -3,7 +3,7 @@ import {
   defineExcelColumns,
   formatYnActiveFlag,
   mapToExcelRows
-} from '../../../../utils/excel/index.js';
+} from '@digifyhr/common/excel';
 
 const EXPORT_COLUMNS = defineExcelColumns([
   { header: 'Org Structure', key: 'org_structure', width: 24 },

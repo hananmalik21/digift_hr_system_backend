@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { bufferToHex, hexToRawBuffer } from '@digifyhr/common';
 
 const PKG = 'REC.CANDIDATE_BG_CHECK_PKG';
 const CREATE_PROC = `${PKG}.CREATE_BACKGROUND_CHECK`;

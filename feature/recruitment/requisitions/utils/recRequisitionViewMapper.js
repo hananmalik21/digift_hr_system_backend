@@ -1,4 +1,4 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 
 const LOG_TAG = 'recRequisitionViewMapper';
 

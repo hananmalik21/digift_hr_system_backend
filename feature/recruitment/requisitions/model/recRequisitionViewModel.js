@@ -1,8 +1,8 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
-import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import { escapeLikePattern } from '@digifyhr/common';
 import { mapViewRowToDetail, mapViewRowToListItem } from '../utils/recRequisitionViewMapper.js';
 import { pickQueryFilterCode } from '../utils/recRequisitionListFilters.js';
 import {
@@ -10,7 +10,7 @@ import {
   parseOrgUnitHierarchyFilter,
   resolveStatusTabClause
 } from '../utils/recRequisitionViewValidators.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const VIEW = process.env.REC_REQUISITION_LIST_V || 'REC.V_REQUISITION_LIST';
 const LOG_TAG = 'recRequisitionViewModel';

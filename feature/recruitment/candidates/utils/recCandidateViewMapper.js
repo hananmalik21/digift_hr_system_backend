@@ -1,4 +1,4 @@
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 import { formatDateOnly } from '../../candidate_matches/utils/recCandidateMatchMappers.js';
 import { CANDIDATE_DOB_VIEW_COLUMN } from './recCandidateProfileFields.js';
 import {

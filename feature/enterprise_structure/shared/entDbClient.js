@@ -1,7 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../config/db.js';
-import { parseJsonClobOut, textClobBind } from '../../compensation/utils/oracleClobBinds.js';
-import { oraclePlsqlErrorMessage } from '../../recruitment/shared/oraclePackageUtils.js';
+import { parseJsonClobOut, textClobBind } from '../../../utils/oracleClobBinds.js';
+import { oraclePlsqlErrorMessage } from '../../../utils/oraclePackageUtils.js';
 
 /** Logical module name → Oracle package (domain-specific, not monolithic ENT_API_PKG body). */
 export const ENT_MODULE_PACKAGES = Object.freeze({

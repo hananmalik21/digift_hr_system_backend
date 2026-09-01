@@ -5,7 +5,7 @@
 
 import oracledb from 'oracledb';
 import { NotFoundError } from '../../../../utils/errors/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 import {
   rethrowUnlessOperational,
   ROW_OPTS,

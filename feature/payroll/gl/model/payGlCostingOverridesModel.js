@@ -5,7 +5,7 @@
 
 import oracledb from 'oracledb';
 import { queryPayList, queryPayOne, executePayDml, outIdGuidBinds } from '../../shared/index.js';
-import { hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { hexToRawBuffer } from '@digifyhr/common';
 
 const FROM = 'PAY.PAY_GL_COSTING_OVERRIDES v';
 

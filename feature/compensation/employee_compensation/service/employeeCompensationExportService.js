@@ -2,7 +2,7 @@ import {
   buildExcelExport,
   defineExcelColumns,
   mapToExcelRows
-} from '../../../../utils/excel/index.js';
+} from '@digifyhr/common/excel';
 
 const EXPORT_COLUMNS = defineExcelColumns([
   { header: 'Employee Number', key: 'employee_number', width: 18 },

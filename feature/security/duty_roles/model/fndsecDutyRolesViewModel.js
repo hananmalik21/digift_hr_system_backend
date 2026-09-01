@@ -2,9 +2,9 @@ import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { DatabaseError, NotFoundError, ValidationError } from '../../../../utils/errors/index.js';
 import { bufferToGuidHex, guidToBuffer } from '../../../../src/utils/oracleGuid.js';
-import { escapeLikePattern } from '../../modules/utils/escapeLikePattern.js';
+import { escapeLikePattern } from '@digifyhr/common';
 import { parseDutyRoleGuidOrThrow, parseEnterpriseIdQuery } from './fndsecDutyRolesModel.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 const VIEW = 'FNDSEC.FNDSEC_DUTY_ROLES_FULL_JSON_V';
 const LOG_TAG = 'fndsecDutyRolesViewModel';

@@ -3,7 +3,7 @@ import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import crypto from 'crypto';
 import { DatabaseError, ValidationError } from '../../../../utils/errors/index.js';
-import { ensureHex32, hexToRawBuffer, generateSysGuid } from '../../../../utils/guidUtils.js';
+import { ensureHex32, hexToRawBuffer, generateSysGuid } from '@digifyhr/common';
 import { safeJson } from '../../../../services/emplEmployeeListService.js';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 

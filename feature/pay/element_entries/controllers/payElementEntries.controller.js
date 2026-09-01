@@ -3,7 +3,7 @@
  * OpenAPI: docs/pay_element_entries_api.openapi.yaml
  */
 import '../swagger/payElementEntries.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementEntry,
   deleteElementEntry,
@@ -13,7 +13,7 @@ import {
   updateElementEntry
 } from '../services/payElementEntries.service.js';
 import { ELEMENT_ENTRIES_EXPORT_EMPTY_MESSAGE } from '../services/payElementEntriesExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import {
   logAudit,
   resolveAuditActor,

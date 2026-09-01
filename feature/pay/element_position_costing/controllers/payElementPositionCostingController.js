@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_ELEMENT_POSITION_COSTING_PKG
  * Reads:     PAY.V_PAY_ELEMENT_POSITION_COSTING
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementPositionCostingService,
   deleteElementPositionCostingService,

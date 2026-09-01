@@ -1,4 +1,4 @@
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   createBalanceInitialization as createBalanceInitializationInModel,
   deleteBalanceInitialization as deleteBalanceInitializationInModel,

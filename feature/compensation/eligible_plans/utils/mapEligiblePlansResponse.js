@@ -2,7 +2,7 @@
  * Map Oracle rows / plans_json CLOB to API response shape.
  */
 
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 import { pickSnakeCaseFields } from '../../utils/pickSnakeCaseFields.js';
 import {
   oracleTextToString,

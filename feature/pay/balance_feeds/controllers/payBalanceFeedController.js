@@ -2,7 +2,7 @@
  * Payroll Balance Feeds API.
  * Reads: PAY.V_PAY_BALANCE_FEEDS | DML: PAY.PAY_BALANCE_FEEDS_PKG
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createBalanceFeed,
   deleteBalanceFeed,

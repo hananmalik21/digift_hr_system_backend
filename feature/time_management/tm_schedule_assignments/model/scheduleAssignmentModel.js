@@ -2,7 +2,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import HrOrgStructureModel from '../../../enterprise_structure/hr_org_structures/model/hrOrgStructureModel.js';
+import { getOrgStructureById } from '../../../enterprise_structure/enterprise.facade.js';
 import { employeeAccessPredicate } from '../../../../utils/userContext.js';
 
 /**
@@ -490,7 +490,7 @@ class ScheduleAssignmentModel {
   static async getOrgStructureDetails(structureIdHex) {
     try {
       if (!structureIdHex) return null;
-      const structure = await HrOrgStructureModel.findById(structureIdHex);
+      const structure = await getOrgStructureById(structureIdHex);
       if (!structure) return null;
 
       return {

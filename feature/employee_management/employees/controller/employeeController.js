@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import oracledb from 'oracledb';
 import EmployeeModel from '../model/employeeModel.js';
-import PositionsModel from '../../../enterprise_structure/positions/model/positions_model.js';
+import { getPositionById } from '../../../enterprise_structure/enterprise.facade.js';
 import { getConnection } from '../../../../config/db.js';
 import {
   validateRequired,
@@ -25,7 +25,7 @@ import {
   sendEmployeeExport
 } from '../view/employeeView.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   requireActingUserId,
   getActingUsername,
@@ -41,7 +41,7 @@ import {
   parseOrgStructureListFromRow,
   rowRawToHex
 } from '../../../../utils/employeeAssignmentViewUtils.js';
-import { buildPaginationMeta, parsePagination } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta, parsePagination } from '@digifyhr/common';
 import {
   parseEmployeeListQuery,
   fetchEmployeeListPage,
@@ -568,7 +568,7 @@ export async function getEmployeeListRowByEmployeeId(employeeId) {
     const data = toSnakeCaseKeys(normalized);
     if (data.position_id) {
       try {
-        const full = await PositionsModel.findById(data.position_id);
+        const full = await getPositionById(data.position_id);
         data.position = full
           ? {
               position_id: full.position_id ?? null,

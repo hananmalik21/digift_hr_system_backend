@@ -2,7 +2,7 @@
  * Payroll audit trail API.
  * Mounted at /api/payroll/audit.
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   parsePaginationQuery,
   pickFilters,

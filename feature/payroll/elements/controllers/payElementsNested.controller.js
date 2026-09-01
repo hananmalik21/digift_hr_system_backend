@@ -2,7 +2,7 @@
  * Nested element reads + status toggle API.
  * Mounted at /api/payroll/elements (paths are relative to `/:elementGuid/...`).
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   parseGuidParam,
   parsePaginationQuery,

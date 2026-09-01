@@ -1,4 +1,4 @@
-import { asyncHandler } from '../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { convertCurrency } from '../services/currency.service.js';
 import { parseConvertBody } from '../validators/currency.validator.js';
 

@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { handleReadError, sendPackageResponse } from '../../shared/recControllerHelpers.js';
 import { withPublicLogoUrls } from '../../employer_info/utils/recEmployerInfoLogoUrl.js';
 import { getJobPostingEmployerInfoByGuid } from '../model/recJobPostingEmployerInfoModel.js';

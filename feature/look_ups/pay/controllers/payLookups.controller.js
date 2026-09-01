@@ -3,7 +3,7 @@
  * OpenAPI: docs/pay_lookups_api.openapi.yaml
  */
 import '../swagger/payLookups.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createLookupType,
   createLookupValue,

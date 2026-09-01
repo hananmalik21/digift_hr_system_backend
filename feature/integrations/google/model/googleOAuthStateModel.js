@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { withConnection, ROW_OPTS } from '../../../recruitment/shared/recViewModelUtils.js';
+import { withConnection, ROW_OPTS } from '../../../../utils/oraclePackageUtils.js';
 
 const TABLE = 'FNDSEC.FND_OAUTH_STATES';
 

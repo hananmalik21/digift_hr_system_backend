@@ -1,4 +1,4 @@
-import { escapeLikePattern } from '../../../security/modules/utils/escapeLikePattern.js';
+import { escapeLikePattern } from '@digifyhr/common';
 import { isNonEmptyTrimmed } from '../../shared/recViewModelUtils.js';
 
 /** @typedef {{ column: string, clob?: boolean }} SearchField */

@@ -3,7 +3,7 @@
  */
 
 import { ValidationError, ForbiddenError } from '../../../utils/errors/index.js';
-import { parseGuid } from '../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import { getActingEnterpriseId } from '../../../utils/userContext.js';
 import { resolveRequestEnterpriseId } from '../../../utils/requestEnterprise.js';
 

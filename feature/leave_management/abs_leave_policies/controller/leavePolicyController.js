@@ -2,8 +2,8 @@ import express from 'express';
 import LeavePolicyModel from '../model/leavePolicyModel.js';
 import { sendSuccess, sendPolicy, sendValidationError, sendDatabaseError, sendError, sendPolicyList } from '../view/leavePolicyView.js';
 import { ValidationError, DatabaseError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendSuccess as sendStandardSuccess } from '../../../../utils/response.js';
+import { asyncHandler } from '@digifyhr/common';
+import { sendSuccess as sendStandardSuccess } from '@digifyhr/common';
 import { ALLOWED_ACCRUAL_METHOD_CODES } from '../config.js';
 
 /** 32-char hex policy GUID format (reused to avoid regex recompilation). */

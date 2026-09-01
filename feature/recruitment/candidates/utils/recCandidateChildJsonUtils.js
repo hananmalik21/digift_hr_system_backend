@@ -1,5 +1,5 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { isValidCalendarDateOnly } from '../../../../utils/dateOnlyUtils.js';
+import { isValidCalendarDateOnly } from '@digifyhr/common';
 import { isBlank } from '../../shared/recValidationUtils.js';
 
 /** Canonical API child-array fields (map to Oracle P_*_JSON CLOB binds). */

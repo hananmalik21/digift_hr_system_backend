@@ -1,4 +1,4 @@
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 import { normalizeYnFlag, safeFiniteNumber, strOrNull } from './recApplicationRowUtils.js';
 
 /** Relative download path (no query string; enterprise_id passed when calling the API). */

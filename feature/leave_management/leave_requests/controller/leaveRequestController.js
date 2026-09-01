@@ -17,7 +17,7 @@ import {
   generateBaseMetadata,
   getDocumentUrls
 } from '../view/leaveRequestView.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
+import { parseGuid } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
   requireActingUserId,

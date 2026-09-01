@@ -14,7 +14,7 @@ import {
   mapPackageBusinessMessage,
   OVERRIDE_RULE_ALREADY_EXISTS_MESSAGE
 } from '../utils/payElementOverrideRulesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { assertEnterpriseAccess } from '../validations/payElementOverrideRules.validation.js';
 
 const CREATE_SUCCESS_MESSAGE = 'Override rule created successfully.';

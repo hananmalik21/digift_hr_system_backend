@@ -8,12 +8,12 @@
  */
 
 import express from 'express';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { asyncHandler } from '@digifyhr/common';
+import { buildPaginationMeta } from '@digifyhr/common';
 import { safeDatabaseMessageForApi } from '../../employee_compensation/utils/oracleErrorMessage.js';
 import { fetchSalaryChangeHistory, fetchSalaryChangeHistoryForExport } from '../service/compSalaryChangeHistoryService.js';
 import { buildSalaryChangeHistoryExcelBuffer } from '../service/salaryChangeHistoryExportService.js';
-import { sendExcelExport } from '../../../../utils/excel/index.js';
+import { sendExcelExport } from '@digifyhr/common/excel';
 import { parseSalaryChangeHistoryQuery } from '../utils/parseSalaryChangeHistoryQuery.js';
 import {
   requireActingUserId,

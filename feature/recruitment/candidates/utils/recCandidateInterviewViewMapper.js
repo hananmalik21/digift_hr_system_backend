@@ -1,4 +1,4 @@
-import { bufferToHex, formatGuidWithHyphens, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, formatGuidWithHyphens, normalizeApiGuidString } from '@digifyhr/common';
 import { normalizeGuidInJsonObject } from '../../shared/recViewJsonUtils.js';
 import { formatDateOnly } from '../../job_postings/utils/recJobPostingViewMapper.js';
 import {

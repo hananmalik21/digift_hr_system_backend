@@ -11,7 +11,7 @@ import {
   sendError
 } from '../view/attendanceView.js';
 import { ValidationError, DatabaseError, ForbiddenError } from '../../../../utils/errors/index.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { ALLOWED_SOURCE_TYPES, ALLOWED_LOG_TYPES } from '../config.js';
 import FaceAttendanceRepository from '../../face_attendance/repository/faceAttendanceRepository.js';
 import { getFaceDescriptor } from '../../../../utils/faceProcess.js';

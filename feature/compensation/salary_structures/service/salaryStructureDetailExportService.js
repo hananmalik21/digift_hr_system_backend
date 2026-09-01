@@ -1,4 +1,4 @@
-import { buildDynamicApiExcelBuffer } from '../../../../utils/excel/index.js';
+import { buildDynamicApiExcelBuffer } from '@digifyhr/common/excel';
 
 const KEY_ORDER = [
   'structure_id',

@@ -1,4 +1,4 @@
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   NotificationError,
   NOTIFICATION_ERROR_CODES,

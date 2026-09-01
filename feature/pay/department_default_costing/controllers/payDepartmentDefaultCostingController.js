@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_DEPARTMENT_DEFAULT_COSTING_PKG
  * Reads:     PAY.V_PAY_DEPARTMENT_DEFAULT_COSTING
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createDepartmentDefaultCostingService,
   deleteDepartmentDefaultCostingService,

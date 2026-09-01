@@ -1,5 +1,5 @@
 import oracledb from 'oracledb';
-import { bufferToHex, hexToRawBuffer } from '../../../../utils/guidUtils.js';
+import { bufferToHex, hexToRawBuffer } from '@digifyhr/common';
 import { packageStatusIsSuccess, withConnection } from '../../../../utils/oraclePackageUtils.js';
 import { applyRequisitionDefaults } from '../utils/recRequisitionValidators.js';
 

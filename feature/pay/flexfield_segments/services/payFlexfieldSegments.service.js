@@ -7,7 +7,7 @@ import {
   getFlexfieldSegmentFromViewByGuid,
   listFlexfieldSegmentsFromView
 } from '../model/payFlexfieldSegmentsViewModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 const CREATE_SUCCESS_MESSAGE = 'Segment created successfully';
 const UPDATE_SUCCESS_MESSAGE = 'Segment updated successfully';

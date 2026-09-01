@@ -8,7 +8,7 @@ import {
   getPayElementFromViewByGuid,
   listPayElementsFromView
 } from '../model/payElementsViewModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 const CREATE_SUCCESS_MESSAGE = 'Element created successfully';
 const UPDATE_SUCCESS_MESSAGE = 'Element updated successfully';

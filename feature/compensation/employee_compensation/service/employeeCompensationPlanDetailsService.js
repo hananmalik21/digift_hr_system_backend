@@ -1,5 +1,5 @@
 import { executeQuery } from '../../../../config/db.js';
-import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { convertKeysToSnakeCase } from '@digifyhr/common';
 import {
   oracleTextToString,
   oracleRawToHexOrValue,

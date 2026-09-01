@@ -1,21 +1,12 @@
-/**
- * Redact bearer / Google access tokens from error messages before logging.
- * @param {unknown} err
- * @returns {string}
- */
+import { redactHttpErrorMessage } from '@digifyhr/common';
+
 export function sanitizeGoogleError(err) {
-  const message = err instanceof Error ? err.message : String(err ?? 'Unknown error');
-  return message
-    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/ya29\.[A-Za-z0-9\-._~+/]+/gi, '[REDACTED_ACCESS_TOKEN]')
-    .slice(0, 500);
+  return redactHttpErrorMessage(err).replace(
+    /ya29\.[A-Za-z0-9\-._~+/]+/gi,
+    '[REDACTED_ACCESS_TOKEN]'
+  );
 }
 
-/**
- * Prefer Google API error code/description when present.
- * @param {unknown} err
- * @returns {string}
- */
 export function extractGoogleApiError(err) {
   const data = err?.response?.data;
   if (data && typeof data === 'object') {

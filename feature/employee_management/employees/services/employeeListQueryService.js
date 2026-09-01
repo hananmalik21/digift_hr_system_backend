@@ -11,7 +11,7 @@ import {
   employeeAccessBypassBindClause,
   employeeAccessOptionsFromReq
 } from '../../../../utils/userContext.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 function hexToBuffer(hex) {
   if (hex == null || typeof hex !== 'string') return null;

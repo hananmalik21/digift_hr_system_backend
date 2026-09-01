@@ -1,5 +1,5 @@
-import { parseGuid } from '../../../../utils/guidUtils.js';
-import { parsePageLimit } from '../../../../utils/paginationUtils.js';
+import { parseGuid } from '@digifyhr/common';
+import { parsePageLimit } from '@digifyhr/common';
 import {
   assertEnterpriseAccess,
   firstValidationMessage,

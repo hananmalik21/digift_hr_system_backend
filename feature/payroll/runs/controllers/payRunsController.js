@@ -2,7 +2,7 @@
  * DigifyHR Payroll — Run controllers.
  */
 
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import { sendOutcome, withPayrollErrorHandling } from '../../shared/index.js';
 import * as runsService from '../services/payRunsService.js';
 import {

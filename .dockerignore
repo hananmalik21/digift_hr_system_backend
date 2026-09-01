@@ -1,16 +1,32 @@
 node_modules
-npm-debug.log
+npm-debug.log*
 .git
 .gitignore
-.env
-.env.*
 .DS_Store
 *.md
 .cursor
 .vscode
 coverage
 .eslintcache
+*.log
+server.log
 
 .env
+.env.*
+!.env.example
+
 firebase-service-account.json
+*firebase-adminsdk*.json
+*-credentials.json
 deploy.sh.backup-*
+
+# Secrets must be mounted at runtime, not copied into the image
+Wallet/
+Wallet_OLD/
+TESTDB/
+TESTDB.zip
+**/cwallet.sso
+**/*.p12
+**/ewallet.pem
+**/keystore.jks
+**/truststore.jks

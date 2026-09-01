@@ -3,7 +3,7 @@ import {
   defineExcelColumns,
   formatJsonExportValue,
   mapToExcelRows
-} from '../../../../utils/excel/index.js';
+} from '@digifyhr/common/excel';
 
 export const ELEMENT_ENTRIES_EXPORT_SHEET_NAME = 'Element Entries';
 export const ELEMENT_ENTRIES_EXPORT_EMPTY_MESSAGE = 'No element entries found to export';

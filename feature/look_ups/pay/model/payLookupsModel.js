@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { parseLookupTypeGuid, parseLookupValueGuid } from '../../../../utils/guidUtils.js';
+import { parseHexGuid } from '@digifyhr/common';
 import {
   auditInBind,
   codeInBind,
@@ -16,9 +16,9 @@ import {
   activeFlagInBind,
   clobJsonInBind
 } from '../../../../utils/oraclePackageUtils.js';
-import { parseJsonClobOut } from '../../../compensation/utils/oracleClobBinds.js';
-import { parsePageLimit, buildListResponse } from '../../../../utils/paginationUtils.js';
-import { parseOptionalActiveFlag } from '../../../../utils/validationUtils.js';
+import { parseJsonClobOut } from '../../../../utils/oracleClobBinds.js';
+import { parsePageLimit, buildListResponse } from '@digifyhr/common';
+import { parseOptionalActiveFlag } from '@digifyhr/common';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
 import { toIso } from '../../../../utils/rowMapperUtils.js';
 
@@ -337,7 +337,7 @@ export async function listLookupTypes(filters = {}, pagination = {}) {
  * @param {string} lookupTypeGuidRaw
  */
 export async function getLookupTypeByGuid(lookupTypeGuidRaw) {
-  const lookupTypeGuid = parseLookupTypeGuid(lookupTypeGuidRaw);
+  const lookupTypeGuid = parseHexGuid(lookupTypeGuidRaw, 'lookup_type_guid');
   const result = await executeRead(TYPE_BY_GUID_SQL, { lookup_type_guid: lookupTypeGuid });
   const row = result.rows?.[0];
   return row ? mapLookupTypeRow(row) : null;
@@ -373,7 +373,7 @@ export async function listLookupValues(filters = {}, pagination = {}) {
  * @param {unknown} enterpriseIdRaw
  */
 export async function getLookupValueByGuidForEnterprise(lookupValueGuidRaw, enterpriseIdRaw) {
-  const lookupValueGuid = parseLookupValueGuid(lookupValueGuidRaw);
+  const lookupValueGuid = parseHexGuid(lookupValueGuidRaw, 'lookup_value_guid');
   const enterpriseId = parseEnterpriseId(enterpriseIdRaw);
 
   const result = await executeRead(VALUE_BY_GUID_SQL, {
@@ -389,7 +389,7 @@ export async function getLookupValueByGuidForEnterprise(lookupValueGuidRaw, ente
  * @param {string} lookupValueGuidRaw
  */
 export async function getLookupValueByGuid(lookupValueGuidRaw) {
-  const lookupValueGuid = parseLookupValueGuid(lookupValueGuidRaw);
+  const lookupValueGuid = parseHexGuid(lookupValueGuidRaw, 'lookup_value_guid');
   const result = await executeRead(VALUE_BY_GUID_ONLY_SQL, { lookup_value_guid: lookupValueGuid });
   const row = result.rows?.[0];
   return row ? mapLookupValueRow(row) : null;
@@ -422,7 +422,7 @@ export async function createLookupTypeViaPackage(payload, createdBy) {
  * @param {string} updatedBy
  */
 export async function updateLookupTypeViaPackage(lookupTypeGuidRaw, payload, updatedBy) {
-  const lookupTypeGuid = parseLookupTypeGuid(lookupTypeGuidRaw);
+  const lookupTypeGuid = parseHexGuid(lookupTypeGuidRaw, 'lookup_type_guid');
   const binds = {
     lookup_type_guid: guidHexInBind(lookupTypeGuid),
     type_code: payload.type_code != null ? codeInBind(payload.type_code, 100) : codeInBind(null, 100),
@@ -439,7 +439,7 @@ export async function updateLookupTypeViaPackage(lookupTypeGuidRaw, payload, upd
  * @param {string} lookupTypeGuidRaw
  */
 export async function deleteLookupTypeViaPackage(lookupTypeGuidRaw) {
-  const lookupTypeGuid = parseLookupTypeGuid(lookupTypeGuidRaw);
+  const lookupTypeGuid = parseHexGuid(lookupTypeGuidRaw, 'lookup_type_guid');
   await executePackageMutation(DELETE_TYPE_PLSQL, {
     lookup_type_guid: guidHexInBind(lookupTypeGuid)
   });
@@ -476,7 +476,7 @@ export async function createLookupValueViaPackage(payload, createdBy) {
  * @param {string} updatedBy
  */
 export async function updateLookupValueViaPackage(lookupValueGuidRaw, payload, updatedBy) {
-  const lookupValueGuid = parseLookupValueGuid(lookupValueGuidRaw);
+  const lookupValueGuid = parseHexGuid(lookupValueGuidRaw, 'lookup_value_guid');
   const enterpriseId = parseEnterpriseId(payload.enterprise_id, { required: false });
 
   const binds = {
@@ -496,7 +496,7 @@ export async function updateLookupValueViaPackage(lookupValueGuidRaw, payload, u
  * @param {string} lookupValueGuidRaw
  */
 export async function deleteLookupValueViaPackage(lookupValueGuidRaw) {
-  const lookupValueGuid = parseLookupValueGuid(lookupValueGuidRaw);
+  const lookupValueGuid = parseHexGuid(lookupValueGuidRaw, 'lookup_value_guid');
   await executePackageMutation(DELETE_VALUE_PLSQL, {
     lookup_value_guid: guidHexInBind(lookupValueGuid)
   });

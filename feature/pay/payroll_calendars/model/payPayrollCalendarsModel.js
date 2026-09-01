@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 import {
   auditInBind,
   codeInBind,

@@ -2,7 +2,7 @@
  * Payroll Balance Categories API.
  * Reads: PAY.V_PAY_BALANCE_CATEGORIES | DML: PAY.PAY_BALANCE_CATEGORIES_PKG
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createBalanceCategory,
   deleteBalanceCategory,

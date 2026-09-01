@@ -3,7 +3,7 @@
  * Reads: PAY.V_PAY_ELEMENT_ELIGIBILITY_RULES | DML: PAY.PAY_ELEMENT_ELIGIBILITY_RULES_PKG
  */
 import '../swagger/payElementEligibilityRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementEligibilityRule,
   deleteElementEligibilityRule,

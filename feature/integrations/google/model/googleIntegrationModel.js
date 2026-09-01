@@ -1,8 +1,8 @@
 import crypto from 'crypto';
 import oracledb from 'oracledb';
 import { AppError } from '../../../../utils/errors/index.js';
-import { withConnection, ROW_OPTS } from '../../../recruitment/shared/recViewModelUtils.js';
-import { normalizeUtcIsoTimestamp } from '../../../recruitment/candidates/utils/recInterviewUtcTimestamps.js';
+import { withConnection, ROW_OPTS } from '../../../../utils/oraclePackageUtils.js';
+import { normalizeUtcIsoTimestamp } from '@digifyhr/common';
 import { decryptSecret, encryptSecret } from '../../../../utils/tokenEncryption.js';
 import { GOOGLE_OAUTH_PROVIDER_CODE } from '../../../../config/googleOAuth.js';
 

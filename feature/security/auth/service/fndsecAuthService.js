@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { AppError, ValidationError } from '../../../../utils/errors/index.js';
 import { parseTenantId } from '../../../../utils/tenantUtils.js';
-import { verifyUserPassword } from '../../../../utils/passwordVerification.js';
+import { verifyUserPassword } from '@digifyhr/common';
 import { resolveAdminTypeFromUserInfo } from '../../../../utils/adminAccess.js';
 import { fetchPasswordHashForLogin, loginUserViaPackage } from '../repository/fndsecAuthRepository.js';
 import { authDebugEnabled } from '../utils/authDebug.js';
@@ -123,7 +123,7 @@ export function validateLoginBody(body, req = null) {
   if (errors.length) throw new ValidationError('Validation failed', errors);
 }
 
-export { verifyUserPassword } from '../../../../utils/passwordVerification.js';
+export { verifyUserPassword } from '@digifyhr/common';
 
 /**
  * @param {object} body

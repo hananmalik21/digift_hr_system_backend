@@ -1,9 +1,9 @@
 import { executeQuery } from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { convertKeysToSnakeCase } from '../../../../utils/keyCase.js';
+import { convertKeysToSnakeCase } from '@digifyhr/common';
 import { employeeAccessFunctionPredicate } from '../../../../utils/userContext.js';
 import { parseOrgStructureListFromOracle } from '../utils/oracleCompensationRead.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 function buildPlanFullDetailsSql(accessOptions) {
   const employeePredicate = employeeAccessFunctionPredicate(

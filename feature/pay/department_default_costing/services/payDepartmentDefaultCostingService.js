@@ -19,7 +19,7 @@ import {
   listDepartmentDefaultCostingFromView,
   updateDepartmentDefaultCosting
 } from '../model/payDepartmentDefaultCostingModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createDepartmentDefaultCostingService(payload, createdBy) {
   const result = await createDepartmentDefaultCosting(payload, createdBy);

@@ -12,7 +12,7 @@ import {
   sendConflict
 } from '../view/absLookupView.js';
 import absLookupValueController from '../../abs_lookup_values/controller/absLookupValueController.js';
-import { getUserId } from '../../../../../utils/requestUtils.js';
+import { getUserId } from '@digifyhr/common';
 import { normalizeTenantId } from '../../../../../utils/lookupEnterpriseUtils.js';
 import {
   normalizeAbsBody,

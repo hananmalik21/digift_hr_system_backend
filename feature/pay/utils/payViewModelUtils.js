@@ -1,6 +1,6 @@
 import oracledb from 'oracledb';
 import db from '../../../config/db.js';
-import { normalizeApiGuidString } from '../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 import { normalizeOutGuidHex } from '../../../utils/oraclePackageUtils.js';
 
 export const PAY_VIEW_ROW_OBJECT = { outFormat: oracledb.OUT_FORMAT_OBJECT };

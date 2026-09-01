@@ -70,6 +70,7 @@ import activeStructureStatsController from './feature/enterprise_structure/activ
 import currenciesController from './feature/enterprise_structure/currencies/controller/currenciesController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
+import { requestIdMiddleware } from '@digifyhr/common';
 import { requireAuth } from './middleware/authMiddleware.js';
 import emplEmployeesRouter from './routes/emplEmployees.js';
 import faceAttendanceController from './feature/attendance_management/face_attendance/controller/faceAttendanceController.js';
@@ -112,13 +113,7 @@ import compensationProcessController from './feature/compensation/process/contro
 import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/routes/compBulkAdjustments.routes.js';
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
 import recLookupValueController from './feature/look_ups/rec/rec_lookup_values/controller/recLookupValueController.js';
-import grcQuestionCategoryController from './feature/grc/question_categories/controller/grcQuestionCategoryController.js';
-import grcQuestionSubcategoryController from './feature/grc/question_subcategories/controller/grcQuestionSubcategoryController.js';
-import grcLookupTypeController from './feature/grc/lookup_types/controller/grcLookupTypeController.js';
-import grcLookupValueController from './feature/grc/lookup_values/controller/grcLookupValueController.js';
-import grcControlController from './feature/grc/controls/controller/grcControlController.js';
-import grcAssetController from './feature/grc/assets/controller/grcAssetController.js';
-import grcQuestionController from './feature/grc/questions/controller/grcQuestionController.js';
+import { mountGrcGitPackage, initGrcPackage, closeGrcPackage } from './feature/grc/grc.gitPackage.js';
 import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
 import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
 import payFlexfieldSegmentValuesRoutes from './feature/pay/flexfield_segment_values/routes/payFlexfieldSegmentValues.routes.js';
@@ -167,6 +162,8 @@ import {
 } from './middleware/enterpriseContextMiddleware.js';
 import publicEnterpriseContextController from './feature/enterprise_structure/enterprises/controller/publicEnterpriseContextController.js';
 import publicCareerController from './feature/recruitment/public/controller/publicCareerController.js';
+import { logger } from './utils/logger.js';
+import healthRoutes from './routes/health.routes.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -175,6 +172,7 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', resolveExpressTrustProxy());
 
 // Middleware
+app.use(requestIdMiddleware);
 app.use(cors());
 const bulkAdjustJsonLimit = process.env.BULK_ADJUST_JSON_LIMIT || '10mb';
 app.use('/api/compensation/bulk-adjustments', express.json({ limit: bulkAdjustJsonLimit }));
@@ -193,6 +191,9 @@ app.use(resolveEnterpriseContext);
 // ==========================================
 app.use(requireAuth);
 app.use(enforceJwtEnterpriseMatch);
+
+// Health must be mounted before the root `/:id` hierarchy-level router.
+app.use(healthRoutes);
 
 // Public tenant + career aliases (no JWT)
 app.use('/api/public', publicEnterpriseContextController);
@@ -436,14 +437,8 @@ app.use('/api/rec/job-offers', recJobOffersController);
 app.use('/api/rec/lookup-types', recLookupTypeController);
 app.use('/api/rec/lookup-values', recLookupValueController);
 
-// GRC — question categories, subcategories, lookups, controls, assets, questions
-app.use('/api/grc/question-categories', grcQuestionCategoryController);
-app.use('/api/grc/question-subcategories', grcQuestionSubcategoryController);
-app.use('/api/grc/lookup-types', grcLookupTypeController);
-app.use('/api/grc/lookup-values', grcLookupValueController);
-app.use('/api/grc/controls', grcControlController);
-app.use('/api/grc/assets', grcAssetController);
-app.use('/api/grc/questions', grcQuestionController);
+// GRC — GitHub npm package
+mountGrcGitPackage(app);
 
 // Payroll — element entries (PAY.PAY_ELEMENT_ENTRIES_PKG)
 app.use('/api/pay', payElementEntriesRoutes);
@@ -580,48 +575,36 @@ app.use('/api/currency', currencyRoutes);
 // Initialize database pool on startup
 await createPool();
 await createFaceOraclePool();
+try {
+  await initGrcPackage();
+} catch (err) {
+  logger.error('GRC package Oracle pool failed', { error: err?.message || String(err) });
+  process.exit(1);
+}
 
 try {
   initializeFirebase();
 } catch (err) {
-  console.error('[startup] Firebase initialization failed:', err?.message || err);
+  logger.error('Firebase initialization failed', { error: err?.message || String(err) });
   process.exit(1);
 }
 
 if (isGoogleOAuthConfigured()) {
-  console.info('[startup] Google OAuth configured for Calendar/Meet integration');
+  logger.info('Google OAuth configured for Calendar/Meet integration');
 } else {
-  console.info(
-    '[startup] Google OAuth not configured (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)'
-  );
+  logger.info('Google OAuth not configured (set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)');
 }
 
 try {
   const seedResult = await ensureSeedAndBackfillAdminUsers();
   if (!seedResult.ok && !seedResult.seed?.skipped) {
-    console.error('[startup] Admin seed/backfill failed; continuing server startup.');
+    logger.error('Admin seed/backfill failed; continuing server startup');
   }
 } catch (err) {
-  console.error('[startup] Admin seed error:', err?.message || err);
+  logger.error('Admin seed error', { error: err?.message || String(err) });
 }
 
 await Promise.all([prewarmFaceModels(), prewarmJobOfferPdfBrowser()]);
-
-// ==========================================
-// 📌 HEALTH CHECK ENDPOINT
-// ==========================================
-import { sendSuccess } from './utils/response.js';
-
-app.get('/health', (req, res) => {
-  sendSuccess(res, {
-    message: 'API Server is running',
-    data: {
-      status: 'OK',
-      timestamp: new Date().toISOString()
-    }
-  });
-});
-
 
 // ==========================================
 // 📌 404 HANDLER (must be before error middleware)
@@ -636,16 +619,16 @@ app.use(errorMiddleware);
 // ==========================================
 // 📌 START SERVER
 // ==========================================
-const server = app.listen(PORT);
+const server = app.listen(PORT, () => {
+  logger.info('API server listening', { port: PORT });
+});
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(
-      `Port ${PORT} is already in use. Stop the other Node process (lsof -nP -iTCP:${PORT} -sTCP:LISTEN) or set PORT to a free port.`
-    );
+    logger.error(`Port ${PORT} is already in use. Stop the other Node process or set PORT to a free port.`);
     process.exit(1);
   }
-  console.error('Server listen error:', err);
+  logger.error('Server listen error', { error: err?.message || String(err) });
   process.exit(1);
 });
 
@@ -659,10 +642,10 @@ async function shutdown(signal) {
     return;
   }
   shuttingDown = true;
-  console.log(`[shutdown] ${signal} received`);
+  logger.info('Shutdown signal received', { signal });
 
   const forceTimer = setTimeout(() => {
-    console.error('[shutdown] Timed out; exiting');
+    logger.error('Shutdown timed out; exiting');
     process.exit(1);
   }, 8000);
   forceTimer.unref();
@@ -672,8 +655,9 @@ async function shutdown(signal) {
       await closeJobOfferPdfBrowser();
       await closePool();
       await closeFaceOraclePool();
+      await closeGrcPackage();
     } catch (err) {
-      console.error('[shutdown] cleanup error:', err?.message || err);
+      logger.error('Shutdown cleanup error', { error: err?.message || String(err) });
     } finally {
       process.exit(0);
     }

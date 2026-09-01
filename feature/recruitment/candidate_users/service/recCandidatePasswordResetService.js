@@ -1,6 +1,6 @@
-import { hashPasswordArgon2id } from '../../../security/users/service/fndsecUsersService.js';
+import { hashPasswordArgon2id } from '../../../security/security.facade.js';
 import { sendEmail } from '../../../../services/email.service.js';
-import EnterpriseModel from '../../../enterprise_structure/enterprises/model/enterpriseModel.js';
+import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
 import {
   getResetAccountViaPackage,
   resetCandidatePasswordViaPackage
@@ -64,7 +64,7 @@ function logResultCode(action, resultCode) {
  */
 async function resolveEnterpriseDisplayName(enterpriseId) {
   try {
-    const row = await EnterpriseModel.findById(enterpriseId);
+    const row = await getEnterpriseById(enterpriseId);
     if (!row) return null;
     const name = row.enterprise_name ?? row.ENTERPRISE_NAME ?? null;
     const trimmed = name != null ? String(name).trim() : '';

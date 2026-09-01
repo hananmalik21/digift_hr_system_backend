@@ -10,7 +10,7 @@ import {
   listFlexfieldSegmentValuesLookupBySegmentCode
 } from '../model/payFlexfieldSegmentValuesViewModel.js';
 import { SEGMENT_CODE_NOT_FOUND_MESSAGE } from '../utils/payFlexfieldSegmentValuesOracleErrors.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 const CREATE_SUCCESS_MESSAGE = 'Segment value created successfully';
 const UPDATE_SUCCESS_MESSAGE = 'Segment value updated successfully';

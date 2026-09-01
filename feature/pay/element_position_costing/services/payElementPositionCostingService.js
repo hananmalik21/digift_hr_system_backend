@@ -19,7 +19,7 @@ import {
   listElementPositionCostingFromView,
   updateElementPositionCosting
 } from '../model/payElementPositionCostingModel.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 
 export async function createElementPositionCostingService(payload, createdBy) {
   const result = await createElementPositionCosting(payload, createdBy);

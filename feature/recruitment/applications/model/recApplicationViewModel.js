@@ -44,7 +44,7 @@ import {
   rowKeyMap
 } from '../utils/recApplicationRowUtils.js';
 import { parseApplicationSort, parseStageHistorySort } from '../utils/recApplicationViewValidators.js';
-import { normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { normalizeApiGuidString } from '@digifyhr/common';
 
 async function listApplicationNotesForDetail(applicationGuidHex, enterpriseId) {
   const sql = `SELECT ${NOTE_SELECT_SQL} FROM ${NOTES_JOIN_SQL}

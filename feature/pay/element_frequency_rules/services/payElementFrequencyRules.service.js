@@ -1,5 +1,5 @@
 import { packageStatusIsSuccess } from '../../../../utils/oraclePackageUtils.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   createFrequencyRuleViaPackage,
   deleteFrequencyRuleViaPackage,

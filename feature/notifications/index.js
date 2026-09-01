@@ -1,5 +1,11 @@
 export { notificationService, createNotificationForEnterprise } from './service/notification.service.js';
 export { getActiveNotificationTargets } from './repository/notification.device.repository.js';
+export {
+  bindInNumber,
+  bindInString,
+  ROW_OPTS,
+  withConnection
+} from './utils/notification.oracle.js';
 
 export {
   NOTIFICATION_LIST_STATUS,

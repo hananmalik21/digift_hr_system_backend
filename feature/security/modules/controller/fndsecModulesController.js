@@ -1,9 +1,9 @@
 import express from 'express';
 import multer from 'multer';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
-import { sendCreated, sendDeleted, sendSuccess, sendUpdated } from '../../../../utils/response.js';
+import { asyncHandler } from '@digifyhr/common';
+import { sendCreated, sendDeleted, sendSuccess, sendUpdated } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { buildPaginationMeta } from '../../../../utils/paginationUtils.js';
+import { buildPaginationMeta } from '@digifyhr/common';
 import {
   createModule,
   updateModule,

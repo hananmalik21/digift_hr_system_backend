@@ -1,4 +1,4 @@
-import { AppError } from './AppError.js';
+import { AppError } from '@digifyhr/common';
 
 /**
  * Database Error

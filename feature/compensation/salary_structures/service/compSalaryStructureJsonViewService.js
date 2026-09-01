@@ -15,7 +15,7 @@ import { parseSalaryStructurePageLimit } from '../utils/parseSalaryStructurePage
 import { parseRequiredEnterpriseId } from '../utils/parseSalaryStructureEnterpriseId.js';
 import { rowKeysUpper } from '../utils/rowKeysUpper.js';
 import { normalizeStructureGuid } from './compSalaryStructureService.js';
-import { paginateForExport } from '../../../../utils/excel/index.js';
+import { paginateForExport } from '@digifyhr/common/excel';
 
 /** Duplicated at response root; stripped from nested `structure` in details. */
 const PROMOTED_STRUCTURE_HEADER_KEYS = ['structure_type_code', 'location_obj'];

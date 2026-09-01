@@ -1,6 +1,6 @@
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { parseGuid } from '../../../../utils/guidUtils.js';
-import { validateActiveFlag, validateDisplaySequence } from '../../../../utils/validationUtils.js';
+import { parseGuid } from '@digifyhr/common';
+import { validateActiveFlag, validateDisplaySequence } from '@digifyhr/common';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
 
 function throwIfErrors(errors) {

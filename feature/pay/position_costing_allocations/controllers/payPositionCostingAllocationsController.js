@@ -3,7 +3,7 @@
  * Mutations: PAY.PAY_POSITION_COSTING_ALLOCATIONS_PKG
  * Reads:     PAY.V_PAY_POSITION_COSTING_ALLOCATIONS
  */
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createPositionCostingAllocationService,
   deletePositionCostingAllocationService,

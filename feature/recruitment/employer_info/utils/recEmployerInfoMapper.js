@@ -4,7 +4,7 @@ import {
   safeFiniteNumber,
   strOrNull
 } from '../../applications/utils/recApplicationRowUtils.js';
-import { bufferToHex, normalizeApiGuidString } from '../../../../utils/guidUtils.js';
+import { bufferToHex, normalizeApiGuidString } from '@digifyhr/common';
 import { employerInfoLogoPath } from './recEmployerInfoLogoUrl.js';
 
 const HEX_32 = /^[0-9A-Fa-f]{32}$/;

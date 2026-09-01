@@ -3,7 +3,7 @@
  * OpenAPI: PAY.PAY_ELEMENT_PRORATION_RULES_PKG / PAY.V_PAY_ELEMENT_PRORATION_RULES
  */
 import '../swagger/payElementProrationRules.swagger.js';
-import { asyncHandler } from '../../../../middleware/asyncHandler.js';
+import { asyncHandler } from '@digifyhr/common';
 import {
   createElementProrationRule,
   deleteElementProrationRule,
