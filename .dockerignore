@@ -11,22 +11,36 @@ coverage
 *.log
 server.log
 
+# Environment files
 .env
 .env.*
 !.env.example
 
+# Firebase / service credentials
 firebase-service-account.json
 *firebase-adminsdk*.json
 *-credentials.json
+
+# Deployment backups
 deploy.sh.backup-*
 
-# Secrets must be mounted at runtime, not copied into the image
+# Secrets must be mounted at runtime, never copied into image
 Wallet/
 Wallet_OLD/
 TESTDB/
 TESTDB.zip
+Wallet*.zip
+wallet/
+
+# Oracle wallet / certificate material
 **/cwallet.sso
 **/*.p12
-**/ewallet.pem
+**/*.pfx
+**/*.pem
+**/*.key
 **/keystore.jks
 **/truststore.jks
+
+# Oracle network configuration should come from runtime wallet mount
+**/tnsnames.ora
+**/sqlnet.ora
