@@ -12,7 +12,7 @@ import {
   roundHalfUp,
   toNumber,
 } from '../utils/currencyDecimal.js';
-import CurrenciesModel from '../../feature/enterprise_structure/currencies/model/currenciesModel.js';
+import { getCurrencyDecimalPlaces } from 'digify-hr-enterprise-backend';
 
 function formatRate(decimal) {
   return toNumber(roundHalfUp(decimal, RATE_DISPLAY_SCALE));
@@ -32,7 +32,7 @@ function formatAmount(decimal, decimalPlaces) {
 }
 
 async function defaultResolveDecimalPlaces(currencyCode) {
-  return CurrenciesModel.getDecimalPlaces(currencyCode);
+  return getCurrencyDecimalPlaces(currencyCode);
 }
 
 function parseProviderRate(rate, fromCurrency, toCurrency, conversionDate) {

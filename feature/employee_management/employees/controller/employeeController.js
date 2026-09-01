@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import oracledb from 'oracledb';
 import EmployeeModel from '../model/employeeModel.js';
-import { getPositionById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getPositionById } from 'digify-hr-enterprise-backend';
 import { getConnection } from '../../../../config/db.js';
 import {
   validateRequired,

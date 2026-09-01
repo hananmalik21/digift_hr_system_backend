@@ -9,7 +9,7 @@ import express from 'express';
 import WorkScheduleModel from '../model/workScheduleModel.js';
 import WorkPatternModel from '../../work_patterns/model/workPatternModel.js';
 import ShiftModel from '../../shifts/model/shiftModel.js';
-import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getEnterpriseById } from 'digify-hr-enterprise-backend';
 import { normalizeDayType, VALID_DAY_TYPE_INPUTS, VALID_DAY_OF_WEEKS } from '../constants.js';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '@digifyhr/common';
 import { toLowerCaseKeys } from '@digifyhr/common';

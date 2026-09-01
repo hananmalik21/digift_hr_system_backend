@@ -2,7 +2,7 @@
 import db from '../../../../config/db.js';
 import oracledb from 'oracledb';
 import { DatabaseError, ValidationError, NotFoundError } from '../../../../utils/errors/index.js';
-import { getOrgStructureById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getOrgStructureById } from 'digify-hr-enterprise-backend';
 import { employeeAccessPredicate } from '../../../../utils/userContext.js';
 
 /**

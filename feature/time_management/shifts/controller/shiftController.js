@@ -1,6 +1,6 @@
 import express from 'express';
 import ShiftModel from '../model/shiftModel.js';
-import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getEnterpriseById } from 'digify-hr-enterprise-backend';
 import { sendCreated, sendUpdated, sendDeleted, sendList, sendSuccess } from '@digifyhr/common';
 import { toLowerCaseKeys } from '@digifyhr/common';
 import { ValidationError, NotFoundError } from '../../../../utils/errors/index.js';

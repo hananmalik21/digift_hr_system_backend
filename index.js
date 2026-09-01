@@ -7,16 +7,7 @@ import { createPool, closePool } from './config/db.js';
 import { initializeFirebase } from './config/firebase.js';
 import { isGoogleOAuthConfigured } from './config/googleOAuth.js';
 import { createFaceOraclePool, closeFaceOraclePool } from './config/oracleFacePool.js';
-import hrOrgHierarchyLevelController from './feature/enterprise_structure/hr_org_hierarchy_levels/controller/hrOrgHierarchyLevelController.js';
-import hrOrgStructureController from './feature/enterprise_structure/hr_org_structures/controller/hrOrgStructureController.js';
-import orgUnitController from './feature/enterprise_structure/org_units/controller/orgUnitController.js';
-import structureLevelController from './feature/enterprise_structure/structure_levels/controller/structureLevelController.js';
-import enterpriseController from './feature/enterprise_structure/enterprises/controller/enterpriseController.js';
 import employeeController, { createEmployeeRouter, documentsDownloadRouter } from './feature/employee_management/employees/controller/employeeController.js';
-import jobFamilyController from './feature/enterprise_structure/job_families/controller/jobFamilyController.js';
-import gradeController from './feature/enterprise_structure/grades/controller/grades_controller.js';
-import jobLevelsController from './feature/enterprise_structure/job_levels/controller/job_levels_controller.js';
-import positionsController from './feature/enterprise_structure/positions/controller/positions_controller.js';
 import shiftController from './feature/time_management/shifts/controller/shiftController.js';
 import workPatternController from './feature/time_management/work_patterns/controller/workPatternController.js';
 import workScheduleController from './feature/time_management/work_schedules/controller/workScheduleController.js';
@@ -40,8 +31,6 @@ import employeeLeaveBalanceController from './feature/leave_management/employee_
 import absLookupController from './feature/look_ups/abs/abs_lookups/controller/absLookupController.js';
 import emplLookupTypeController from './feature/look_ups/empl/empl_lookup_types/controller/emplLookupTypeController.js';
 import emplLookupValueController from './feature/look_ups/empl/empl_lookup_values/controller/emplLookupValueController.js';
-import entLookupTypeController from './feature/look_ups/ent/ent_lookup_types/controller/entLookupTypeController.js';
-import entLookupValueController from './feature/look_ups/ent/ent_lookup_values/controller/entLookupValueController.js';
 import compLookupTypeController from './feature/look_ups/comp/comp_lookup_types/controller/compLookupTypeController.js';
 import compLookupValueController from './feature/look_ups/comp/comp_lookup_values/controller/compLookupValueController.js';
 import compComponentController from './feature/compensation/components/controller/compComponentController.js';
@@ -64,10 +53,6 @@ import timeZoneController from './feature/time_management/time_zones/controller/
 import tmOvertimeRequestsRoutes from './src/routes/tmOvertimeRequests.routes.js';
 import currencyRoutes from './src/routes/currency.routes.js';
 import leavePolicyController from './feature/leave_management/abs_leave_policies/controller/leavePolicyController.js';
-import workforceStatsController from './feature/enterprise_structure/workforce_stats/controller/workforceStatsController.js';
-import enterpriseStatsController from './feature/enterprise_structure/enterprise_stats/controller/enterpriseStatsController.js';
-import activeStructureStatsController from './feature/enterprise_structure/active_structure_stats/controller/activeStructureStatsController.js';
-import currenciesController from './feature/enterprise_structure/currencies/controller/currenciesController.js';
 import timeManagementStatsController from './feature/time_management/time_management_stats/controller/timeManagementStatsController.js';
 import { errorMiddleware, notFoundHandler } from './middleware/errorMiddleware.js';
 import { requestIdMiddleware } from '@digifyhr/common';
@@ -114,6 +99,12 @@ import compBulkAdjustmentsRoutes from './feature/compensation/bulk_adjustments/r
 import recLookupTypeController from './feature/look_ups/rec/rec_lookup_types/controller/recLookupTypeController.js';
 import recLookupValueController from './feature/look_ups/rec/rec_lookup_values/controller/recLookupValueController.js';
 import { mountGrcGitPackage, initGrcPackage, closeGrcPackage } from './feature/grc/grc.gitPackage.js';
+import {
+  mountEnterprisePackage,
+  mountEnterpriseCatchAllRoutes,
+  initEnterprisePackage,
+  closeEnterprisePackage
+} from './feature/enterprise_structure/enterprise.gitPackage.js';
 import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
 import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
 import payFlexfieldSegmentValuesRoutes from './feature/pay/flexfield_segment_values/routes/payFlexfieldSegmentValues.routes.js';
@@ -160,7 +151,6 @@ import {
   enforceJwtEnterpriseMatch,
   resolveEnterpriseContext
 } from './middleware/enterpriseContextMiddleware.js';
-import publicEnterpriseContextController from './feature/enterprise_structure/enterprises/controller/publicEnterpriseContextController.js';
 import publicCareerController from './feature/recruitment/public/controller/publicCareerController.js';
 import { logger } from './utils/logger.js';
 import healthRoutes from './routes/health.routes.js';
@@ -195,12 +185,10 @@ app.use(enforceJwtEnterpriseMatch);
 // Health must be mounted before the root `/:id` hierarchy-level router.
 app.use(healthRoutes);
 
-// Public tenant + career aliases (no JWT)
-app.use('/api/public', publicEnterpriseContextController);
+// Prefix-safe Enterprise routes (public context, enterprises, org, grades, stats, lookups).
+// Career stays on the same /api/public prefix; catch-alls are mounted later.
+mountEnterprisePackage(app);
 app.use('/api/public', publicCareerController);
-
-// Enterprise routes
-app.use('/api/enterprises', enterpriseController);
 
 // Employee routes
 app.use('/api/employees', employeeController);
@@ -210,40 +198,8 @@ app.use('/api', createEmployeeRouter);
 // Update employee (all-in-one): PUT {{baseUrl}}/api/update-employee/:idOrGuid (id or 32-char guid)
 app.use('/api', emplEmployeesRouter);
 
-// HR Organization Hierarchy Level routes
-app.use('/api/hr-org-hierarchy-levels', hrOrgHierarchyLevelController);
-
-// Org Units routes (structure-centric, mounted FIRST so specific routes like /:structureId/org-units match before catch-all /:id)
-// Routes: /api/hr-org-structures/:structureId, /api/hr-org-structures/:structureId/levels, etc.
-app.use('/api/hr-org-structures', orgUnitController);
-
-// HR Organization Structure routes (mounted AFTER orgUnitController so catch-all /:id doesn't intercept specific routes)
-// Routes: /api/hr-org-structures/:id, /api/hr-org-structures/active/levels
-app.use('/api/hr-org-structures', hrOrgStructureController);
-
-// Structure Level routes (mounted BEFORE orgUnitController to avoid route conflicts)
-app.use('/api/structure-levels', structureLevelController);
-
-// Mount specific routes BEFORE catch-all routes to avoid conflicts
-app.use('/api/grades', gradeController);
-app.use('/api/job-families', jobFamilyController);
-app.use('/api/job-levels', jobLevelsController);
-app.use('/api/positions', positionsController);
-
-// Holidays routes (must be BEFORE catch-all /api route)
+// Holidays routes (must be BEFORE Enterprise /api catch-all)
 app.use('/api/holidays', holidayController);
-
-// Workforce Stats routes (must be BEFORE catch-all /api route)
-app.use('/api/workforce-stats', workforceStatsController);
-
-// Enterprise Stats routes (per enterprise/tenant)
-app.use('/api/enterprise-stats', enterpriseStatsController);
-
-// Active structure stats (active structure + levels with component counts per enterprise)
-app.use('/api/active-structure-stats', activeStructureStatsController);
-
-// Enterprise currencies (ENT.CURRENCIES reference list; before /api catch-all)
-app.use('/api/enterprise/currencies', currenciesController);
 
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
@@ -257,12 +213,9 @@ app.use('/api/employer-info', recEmployerInfoController);
 // Job posting employer branding (must be BEFORE /api catch-all)
 app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
-// Org Units simplified routes (for easier access)
-// Routes: /api/org-units/tree/active
-// NOTE: This must be mounted AFTER specific routes to avoid catching routes like /api/positions or /api/holidays
-app.use('/api', orgUnitController);
-
-app.use('/', hrOrgHierarchyLevelController);
+// Enterprise catch-alls (/api/:structureId… and / hierarchy aliases).
+// Must stay AFTER holidays, time-zones, data-roles, employer-info, and job-postings.
+mountEnterpriseCatchAllRoutes(app);
 
 // Shifts routes
 app.use('/api/tm/shifts', shiftController);
@@ -315,8 +268,6 @@ app.use('/api/abs/leave-documents', leaveDocumentController);
 app.use('/api/abs/lookups', absLookupController);
 app.use('/api/empl/lookup-types', emplLookupTypeController);
 app.use('/api/empl/lookup-values', emplLookupValueController);
-app.use('/api/ent/lookup-types', entLookupTypeController);
-app.use('/api/ent/lookup-values', entLookupValueController);
 app.use('/api/comp/lookup-types', compLookupTypeController);
 app.use('/api/comp/lookup-values', compLookupValueController);
 app.use('/api/comp/components', compComponentController);
@@ -581,6 +532,12 @@ try {
   logger.error('GRC package Oracle pool failed', { error: err?.message || String(err) });
   process.exit(1);
 }
+try {
+  await initEnterprisePackage();
+} catch (err) {
+  logger.error('Enterprise package Oracle pool failed', { error: err?.message || String(err) });
+  process.exit(1);
+}
 
 try {
   initializeFirebase();
@@ -656,6 +613,7 @@ async function shutdown(signal) {
       await closePool();
       await closeFaceOraclePool();
       await closeGrcPackage();
+      await closeEnterprisePackage();
     } catch (err) {
       logger.error('Shutdown cleanup error', { error: err?.message || String(err) });
     } finally {

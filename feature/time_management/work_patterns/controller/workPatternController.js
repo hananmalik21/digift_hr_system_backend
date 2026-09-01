@@ -1,6 +1,6 @@
 import express from 'express';
 import WorkPatternModel from '../model/workPatternModel.js';
-import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getEnterpriseById } from 'digify-hr-enterprise-backend';
 import { VALID_DAY_TYPES, VALID_DAY_OF_WEEKS } from '../../constants.js';
 import {
   sendWorkPatternList,

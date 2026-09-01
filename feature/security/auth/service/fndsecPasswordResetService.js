@@ -1,6 +1,6 @@
 import { hashPasswordArgon2id } from '../../users/service/fndsecUsersService.js';
 import { sendEmail } from '../../../../services/email.service.js';
-import { getEnterpriseById } from '../../../enterprise_structure/enterprise.facade.js';
+import { getEnterpriseById } from 'digify-hr-enterprise-backend';
 import {
   getFndsecResetAccountViaPackage,
   resetFndsecUserPasswordViaPackage

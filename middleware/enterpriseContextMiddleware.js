@@ -21,7 +21,7 @@ import {
   sendTenantError
 } from '../utils/tenantErrors.js';
 import { getRequestId, logTenantResolution } from '../utils/tenantLogger.js';
-import { resolveEnterpriseBySubdomain } from '../feature/enterprise_structure/enterprises/service/resolveEnterpriseBySubdomain.js';
+import { resolveEnterpriseBySubdomain } from 'digify-hr-enterprise-backend';
 
 /** Routes that must not call RESOLVE_SUBDOMAIN. */
 const SKIP_RESOLVE_PATHS = [
