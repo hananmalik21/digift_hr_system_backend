@@ -6,6 +6,7 @@ import {
   LOG_TAG,
   VALIDATE_SUCCESS_MESSAGE
 } from '../utils/recCandidateConversionConstants.js';
+import { createLoggedOp } from '../utils/recCandidateConversionLog.js';
 import { mapConversionOracleError } from '../utils/recCandidateConversionOracleErrors.js';
 import { mapConvertSuccessData } from '../utils/recCandidateConversionResponses.js';
 import {
@@ -14,43 +15,11 @@ import {
   validateConversionViaPackage
 } from '../model/recCandidateConversionModel.js';
 
-/**
- * Structured audit log. No passwords, credentials, or personal data.
- * @param {string} operation
- * @param {Record<string, unknown>} fields
- */
-function logConversion(operation, fields) {
-  console.info(`[${LOG_TAG}]`, JSON.stringify({ operation, ...fields }));
-}
+const { log: logConversion, runLoggedOp } = createLoggedOp(LOG_TAG, mapConversionOracleError);
 
-/**
- * Time, log, and map Oracle errors for a conversion operation.
- * @template T
- * @param {string} operation
- * @param {Record<string, unknown>} context
- * @param {() => Promise<{ result: T, extraLog?: Record<string, unknown> }>} work
- * @returns {Promise<T>}
- */
-async function runLoggedOp(operation, context, work) {
-  const startedAt = Date.now();
-  try {
-    const { result, extraLog } = await work();
-    logConversion(operation, {
-      ...context,
-      success: true,
-      ...(extraLog || {}),
-      elapsed_ms: Date.now() - startedAt
-    });
-    return result;
-  } catch (err) {
-    const mapped = err instanceof AppError ? err : mapConversionOracleError(err);
-    logConversion(operation, {
-      ...context,
-      success: false,
-      code: mapped.code,
-      elapsed_ms: Date.now() - startedAt
-    });
-    throw mapped;
+export function requireCandidateExists(resolved) {
+  if (!resolved?.candidateExists) {
+    throw new AppError(CANDIDATE_NOT_FOUND_MESSAGE, 404, ERROR_CODES.CANDIDATE_NOT_FOUND);
   }
 }
 
@@ -59,9 +28,7 @@ async function runLoggedOp(operation, context, work) {
  * @returns {string}
  */
 export function requireAcceptedOfferGuid(resolved) {
-  if (!resolved?.candidateExists) {
-    throw new AppError(CANDIDATE_NOT_FOUND_MESSAGE, 404, ERROR_CODES.CANDIDATE_NOT_FOUND);
-  }
+  requireCandidateExists(resolved);
   if (!resolved.offerGuid) {
     throw new AppError(
       ACCEPTED_OFFER_NOT_FOUND_MESSAGE,

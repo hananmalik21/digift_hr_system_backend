@@ -391,7 +391,7 @@ app.use('/api/recruitment/dashboard', recDashboardController);
 app.use('/api/rec/job-offers', jobOfferRoutes);
 app.use('/api/rec/job-offers', recJobOffersController);
 
-// Recruitment — candidate → employee + assignment (REC.CANDIDATE_TO_EMPLOYEE_PKG)
+// Recruitment — candidate → employee + Transfer to HR (REC.CANDIDATE_TO_EMPLOYEE_PKG)
 app.use('/api/rec/candidate-conversion', recCandidateConversionController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)

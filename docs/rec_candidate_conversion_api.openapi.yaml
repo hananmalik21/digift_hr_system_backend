@@ -9,20 +9,26 @@ info:
 
     - `VALIDATE_CONVERSION`
     - `CONVERT_TO_EMPLOYEE`
+    - `TRANSFER_TO_HR`
+    - `UPDATE_TRANSFER_ACTION_STATUS`
 
-    The package creates `EMPL.EMPLOYEES`, `EMPL.ASSIGNMENTS`, and `REC.CANDIDATE_EMPLOYEE_XREF`.
-    Candidate, offer, and position attributes are derived in Oracle — Node.js sends only
-    `offer_guid` / `candidate_guid`, optional `probation_days`, and authenticated `p_actor`.
+    The package creates `EMPL.EMPLOYEES`, `EMPL.ASSIGNMENTS`, `REC.CANDIDATE_EMPLOYEE_XREF`,
+    and `REC.CANDIDATE_HR_TRANSFERS`. Candidate, offer, and position attributes are derived
+    in Oracle — Node.js sends only offer/candidate GUID, optional transfer fields, and
+    authenticated `p_actor`.
 
-    **Auth:** JWT required. Permission `REC_CANDIDATE_CONVERT_EMPLOYEE` when
-    `REC_ENFORCE_PERMISSIONS=true`.
+    Employee and initial assignment are created in HR (not as a Pending placeholder).
 
-    **IDs:** Conversion uses **OFFER_GUID**, not CANDIDATE_GUID. The candidate-friendly
-    endpoint looks up the latest ACCEPTED offer (`OFFER_ID DESC`) then calls the package.
+    **Auth:** JWT required. Permissions `REC_CANDIDATE_CONVERT_EMPLOYEE` /
+    `REC_CANDIDATE_TRANSFER_TO_HR` when `REC_ENFORCE_PERMISSIONS=true`.
+
+    **IDs:** Package calls use **OFFER_GUID**, not CANDIDATE_GUID. Candidate-friendly
+    endpoints look up the latest ACCEPTED offer (`OFFER_ID DESC`) then call the package.
 servers:
   - url: /
 tags:
   - name: Candidate Conversion
+  - name: Transfer to HR
 paths:
   /api/rec/candidate-conversion/{offer_guid}/validate:
     get:
@@ -128,6 +134,144 @@ paths:
                     success: false
                     code: ACCEPTED_OFFER_NOT_FOUND
                     message: No accepted offer was found for this candidate.
+  /api/rec/candidates/{candidate_guid}/transfer-to-hr:
+    get:
+      tags: [Transfer to HR]
+      summary: Load Transfer to HR modal details
+      operationId: getTransferToHrDetails
+      description: |
+        Validates `candidate_guid`, finds the latest ACCEPTED offer, calls
+        `VALIDATE_CONVERSION`, and returns candidate/offer/defaults.
+        `hr_contacts` is empty unless `REC_HR_CONTACTS` is configured.
+        Employee and assignment will be created in HR.
+      parameters:
+        - $ref: '#/components/parameters/CandidateGuidPath'
+      responses:
+        '200':
+          description: Modal payload (`can_transfer=false` is still 200)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferDetailsResponse'
+              example:
+                success: true
+                data:
+                  candidate_guid: 5952FA7941222884E0631718000A4E04
+                  offer_guid: 5957CB3486193C3DE0631718000AA9C8
+                  candidate:
+                    name: Candidate Name
+                  offer:
+                    offer_id: 27
+                    offer_number: OFF-20260818-00022
+                    job_title: LangChain Ai Developer
+                    start_date: '2026-08-18'
+                    employment_type: PERMANENT
+                  validation:
+                    can_transfer: true
+                    message: Candidate is eligible for employee conversion.
+                  defaults:
+                    probation_days: 0
+                    send_notification: true
+                    trigger_onboarding: true
+                  hr_contacts: []
+        '400':
+          $ref: '#/components/responses/InvalidCandidateGuid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Candidate or accepted offer not found
+        '409':
+          $ref: '#/components/responses/AlreadyTransferred'
+    post:
+      tags: [Transfer to HR]
+      summary: Transfer accepted candidate to HR
+      operationId: transferCandidateToHr
+      description: |
+        Resolves latest ACCEPTED offer, then calls `TRANSFER_TO_HR`.
+        After commit, optional email uses the existing mail service and optional
+        onboarding uses the existing onboarding adapter. Email/onboarding failures
+        do not roll back the transfer.
+      parameters:
+        - $ref: '#/components/parameters/CandidateGuidPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+            example:
+              probation_days: 90
+              hr_contact_id: HR_TEAM_001
+              transfer_notes: Please prioritize onboarding.
+              send_notification: true
+              trigger_onboarding: true
+      responses:
+        '201':
+          $ref: '#/components/responses/TransferSuccess'
+        '400':
+          description: Validation or business error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                hr_contact_required:
+                  value:
+                    success: false
+                    code: HR_CONTACT_REQUIRED
+                    message: HR department contact is required when notification is requested.
+                invalid_probation:
+                  value:
+                    success: false
+                    code: INVALID_PROBATION_DAYS
+                    message: Probation days must be zero or greater.
+        '404':
+          description: Candidate or accepted offer not found
+        '409':
+          $ref: '#/components/responses/AlreadyTransferred'
+        '500':
+          description: Unexpected transfer failure
+          content:
+            application/json:
+              example:
+                success: false
+                code: TRANSFER_FAILED
+                message: Unable to transfer candidate to HR. Please try again.
+  /api/rec/candidates/{candidate_guid}/transfer-history:
+    get:
+      tags: [Transfer to HR]
+      summary: List Transfer to HR history
+      operationId: getCandidateTransferHistory
+      description: Reads `REC.CANDIDATE_HR_TRANSFERS` for the candidate.
+      parameters:
+        - $ref: '#/components/parameters/CandidateGuidPath'
+      responses:
+        '200':
+          description: Transfer history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferHistoryResponse'
+              example:
+                success: true
+                data:
+                  - transfer_id: 101
+                    employee_id: 362
+                    employee_number: EMP-362
+                    assignment_id: 460
+                    hr_contact_id: HR_TEAM_001
+                    probation_days: 90
+                    send_notification: true
+                    notification_status: SENT
+                    trigger_onboarding: true
+                    onboarding_status: TRIGGERED
+                    transfer_status: COMPLETED
+                    transferred_by: hr.user
+                    transfer_date: '2026-09-02 07:00:00'
+        '400':
+          $ref: '#/components/responses/InvalidCandidateGuid'
+        '404':
+          description: Candidate not found
 components:
   parameters:
     OfferGuidPath:
@@ -191,6 +335,52 @@ components:
             success: false
             code: CANDIDATE_ALREADY_CONVERTED
             message: This candidate has already been converted to an employee.
+    AlreadyTransferred:
+      description: Offer already transferred to HR
+      content:
+        application/json:
+          example:
+            success: false
+            code: OFFER_ALREADY_TRANSFERRED
+            message: This offer has already been transferred to HR.
+    InvalidCandidateGuid:
+      description: Invalid CANDIDATE_GUID
+      content:
+        application/json:
+          example:
+            success: false
+            code: INVALID_CANDIDATE_GUID
+            message: candidate_guid must be a 32-character hexadecimal string.
+    TransferSuccess:
+      description: Candidate transferred to HR. Email/onboarding failures still return 201.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TransferSuccessResponse'
+          example:
+            success: true
+            message: Candidate transferred to HR successfully.
+            data:
+              candidate_guid: 5952FA7941222884E0631718000A4E04
+              offer_guid: 5957CB3486193C3DE0631718000AA9C8
+              employee:
+                employee_id: 362
+                employee_guid: 5A7B9C9C49A83E0EE0631718000A8B11
+                employee_number: EMP-362
+              assignment:
+                assignment_id: 460
+                assignment_guid: 5A7B9C9C49A93E0EE0631718000A8B11
+              transfer:
+                transfer_id: 101
+                transfer_guid: 5A7B9C9C49AA3E0EE0631718000A8B11
+                status: COMPLETED
+                notification:
+                  requested: true
+                  status: SENT
+                onboarding:
+                  requested: true
+                  status: TRIGGERED
+                  reference: ONB-101
     Unauthorized:
       description: Missing or invalid JWT
     UnexpectedDatabaseError:
@@ -244,6 +434,109 @@ components:
                 assignment_guid: { type: string }
             conversion_status: { type: string, example: COMPLETED }
             next_action: { type: string, example: COMPLETE_EMPLOYEE_ONBOARDING }
+    TransferRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        probation_days:
+          type: integer
+          minimum: 0
+          default: 0
+        hr_contact_id:
+          type: string
+          description: Required when send_notification is true.
+        transfer_notes:
+          type: string
+          maxLength: 4000
+        send_notification:
+          type: boolean
+          default: true
+        trigger_onboarding:
+          type: boolean
+          default: true
+      description: Do not send department, position, hire date, or assignment status.
+    TransferDetailsResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            candidate_guid: { type: string }
+            offer_guid: { type: string }
+            candidate:
+              type: object
+              properties:
+                name: { type: string }
+            offer:
+              type: object
+              properties:
+                offer_id: { type: integer }
+                offer_number: { type: string }
+                job_title: { type: string }
+                start_date: { type: string }
+                employment_type: { type: string }
+            validation:
+              type: object
+              properties:
+                can_transfer: { type: boolean }
+                message: { type: string }
+            defaults:
+              type: object
+              properties:
+                probation_days: { type: integer }
+                send_notification: { type: boolean }
+                trigger_onboarding: { type: boolean }
+            hr_contacts:
+              type: array
+              items:
+                type: object
+    TransferSuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            candidate_guid: { type: string }
+            offer_guid: { type: string }
+            employee:
+              type: object
+              properties:
+                employee_id: { type: integer }
+                employee_guid: { type: string }
+                employee_number: { type: string }
+            assignment:
+              type: object
+              properties:
+                assignment_id: { type: integer }
+                assignment_guid: { type: string }
+            transfer:
+              type: object
+              properties:
+                transfer_id: { type: integer }
+                transfer_guid: { type: string }
+                status: { type: string, example: COMPLETED }
+                notification:
+                  type: object
+                  properties:
+                    requested: { type: boolean }
+                    status: { type: string }
+                onboarding:
+                  type: object
+                  properties:
+                    requested: { type: boolean }
+                    status: { type: string }
+                    reference: { type: string }
+    TransferHistoryResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: array
+          items:
+            type: object
     ErrorResponse:
       type: object
       properties:

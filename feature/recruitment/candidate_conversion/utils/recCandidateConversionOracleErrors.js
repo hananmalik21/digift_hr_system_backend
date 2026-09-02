@@ -1,5 +1,9 @@
 import { AppError } from '../../../../utils/errors/index.js';
-import { ERROR_CODES, GENERIC_ERROR_MESSAGE } from './recCandidateConversionConstants.js';
+import {
+  ERROR_CODES,
+  GENERIC_ERROR_MESSAGE,
+  GENERIC_TRANSFER_ERROR_MESSAGE
+} from './recCandidateConversionConstants.js';
 
 const APPLICATION_ERROR_MIN = 20000;
 const APPLICATION_ERROR_MAX = 20999;
@@ -14,6 +18,7 @@ function rule(pattern, statusCode, code) {
  * First matching rule wins.
  */
 const BUSINESS_ERROR_RULES = Object.freeze([
+  rule(/already been transferred|already transferred|offer already transferred/i, 409, ERROR_CODES.OFFER_ALREADY_TRANSFERRED),
   rule(/offer has already been converted|offer already converted/i, 409, ERROR_CODES.OFFER_ALREADY_CONVERTED),
   rule(/already been converted|already converted/i, 409, ERROR_CODES.CANDIDATE_ALREADY_CONVERTED),
   rule(/email already exists|employee already exists|duplicate.*email/i, 409, ERROR_CODES.EMPLOYEE_ALREADY_EXISTS),
@@ -102,10 +107,21 @@ export function matchBusinessErrorRule(message) {
  * Map an Oracle/driver error to an AppError safe for the Flutter client.
  *
  * @param {unknown} err
+ * @param {{
+ *   genericMessage?: string,
+ *   unmatchedAppCode?: string,
+ *   unmatchedAppStatusCode?: number,
+ *   unexpectedCode?: string
+ * }} [options]
  * @returns {AppError}
  */
-export function mapConversionOracleError(err) {
+export function mapConversionOracleError(err, options = {}) {
   if (err instanceof AppError) return err;
+
+  const genericMessage = options.genericMessage || GENERIC_ERROR_MESSAGE;
+  const unmatchedAppCode = options.unmatchedAppCode || ERROR_CODES.CANDIDATE_CONVERSION_FAILED;
+  const unmatchedAppStatusCode = options.unmatchedAppStatusCode ?? 400;
+  const unexpectedCode = options.unexpectedCode || ERROR_CODES.CANDIDATE_CONVERSION_FAILED;
 
   const errorNum = extractOracleErrorNum(err);
   const cleaned = cleanOracleBusinessMessage(err);
@@ -113,14 +129,25 @@ export function mapConversionOracleError(err) {
   if (isApplicationErrorNum(errorNum)) {
     const matched = matchBusinessErrorRule(cleaned);
     if (matched) {
-      return new AppError(cleaned || GENERIC_ERROR_MESSAGE, matched.statusCode, matched.code);
+      return new AppError(cleaned || genericMessage, matched.statusCode, matched.code);
     }
-    return new AppError(
-      cleaned || GENERIC_ERROR_MESSAGE,
-      400,
-      ERROR_CODES.CANDIDATE_CONVERSION_FAILED
-    );
+    return new AppError(cleaned || genericMessage, unmatchedAppStatusCode, unmatchedAppCode);
   }
 
-  return new AppError(GENERIC_ERROR_MESSAGE, 500, ERROR_CODES.CANDIDATE_CONVERSION_FAILED);
+  return new AppError(genericMessage, 500, unexpectedCode);
+}
+
+/**
+ * Transfer-to-HR Oracle mapping. Unmatched unexpected errors are TRANSFER_FAILED / 500.
+ *
+ * @param {unknown} err
+ * @returns {AppError}
+ */
+export function mapTransferOracleError(err) {
+  return mapConversionOracleError(err, {
+    genericMessage: GENERIC_TRANSFER_ERROR_MESSAGE,
+    unmatchedAppCode: ERROR_CODES.TRANSFER_FAILED,
+    unmatchedAppStatusCode: 400,
+    unexpectedCode: ERROR_CODES.TRANSFER_FAILED
+  });
 }
