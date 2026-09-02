@@ -1,6 +1,7 @@
 /**
- * Candidate → employee conversion APIs.
- * Calls REC.CANDIDATE_TO_EMPLOYEE_PKG only (VALIDATE_CONVERSION / CONVERT_TO_EMPLOYEE).
+ * Candidate → employee conversion and Transfer to HR APIs.
+ * Calls REC.CANDIDATE_TO_EMPLOYEE_PKG only
+ * (VALIDATE_CONVERSION / CONVERT_TO_EMPLOYEE / TRANSFER_TO_HR / UPDATE_TRANSFER_ACTION_STATUS).
  */
 import express from 'express';
 import { asyncHandler } from '@digifyhr/common';
@@ -11,11 +12,16 @@ import { CANDIDATE_CONVERSION_PERMISSIONS } from '../utils/recCandidateConversio
 import {
   parseConversionCandidateGuid,
   parseConversionOfferGuid,
-  parseProbationDays
+  parseProbationDays,
+  parseTransferToHrBody
 } from '../utils/recCandidateConversionValidators.js';
 import {
   handleCandidateConversionError,
+  handleCandidateTransferError,
   sendConvertSuccessResponse,
+  sendTransferDetailsResponse,
+  sendTransferHistoryResponse,
+  sendTransferSuccessResponse,
   sendValidateConversionResponse
 } from '../utils/recCandidateConversionResponses.js';
 import {
@@ -23,14 +29,22 @@ import {
   convertCandidateToEmployee,
   validateCandidateConversion
 } from '../service/recCandidateConversionService.js';
+import {
+  getCandidateTransferHistory,
+  getTransferToHrDetails,
+  transferCandidateToHr
+} from '../service/recCandidateTransferService.js';
 
 const router = express.Router();
 
-/** Mounted at /api/rec/candidates for POST /:candidate_guid/convert-to-employee. */
+/** Mounted at /api/rec/candidates for candidate-guid conversion and Transfer to HR. */
 export const recCandidateConvertByCandidateRouter = express.Router();
 
 const requireConversionPermission = recRequirePermission(
   CANDIDATE_CONVERSION_PERMISSIONS.convert
+);
+const requireTransferPermission = recRequirePermission(
+  CANDIDATE_CONVERSION_PERMISSIONS.transfer
 );
 
 /**
@@ -45,15 +59,18 @@ function resolveConversionActor(req) {
   throw new UnauthorizedError('Unauthorized');
 }
 
-function conversionRoute(handler) {
+function packageRoute(handler, onError) {
   return asyncHandler(async (req, res) => {
     try {
       return await handler(req, res);
     } catch (err) {
-      return handleCandidateConversionError(res, err);
+      return onError(res, err);
     }
   });
 }
+
+const conversionRoute = (handler) => packageRoute(handler, handleCandidateConversionError);
+const transferRoute = (handler) => packageRoute(handler, handleCandidateTransferError);
 
 /**
  * GET /api/rec/candidate-conversion/:offer_guid/validate
@@ -83,6 +100,51 @@ router.post(
       parseProbationDays(req.body)
     );
     return sendConvertSuccessResponse(res, data);
+  })
+);
+
+/**
+ * GET /api/rec/candidates/:candidate_guid/transfer-to-hr
+ */
+recCandidateConvertByCandidateRouter.get(
+  '/:candidate_guid/transfer-to-hr',
+  requireTransferPermission,
+  transferRoute(async (req, res) => {
+    const candidateGuid = parseConversionCandidateGuid(req.params.candidate_guid);
+    const data = await getTransferToHrDetails(candidateGuid, resolveConversionActor(req));
+    return sendTransferDetailsResponse(res, data);
+  })
+);
+
+/**
+ * POST /api/rec/candidates/:candidate_guid/transfer-to-hr
+ * Body: probation_days, hr_contact_id, transfer_notes, send_notification, trigger_onboarding.
+ */
+recCandidateConvertByCandidateRouter.post(
+  '/:candidate_guid/transfer-to-hr',
+  requireTransferPermission,
+  transferRoute(async (req, res) => {
+    const candidateGuid = parseConversionCandidateGuid(req.params.candidate_guid);
+    const payload = parseTransferToHrBody(req.body);
+    const result = await transferCandidateToHr(
+      candidateGuid,
+      resolveConversionActor(req),
+      payload
+    );
+    return sendTransferSuccessResponse(res, result.data, result.message);
+  })
+);
+
+/**
+ * GET /api/rec/candidates/:candidate_guid/transfer-history
+ */
+recCandidateConvertByCandidateRouter.get(
+  '/:candidate_guid/transfer-history',
+  requireTransferPermission,
+  transferRoute(async (req, res) => {
+    const candidateGuid = parseConversionCandidateGuid(req.params.candidate_guid);
+    const data = await getCandidateTransferHistory(candidateGuid, resolveConversionActor(req));
+    return sendTransferHistoryResponse(res, data);
   })
 );
 
