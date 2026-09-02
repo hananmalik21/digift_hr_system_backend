@@ -215,6 +215,8 @@ app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
 // Enterprise catch-alls (/api/:structureId… and / hierarchy aliases).
 // Must stay AFTER holidays, time-zones, data-roles, employer-info, and job-postings.
+// The package also skips host-owned prefixes (grc, payroll, tm, …) so those
+// later mounts are not handled as a structure id.
 mountEnterpriseCatchAllRoutes(app);
 
 // Shifts routes
@@ -604,7 +606,7 @@ async function shutdown(signal) {
   const forceTimer = setTimeout(() => {
     logger.error('Shutdown timed out; exiting');
     process.exit(1);
-  }, 8000);
+  }, 15000);
   forceTimer.unref();
 
   server.close(async () => {

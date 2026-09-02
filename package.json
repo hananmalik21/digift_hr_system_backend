@@ -35,7 +35,7 @@
     "bcrypt": "^5.1.1",
     "canvas": "^3.2.2",
     "cors": "^2.8.5",
-    "digify-hr-enterprise-backend": "git+ssh://git@github.com/hananmalik21/digify_hr_enterprise-backend.git#v1.0.0",
+    "digify-hr-enterprise-backend": "git+ssh://git@github.com/hananmalik21/digify_hr_enterprise-backend.git#v1.0.1",
     "digify-hr-grc-backend": "git+ssh://git@github.com/hananmalik21/digify_hr_grc-backend.git#v1.1.0",
     "dotenv": "^17.2.3",
     "exceljs": "^4.4.0",

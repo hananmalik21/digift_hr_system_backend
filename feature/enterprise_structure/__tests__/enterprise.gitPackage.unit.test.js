@@ -20,3 +20,24 @@ test('mount functions reject a missing app', () => {
   assert.throws(() => mountEnterprisePackage(null), /Express app/);
   assert.throws(() => mountEnterpriseCatchAllRoutes(null), /Express app/);
 });
+
+test('default Security hook is kept unless an explicit function is passed', async () => {
+  const { resolveOnEnterpriseProvisioned } = await import('../enterprise.gitPackage.js');
+  const { provisionEnterpriseAdminOnEnterpriseCreate } = await import('../../security/security.facade.js');
+  const custom = async () => ({ ok: true });
+
+  assert.equal(resolveOnEnterpriseProvisioned(), provisionEnterpriseAdminOnEnterpriseCreate);
+  assert.equal(resolveOnEnterpriseProvisioned({}), provisionEnterpriseAdminOnEnterpriseCreate);
+  assert.equal(
+    resolveOnEnterpriseProvisioned({ onEnterpriseProvisioned: undefined }),
+    provisionEnterpriseAdminOnEnterpriseCreate
+  );
+  assert.equal(
+    resolveOnEnterpriseProvisioned({ onEnterpriseProvisioned: null }),
+    provisionEnterpriseAdminOnEnterpriseCreate
+  );
+  assert.equal(
+    resolveOnEnterpriseProvisioned({ onEnterpriseProvisioned: custom }),
+    custom
+  );
+});

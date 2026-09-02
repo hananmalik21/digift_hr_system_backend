@@ -6,7 +6,7 @@ This document describes the **current modular monolith**. It is not a microservi
 
 Digify ERP is a Node.js (ESM) Express 5 backend that serves a Flutter frontend. Business domains live under `feature/`. Oracle Database holds almost all business logic in packages, views, and tables. Node is primarily transport, validation, shaping, and orchestration.
 
-Runtime: single Node process, one composition root (`index.js`), two Oracle connection pools (primary + face attendance), optional Firebase Admin, optional Google OAuth, optional Puppeteer for job-offer PDFs.
+Runtime: single Node process, one composition root (`index.js`), four Oracle connection pools (primary ERP, face attendance, GRC package, Enterprise package), optional Firebase Admin, optional Google OAuth, optional Puppeteer for job-offer PDFs.
 
 ## 2. Entry point
 
@@ -17,7 +17,7 @@ Runtime: single Node process, one composition root (`index.js`), two Oracle conn
   2. Create Express app (`trust proxy`, CORS, JSON, request ID)
   3. Hostname → enterprise context
   4. JWT `requireAuth` + JWT/enterprise match
-  5. Mount all feature routers (order matters; several catch-all routes)
+  5. Mount all feature routers (order matters; Enterprise catch-alls skip host prefixes such as `grc`/`payroll`)
   6. Create Oracle pools, initialize Firebase, optional admin seed
   7. Prewarm face models and PDF browser
   8. `GET /health`
@@ -25,6 +25,8 @@ Runtime: single Node process, one composition root (`index.js`), two Oracle conn
   10. Listen; SIGINT/SIGTERM closes pools and the PDF browser
 
 There is no per-module registrar. All HTTP wiring converges on `index.js`.
+
+Enterprise HTTP is served by `digify-hr-enterprise-backend` (two-phase mounts). Local `feature/enterprise_structure/` (except `enterprise.gitPackage.js`) and `feature/look_ups/ent/` remain as a rollback copy and are not mounted at runtime.
 
 ## 3. Route structure
 
@@ -34,7 +36,7 @@ Public API prefixes (not exhaustive):
 |--------|--------|
 | `GET /health` | Shared |
 | `/api/security/*`, `/api/auth/*` | Security |
-| `/api/enterprises`, `/api/hr-org-structures`, `/api/org-units`, `/api/grades`, `/api/positions`, … | Enterprise |
+| `/api/enterprises`, `/api/hr-org-structures`, `/api/org-units`, `/api/grades`, `/api/positions`, … | Enterprise (`digify-hr-enterprise-backend`) |
 | `/api/employees`, `/api/create-employee`, `/api/update-employee/:id` | Employee |
 | `/api/tm/*`, `/api/holidays`, `/api/time-zones`, `/api/registerFace` | Time / Attendance |
 | `/api/abs/*` | Leave |
@@ -60,7 +62,7 @@ Canonical domain folders (do not rename for cosmetic consistency):
 | Domain | Path |
 |--------|------|
 | Security | `feature/security/` |
-| Enterprise | `feature/enterprise_structure/` |
+| Enterprise | npm `digify-hr-enterprise-backend` via `feature/enterprise_structure/enterprise.gitPackage.js` |
 | Employee | `feature/employee_management/` |
 | Time | `feature/time_management/` + `src/` (overtime requests) |
 | Attendance | `feature/attendance_management/` |
@@ -71,7 +73,8 @@ Canonical domain folders (do not rename for cosmetic consistency):
 | Recruitment | `feature/recruitment/` |
 | Notifications | `feature/notifications/` |
 | GRC | npm `digify-hr-grc-backend` via `feature/grc/grc.gitPackage.js` |
-| Lookups | `feature/look_ups/` |
+| Shared technical | npm `@digifyhr/common` `#v1.2.0` (logger, request ID, Excel, GUID helpers) |
+| Lookups | `feature/look_ups/` (ENT lookups live in the Enterprise package) |
 | Integrations | `feature/integrations/` |
 
 Overflow (legacy, still in use):
@@ -83,7 +86,7 @@ Overflow (legacy, still in use):
 ## 5. Module responsibility
 
 - **Security:** login/JWT, users, roles, modules/functions, work locations, password reset, data access predicates
-- **Enterprise:** tenants, org structures/units, grades, jobs, positions, currencies, stats
+- **Enterprise:** tenants, org structures/units, grades, jobs, positions, currencies, stats (Git package `digify-hr-enterprise-backend`)
 - **Employee:** employee CRUD, assignments, documents, create/update all-in-one
 - **Time / Attendance:** shifts, patterns, schedules, timesheets, attendance, overtime, face punch
 - **Leave:** leave types, policies, requests, balances, documents
@@ -122,6 +125,8 @@ Node does **not** own table DDL for production. SQL files under `feature/**/sql/
 |------|------|
 | `config/db.js` | Primary Oracle pool |
 | `config/oracleFacePool.js` | Face attendance pool |
+| `feature/grc/grc.gitPackage.js` | GRC package pool (`digify-hr-grc`) |
+| `feature/enterprise_structure/enterprise.gitPackage.js` | Enterprise package pool (`digify-hr-enterprise`) |
 | `config/firebase.js` | Firebase Admin |
 | `config/googleOAuth.js` | Google OAuth flags |
 | `middleware/authMiddleware.js` | JWT |

@@ -3,6 +3,7 @@
  *
  * Prefix-safe routes and catch-alls are mounted separately so
  * `/api/:structureId` cannot steal Time / Security / Recruitment paths.
+ * The package catch-all also skips host-owned first segments (grc, pay, …).
  */
 import {
   initEnterprisePackage as initPkg,
@@ -27,10 +28,17 @@ export function mountEnterpriseCatchAllRoutes(app) {
   mountCatchAll(app);
 }
 
+export function resolveOnEnterpriseProvisioned(options = {}) {
+  return typeof options.onEnterpriseProvisioned === 'function'
+    ? options.onEnterpriseProvisioned
+    : provisionEnterpriseAdminOnEnterpriseCreate;
+}
+
 export async function initEnterprisePackage(options = {}) {
+  const { onEnterpriseProvisioned, ...rest } = options;
   return initPkg({
-    onEnterpriseProvisioned: provisionEnterpriseAdminOnEnterpriseCreate,
-    ...options
+    ...rest,
+    onEnterpriseProvisioned: resolveOnEnterpriseProvisioned({ onEnterpriseProvisioned })
   });
 }
 
