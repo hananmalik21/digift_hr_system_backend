@@ -1,4 +1,4 @@
-import { POSITION_ALLOWED_EMPLOYMENT_TYPES } from '../../../enterprise_structure/positions/constants/positions_constants.js';
+import { POSITION_ALLOWED_EMPLOYMENT_TYPES } from 'digify-hr-enterprise-backend';
 
 export const ALLOWED_CRITERIA_TYPE_CODES = Object.freeze([
   'EMPLOYMENT_TYPE',
