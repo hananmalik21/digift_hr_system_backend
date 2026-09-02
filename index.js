@@ -89,6 +89,9 @@ import recJobPostingEmployerInfoController from './feature/recruitment/job_posti
 import recApplicationsController from './feature/recruitment/applications/controller/recApplicationsController.js';
 import recDashboardController from './feature/recruitment/dashboard/controller/recDashboardController.js';
 import recJobOffersController from './feature/recruitment/job_offers/controller/recJobOffersController.js';
+import recCandidateConversionController, {
+  recCandidateConvertByCandidateRouter
+} from './feature/recruitment/candidate_conversion/controller/recCandidateConversionController.js';
 import jobOfferRoutes from './routes/jobOfferRoutes.js';
 import testEmailRoutes from './routes/testEmail.routes.js';
 import recCandidateUserController from './feature/recruitment/candidate_users/controller/recCandidateUserController.js';
@@ -360,8 +363,10 @@ app.use('/api/rec/candidates/interviews', recCandidateInterviewsController);
 app.use('/api/recruitment/candidates/interviews', recCandidateInterviewsController);
 
 // Recruitment — candidates (REC.CANDIDATE_PKG)
+app.use('/api/rec/candidates', recCandidateConvertByCandidateRouter);
 app.use('/api/rec/candidates', recCandidatesController);
 app.use('/api/recruitment/candidates', recCandidateNotesController);
+app.use('/api/recruitment/candidates', recCandidateConvertByCandidateRouter);
 app.use('/api/recruitment/candidates', recCandidatesController);
 
 // Career portal — token-free (register, etc.)
@@ -385,6 +390,9 @@ app.use('/api/recruitment/dashboard', recDashboardController);
 // Recruitment — job offers (REC.V_JOB_OFFER_MANAGEMENT reads, REC.REC_JOB_OFFER_PKG mutations)
 app.use('/api/rec/job-offers', jobOfferRoutes);
 app.use('/api/rec/job-offers', recJobOffersController);
+
+// Recruitment — candidate → employee + assignment (REC.CANDIDATE_TO_EMPLOYEE_PKG)
+app.use('/api/rec/candidate-conversion', recCandidateConversionController);
 
 // Recruitment — lookups (REC.REC_LOOKUP_TYPES / REC.REC_LOOKUP_VALUES; enterprise scope includes global NULL rows)
 app.use('/api/rec/lookup-types', recLookupTypeController);

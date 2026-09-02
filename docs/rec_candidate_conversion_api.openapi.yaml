@@ -1,0 +1,252 @@
+openapi: 3.0.3
+info:
+  title: Digify ERP — Candidate to Employee Conversion API
+  version: 2.0.0
+  description: |
+    Converts an accepted recruitment candidate into an employee **and** initial assignment.
+
+    Calls `REC.CANDIDATE_TO_EMPLOYEE_PKG` only:
+
+    - `VALIDATE_CONVERSION`
+    - `CONVERT_TO_EMPLOYEE`
+
+    The package creates `EMPL.EMPLOYEES`, `EMPL.ASSIGNMENTS`, and `REC.CANDIDATE_EMPLOYEE_XREF`.
+    Candidate, offer, and position attributes are derived in Oracle — Node.js sends only
+    `offer_guid` / `candidate_guid`, optional `probation_days`, and authenticated `p_actor`.
+
+    **Auth:** JWT required. Permission `REC_CANDIDATE_CONVERT_EMPLOYEE` when
+    `REC_ENFORCE_PERMISSIONS=true`.
+
+    **IDs:** Conversion uses **OFFER_GUID**, not CANDIDATE_GUID. The candidate-friendly
+    endpoint looks up the latest ACCEPTED offer (`OFFER_ID DESC`) then calls the package.
+servers:
+  - url: /
+tags:
+  - name: Candidate Conversion
+paths:
+  /api/rec/candidate-conversion/{offer_guid}/validate:
+    get:
+      tags: [Candidate Conversion]
+      summary: Validate candidate-to-employee conversion
+      operationId: validateCandidateConversion
+      parameters:
+        - $ref: '#/components/parameters/OfferGuidPath'
+      responses:
+        '200':
+          description: Validation completed (`can_convert=false` is still 200)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateConversionResponse'
+              example:
+                success: true
+                data:
+                  offer_guid: 5957CB3486193C3DE0631718000AA9C8
+                  can_convert: true
+                  message: Candidate is eligible for employee conversion.
+        '400':
+          $ref: '#/components/responses/InvalidOfferGuid'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/OfferNotFound'
+        '500':
+          $ref: '#/components/responses/UnexpectedDatabaseError'
+  /api/rec/candidate-conversion/{offer_guid}/convert:
+    post:
+      tags: [Candidate Conversion]
+      summary: Convert accepted offer to employee + assignment
+      operationId: convertCandidateToEmployee
+      parameters:
+        - $ref: '#/components/parameters/OfferGuidPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertRequest'
+            example:
+              probation_days: 0
+      responses:
+        '201':
+          $ref: '#/components/responses/ConvertSuccess'
+        '400':
+          description: Validation or business error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                offer_not_accepted:
+                  value:
+                    success: false
+                    code: OFFER_NOT_ACCEPTED
+                    message: Offer must be ACCEPTED before candidate conversion.
+                invalid_probation:
+                  value:
+                    success: false
+                    code: INVALID_PROBATION_DAYS
+                    message: Probation days must be zero or greater.
+        '409':
+          $ref: '#/components/responses/AlreadyConverted'
+        '404':
+          $ref: '#/components/responses/OfferNotFound'
+        '500':
+          $ref: '#/components/responses/UnexpectedDatabaseError'
+  /api/rec/candidates/{candidate_guid}/convert-to-employee:
+    post:
+      tags: [Candidate Conversion]
+      summary: Convert candidate using latest accepted offer
+      operationId: convertCandidateByCandidateGuid
+      description: |
+        Validates `candidate_guid`, finds the latest ACCEPTED offer (`OFFER_ID DESC`),
+        then calls `CONVERT_TO_EMPLOYEE` with that OFFER_GUID.
+      parameters:
+        - $ref: '#/components/parameters/CandidateGuidPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertRequest'
+            example:
+              probation_days: 0
+      responses:
+        '201':
+          $ref: '#/components/responses/ConvertSuccess'
+        '400':
+          description: Invalid candidate GUID or probation_days
+        '404':
+          description: Candidate or accepted offer not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                no_accepted_offer:
+                  value:
+                    success: false
+                    code: ACCEPTED_OFFER_NOT_FOUND
+                    message: No accepted offer was found for this candidate.
+components:
+  parameters:
+    OfferGuidPath:
+      name: offer_guid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Fa-f0-9]{32}$'
+        example: 5957CB3486193C3DE0631718000AA9C8
+    CandidateGuidPath:
+      name: candidate_guid
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Fa-f0-9]{32}$'
+        example: 5952FA7941222884E0631718000A4E04
+  responses:
+    ConvertSuccess:
+      description: Employee and assignment created
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ConvertSuccessResponse'
+          example:
+            success: true
+            message: Candidate converted to employee successfully.
+            data:
+              offer_guid: 5957CB3486193C3DE0631718000AA9C8
+              employee:
+                employee_id: 362
+                employee_guid: 5A7B9C9C49A83E0EE0631718000A8B11
+                employee_number: EMP-362
+              assignment:
+                assignment_id: 460
+                assignment_guid: 5A7B9C9C49A93E0EE0631718000A8B11
+              conversion_status: COMPLETED
+              next_action: COMPLETE_EMPLOYEE_ONBOARDING
+    InvalidOfferGuid:
+      description: Invalid OFFER_GUID
+      content:
+        application/json:
+          example:
+            success: false
+            code: INVALID_OFFER_GUID
+            message: offer_guid must be a 32-character hexadecimal string.
+    OfferNotFound:
+      description: Offer not found
+      content:
+        application/json:
+          example:
+            success: false
+            code: OFFER_NOT_FOUND
+            message: Offer not found.
+    AlreadyConverted:
+      description: Already converted
+      content:
+        application/json:
+          example:
+            success: false
+            code: CANDIDATE_ALREADY_CONVERTED
+            message: This candidate has already been converted to an employee.
+    Unauthorized:
+      description: Missing or invalid JWT
+    UnexpectedDatabaseError:
+      description: Unexpected database error
+      content:
+        application/json:
+          example:
+            success: false
+            code: CANDIDATE_CONVERSION_FAILED
+            message: Unable to convert candidate to employee. Please try again.
+  schemas:
+    ConvertRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        probation_days:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Optional. Defaults to 0. Do not send department, position, or hire fields.
+    ValidateConversionResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            offer_guid: { type: string }
+            can_convert: { type: boolean }
+            message: { type: string }
+    ConvertSuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data:
+          type: object
+          properties:
+            offer_guid: { type: string }
+            candidate_guid: { type: string }
+            employee:
+              type: object
+              properties:
+                employee_id: { type: integer }
+                employee_guid: { type: string }
+                employee_number: { type: string }
+            assignment:
+              type: object
+              properties:
+                assignment_id: { type: integer }
+                assignment_guid: { type: string }
+            conversion_status: { type: string, example: COMPLETED }
+            next_action: { type: string, example: COMPLETE_EMPLOYEE_ONBOARDING }
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        code: { type: string }
+        message: { type: string }
