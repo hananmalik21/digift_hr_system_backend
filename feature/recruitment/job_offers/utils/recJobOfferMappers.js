@@ -18,6 +18,7 @@ export function mapJobOfferDetailOffer(row) {
     enterprise_id: safeFiniteNumber(m.enterprise_id),
     application_guid: normalizeGuidValue(m.application_guid),
     application_number: strOrNull(m.application_number),
+    resume_url: strOrNull(m.resume_url),
     candidate_guid: normalizeGuidValue(m.candidate_guid),
     candidate_name: strOrNull(m.candidate_name),
     posting_id: safeFiniteNumber(m.posting_id),

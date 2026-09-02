@@ -4,6 +4,7 @@ info:
   version: 3.0.0
   description: |
     Job offers via `REC.REC_JOB_OFFER_PKG` and `REC.V_JOB_OFFER_MANAGEMENT`.
+    List and detail include `resume_url` from the linked application (`RESUME_URL` on the management view), or `null` when no resume is attached. Download uses `GET /api/recruitment/applications/{applicationGuid}/resume`.
 
     **Lifecycle:** Draft Offer (`DRAFT`) → Offer Approval (`APPROVED` / `REJECTED`) → Extend to Candidate (`EXTENDED`) → Candidate Response (`ACCEPTED` / `DECLINED` / `EXPIRED`) or Company Action (`WITHDRAWN`).
 
@@ -300,6 +301,11 @@ components:
         offer_guid: { type: string }
         enterprise_id: { type: integer }
         application_id: { type: integer }
+        resume_url:
+          type: string
+          nullable: true
+          description: Relative path to download the linked application resume, or null when none is attached.
+          example: /api/recruitment/applications/9F82D53C95A84BC78D91273B59128A01/resume
         candidate_guid: { type: string }
         posting_id: { type: integer }
         offer_number: { type: string }
@@ -358,6 +364,12 @@ components:
             offer:
               allOf:
                 - type: object
+                  properties:
+                    resume_url:
+                      type: string
+                      nullable: true
+                      description: Relative path to download the linked application resume, or null when none is attached.
+                      example: /api/recruitment/applications/9F82D53C95A84BC78D91273B59128A01/resume
                 - $ref: '#/components/schemas/OfferStageFields'
             components: { type: array, items: { type: object } }
             benefits: { type: object }
