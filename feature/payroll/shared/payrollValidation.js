@@ -6,6 +6,7 @@ import { ValidationError, ForbiddenError } from '../../../utils/errors/index.js'
 import { parseGuid } from '@digifyhr/common';
 import { getActingEnterpriseId } from '../../../utils/userContext.js';
 import { resolveRequestEnterpriseId } from '../../../utils/requestEnterprise.js';
+import { resolveAuditActor, sendForbiddenError, sendValidationError } from './payrollResponse.js';
 
 export function requirePositiveInt(value, field) {
   if (value == null || value === '') {
@@ -41,6 +42,21 @@ export function requireString(value, field, { max = 4000, min = 1 } = {}) {
 export function optionalString(value, field, opts) {
   if (value == null || value === '') return null;
   return requireString(value, field, opts);
+}
+
+export function requireOneOf(value, field, allowed) {
+  const s = requireString(value, field, { max: 80 }).toUpperCase();
+  if (!allowed.includes(s)) {
+    throw new ValidationError(`${field} must be one of: ${allowed.join(', ')}`, [
+      { field, message: `${field} must be one of: ${allowed.join(', ')}` }
+    ]);
+  }
+  return s;
+}
+
+export function optionalOneOf(value, field, allowed) {
+  if (value == null || value === '') return null;
+  return requireOneOf(value, field, allowed);
 }
 
 export function requireYn(value, field, defaultValue = null) {
@@ -142,4 +158,47 @@ export function pickFilters(query, keys) {
     if (query[key] != null && query[key] !== '') out[key] = query[key];
   }
   return out;
+}
+
+export const PAYROLL_STATUS_VALUES = ['ACTIVE', 'INACTIVE'];
+
+/** Persisted PAY.PAYROLL_RUNS.STATUS_CODE values after PAYROLL_PROCESSING_PKG updates. */
+export const PAYROLL_RUN_STATUS_CODES = Object.freeze([
+  'IN_PROGRESS',
+  'READY_TO_FINALIZE',
+  'COMPLETED_WITH_ERRORS',
+  'COMPLETED',
+  'ROLLED_BACK',
+  'ERROR'
+]);
+
+/** Persisted PAY.PAY_PAYROLL_FLOW_SUBMISSIONS.STATUS_CODE values. */
+export const PAYROLL_FLOW_SUBMISSION_STATUS_CODES = Object.freeze([
+  'DRAFT',
+  'SUBMITTED',
+  'RUN_CREATED',
+  'COMPLETED',
+  'ROLLED_BACK',
+  'CANCELLED',
+  'ERROR'
+]);
+
+export function runPayrollValidation(res, next, work) {
+  try {
+    work();
+    next();
+  } catch (err) {
+    if (err instanceof ForbiddenError) return sendForbiddenError(res, err);
+    return sendValidationError(res, err);
+  }
+}
+
+export function scopedEnterpriseId(req, raw) {
+  const enterpriseId = resolveEnterpriseId(req, raw);
+  assertEnterpriseAccess(req, enterpriseId);
+  return enterpriseId;
+}
+
+export function resolveOptionalActor(req, body, field) {
+  return optionalString(body?.[field], field, { max: 100 }) || resolveAuditActor(req);
 }

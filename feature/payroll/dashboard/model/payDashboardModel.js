@@ -57,7 +57,7 @@ export async function listDashboardExceptions(filters) {
       ...buildCommonRunFilters(filters, 'r'),
       { sql: 'r.RUN_ID = :run_id', bind: 'run_id', value: filters.run_id },
       {
-        sql: "(r.ERROR_EMPLOYEES > 0 OR r.ERROR_CODE IS NOT NULL OR r.STATUS_CODE = 'ERROR')",
+        sql: "(r.ERROR_EMPLOYEES > 0 OR r.ERROR_CODE IS NOT NULL OR r.STATUS_CODE IN ('ERROR', 'COMPLETED_WITH_ERRORS'))",
         skipIfEmpty: false
       },
       { sql: 'r.PERIOD_START_DATE >= TO_DATE(:period_start_date, \'YYYY-MM-DD\')', bind: 'period_start_date', value: filters.period_start_date },

@@ -13,6 +13,17 @@ import {
   listStatutoryStatus
 } from '../model/payDashboardModel.js';
 
+const DRAFT_RUN_STATUSES = ['DRAFT', 'INITIALIZED'];
+const PROCESSING_RUN_STATUSES = ['PROCESSING', 'IN_PROGRESS', 'PREPARED', 'READY_TO_FINALIZE'];
+const COMPLETED_RUN_STATUSES = ['COMPLETED', 'FINALIZED'];
+const FAILED_RUN_STATUSES = ['ERROR', 'FAILED', 'COMPLETED_WITH_ERRORS'];
+const OPEN_RUN_STATUSES = [
+  ...DRAFT_RUN_STATUSES,
+  ...PROCESSING_RUN_STATUSES,
+  ...COMPLETED_RUN_STATUSES,
+  'COMPLETED_WITH_ERRORS'
+];
+
 export async function getSummary(filters) {
   const raw = await getDashboardSummary(filters);
   const countBy = (rows, ...statuses) =>
@@ -22,10 +33,10 @@ export async function getSummary(filters) {
 
   const data = {
     total_payroll_runs: raw.runs?.total ?? 0,
-    draft_runs: countBy(raw.runs?.by_status, 'DRAFT', 'INITIALIZED'),
-    processing_runs: countBy(raw.runs?.by_status, 'PROCESSING', 'IN_PROGRESS', 'PREPARED'),
-    completed_runs: countBy(raw.runs?.by_status, 'COMPLETED', 'FINALIZED'),
-    failed_runs: countBy(raw.runs?.by_status, 'ERROR', 'FAILED'),
+    draft_runs: countBy(raw.runs?.by_status, ...DRAFT_RUN_STATUSES),
+    processing_runs: countBy(raw.runs?.by_status, ...PROCESSING_RUN_STATUSES),
+    completed_runs: countBy(raw.runs?.by_status, ...COMPLETED_RUN_STATUSES),
+    failed_runs: countBy(raw.runs?.by_status, ...FAILED_RUN_STATUSES),
     closed_runs: countBy(raw.runs?.by_status, 'CLOSED'),
     total_employees_processed: raw.runs?.total_employees ?? 0,
     gross_payroll: null,
@@ -37,7 +48,7 @@ export async function getSummary(filters) {
     unreconciled_payments: countBy(raw.payments?.by_status, 'ISSUED', 'RETURNED'),
     unposted_gl_journals: countBy(raw.gl?.by_status, 'DRAFT', 'VALIDATED', 'APPROVED', 'EXPORTED'),
     unpublished_payslips: countBy(raw.payslips?.by_status, 'GENERATED', 'DRAFT'),
-    open_payroll_periods: countBy(raw.runs?.by_status, 'COMPLETED', 'FINALIZED', 'PROCESSING', 'DRAFT', 'INITIALIZED', 'PREPARED'),
+    open_payroll_periods: countBy(raw.runs?.by_status, ...OPEN_RUN_STATUSES),
     statutory_filings_pending_submission: countBy(raw.statutory?.by_status, 'DRAFT', 'VALIDATED'),
     statutory_filings_pending_acceptance: countBy(raw.statutory?.by_status, 'FILED'),
     failed_health_checks: raw.health_checks?.fail_count ?? 0,

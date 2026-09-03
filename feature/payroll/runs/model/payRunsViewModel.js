@@ -38,6 +38,8 @@ const ERROR_STATUS_CODES = ['ERROR', 'FAILED', 'FAILURE', 'EXCEPTION', 'REJECTED
 
 /**
  * @param {{ enterprise_id: number, payroll_id?: number, run_type_code?: string, status_code?: string, page: number, pageSize: number, sortBy?: string, sortOrder?: string }} filters
+ * status_code is the persisted PAY.PAYROLL_RUNS.STATUS_CODE (includes READY_TO_FINALIZE).
+ * SELECT v.* returns flow_submission_id when the column exists.
  */
 export async function listRuns(filters) {
   return queryPayList({
