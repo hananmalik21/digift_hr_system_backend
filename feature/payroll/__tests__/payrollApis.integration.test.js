@@ -753,3 +753,65 @@ test('21. Audit — history endpoints + combined run audit', async () => {
   });
   assertSuccessObject(runAudit, 'run audit');
 });
+
+// =============================================================================
+// 27. Payroll flows / consolidation groups / process config / submissions
+// =============================================================================
+test('27. Flows — list and invalid status', async () => {
+  const list = await api('GET', '/api/payroll/flows', {
+    query: { enterprise_id: E, status: 'ACTIVE' }
+  });
+  assert.ok([200, 400, 404].includes(list.status), `flows list => ${list.status}`);
+  if (list.status === 200) {
+    assert.equal(list.json.success, true);
+    assert.equal(typeof list.json.success, 'boolean');
+  }
+
+  const bad = await api('GET', '/api/payroll/flows', {
+    query: { enterprise_id: E, status: 'DRAFT' }
+  });
+  assertClientError(bad, 'flows invalid status');
+});
+
+test('27. Flows — create validation requires flow_name', async () => {
+  const r = await api('POST', '/api/payroll/flows', {
+    body: { enterprise_id: E, flow_code: 'X' }
+  });
+  assertClientError(r, 'create flow validation');
+});
+
+test('27. Consolidation / process-config groups — list and create validation', async () => {
+  for (const path of ['/api/payroll/consolidation-groups', '/api/payroll/process-configuration-groups']) {
+    const list = await api('GET', path, { query: { enterprise_id: E, status: 'ACTIVE' } });
+    assert.ok([200, 400, 404].includes(list.status), `${path} list => ${list.status}`);
+    if (list.status === 200) {
+      assert.equal(list.json.success, true);
+      assert.equal(typeof list.json.success, 'boolean');
+    }
+
+    const create = await api('POST', path, { body: { enterprise_id: E } });
+    assertClientError(create, `${path} create validation`);
+  }
+});
+
+test('27. Flow submissions — draft/submit/initialize-run validation', async () => {
+  const list = await api('GET', '/api/payroll/flow-submissions', { query: { enterprise_id: E } });
+  assert.ok([200, 400, 404].includes(list.status), `submissions list => ${list.status}`);
+
+  const draft = await api('POST', '/api/payroll/flow-submissions', {
+    body: { enterprise_id: E }
+  });
+  assertClientError(draft, 'create draft validation');
+
+  const submit = await api('POST', '/api/payroll/flow-submissions/1/submit', {
+    body: { enterprise_id: E }
+  });
+  assert.ok(submit.status >= 400, `submit without valid draft => ${submit.status}`);
+  assert.equal(submit.json?.success, false);
+
+  const init = await api('POST', '/api/payroll/flow-submissions/999999999/initialize-run', {
+    body: { enterprise_id: E }
+  });
+  assert.ok(init.status >= 400, `initialize-run unknown => ${init.status}`);
+  assert.equal(init.json?.success, false);
+});

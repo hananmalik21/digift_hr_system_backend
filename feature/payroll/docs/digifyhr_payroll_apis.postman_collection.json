@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "DigifyHR Payroll APIs — Complete",
-    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–26 + Person Results | Requests: 311\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, person results, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- NEW: TM Payroll Source Mappings (22)\n- NEW: Hourly Rate Policies (23)\n- NEW: TM Payroll Transfer (24)\n- NEW: Remaining Payroll Configuration (25)\n- NEW: Person Results (08b) — V_PAY_PERSON_RESULTS / V_PAY_PERSON_PROCESS_RESULTS\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id,\nhourly_rate_policy_id, payroll_source_mapping_id, transfer_batch_id, transfer_line_id",
+    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–27 + Person Results | Requests: 340\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, person results, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- TM Payroll Source Mappings (22)\n- Hourly Rate Policies (23)\n- TM Payroll Transfer (24)\n- Remaining Payroll Configuration (25)\n- Person Results (08b)\n- NEW: Payroll Flows, Consolidation Groups, Process Configuration Groups, Flow Submissions (27)\n\nSubmit Payroll Flow UI: Create Draft → Submit → Initialize Run From Submission → Prepare Employees → Process Run → Finalize Run.\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id, flow_id, flow_submission_id, consolidation_group_id, process_config_group_id",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -204,6 +204,22 @@
       "key": "hourly_rate_policy_id",
       "value": "21",
       "type": "string"
+    },
+    {
+      "key": "flow_id",
+      "value": "1"
+    },
+    {
+      "key": "flow_submission_id",
+      "value": "1"
+    },
+    {
+      "key": "consolidation_group_id",
+      "value": "1"
+    },
+    {
+      "key": "process_config_group_id",
+      "value": "1"
     }
   ],
   "item": [
@@ -11979,6 +11995,1086 @@
             "description": "TEST/ADMIN ONLY. Calls PAY.PAYROLL_TEST_RESET_PKG.RESET_ENTERPRISE_RUNTIME. Destructive. Disabled in production. Requires enterprise_admin and confirmation RESET_PAYROLL_TEST_DATA. Authorization: Bearer {{jwt}} (collection token)."
           },
           "response": []
+        }
+      ]
+    },
+    {
+      "name": "27 Payroll Flows & Submissions",
+      "description": "Submit Payroll Flow UI APIs. Oracle owns all payroll-flow business rules.\n\nUI path: Create Draft → Submit → Initialize Run From Submission → Prepare Employees → Process Run → Finalize Run.\n\nLookups: GET /flows?status=ACTIVE, existing payroll-definition/list, payroll calendar/period, GET /consolidation-groups?status=ACTIVE, existing PAYROLL_GROUPS/list, GET /process-configuration-groups?status=ACTIVE.",
+      "item": [
+        {
+          "name": "Payroll Flow Definitions",
+          "item": [
+            {
+              "name": "List flows",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows?enterprise_id={{enterprise_id}}&status=ACTIVE",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    },
+                    {
+                      "key": "status",
+                      "value": "ACTIVE"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.LIST_FLOWS. Optional status=ACTIVE|INACTIVE."
+              },
+              "response": []
+            },
+            {
+              "name": "Get flow",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows/{{flow_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows",
+                    "{{flow_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.GET_FLOW"
+              },
+              "response": []
+            },
+            {
+              "name": "Create flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.CREATE_FLOW. created_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_name\": \"Digify Simplified Payroll Cycle KW\",\n  \"flow_code\": \"SIMPLIFIED_PAYROLL_KW\",\n  \"description\": \"Simplified Kuwait payroll processing cycle\",\n  \"default_run_type_code\": \"REGULAR\",\n  \"default_run_mode_code\": \"NORMAL\",\n  \"default_schedule_code\": \"ASAP\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": [
+                {
+                  "name": "Created",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flows",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flows"
+                      ]
+                    },
+                    "description": "PAY.PAY_PAYROLL_FLOWS_PKG.CREATE_FLOW. created_by is the authenticated username.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_name\": \"Digify Simplified Payroll Cycle KW\",\n  \"flow_code\": \"SIMPLIFIED_PAYROLL_KW\",\n  \"description\": \"Simplified Kuwait payroll processing cycle\",\n  \"default_run_type_code\": \"REGULAR\",\n  \"default_run_mode_code\": \"NORMAL\",\n  \"default_schedule_code\": \"ASAP\",\n  \"status\": \"ACTIVE\"\n}"
+                    }
+                  },
+                  "status": "Created",
+                  "code": 201,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll flow created successfully.\",\n  \"data\": {\n    \"flow_id\": 1,\n    \"flow_guid\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"flow_name\": \"Digify Simplified Payroll Cycle KW\",\n    \"flow_code\": \"SIMPLIFIED_PAYROLL_KW\",\n    \"description\": \"Simplified Kuwait payroll processing cycle\",\n    \"default_run_type_code\": \"REGULAR\",\n    \"default_run_mode_code\": \"NORMAL\",\n    \"default_schedule_code\": \"ASAP\",\n    \"status\": \"ACTIVE\"\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Update flow",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows/{{flow_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows",
+                    "{{flow_id}}"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.UPDATE_FLOW. Full editable payload. updated_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_name\": \"Digify Simplified Payroll Cycle KW\",\n  \"flow_code\": \"SIMPLIFIED_PAYROLL_KW\",\n  \"description\": \"Simplified Kuwait payroll processing cycle\",\n  \"default_run_type_code\": \"REGULAR\",\n  \"default_run_mode_code\": \"NORMAL\",\n  \"default_schedule_code\": \"ASAP\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Set flow status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows/{{flow_id}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows",
+                    "{{flow_id}}",
+                    "status"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.SET_STATUS",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"status\": \"INACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete flow",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flows/{{flow_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flows",
+                    "{{flow_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOWS_PKG.DELETE_FLOW. Oracle owns delete protection."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Consolidation Groups",
+          "item": [
+            {
+              "name": "List consolidation groups",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups?enterprise_id={{enterprise_id}}&status=ACTIVE",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    },
+                    {
+                      "key": "status",
+                      "value": "ACTIVE"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.LIST_GROUPS"
+              },
+              "response": []
+            },
+            {
+              "name": "Get consolidation group",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups/{{consolidation_group_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups",
+                    "{{consolidation_group_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.GET_GROUP"
+              },
+              "response": []
+            },
+            {
+              "name": "Create consolidation group",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups"
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.CREATE_GROUP",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"group_name\": \"Kuwait Monthly Consolidation\",\n  \"group_code\": \"KW_MONTHLY_CONSOL\",\n  \"description\": \"Default consolidation group for Kuwait monthly payroll processing\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update consolidation group",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups/{{consolidation_group_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups",
+                    "{{consolidation_group_id}}"
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.UPDATE_GROUP",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"group_name\": \"Kuwait Monthly Consolidation\",\n  \"group_code\": \"KW_MONTHLY_CONSOL\",\n  \"description\": \"Default consolidation group for Kuwait monthly payroll processing\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Set consolidation group status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups/{{consolidation_group_id}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups",
+                    "{{consolidation_group_id}}",
+                    "status"
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.SET_STATUS",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete consolidation group",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/consolidation-groups/{{consolidation_group_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "consolidation-groups",
+                    "{{consolidation_group_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_CONSOLIDATION_GROUPS_PKG.DELETE_GROUP"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Process Configuration Groups",
+          "item": [
+            {
+              "name": "List process configuration groups",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups?enterprise_id={{enterprise_id}}&status=ACTIVE",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    },
+                    {
+                      "key": "status",
+                      "value": "ACTIVE"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.LIST_GROUPS"
+              },
+              "response": []
+            },
+            {
+              "name": "Get process configuration group",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups/{{process_config_group_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups",
+                    "{{process_config_group_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.GET_GROUP"
+              },
+              "response": []
+            },
+            {
+              "name": "Create process configuration group",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups"
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.CREATE_GROUP",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"group_name\": \"Kuwait Standard Payroll Processing\",\n  \"group_code\": \"KW_STANDARD_PROCESS\",\n  \"description\": \"Standard process configuration group for Kuwait payroll processing\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Update process configuration group",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups/{{process_config_group_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups",
+                    "{{process_config_group_id}}"
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.UPDATE_GROUP",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"group_name\": \"Kuwait Standard Payroll Processing\",\n  \"group_code\": \"KW_STANDARD_PROCESS\",\n  \"description\": \"Standard process configuration group for Kuwait payroll processing\",\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Set process configuration group status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups/{{process_config_group_id}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups",
+                    "{{process_config_group_id}}",
+                    "status"
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.SET_STATUS",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"status\": \"ACTIVE\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete process configuration group",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/process-configuration-groups/{{process_config_group_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "process-configuration-groups",
+                    "{{process_config_group_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PROCESS_CONFIG_GROUPS_PKG.DELETE_GROUP"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Flow Submissions",
+          "item": [
+            {
+              "name": "List submissions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions?enterprise_id={{enterprise_id}}&status_code=&payroll_id={{payroll_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    },
+                    {
+                      "key": "status_code",
+                      "value": ""
+                    },
+                    {
+                      "key": "payroll_id",
+                      "value": "{{payroll_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.LIST_SUBMISSIONS. Optional status_code, payroll_id."
+              },
+              "response": []
+            },
+            {
+              "name": "Get submission",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.GET_SUBMISSION"
+              },
+              "response": []
+            },
+            {
+              "name": "Create draft",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.CREATE_DRAFT. Creates DRAFT only. created_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_id\": 1,\n  \"schedule_code\": \"ASAP\",\n  \"scheduled_date\": null,\n  \"scope_code\": \"ALL_EMPLOYEES\",\n  \"payroll_id\": 15,\n  \"period_start_date\": \"2026-09-01\",\n  \"period_end_date\": \"2026-09-30\",\n  \"payment_date\": \"2026-09-30\",\n  \"consolidation_group_id\": 1,\n  \"run_type_code\": \"REGULAR\",\n  \"payroll_group_id\": null,\n  \"process_start_date\": \"2026-09-01\",\n  \"process_end_date\": \"2026-09-30\",\n  \"date_earned\": \"2026-09-30\",\n  \"element_group_code\": null,\n  \"report_category_code\": null,\n  \"process_config_group_id\": 1,\n  \"run_mode_code\": \"NORMAL\"\n}"
+                }
+              },
+              "response": [
+                {
+                  "name": "Created",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flow-submissions",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flow-submissions"
+                      ]
+                    },
+                    "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.CREATE_DRAFT. Creates DRAFT only. created_by is the authenticated username.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_id\": 1,\n  \"schedule_code\": \"ASAP\",\n  \"scheduled_date\": null,\n  \"scope_code\": \"ALL_EMPLOYEES\",\n  \"payroll_id\": 15,\n  \"period_start_date\": \"2026-09-01\",\n  \"period_end_date\": \"2026-09-30\",\n  \"payment_date\": \"2026-09-30\",\n  \"consolidation_group_id\": 1,\n  \"run_type_code\": \"REGULAR\",\n  \"payroll_group_id\": null,\n  \"process_start_date\": \"2026-09-01\",\n  \"process_end_date\": \"2026-09-30\",\n  \"date_earned\": \"2026-09-30\",\n  \"element_group_code\": null,\n  \"report_category_code\": null,\n  \"process_config_group_id\": 1,\n  \"run_mode_code\": \"NORMAL\"\n}"
+                    }
+                  },
+                  "status": "Created",
+                  "code": 201,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll flow submission draft created successfully.\",\n  \"data\": {\n    \"flow_submission_id\": 123,\n    \"flow_submission_guid\": \"bbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaa\",\n    \"submission_number\": \"PR-2026-001\",\n    \"status_code\": \"DRAFT\",\n    \"flow_id\": 1,\n    \"payroll_id\": 15\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Update draft",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.UPDATE_DRAFT. Oracle rejects non-DRAFT.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"flow_id\": 1,\n  \"schedule_code\": \"ASAP\",\n  \"scheduled_date\": null,\n  \"scope_code\": \"ALL_EMPLOYEES\",\n  \"payroll_id\": 15,\n  \"period_start_date\": \"2026-09-01\",\n  \"period_end_date\": \"2026-09-30\",\n  \"payment_date\": \"2026-09-30\",\n  \"consolidation_group_id\": 1,\n  \"run_type_code\": \"REGULAR\",\n  \"payroll_group_id\": null,\n  \"process_start_date\": \"2026-09-01\",\n  \"process_end_date\": \"2026-09-30\",\n  \"date_earned\": \"2026-09-30\",\n  \"element_group_code\": null,\n  \"report_category_code\": null,\n  \"process_config_group_id\": 1,\n  \"run_mode_code\": \"NORMAL\"\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Submit flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}/submit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}",
+                    "submit"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.SUBMIT_FLOW. DRAFT → SUBMITTED. Does not initialize a payroll run. submitted_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1\n}"
+                }
+              },
+              "response": [
+                {
+                  "name": "Submitted",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}/submit",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flow-submissions",
+                        "{{flow_submission_id}}",
+                        "submit"
+                      ]
+                    },
+                    "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.SUBMIT_FLOW. DRAFT → SUBMITTED. Does not initialize a payroll run. submitted_by is the authenticated username.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"enterprise_id\": 1\n}"
+                    }
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll flow submitted successfully.\",\n  \"data\": {\n    \"flow_submission_id\": 123,\n    \"submission_number\": \"PR-2026-001\",\n    \"status_code\": \"SUBMITTED\"\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Cancel submission",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}",
+                    "cancel"
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.CANCEL_SUBMISSION. cancelled_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1\n}"
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Initialize run from submission",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}/initialize-run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}",
+                    "initialize-run"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.INITIALIZE_RUN_FROM_SUBMISSION. Use after SUBMITTED. Then Prepare Employees → Process Run → Finalize Run. created_by is the authenticated username.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1\n}"
+                }
+              },
+              "response": [
+                {
+                  "name": "Run created",
+                  "originalRequest": {
+                    "method": "POST",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      },
+                      {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}/initialize-run",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flow-submissions",
+                        "{{flow_submission_id}}",
+                        "initialize-run"
+                      ]
+                    },
+                    "description": "PAY.PAYROLL_PROCESSING_PKG.INITIALIZE_RUN_FROM_SUBMISSION. Use after SUBMITTED. Then Prepare Employees → Process Run → Finalize Run. created_by is the authenticated username.",
+                    "body": {
+                      "mode": "raw",
+                      "raw": "{\n  \"enterprise_id\": 1\n}"
+                    }
+                  },
+                  "status": "Created",
+                  "code": 201,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run initialized from flow submission successfully.\",\n  \"data\": {\n    \"flow_submission_id\": 123,\n    \"submission_number\": \"PR-2026-001\",\n    \"submission_status_code\": \"RUN_CREATED\",\n    \"run_id\": 250,\n    \"run_guid\": \"ccccccccccccccccaaaaaaaaaaaaaaaa\",\n    \"run_number\": \"KW_MONTHLY-202609-001\",\n    \"run_status_code\": \"IN_PROGRESS\"\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Delete draft",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "flow-submissions",
+                    "{{flow_submission_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.DELETE_DRAFT. Oracle rejects unless status is DRAFT."
+              },
+              "response": []
+            }
+          ]
         }
       ]
     }

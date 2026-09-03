@@ -5,3 +5,4 @@ export * from './payrollRowMapper.js';
 export * from './payrollViewQuery.js';
 export * from './payrollValidation.js';
 export * from './payrollTableDml.js';
+export * from './payrollResultJson.js';

@@ -7,7 +7,8 @@
  *    balances employee/run reads, dashboard, audit, runs, payments, GL, close,
  *    recurring entries, element dependencies, retro/arrears, approvals,
  *    statutory processing, operations & certification, payment methods,
- *    TM → PAY, and the test/admin runtime reset).
+ *    TM → PAY, payroll flows / consolidation / process-config / submissions,
+ *    and the test/admin runtime reset).
  *  - Existing feature/pay CRUD routers (elements family, eligibility, balances
  *    family, formulas, lookups), remounted here so a single `/api/payroll`
  *    base exposes both the legacy CRUD and the new payroll-specific endpoints.
@@ -25,6 +26,10 @@ import payAuditRoutes from '../audit/routes/payAudit.routes.js';
 // --- feature/payroll modules built by sibling agents (confirmed present) ---
 import payPersonResultsRoutes from '../person_results/routes/payPersonResults.routes.js';
 import payRunsRoutes from '../runs/routes/payRuns.routes.js';
+import payPayrollFlowsRoutes from '../flows/routes/payPayrollFlows.routes.js';
+import payConsolidationGroupsRoutes from '../consolidation_groups/routes/payConsolidationGroups.routes.js';
+import payProcessConfigGroupsRoutes from '../process_config_groups/routes/payProcessConfigGroups.routes.js';
+import payFlowSubmissionsRoutes from '../flow_submissions/routes/payFlowSubmissions.routes.js';
 import payPaymentsRoutes from '../payments/routes/payPayments.routes.js';
 import payGlRoutes from '../gl/routes/payGl.routes.js';
 import payCloseRoutes from '../close/routes/payClose.routes.js';
@@ -131,6 +136,10 @@ router.use('/balance-inquiry', payEmployeeBalanceInquiryRoutes);
 // handles its own paths and next()s unmatched ones.
 // =====================================================================================
 router.use('/', payPersonResultsRoutes);
+router.use('/', payPayrollFlowsRoutes);
+router.use('/', payConsolidationGroupsRoutes);
+router.use('/', payProcessConfigGroupsRoutes);
+router.use('/', payFlowSubmissionsRoutes);
 router.use('/runs', payRunsRoutes);
 router.use('/', payPaymentsRoutes);
 router.use('/', payGlRoutes);

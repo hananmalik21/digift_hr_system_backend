@@ -6,7 +6,7 @@
 
 import { AppError, DatabaseError, ForbiddenError, ValidationError } from '../../../utils/errors/index.js';
 import { getActingUsername } from '../../../utils/userContext.js';
-import { buildPaginationMeta } from '@digifyhr/common';
+import { asyncHandler, buildPaginationMeta } from '@digifyhr/common';
 
 export const FALLBACK_ERROR = 'Unable to process payroll request. Please try again.';
 
@@ -129,4 +129,14 @@ export async function withPayrollErrorHandling(res, work, fallback = FALLBACK_ER
     if (err instanceof ForbiddenError) return sendForbiddenError(res, err);
     return sendSystemError(res, err, fallback);
   }
+}
+
+/**
+ * Standard payroll controller step after validation has set `req.validated`.
+ * @param {(req: import('express').Request) => Promise<object>|object} work
+ */
+export function payrollHandler(work) {
+  return asyncHandler(async (req, res) =>
+    withPayrollErrorHandling(res, async () => sendOutcome(res, await work(req)))
+  );
 }
