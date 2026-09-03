@@ -24,8 +24,9 @@ function mockRes() {
   };
 }
 
-test('LIST_ACTIVE_LOCATIONS_SQL reads ENT.V_ACTIVE_LOCATIONS ordered by name', () => {
-  assert.match(LIST_ACTIVE_LOCATIONS_SQL, /FROM ENT\.V_ACTIVE_LOCATIONS/);
+test('LIST_ACTIVE_LOCATIONS_SQL reads ENT.V_LOCATIONS active rows ordered by name', () => {
+  assert.match(LIST_ACTIVE_LOCATIONS_SQL, /FROM ENT\.V_LOCATIONS/);
+  assert.match(LIST_ACTIVE_LOCATIONS_SQL, /ACTIVE_FLAG = 'Y'/);
   assert.match(LIST_ACTIVE_LOCATIONS_SQL, /ORDER BY LOCATION_NAME/);
   assert.match(LIST_ACTIVE_LOCATIONS_SQL, /LOCATION_ID/);
   assert.match(LIST_ACTIVE_LOCATIONS_SQL, /COUNTRY_CODE/);

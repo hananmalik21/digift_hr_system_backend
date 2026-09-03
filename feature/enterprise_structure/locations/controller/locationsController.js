@@ -6,7 +6,7 @@ import {
 
 /**
  * GET /api/locations
- * List active locations from ENT.V_ACTIVE_LOCATIONS, ordered by LOCATION_NAME ASC.
+ * List active locations from ENT.V_LOCATIONS (ACTIVE_FLAG = 'Y'), ordered by LOCATION_NAME ASC.
  * Public — no JWT required.
  */
 export async function listLocationsHandler(req, res) {
