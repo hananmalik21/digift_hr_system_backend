@@ -1,5 +1,5 @@
 /**
- * Follow-up reads after INITIALIZE_RUN_FROM_SUBMISSION.
+ * Follow-up reads after INITIALIZE_RUN_FROM_SUBMISSION and run lifecycle mutations.
  * Enterprise-scoped SELECTs only — no DML.
  */
 
@@ -22,6 +22,15 @@ export async function getFlowSubmissionById(enterpriseId, flowSubmissionId) {
     ],
     logTag: LOG_TAG
   });
+}
+
+/**
+ * Linked flow submission for a payroll run. Requires both enterprise and submission id.
+ * @param {{ enterpriseId: number, flowSubmissionId: number|null|undefined }} args
+ */
+export async function getLinkedFlowSubmission({ enterpriseId, flowSubmissionId }) {
+  if (enterpriseId == null || flowSubmissionId == null) return null;
+  return getFlowSubmissionById(enterpriseId, flowSubmissionId);
 }
 
 /**

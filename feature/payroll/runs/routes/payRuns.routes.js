@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import '../swagger/payRuns.swagger.js';
 import {
   finalizeRunHandler,
   getRunActionsHandler,

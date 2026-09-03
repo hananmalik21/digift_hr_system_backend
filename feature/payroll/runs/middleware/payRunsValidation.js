@@ -50,7 +50,7 @@ export function validateListRuns(req, res, next) {
       pageSize,
       payroll_id: req.query.payroll_id ? requirePositiveInt(req.query.payroll_id, 'payroll_id') : null,
       run_type_code: optionalString(req.query.run_type_code, 'run_type_code', { max: 30 }),
-      status_code: optionalString(req.query.status_code, 'status_code', { max: 30 }),
+      status_code: optionalString(req.query.status_code ?? req.query.status, 'status_code', { max: 30 }),
       sortBy: optionalString(req.query.sort_by, 'sort_by', { max: 60 }),
       sortOrder: optionalString(req.query.sort_order, 'sort_order', { max: 4 })
     };

@@ -262,14 +262,54 @@ test('initialize-run enriches from persisted submission and run rows', async () 
   assert.equal(outcome.httpStatus, 201);
   assert.equal(typeof outcome.success, 'boolean');
   assert.deepEqual(outcome.data, {
-    flow_submission_id: 123,
-    submission_number: 'PR-2026-001',
-    submission_status_code: 'RUN_CREATED',
-    run_id: 250,
-    run_guid: 'abc',
-    run_number: 'KW_MONTHLY-202609-1',
-    run_status_code: 'IN_PROGRESS'
+    submission: {
+      flow_submission_id: 123,
+      submission_number: 'PR-2026-001',
+      status_code: 'RUN_CREATED'
+    },
+    run: {
+      run_id: 250,
+      run_guid: 'abc',
+      run_number: 'KW_MONTHLY-202609-1',
+      status_code: 'IN_PROGRESS',
+      flow_submission_id: 123
+    }
   });
+});
+
+test('initialize-run treats existing RUN_CREATED submission as success', async () => {
+  const outcome = await initializeRunFromSubmission(
+    { enterprise_id: 1, flow_submission_id: 123, created_by: 'PAYROLL_TEST' },
+    {
+      initializeRunFromSubmission: async () => ({
+        success: true,
+        message: 'Payroll run already exists for this flow submission.',
+        data: {
+          run_id: 250,
+          run_guid: 'abc',
+          run_number: 'KW_MONTHLY-202609-1',
+          submission_number: 'PR-2026-001'
+        }
+      }),
+      getFlowSubmissionById: async () => ({
+        flow_submission_id: 123,
+        submission_number: 'PR-2026-001',
+        status_code: 'RUN_CREATED'
+      }),
+      getRunById: async () => ({
+        run_id: 250,
+        run_guid: 'abc',
+        run_number: 'KW_MONTHLY-202609-1',
+        status_code: 'IN_PROGRESS',
+        flow_submission_id: 123
+      }),
+      getRunByFlowSubmissionId: async () => null
+    }
+  );
+  assert.equal(outcome.success, true);
+  assert.equal(outcome.data.submission.status_code, 'RUN_CREATED');
+  assert.equal(outcome.data.run.run_id, 250);
+  assert.equal(outcome.data.run.flow_submission_id, 123);
 });
 
 test('initialize-run follow-up reads are SELECT only', () => {

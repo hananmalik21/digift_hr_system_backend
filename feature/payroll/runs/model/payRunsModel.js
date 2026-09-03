@@ -1,6 +1,10 @@
 /**
  * DigifyHR Payroll — Run processing package calls.
  * Package: PAY.PAYROLL_PROCESSING_PKG
+ *
+ * Lifecycle is Oracle-owned. Node does not UPDATE PAYROLL_RUNS or
+ * PAY_PAYROLL_FLOW_SUBMISSIONS status. INITIALIZE_RUN rejects end-of-time
+ * sentinel period end dates in Oracle — do not bypass that check here.
  */
 
 import {
@@ -197,6 +201,7 @@ export async function processRun(payload) {
       entry_count: helpers.num('p_entry_count'),
       result_count: helpers.num('p_result_count'),
       transaction_count: helpers.num('p_transaction_count'),
+      // Persisted run status after PROCESS_RUN: IN_PROGRESS | READY_TO_FINALIZE | COMPLETED_WITH_ERRORS.
       status: helpers.str('p_status')
     })
   });

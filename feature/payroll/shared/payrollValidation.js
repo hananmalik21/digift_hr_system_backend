@@ -162,6 +162,27 @@ export function pickFilters(query, keys) {
 
 export const PAYROLL_STATUS_VALUES = ['ACTIVE', 'INACTIVE'];
 
+/** Persisted PAY.PAYROLL_RUNS.STATUS_CODE values after PAYROLL_PROCESSING_PKG updates. */
+export const PAYROLL_RUN_STATUS_CODES = Object.freeze([
+  'IN_PROGRESS',
+  'READY_TO_FINALIZE',
+  'COMPLETED_WITH_ERRORS',
+  'COMPLETED',
+  'ROLLED_BACK',
+  'ERROR'
+]);
+
+/** Persisted PAY.PAY_PAYROLL_FLOW_SUBMISSIONS.STATUS_CODE values. */
+export const PAYROLL_FLOW_SUBMISSION_STATUS_CODES = Object.freeze([
+  'DRAFT',
+  'SUBMITTED',
+  'RUN_CREATED',
+  'COMPLETED',
+  'ROLLED_BACK',
+  'CANCELLED',
+  'ERROR'
+]);
+
 export function runPayrollValidation(res, next, work) {
   try {
     work();

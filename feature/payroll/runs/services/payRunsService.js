@@ -5,6 +5,7 @@
  */
 
 import { failOutcome, notFoundOutcome, okGet, okList, okMutation } from '../../shared/index.js';
+import { getLinkedFlowSubmission } from '../../flow_submissions/model/payFlowSubmissionsViewModel.js';
 import * as runsModel from '../model/payRunsModel.js';
 import {
   getRunById,
@@ -34,6 +35,80 @@ function mapPackageOutcome(pkg, opts = {}) {
 
 async function loadRunOrNull(enterpriseId, runId) {
   return getRunById(enterpriseId, runId);
+}
+
+function resolveSubmissionLoader(deps) {
+  if (typeof deps.getLinkedFlowSubmission === 'function') return deps.getLinkedFlowSubmission;
+  if (typeof deps.getFlowSubmissionById === 'function') return deps.getFlowSubmissionById;
+  return (enterpriseId, flowSubmissionId) => getLinkedFlowSubmission({ enterpriseId, flowSubmissionId });
+}
+
+/**
+ * Prefer PAY.PAYROLL_RUNS.STATUS_CODE from the follow-up SELECT over package OUT P_STATUS.
+ * PROCESS_RUN now persists READY_TO_FINALIZE / COMPLETED_WITH_ERRORS / IN_PROGRESS.
+ * Node must not remap READY_TO_FINALIZE back to IN_PROGRESS.
+ *
+ * @param {object|null|undefined} pkgData
+ * @param {object|null|undefined} run
+ * @returns {{ status: string|null, run: object|null }}
+ */
+export function withPersistedRunStatus(pkgData, run) {
+  return {
+    ...(pkgData || {}),
+    status: run?.status_code ?? pkgData?.status ?? null,
+    run: run ?? null
+  };
+}
+
+/**
+ * After a successful package mutation, SELECT the linked flow submission when
+ * PAYROLL_RUNS.FLOW_SUBMISSION_ID is set. Oracle owns the status transition.
+ */
+export async function attachLinkedFlowSubmission(data, enterpriseId, updatedRun, priorRun, loadSubmission) {
+  const flowSubmissionId = updatedRun?.flow_submission_id ?? priorRun?.flow_submission_id ?? null;
+  if (flowSubmissionId == null) return data;
+  data.submission = await loadSubmission(enterpriseId, flowSubmissionId);
+  return data;
+}
+
+/**
+ * Shared PROCESS/RETRY/FINALIZE/ROLLBACK orchestration: package call, then persisted-row SELECT.
+ * Follow-up SELECTs run only after Oracle reports success.
+ */
+async function executeRunMutation({
+  enterpriseId,
+  runId,
+  payload,
+  extra = {},
+  deps = {},
+  modelFn,
+  pkgKey,
+  successMessage,
+  attachSubmission = false
+}) {
+  const loadRun = deps.getRunById ?? loadRunOrNull;
+  const callPkg = deps[pkgKey] ?? modelFn;
+  const run = await loadRun(enterpriseId, runId);
+  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
+
+  const pkg = await callPkg({
+    ...payload,
+    ...extra,
+    enterprise_id: enterpriseId,
+    run_id: runId
+  });
+  if (!pkg.success) return mapPackageOutcome(pkg);
+
+  const updatedRun = await loadRun(enterpriseId, runId);
+  const data = withPersistedRunStatus(pkg.data, updatedRun);
+  if (attachSubmission) {
+    await attachLinkedFlowSubmission(data, enterpriseId, updatedRun, run, resolveSubmissionLoader(deps));
+  }
+
+  return mapPackageOutcome(pkg, {
+    successMessage: pkg.message || successMessage,
+    data
+  });
 }
 
 /**
@@ -78,17 +153,15 @@ export async function createRunInitialization(payload) {
  * @param {number} runId
  * @param {object} payload
  */
-export async function prepareRunEmployees(enterpriseId, runId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.prepareRunEmployees({ ...payload, enterprise_id: enterpriseId, run_id: runId });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  const updatedRun = await loadRunOrNull(enterpriseId, runId);
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Run employees prepared successfully.',
-    data: { ...pkg.data, run: updatedRun }
+export async function prepareRunEmployees(enterpriseId, runId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    deps,
+    modelFn: runsModel.prepareRunEmployees,
+    pkgKey: 'prepareRunEmployees',
+    successMessage: 'Run employees prepared successfully.'
   });
 }
 
@@ -96,18 +169,17 @@ export async function prepareRunEmployees(enterpriseId, runId, payload) {
  * @param {number} enterpriseId
  * @param {number} runId
  * @param {object} payload
+ * @param {object} [deps]
  */
-export async function processRun(enterpriseId, runId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.processRun({ ...payload, enterprise_id: enterpriseId, run_id: runId });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  const updatedRun = await loadRunOrNull(enterpriseId, runId);
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Payroll run processed successfully.',
-    data: { ...pkg.data, run: updatedRun }
+export async function processRun(enterpriseId, runId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    deps,
+    modelFn: runsModel.processRun,
+    pkgKey: 'processRun',
+    successMessage: 'Payroll run processing completed.'
   });
 }
 
@@ -119,17 +191,15 @@ export async function processRun(enterpriseId, runId, payload) {
  * @param {number} runId
  * @param {object} payload
  */
-export async function retryRun(enterpriseId, runId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.retryRun({ ...payload, enterprise_id: enterpriseId, run_id: runId });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  const updatedRun = await loadRunOrNull(enterpriseId, runId);
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Payroll run retried successfully.',
-    data: { ...pkg.data, run: updatedRun }
+export async function retryRun(enterpriseId, runId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    deps,
+    modelFn: runsModel.retryRun,
+    pkgKey: 'retryRun',
+    successMessage: 'Payroll run retried successfully.'
   });
 }
 
@@ -162,20 +232,17 @@ export async function processRunEmployee(enterpriseId, runId, employeeId, payloa
  * @param {number} employeeId
  * @param {object} payload
  */
-export async function retryRunEmployee(enterpriseId, runId, employeeId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.retryEmployee({
-    ...payload,
-    enterprise_id: enterpriseId,
-    run_id: runId,
-    employee_id: employeeId
-  });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Employee retried successfully.'
+export async function retryRunEmployee(enterpriseId, runId, employeeId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    extra: { employee_id: employeeId },
+    deps,
+    modelFn: runsModel.retryEmployee,
+    pkgKey: 'retryEmployee',
+    successMessage: 'Employee retried successfully.',
+    attachSubmission: true
   });
 }
 
@@ -184,17 +251,16 @@ export async function retryRunEmployee(enterpriseId, runId, employeeId, payload)
  * @param {number} runId
  * @param {object} payload
  */
-export async function finalizeRun(enterpriseId, runId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.finalizeRun({ ...payload, enterprise_id: enterpriseId, run_id: runId });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  const updatedRun = await loadRunOrNull(enterpriseId, runId);
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Payroll run finalized successfully.',
-    data: { ...pkg.data, run: updatedRun }
+export async function finalizeRun(enterpriseId, runId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    deps,
+    modelFn: runsModel.finalizeRun,
+    pkgKey: 'finalizeRun',
+    successMessage: 'Payroll run finalized successfully.',
+    attachSubmission: true
   });
 }
 
@@ -203,17 +269,16 @@ export async function finalizeRun(enterpriseId, runId, payload) {
  * @param {number} runId
  * @param {object} payload
  */
-export async function rollbackRun(enterpriseId, runId, payload) {
-  const run = await loadRunOrNull(enterpriseId, runId);
-  if (!run) return notFoundOutcome(RUN_NOT_FOUND_MESSAGE);
-
-  const pkg = await runsModel.rollbackRun({ ...payload, enterprise_id: enterpriseId, run_id: runId });
-  if (!pkg.success) return mapPackageOutcome(pkg);
-
-  const updatedRun = await loadRunOrNull(enterpriseId, runId);
-  return mapPackageOutcome(pkg, {
-    successMessage: pkg.message || 'Payroll run rolled back successfully.',
-    data: { ...pkg.data, run: updatedRun }
+export async function rollbackRun(enterpriseId, runId, payload, deps = {}) {
+  return executeRunMutation({
+    enterpriseId,
+    runId,
+    payload,
+    deps,
+    modelFn: runsModel.rollbackRun,
+    pkgKey: 'rollbackRun',
+    successMessage: 'Payroll run rolled back successfully.',
+    attachSubmission: true
   });
 }
 
@@ -301,6 +366,7 @@ export async function getRunSummary(enterpriseId, runId) {
     period_start_date: run.period_start_date,
     period_end_date: run.period_end_date,
     payment_date: run.payment_date,
+    flow_submission_id: run.flow_submission_id ?? null,
     run_status: run.status_code,
     payment_status: run.payment_status_code,
     payment_locked_flag: run.payment_locked_flag,
@@ -333,6 +399,7 @@ export async function getRunStatusOverview(enterpriseId, runId) {
     run_id: run.run_id,
     run_guid: run.run_guid,
     status_code: run.status_code,
+    flow_submission_id: run.flow_submission_id ?? null,
     payment_status_code: run.payment_status_code,
     payment_locked_flag: run.payment_locked_flag,
     gl_status_code: run.gl_status_code,

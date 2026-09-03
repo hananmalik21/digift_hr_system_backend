@@ -96,15 +96,31 @@ export async function initializeRunFromSubmission(payload, deps = {}) {
 
   return okMutation(
     pkg.message || 'Payroll run initialized from flow submission successfully.',
-    {
-      flow_submission_id: submission?.flow_submission_id ?? payload.flow_submission_id,
+    shapeInitializeRunFromSubmission({ submission, run, pkg, payload }),
+    201
+  );
+}
+
+/**
+ * Nested submission + run objects from persisted PAY rows.
+ * Idempotent Oracle success (submission already RUN_CREATED or COMPLETED) is still success.
+ */
+function shapeInitializeRunFromSubmission({ submission, run, pkg, payload }) {
+  const flowSubmissionId = submission?.flow_submission_id ?? payload.flow_submission_id;
+  return {
+    submission: {
+      ...(submission || {}),
+      flow_submission_id: flowSubmissionId,
       submission_number: submission?.submission_number ?? pkg.data?.submission_number ?? null,
-      submission_status_code: submission?.status_code ?? submission?.submission_status_code ?? null,
+      status_code: submission?.status_code ?? submission?.submission_status_code ?? null
+    },
+    run: {
+      ...(run || {}),
       run_id: run?.run_id ?? pkg.data?.run_id ?? null,
       run_guid: run?.run_guid ?? pkg.data?.run_guid ?? null,
       run_number: run?.run_number ?? pkg.data?.run_number ?? null,
-      run_status_code: run?.status_code ?? run?.run_status_code ?? null
-    },
-    201
-  );
+      status_code: run?.status_code ?? run?.run_status_code ?? null,
+      flow_submission_id: run?.flow_submission_id ?? flowSubmissionId
+    }
+  };
 }

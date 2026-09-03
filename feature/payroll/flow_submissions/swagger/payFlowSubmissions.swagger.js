@@ -7,10 +7,16 @@
  *       POST create is DRAFT only. Submit does not initialize a payroll run.
  *       Initialize a run with POST /flow-submissions/{id}/initialize-run
  *       (PAY.PAYROLL_PROCESSING_PKG.INITIALIZE_RUN_FROM_SUBMISSION).
+ *       Idempotent when the submission is already RUN_CREATED or COMPLETED.
+ *       Persisted STATUS_CODE values: DRAFT, SUBMITTED, RUN_CREATED, COMPLETED,
+ *       ROLLED_BACK, CANCELLED, ERROR.
  *
  * @swagger
  * components:
  *   schemas:
+ *     PayrollFlowSubmissionStatusCode:
+ *       type: string
+ *       enum: [DRAFT, SUBMITTED, RUN_CREATED, COMPLETED, ROLLED_BACK, CANCELLED, ERROR]
  *     PayrollFlowSubmissionWrite:
  *       type: object
  *       required: [enterprise_id, flow_id]
@@ -47,7 +53,9 @@
  *         schema: { type: integer }
  *       - in: query
  *         name: status_code
- *         schema: { type: string }
+ *         schema:
+ *           $ref: '#/components/schemas/PayrollFlowSubmissionStatusCode'
+ *         description: Includes ROLLED_BACK after ROLLBACK_RUN.
  *       - in: query
  *         name: payroll_id
  *         schema: { type: integer }
@@ -66,6 +74,7 @@
  *   get:
  *     tags: [Payroll Flow Submissions]
  *     summary: Get flow submission (GET_SUBMISSION)
+ *     description: Returns the persisted submission, including STATUS_CODE = ROLLED_BACK after rollback.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -145,6 +154,10 @@
  *   post:
  *     tags: [Payroll Flow Submissions]
  *     summary: Initialize payroll run from a SUBMITTED submission (INITIALIZE_RUN_FROM_SUBMISSION)
+ *     description: >
+ *       Oracle reads payroll_id, dates, run_type_code, and payment_date from the submission.
+ *       Request body accepts enterprise_id only. Actor is the authenticated username.
+ *       Idempotent if status is already RUN_CREATED or COMPLETED and a linked run exists.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -160,5 +173,5 @@
  *               enterprise_id: { type: integer, example: 1 }
  *     responses:
  *       201:
- *         description: Run created from the submission; data is enriched from persisted PAY rows
+ *         description: Nested persisted submission (RUN_CREATED) and run (IN_PROGRESS, flow_submission_id set)
  */

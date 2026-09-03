@@ -44,6 +44,7 @@ export function validateListSubmissions(req, res, next) {
   return runPayrollValidation(res, next, () => {
     req.validated = {
       enterprise_id: scopedEnterpriseId(req),
+      // Oracle statuses include DRAFT, SUBMITTED, RUN_CREATED, COMPLETED, ROLLED_BACK, CANCELLED, ERROR.
       status_code: optionalString(req.query.status_code, 'status_code', { max: 30 }),
       payroll_id: req.query.payroll_id ? requirePositiveInt(req.query.payroll_id, 'payroll_id') : null
     };
