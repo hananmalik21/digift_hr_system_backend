@@ -36,6 +36,8 @@ const PUBLIC_PATHS = [
   { method: '*', pattern: /^\/api\/enterprises(\/.*)?\/?$/ },
   // Enterprise currencies reference list — no JWT required
   { method: 'GET', pattern: /^\/api\/enterprise\/currencies\/?$/ },
+  // Active locations reference list — no JWT required
+  { method: 'GET', pattern: /^\/api\/locations\/?$/ },
   // Public career portal aliases
   { method: 'GET', pattern: /^\/api\/public\/job-postings\/?$/ },
   { method: 'GET', pattern: /^\/api\/public\/job-postings\/[^/]+\/?$/ },
