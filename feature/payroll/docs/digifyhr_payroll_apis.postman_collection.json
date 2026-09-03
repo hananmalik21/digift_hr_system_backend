@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "DigifyHR Payroll APIs — Complete",
-    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–27 + Person Results | Requests: 340\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, person results, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- TM Payroll Source Mappings (22)\n- Hourly Rate Policies (23)\n- TM Payroll Transfer (24)\n- Remaining Payroll Configuration (25)\n- Person Results (08b)\n- NEW: Payroll Flows, Consolidation Groups, Process Configuration Groups, Flow Submissions (27)\n\nSubmit Payroll Flow UI: Create Draft → Submit → Initialize Run From Submission → Prepare Employees → Process Run → Finalize Run.\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id, flow_id, flow_submission_id, consolidation_group_id, process_config_group_id",
+    "description": "Complete DigifyHR Payroll REST API collection (Oracle PAY + TM → PAY).\n\nFolders: 01–27 + Person Results | Requests: 340\n\nIncludes:\n- Elements, formulas, balances, eligibility, recurring\n- Payroll runs, person results, entries, retro, arrears\n- Payments, GL, payslips, period close, approvals\n- Statutory, operations, health, certification\n- Dashboard & audit\n- TM Payroll Source Mappings (22)\n- Hourly Rate Policies (23)\n- TM Payroll Transfer (24)\n- Remaining Payroll Configuration (25)\n- Person Results (08b)\n- NEW: Payroll Flows, Consolidation Groups, Process Configuration Groups, Flow Submissions (27)\n\nSubmit Payroll Flow UI: Create Draft → Submit → Initialize Run From Submission → Prepare Employees → Process Run (READY_TO_FINALIZE) → Finalize Run. Retry/rollback reload the linked flow submission (RUN_CREATED / ROLLED_BACK).\n\nBase path: {{baseUrl}}/api/payroll\nAuth: Bearer {{jwt}}\n\nSet variables: baseUrl, jwt, enterprise_id, payroll_id, run_id, flow_id, flow_submission_id, consolidation_group_id, process_config_group_id",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -3098,7 +3098,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/payroll/runs?enterprise_id={{enterprise_id}}&page=1&page_size=25&status=&payroll_id={{payroll_id}}",
+              "raw": "{{baseUrl}}/api/payroll/runs?enterprise_id={{enterprise_id}}&page=1&page_size=25&status=&status_code=&payroll_id={{payroll_id}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -3128,7 +3128,7 @@
                 {
                   "key": "status_code",
                   "value": "",
-                  "description": "PAY.PAYROLL_RUNS.STATUS_CODE filter. READY_TO_FINALIZE is a persisted status."
+                  "description": "PAY.PAYROLL_RUNS.STATUS_CODE. IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED, ROLLED_BACK, ERROR."
                 },
                 {
                   "key": "payroll_id",
@@ -3136,7 +3136,75 @@
                 }
               ]
             },
-            "description": "GET PAY.PAYROLL_RUNS. Responses include flow_submission_id and status_code values such as IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED, ROLLED_BACK, ERROR. Query status or status_code filters the persisted STATUS_CODE."
+            "description": "GET PAY.PAYROLL_RUNS. Responses include flow_submission_id and persisted status_code: IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED, ROLLED_BACK, ERROR."
+          },
+          "response": [
+            {
+              "name": "Runs list",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs?enterprise_id={{enterprise_id}}&page=1&page_size=25&status=&status_code=&payroll_id={{payroll_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "page_size",
+                      "value": "25"
+                    },
+                    {
+                      "key": "status",
+                      "value": "",
+                      "description": "Alias for status_code. Includes READY_TO_FINALIZE."
+                    },
+                    {
+                      "key": "status_code",
+                      "value": "",
+                      "description": "PAY.PAYROLL_RUNS.STATUS_CODE. IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED, ROLLED_BACK, ERROR."
+                    },
+                    {
+                      "key": "payroll_id",
+                      "value": "{{payroll_id}}"
+                    }
+                  ]
+                },
+                "description": "GET PAY.PAYROLL_RUNS. Responses include flow_submission_id and persisted status_code: IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED, ROLLED_BACK, ERROR."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll runs retrieved successfully.\",\n  \"data\": [\n    {\n      \"run_id\": 250,\n      \"run_number\": \"KW_MONTHLY-202609-001\",\n      \"status_code\": \"READY_TO_FINALIZE\",\n      \"flow_submission_id\": 123\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get run",
           "request": {
             "method": "GET",
             "header": [
@@ -3163,7 +3231,54 @@
                 }
               ]
             },
-            "description": "Returns the persisted PAY.PAYROLL_RUNS row including flow_submission_id and status_code (READY_TO_FINALIZE is a persisted status after PROCESS_RUN)."
+            "description": "Returns the persisted PAY.PAYROLL_RUNS row including flow_submission_id and status_code (READY_TO_FINALIZE after successful PROCESS_RUN)."
+          },
+          "response": [
+            {
+              "name": "Run",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}?enterprise_id={{enterprise_id}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "enterprise_id",
+                      "value": "{{enterprise_id}}"
+                    }
+                  ]
+                },
+                "description": "Returns the persisted PAY.PAYROLL_RUNS row including flow_submission_id and status_code (READY_TO_FINALIZE after successful PROCESS_RUN)."
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run retrieved successfully.\",\n  \"data\": {\n    \"run_id\": 250,\n    \"run_guid\": \"ccccccccccccccccaaaaaaaaaaaaaaaa\",\n    \"run_number\": \"KW_MONTHLY-202609-001\",\n    \"status_code\": \"READY_TO_FINALIZE\",\n    \"flow_submission_id\": 123\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Initialize run",
           "request": {
             "method": "POST",
             "header": [
@@ -3188,7 +3303,10 @@
                 "initialize"
               ]
             },
-            "description": "PAY.PAYROLL_PROCESSING_PKG.INITIALIZE_RUN. Oracle rejects PERIOD_END_DATE >= 4712-01-01. Do not send the 4712-12-31 sentinel. Prefer POST /api/payroll/flow-submissions/:id/initialize-run for flow-driven payroll.",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.INITIALIZE_RUN (backward compatible). Oracle rejects PERIOD_END_DATE >= 4712-01-01. Prefer POST /api/payroll/flow-submissions/:id/initialize-run for flow-driven payroll.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"payroll_id\": 13,\n  \"run_type_code\": \"REGULAR\",\n  \"period_start_date\": \"2026-08-01\",\n  \"period_end_date\": \"2026-08-31\",\n  \"payment_date\": \"2026-08-31\",\n  \"run_number\": \"PAY-TEST-001\"\n}"
             }
           }
         },
@@ -3219,7 +3337,7 @@
                 "prepare-employees"
               ]
             },
-            "description": "",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.PREPARE_RUN_EMPLOYEES. Run remains IN_PROGRESS.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"enterprise_id\": 1\n}"
@@ -3253,9 +3371,102 @@
                 "process"
               ]
             },
-            "description": "PAY.PAYROLL_PROCESSING_PKG.PROCESS_RUN. Oracle now persists STATUS_CODE. After all employees succeed with no errors, status is READY_TO_FINALIZE (not IN_PROGRESS). Other results: IN_PROGRESS or COMPLETED_WITH_ERRORS. data.status is the persisted run status.",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.PROCESS_RUN. Oracle persists STATUS_CODE. After all employees succeed with no errors: READY_TO_FINALIZE. Also possible: IN_PROGRESS, COMPLETED_WITH_ERRORS. data.status is the persisted run status.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"stop_on_error\": \"N\"\n}"
             }
-          }
+          },
+          "response": [
+            {
+              "name": "Ready to finalize",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/process",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}",
+                    "process"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.PROCESS_RUN. Oracle persists STATUS_CODE. After all employees succeed with no errors: READY_TO_FINALIZE. Also possible: IN_PROGRESS, COMPLETED_WITH_ERRORS. data.status is the persisted run status.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"stop_on_error\": \"N\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run processing completed.\",\n  \"data\": {\n    \"employee_success_count\": 10,\n    \"employee_skipped_count\": 0,\n    \"employee_error_count\": 0,\n    \"status\": \"READY_TO_FINALIZE\",\n    \"run\": {\n      \"run_id\": 250,\n      \"status_code\": \"READY_TO_FINALIZE\",\n      \"flow_submission_id\": 123\n    }\n  }\n}"
+            },
+            {
+              "name": "Completed with errors",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/process",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}",
+                    "process"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.PROCESS_RUN. Oracle persists STATUS_CODE. After all employees succeed with no errors: READY_TO_FINALIZE. Also possible: IN_PROGRESS, COMPLETED_WITH_ERRORS. data.status is the persisted run status.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"stop_on_error\": \"N\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run processing completed with errors.\",\n  \"data\": {\n    \"employee_success_count\": 9,\n    \"employee_error_count\": 1,\n    \"status\": \"COMPLETED_WITH_ERRORS\",\n    \"run\": {\n      \"run_id\": 250,\n      \"status_code\": \"COMPLETED_WITH_ERRORS\",\n      \"flow_submission_id\": 123\n    }\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Process employee",
@@ -3322,9 +3533,60 @@
                 "retry"
               ]
             },
-            "description": "PAY.PAYROLL_PROCESSING_PKG.RETRY_EMPLOYEE. Oracle accepts IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, and COMPLETED. After retry, data.run is the persisted run. If flow_submission_id is set, data.submission is the linked submission (COMPLETED may become RUN_CREATED). Node does not UPDATE the submission.",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.RETRY_EMPLOYEE. Oracle accepts IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED. After retry, data.run is persisted. If flow_submission_id is set, data.submission is re-read (COMPLETED may become RUN_CREATED). Node does not UPDATE the submission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"retry_reason\": \"Reprocess after data fix\"\n}"
             }
-          }
+          },
+          "response": [
+            {
+              "name": "Linked flow run retried",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/employees/{{employee_id}}/retry",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}",
+                    "employees",
+                    "{{employee_id}}",
+                    "retry"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.RETRY_EMPLOYEE. Oracle accepts IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED. After retry, data.run is persisted. If flow_submission_id is set, data.submission is re-read (COMPLETED may become RUN_CREATED). Node does not UPDATE the submission.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"retry_reason\": \"Reprocess after data fix\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Employee retried successfully.\",\n  \"data\": {\n    \"reversed_result_count\": 2,\n    \"status\": \"READY_TO_FINALIZE\",\n    \"run\": {\n      \"run_id\": 250,\n      \"status_code\": \"READY_TO_FINALIZE\",\n      \"flow_submission_id\": 12\n    },\n    \"submission\": {\n      \"flow_submission_id\": 12,\n      \"submission_number\": \"PR-2026-001\",\n      \"status_code\": \"RUN_CREATED\"\n    }\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Retry run",
@@ -3353,7 +3615,15 @@
                 "retry"
               ]
             },
-            "description": "Re-invokes PROCESS_RUN with stop_on_error=N. Returned data.status is the persisted run status (IN_PROGRESS, READY_TO_FINALIZE, or COMPLETED_WITH_ERRORS).",
+            "description": "Re-invokes PROCESS_RUN with stop_on_error=N. data.status is the persisted run status (IN_PROGRESS, READY_TO_FINALIZE, or COMPLETED_WITH_ERRORS).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Finalize run",
           "request": {
             "method": "POST",
             "header": [
@@ -3379,7 +3649,61 @@
                 "finalize"
               ]
             },
-            "description": "PAY.PAYROLL_PROCESSING_PKG.FINALIZE_RUN. Requires persisted STATUS_CODE = READY_TO_FINALIZE. If the run has flow_submission_id, Oracle sets the submission RUN_CREATED → COMPLETED. Node does not UPDATE the submission.",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.FINALIZE_RUN. Requires persisted STATUS_CODE = READY_TO_FINALIZE. If flow_submission_id is set, Oracle sets the submission RUN_CREATED → COMPLETED. Node does not UPDATE the submission.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1\n}"
+            }
+          },
+          "response": [
+            {
+              "name": "Finalized linked flow run",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/finalize",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}",
+                    "finalize"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.FINALIZE_RUN. Requires persisted STATUS_CODE = READY_TO_FINALIZE. If flow_submission_id is set, Oracle sets the submission RUN_CREATED → COMPLETED. Node does not UPDATE the submission.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run finalized successfully.\",\n  \"data\": {\n    \"status\": \"COMPLETED\",\n    \"run\": {\n      \"run_id\": 250,\n      \"status_code\": \"COMPLETED\",\n      \"flow_submission_id\": 12\n    },\n    \"submission\": {\n      \"flow_submission_id\": 12,\n      \"submission_number\": \"PR-2026-001\",\n      \"status_code\": \"COMPLETED\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rollback run",
           "request": {
             "method": "POST",
             "header": [
@@ -3405,9 +3729,58 @@
                 "rollback"
               ]
             },
-            "description": "PAY.PAYROLL_PROCESSING_PKG.ROLLBACK_RUN. Supported from IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, and COMPLETED. Resulting run status is ROLLED_BACK. If flow_submission_id is set, the linked submission is also ROLLED_BACK. Node does not UPDATE either table.",
+            "description": "PAY.PAYROLL_PROCESSING_PKG.ROLLBACK_RUN. Supported from IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED. Resulting run status is ROLLED_BACK. If flow_submission_id is set, the linked submission is also ROLLED_BACK. Node does not UPDATE either table.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"rollback_reason\": \"Incorrect inputs\"\n}"
             }
-          }
+          },
+          "response": [
+            {
+              "name": "Rolled back linked flow run",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/payroll/runs/{{run_id}}/rollback",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "payroll",
+                    "runs",
+                    "{{run_id}}",
+                    "rollback"
+                  ]
+                },
+                "description": "PAY.PAYROLL_PROCESSING_PKG.ROLLBACK_RUN. Supported from IN_PROGRESS, READY_TO_FINALIZE, COMPLETED_WITH_ERRORS, COMPLETED. Resulting run status is ROLLED_BACK. If flow_submission_id is set, the linked submission is also ROLLED_BACK. Node does not UPDATE either table.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enterprise_id\": 1,\n  \"rollback_reason\": \"Incorrect inputs\"\n}"
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                }
+              ],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Payroll run rolled back successfully.\",\n  \"data\": {\n    \"status\": \"ROLLED_BACK\",\n    \"run\": {\n      \"run_id\": 250,\n      \"status_code\": \"ROLLED_BACK\",\n      \"flow_submission_id\": 12\n    },\n    \"submission\": {\n      \"flow_submission_id\": 12,\n      \"submission_number\": \"PR-2026-001\",\n      \"status_code\": \"ROLLED_BACK\"\n    }\n  }\n}"
+            }
+          ]
         },
         {
           "name": "Run employees",
@@ -12663,7 +13036,8 @@
                     },
                     {
                       "key": "status_code",
-                      "value": ""
+                      "value": "",
+                      "description": "Includes ROLLED_BACK after ROLLBACK_RUN. Example: ROLLED_BACK"
                     },
                     {
                       "key": "payroll_id",
@@ -12671,9 +13045,59 @@
                     }
                   ]
                 },
-                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.LIST_SUBMISSIONS. Optional status_code (DRAFT, SUBMITTED, RUN_CREATED, COMPLETED, ROLLED_BACK, CANCELLED, ERROR), payroll_id."
+                "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.LIST_SUBMISSIONS. Optional status_code: DRAFT, SUBMITTED, RUN_CREATED, COMPLETED, ROLLED_BACK, CANCELLED, ERROR."
               },
-              "response": []
+              "response": [
+                {
+                  "name": "Rolled back submissions",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flow-submissions?enterprise_id={{enterprise_id}}&status_code=&payroll_id={{payroll_id}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flow-submissions"
+                      ],
+                      "query": [
+                        {
+                          "key": "enterprise_id",
+                          "value": "{{enterprise_id}}"
+                        },
+                        {
+                          "key": "status_code",
+                          "value": "",
+                          "description": "Includes ROLLED_BACK after ROLLBACK_RUN. Example: ROLLED_BACK"
+                        },
+                        {
+                          "key": "payroll_id",
+                          "value": "{{payroll_id}}"
+                        }
+                      ]
+                    },
+                    "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.LIST_SUBMISSIONS. Optional status_code: DRAFT, SUBMITTED, RUN_CREATED, COMPLETED, ROLLED_BACK, CANCELLED, ERROR."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll flow submissions retrieved successfully.\",\n  \"data\": [\n    {\n      \"flow_submission_id\": 12,\n      \"submission_number\": \"PR-2026-001\",\n      \"status_code\": \"ROLLED_BACK\"\n    }\n  ]\n}"
+                }
+              ]
             },
             {
               "name": "Get submission",
@@ -12705,7 +13129,49 @@
                 },
                 "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.GET_SUBMISSION. STATUS_CODE includes ROLLED_BACK after ROLLBACK_RUN."
               },
-              "response": []
+              "response": [
+                {
+                  "name": "Rolled back submission",
+                  "originalRequest": {
+                    "method": "GET",
+                    "header": [
+                      {
+                        "key": "Authorization",
+                        "value": "Bearer {{jwt}}"
+                      }
+                    ],
+                    "url": {
+                      "raw": "{{baseUrl}}/api/payroll/flow-submissions/{{flow_submission_id}}?enterprise_id={{enterprise_id}}",
+                      "host": [
+                        "{{baseUrl}}"
+                      ],
+                      "path": [
+                        "api",
+                        "payroll",
+                        "flow-submissions",
+                        "{{flow_submission_id}}"
+                      ],
+                      "query": [
+                        {
+                          "key": "enterprise_id",
+                          "value": "{{enterprise_id}}"
+                        }
+                      ]
+                    },
+                    "description": "PAY.PAY_PAYROLL_FLOW_SUBMISSIONS_PKG.GET_SUBMISSION. STATUS_CODE includes ROLLED_BACK after ROLLBACK_RUN."
+                  },
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "header": [
+                    {
+                      "key": "Content-Type",
+                      "value": "application/json"
+                    }
+                  ],
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Payroll flow submission retrieved successfully.\",\n  \"data\": {\n    \"flow_submission_id\": 12,\n    \"submission_number\": \"PR-2026-001\",\n    \"status_code\": \"ROLLED_BACK\"\n  }\n}"
+                }
+              ]
             },
             {
               "name": "Create draft",
