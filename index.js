@@ -108,6 +108,7 @@ import {
   initEnterprisePackage,
   closeEnterprisePackage
 } from './feature/enterprise_structure/enterprise.gitPackage.js';
+import locationsRoutes from './feature/enterprise_structure/locations/routes/locations.routes.js';
 import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
 import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
 import payFlexfieldSegmentValuesRoutes from './feature/pay/flexfield_segment_values/routes/payFlexfieldSegmentValues.routes.js';
@@ -207,6 +208,9 @@ app.use('/api/holidays', holidayController);
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
 
+// Locations (ENT.V_ACTIVE_LOCATIONS) — must be BEFORE /api catch-all so /api/locations is not matched as :structureId
+app.use('/api/locations', locationsRoutes);
+
 // Data roles (must be BEFORE /api catch-all so /api/data-roles is not matched as org structure :structureId)
 app.use('/api/data-roles', fndsecDataRolesController);
 
@@ -217,7 +221,7 @@ app.use('/api/employer-info', recEmployerInfoController);
 app.use('/api/job-postings', recJobPostingEmployerInfoController);
 
 // Enterprise catch-alls (/api/:structureId… and / hierarchy aliases).
-// Must stay AFTER holidays, time-zones, data-roles, employer-info, and job-postings.
+// Must stay AFTER holidays, time-zones, locations, data-roles, employer-info, and job-postings.
 // The package also skips host-owned prefixes (grc, payroll, tm, …) so those
 // later mounts are not handled as a structure id.
 mountEnterpriseCatchAllRoutes(app);
