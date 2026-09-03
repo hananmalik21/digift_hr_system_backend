@@ -1,5 +1,6 @@
 /**
- * Shared helpers for ENT.V_ACTIVE_LOCATIONS list (pure — no DB import).
+ * Shared helpers for active locations list (pure — no DB import).
+ * Source: ENT.V_LOCATIONS (ACTIVE_FLAG = 'Y'). ENT.V_ACTIVE_LOCATIONS is not present.
  */
 
 export const LIST_ACTIVE_LOCATIONS_SQL = [
@@ -7,7 +8,8 @@ export const LIST_ACTIVE_LOCATIONS_SQL = [
   '    LOCATION_ID,',
   '    COUNTRY_CODE,',
   '    LOCATION_NAME',
-  'FROM ENT.V_ACTIVE_LOCATIONS',
+  'FROM ENT.V_LOCATIONS',
+  "WHERE ACTIVE_FLAG = 'Y'",
   'ORDER BY LOCATION_NAME ASC'
 ].join('\n');
 

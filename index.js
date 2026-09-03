@@ -208,7 +208,7 @@ app.use('/api/holidays', holidayController);
 // Time zones (must be BEFORE /api catch-all so /api/time-zones is not matched as org structure :structureId)
 app.use('/api/time-zones', timeZoneController);
 
-// Locations (ENT.V_ACTIVE_LOCATIONS) — must be BEFORE /api catch-all so /api/locations is not matched as :structureId
+// Locations (ENT.V_LOCATIONS, active only) — must be BEFORE /api catch-all so /api/locations is not matched as :structureId
 app.use('/api/locations', locationsRoutes);
 
 // Data roles (must be BEFORE /api catch-all so /api/data-roles is not matched as org structure :structureId)
