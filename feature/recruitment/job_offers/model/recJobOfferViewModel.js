@@ -14,6 +14,7 @@ import {
   REC_JOB_OFFER_MANAGEMENT_VIEW
 } from '../utils/recJobOfferConstants.js';
 import { paginateForExport } from '@digifyhr/common/excel';
+import { APPLICATION_RESUME_URL_PREFIX } from '../../applications/utils/recApplicationResumeMapper.js';
 import { buildJobOfferManagementListFilters } from '../utils/recJobOfferManagementListFilters.js';
 import { mapJobOfferManagementListRow } from '../utils/recJobOfferManagementMappers.js';
 import {
@@ -96,6 +97,11 @@ export async function getJobOfferByGuid(offerGuidHex) {
       o.ENTERPRISE_ID,
       a.APPLICATION_GUID,
       a.APPLICATION_NUMBER,
+      CASE
+        WHEN NVL(DBMS_LOB.GETLENGTH(a.RESUME_FILE_CONTENT), 0) > 0 THEN
+          '${APPLICATION_RESUME_URL_PREFIX}/' || RAWTOHEX(a.APPLICATION_GUID) || '/resume'
+        ELSE NULL
+      END AS RESUME_URL,
       o.CANDIDATE_GUID,
       TRIM(c.FIRST_NAME || ' ' || NVL(c.MIDDLE_NAME, '') || ' ' || c.LAST_NAME) AS CANDIDATE_NAME,
       o.POSTING_ID,

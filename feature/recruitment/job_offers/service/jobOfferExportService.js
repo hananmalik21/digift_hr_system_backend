@@ -5,6 +5,7 @@ const KEY_ORDER = [
   'offer_guid',
   'enterprise_id',
   'application_id',
+  'resume_url',
   'candidate_guid',
   'posting_id',
   'offer_number',

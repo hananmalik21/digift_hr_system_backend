@@ -60,6 +60,7 @@ export async function mapJobOfferManagementListRow(row) {
     offer_guid: normalizeGuidValue(m.offer_guid),
     enterprise_id: safeFiniteNumber(m.enterprise_id),
     application_id: safeFiniteNumber(m.application_id),
+    resume_url: strOrNull(m.resume_url),
     candidate_guid: normalizeGuidValue(m.candidate_guid),
     posting_id: safeFiniteNumber(m.posting_id),
     offer_number: strOrNull(m.offer_number),
