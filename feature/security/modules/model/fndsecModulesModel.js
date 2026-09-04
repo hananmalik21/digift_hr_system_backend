@@ -1,6 +1,7 @@
 import oracledb from 'oracledb';
 import db from '../../../../config/db.js';
 import { ValidationError } from '../../../../utils/errors/index.js';
+import { packageStatusIsSuccess } from '../../../../utils/oraclePackageUtils.js';
 import {
   moduleGuidFromDb,
   normalizeOutGuidHex,
@@ -64,7 +65,7 @@ function normalizeOutNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export { packageStatusIsSuccess } from '../../../../utils/oraclePackageUtils.js';
+export { packageStatusIsSuccess };
 
 function numOrNull(v) {
   if (v === undefined || v === null || v === '') return null;
