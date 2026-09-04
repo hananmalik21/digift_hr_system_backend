@@ -131,14 +131,18 @@ export async function getRun(enterpriseId, runId) {
 
 /**
  * @param {object} payload
+ * @param {{ initializeRun?: Function, getRunById?: Function }} [deps]
  */
-export async function createRunInitialization(payload) {
-  const pkg = await runsModel.initializeRun(payload);
+export async function createRunInitialization(payload, deps = {}) {
+  const callPkg = deps.initializeRun ?? runsModel.initializeRun;
+  const loadRun = deps.getRunById ?? loadRunOrNull;
+
+  const pkg = await callPkg(payload);
   if (!pkg.success) return mapPackageOutcome(pkg);
 
   let run = null;
   if (pkg.data?.run_id) {
-    run = await loadRunOrNull(payload.enterprise_id, pkg.data.run_id);
+    run = await loadRun(payload.enterprise_id, pkg.data.run_id);
   }
 
   return mapPackageOutcome(pkg, {

@@ -5,6 +5,9 @@
  * Lifecycle is Oracle-owned. Node does not UPDATE PAYROLL_RUNS or
  * PAY_PAYROLL_FLOW_SUBMISSIONS status. INITIALIZE_RUN rejects end-of-time
  * sentinel period end dates in Oracle — do not bypass that check here.
+ * Overlapping-run blocking is also Oracle-owned: only runs whose STATUS_CODE
+ * is not in (COMPLETED, ROLLED_BACK, ERROR) block initialization. Node must
+ * not pre-check overlap before calling the package.
  */
 
 import {

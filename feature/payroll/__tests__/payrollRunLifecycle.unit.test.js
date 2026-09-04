@@ -10,12 +10,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { PAYROLL_FLOW_SUBMISSION_STATUS_CODES, PAYROLL_RUN_STATUS_CODES } from '../shared/payrollValidation.js';
 import {
+  createRunInitialization,
   finalizeRun,
   processRun,
   retryRunEmployee,
   rollbackRun,
   withPersistedRunStatus
 } from '../runs/services/payRunsService.js';
+import { initializeRunFromSubmission } from '../flow_submissions/services/payFlowSubmissions.service.js';
 import { validateListRuns } from '../runs/middleware/payRunsValidation.js';
 import {
   validateInitializeRunFromSubmission,
@@ -364,4 +366,191 @@ test('dashboard counts include READY_TO_FINALIZE and COMPLETED_WITH_ERRORS', () 
   assert.ok(dashboardService.includes("'READY_TO_FINALIZE'"));
   assert.ok(dashboardService.includes("'COMPLETED_WITH_ERRORS'"));
   assert.ok(dashboardModel.includes('COMPLETED_WITH_ERRORS'));
+});
+
+const INIT_RUN_PAYLOAD = {
+  enterprise_id: 1,
+  payroll_id: 15,
+  run_type_code: 'REGULAR',
+  period_start_date: '2026-09-01',
+  period_end_date: '2026-09-30',
+  payment_date: '2026-09-30',
+  run_number: 'PAY-TEST-002',
+  created_by: 'PAYROLL_TEST'
+};
+
+const INIT_FROM_SUBMISSION_PAYLOAD = {
+  enterprise_id: 1,
+  flow_submission_id: 123,
+  created_by: 'PAYROLL_TEST'
+};
+
+function mockInitializeRunDeps(oracleResult, overlappingStatus) {
+  let oracleCalled = false;
+  return {
+    deps: {
+      initializeRun: async (payload) => {
+        oracleCalled = true;
+        assert.equal(payload.payroll_id, INIT_RUN_PAYLOAD.payroll_id);
+        return oracleResult;
+      },
+      getRunById: async () => ({
+        run_id: oracleResult.data?.run_id ?? 251,
+        status_code: 'IN_PROGRESS',
+        period_end_date: overlappingStatus === 'COMPLETED' ? '4712-12-31' : '2026-08-31'
+      })
+    },
+    wasOracleCalled: () => oracleCalled
+  };
+}
+
+function mockInitializeFromSubmissionDeps(oracleResult) {
+  let oracleCalled = false;
+  return {
+    deps: {
+      initializeRunFromSubmission: async () => {
+        oracleCalled = true;
+        return oracleResult;
+      },
+      getFlowSubmissionById: async () => ({
+        flow_submission_id: 123,
+        submission_number: 'PR-2026-001',
+        status_code: 'RUN_CREATED'
+      }),
+      getRunById: async () => ({
+        run_id: oracleResult.data?.run_id ?? 251,
+        status_code: 'IN_PROGRESS',
+        flow_submission_id: 123
+      }),
+      getRunByFlowSubmissionId: async () => null
+    },
+    wasOracleCalled: () => oracleCalled
+  };
+}
+
+test('initialize paths do not perform Node-side payroll run overlap validation', () => {
+  const initRunFn = runsService.slice(runsService.indexOf('export async function createRunInitialization'));
+  const initFromSubmissionFn = submissionsService.slice(
+    submissionsService.indexOf('export async function initializeRunFromSubmission')
+  );
+
+  for (const [label, source] of [
+    ['initialize run service fn', initRunFn],
+    ['initialize-from-submission service fn', initFromSubmissionFn],
+    ['runs validation', runsValidation],
+    ['initialize-from-submission validation', initializeValidation]
+  ]) {
+    assert.equal(/overlap/i.test(source), false, `${label} overlap check`);
+    assert.equal(/blocking.*status/i.test(source), false, `${label} blocking status check`);
+    assert.equal(/duplicate.*payroll run/i.test(source), false, `${label} duplicate run check`);
+  }
+
+  assert.equal(initRunFn.includes('listRuns'), false);
+  assert.equal(initFromSubmissionFn.includes('listRuns'), false);
+  assert.ok(runsModel.includes('Overlapping-run blocking is also Oracle-owned'));
+});
+
+test('TEST A: initializeRun does not pre-reject when overlapping COMPLETED run exists', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps(
+    {
+      success: true,
+      message: 'Payroll run initialized successfully.',
+      data: { run_id: 251, run_guid: 'new-guid' }
+    },
+    'COMPLETED'
+  );
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, true);
+  assert.equal(outcome.httpStatus, 201);
+  assert.equal(outcome.data.status_code, 'IN_PROGRESS');
+});
+
+test('TEST B: initializeRun does not pre-reject when overlapping ROLLED_BACK run exists', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps({
+    success: true,
+    message: 'Payroll run initialized successfully.',
+    data: { run_id: 252, run_guid: 'new-guid-2' }
+  });
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, true);
+  assert.equal(outcome.httpStatus, 201);
+});
+
+test('TEST C: initializeRun does not pre-reject when overlapping ERROR run exists', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps({
+    success: true,
+    message: 'Payroll run initialized successfully.',
+    data: { run_id: 253, run_guid: 'new-guid-3' }
+  });
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, true);
+});
+
+test('TEST D: initializeRun propagates Oracle failure for overlapping IN_PROGRESS run', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps({
+    success: false,
+    message: 'Duplicate payroll run for period.',
+    data: null
+  });
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.httpStatus, 400);
+  assert.match(outcome.message, /duplicate payroll run/i);
+});
+
+test('TEST E: initializeRun propagates Oracle failure for overlapping READY_TO_FINALIZE run', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps({
+    success: false,
+    message: 'An overlapping payroll run is already READY_TO_FINALIZE.',
+    data: null
+  });
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.httpStatus, 400);
+});
+
+test('TEST F: initializeRun propagates Oracle failure for overlapping COMPLETED_WITH_ERRORS run', async () => {
+  const { deps, wasOracleCalled } = mockInitializeRunDeps({
+    success: false,
+    message: 'Duplicate payroll run for period.',
+    data: null
+  });
+
+  const outcome = await createRunInitialization(INIT_RUN_PAYLOAD, deps);
+  assert.equal(wasOracleCalled(), true);
+  assert.equal(outcome.success, false);
+  assert.equal(outcome.httpStatus, 400);
+});
+
+test('initialize-run-from-submission delegates overlap blocking to Oracle for active runs', async () => {
+  const blocking = mockInitializeFromSubmissionDeps({
+    success: false,
+    message: 'Duplicate payroll run for period.',
+    data: null
+  });
+  const blockingOutcome = await initializeRunFromSubmission(INIT_FROM_SUBMISSION_PAYLOAD, blocking.deps);
+  assert.equal(blocking.wasOracleCalled(), true);
+  assert.equal(blockingOutcome.success, false);
+  assert.equal(blockingOutcome.httpStatus, 400);
+
+  const nonBlocking = mockInitializeFromSubmissionDeps({
+    success: true,
+    message: 'Payroll run initialized from flow submission successfully.',
+    data: { run_id: 251, run_guid: 'abc', run_number: 'KW-001', submission_number: 'PR-2026-001' }
+  });
+  const okOutcome = await initializeRunFromSubmission(INIT_FROM_SUBMISSION_PAYLOAD, nonBlocking.deps);
+  assert.equal(nonBlocking.wasOracleCalled(), true);
+  assert.equal(okOutcome.success, true);
+  assert.equal(okOutcome.httpStatus, 201);
+  assert.equal(okOutcome.data.run.status_code, 'IN_PROGRESS');
 });
