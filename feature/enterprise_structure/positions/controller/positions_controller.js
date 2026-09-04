@@ -15,7 +15,12 @@ import { getTenantId, requireTenantIdInBody } from '../../../../utils/tenantUtil
 import { getUserId } from '@digifyhr/common';
 import { parsePagination, buildSnakeListMeta } from '@digifyhr/common';
 import { ValidationError } from '../../../../utils/errors/index.js';
-import { validateGetPositionsByOrgUnit, parsePositionListFilters, parseReportingRelationshipsQuery } from '../validators/positionValidator.js';
+import {
+  validateGetPositionsByOrgUnit,
+  parsePositionListFilters,
+  parseReportingRelationshipsQuery,
+  resolveRequiredListTenantId
+} from '../validators/positionValidator.js';
 import { buildPositionsExcelBuffer, buildReportingRelationshipsExcelBuffer } from '../service/positionExportService.js';
 import {
   sendPositionList,
@@ -55,6 +60,21 @@ function isHex32Guid(v) {
 /** @param {string} normalizedUpper already normalized via {@link normalizeGuidString} */
 function isNormalizedHex32Guid(normalizedUpper) {
   return HEX32_GUID_RE.test(normalizedUpper);
+}
+
+function parseListQuery(req) {
+  const { filters, errors } = parsePositionListFilters(req.query);
+  if (errors.length) return { ok: false, errors };
+  const tenantId = resolveRequiredListTenantId(req);
+  filters.tenant_id = tenantId;
+  return { ok: true, filters, tenantId };
+}
+
+function sendPositionRouteError(res, req, error, fallbackMessage) {
+  if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
+  if (Number(error?.statusCode) === 403) return sendForbidden(res, error.message);
+  if (Number(error?.statusCode) === 400) return sendBadRequest(res, req, error.message);
+  return sendServerError(res, req, fallbackMessage, error);
 }
 
 function validatePosition(data, isUpdate = false) {
@@ -189,11 +209,9 @@ async function handleUpdate(req, res) {
  */
 router.get('/', async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
-    const { filters, errors } = parsePositionListFilters(req.query);
-    if (errors.length) return sendBadRequest(res, req, errors);
-
-    filters.tenant_id = tenantId;
+    const parsed = parseListQuery(req);
+    if (!parsed.ok) return sendBadRequest(res, req, parsed.errors);
+    const { filters, tenantId } = parsed;
 
     let page;
     let pageSize;
@@ -210,11 +228,10 @@ router.get('/', async (req, res) => {
       res,
       req,
       result.positions || [],
-      buildSnakeListMeta(page, pageSize, result.total ?? 0)
+      { ...buildSnakeListMeta(page, pageSize, result.total ?? 0), tenant_id: tenantId }
     );
   } catch (error) {
-    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
-    return sendServerError(res, req, 'Failed to fetch positions', error);
+    return sendPositionRouteError(res, req, error, 'Failed to fetch positions');
   }
 });
 
@@ -225,11 +242,9 @@ router.get('/', async (req, res) => {
  */
 router.get('/export', async (req, res) => {
   try {
-    const tenantId = getTenantId(req);
-    const { filters, errors } = parsePositionListFilters(req.query);
-    if (errors.length) return sendBadRequest(res, req, errors);
-
-    filters.tenant_id = tenantId;
+    const parsed = parseListQuery(req);
+    if (!parsed.ok) return sendBadRequest(res, req, parsed.errors);
+    const { filters, tenantId } = parsed;
 
     const result = await PositionsModel.findAllForExport(filters);
     const { buffer, filename, rowCount } = await buildPositionsExcelBuffer({
@@ -243,8 +258,7 @@ router.get('/export', async (req, res) => {
 
     return sendPositionExport(res, buffer, filename);
   } catch (error) {
-    if (error instanceof ValidationError) return sendBadRequest(res, req, error.message);
-    return sendServerError(res, req, 'Failed to export positions', error);
+    return sendPositionRouteError(res, req, error, 'Failed to export positions');
   }
 });
 

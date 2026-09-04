@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import PositionsModel from '../model/positions_model.js';
+import { parsePositionListFilters, resolveRequiredListTenantId } from '../validators/positionValidator.js';
 
 test('LIST/GET shape exposes grade currency_code from the package row', () => {
   const shaped = PositionsModel.shape(PositionsModel.mapViewRowForShape({
@@ -51,4 +52,43 @@ test('CREATE/UPDATE package payload does not send currency_code', () => {
   );
   assert.equal(payload.grade_id, 10);
   assert.equal('currency_code' in payload, false);
+});
+
+test('list filters parse tenant_id from the query string', () => {
+  const { filters, errors } = parsePositionListFilters({ tenant_id: '3' });
+  assert.deepEqual(errors, []);
+  assert.equal(filters.tenant_id, 3);
+});
+
+test('list filters reject a non-positive tenant_id', () => {
+  const { errors } = parsePositionListFilters({ tenant_id: '0' });
+  assert.equal(errors.length > 0, true);
+  assert.match(errors[0], /tenant_id/);
+});
+
+test('resolveRequiredListTenantId reads tenant_id from query', () => {
+  assert.equal(resolveRequiredListTenantId({ query: { tenant_id: '3' } }), 3);
+});
+
+test('resolveRequiredListTenantId uses the first tenant_id when query repeats the key', () => {
+  assert.equal(resolveRequiredListTenantId({ query: { tenant_id: ['3', '1'] } }), 3);
+});
+
+test('resolveRequiredListTenantId reads tenant_id from the URL when query is empty', () => {
+  assert.equal(
+    resolveRequiredListTenantId({ query: {}, originalUrl: '/api/positions?tenant_id=3' }),
+    3
+  );
+});
+
+test('resolveRequiredListTenantId does not fall back to JWT/hostname', () => {
+  assert.throws(
+    () => resolveRequiredListTenantId({
+      query: {},
+      originalUrl: '/api/positions',
+      user: { enterprise_id: 1 },
+      enterprise: { enterpriseId: 1 }
+    }),
+    /tenant_id is required/
+  );
 });

@@ -108,6 +108,7 @@ import {
   initEnterprisePackage,
   closeEnterprisePackage
 } from './feature/enterprise_structure/enterprise.gitPackage.js';
+import positionsController from './feature/enterprise_structure/positions/controller/positions_controller.js';
 import locationsRoutes from './feature/enterprise_structure/locations/routes/locations.routes.js';
 import payElementEntriesRoutes from './feature/pay/element_entries/routes/payElementEntries.routes.js';
 import payFlexfieldSegmentsRoutes from './feature/pay/flexfield_segments/routes/payFlexfieldSegments.routes.js';
@@ -191,6 +192,8 @@ app.use(healthRoutes);
 
 // Prefix-safe Enterprise routes (public context, enterprises, org, grades, stats, lookups).
 // Career stays on the same /api/public prefix; catch-alls are mounted later.
+// Host overlay before the Enterprise package so GET /api/positions uses query tenant_id.
+app.use('/api/positions', positionsController);
 mountEnterprisePackage(app);
 app.use('/api/public', publicCareerController);
 

@@ -20,6 +20,44 @@ function isNormalizedHex32Guid(normalizedUpper) {
   return HEX32_GUID_RE.test(normalizedUpper);
 }
 
+function firstQueryValue(value) {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function tenantIdFromQuery(query) {
+  const raw = firstQueryValue(query?.tenant_id ?? query?.tenantId);
+  if (isBlank(raw)) return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: parseTenantId(raw, 'tenant_id is required') };
+  } catch (err) {
+    return { ok: false, message: err.message };
+  }
+}
+
+function tenantIdFromUrl(rawUrl) {
+  const qIndex = String(rawUrl || '').indexOf('?');
+  if (qIndex === -1) return undefined;
+  const params = new URLSearchParams(String(rawUrl).slice(qIndex + 1));
+  return params.get('tenant_id') ?? params.get('tenantId') ?? undefined;
+}
+
+/**
+ * LIST/export tenant from query or URL only. Hostname/JWT must not replace it.
+ * @param {import('express').Request} req
+ * @returns {number}
+ */
+export function resolveRequiredListTenantId(req) {
+  const fromQuery = tenantIdFromQuery(req?.query);
+  if (!fromQuery.ok) throw new ValidationError(fromQuery.message);
+  if (fromQuery.value != null) return fromQuery.value;
+
+  const fromUrl = tenantIdFromUrl(req?.originalUrl || req?.url);
+  if (!isBlank(fromUrl)) return parseTenantId(fromUrl, 'tenant_id is required');
+
+  throw new ValidationError('tenant_id is required');
+}
+
 /**
  * Parse shared list/export query filters for GET /api/positions and /api/positions/export.
  * @param {import('express').Request['query']} query
@@ -28,6 +66,10 @@ function isNormalizedHex32Guid(normalizedUpper) {
 export function parsePositionListFilters(query) {
   const filters = {};
   const errors = [];
+
+  const tenant = tenantIdFromQuery(query);
+  if (!tenant.ok) errors.push(tenant.message);
+  else if (tenant.value != null) filters.tenant_id = tenant.value;
 
   if (query?.status) {
     filters.status = String(query.status).toUpperCase();

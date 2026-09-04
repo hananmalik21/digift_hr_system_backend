@@ -219,15 +219,8 @@ class PositionsModel {
     };
   }
 
-  // ----------------------------
-  // GET ALL (paginated)
-  // ----------------------------
-  static async findAll(filters = {}) {
-    const tenantIdNum = this.assertPositiveTenantId(filters.tenant_id ?? filters.tenantId);
-    const page = Number(filters?.pagination?.page || 1);
-    const pageSize = Math.min(100, Number(filters?.pagination?.pageSize || 10));
-
-    const { rows, total } = await entListEnvelope('POSITIONS', {
+  static toListPayload(filters, tenantIdNum, pagination) {
+    return {
       tenant_id: tenantIdNum,
       search: filters.search,
       status: filters.status,
@@ -239,12 +232,33 @@ class PositionsModel {
       job_family_id: filters.job_family_id,
       job_level_id: filters.job_level_id,
       grade_id: filters.grade_id,
-      page,
-      page_size: pageSize
-    });
+      ...(pagination ? { page: pagination.page, page_size: pagination.pageSize } : {})
+    };
+  }
 
-    const shaped = this.shapeMany(rows.map((r) => this.mapViewRowForShape(r)));
-    return { positions: shaped, total };
+  static shapeAndFilterByTenant(rows, tenantIdNum) {
+    return this.shapeMany((rows ?? []).map((r) => this.mapViewRowForShape(r)))
+      .filter((row) => Number(row?.tenant_id) === tenantIdNum);
+  }
+
+  // ----------------------------
+  // GET ALL (paginated)
+  // ----------------------------
+  static async findAll(filters = {}) {
+    const tenantIdNum = this.assertPositiveTenantId(filters.tenant_id ?? filters.tenantId);
+    const page = Number(filters?.pagination?.page || 1);
+    const pageSize = Math.min(100, Number(filters?.pagination?.pageSize || 10));
+
+    const { rows } = await entListEnvelope(
+      'POSITIONS',
+      this.toListPayload(filters, tenantIdNum, { page, pageSize })
+    );
+
+    // ENT_POSITIONS_PKG LIST ignores page/page_size; paginate after tenant filter.
+    const shaped = this.shapeAndFilterByTenant(rows, tenantIdNum);
+    const total = shaped.length;
+    const offset = Math.max(0, (page - 1) * pageSize);
+    return { positions: shaped.slice(offset, offset + pageSize), total };
   }
 
   /**
@@ -254,30 +268,14 @@ class PositionsModel {
    */
   static async findAllForExport(filters = {}, options = {}) {
     const tenantIdNum = this.assertPositiveTenantId(filters.tenant_id ?? filters.tenantId);
-    const basePayload = {
-      tenant_id: tenantIdNum,
-      search: filters.search,
-      status: filters.status,
-      org_structure_id: filters.org_structure_id
-        ? this.normalizeGuidHex32(filters.org_structure_id)
-        : undefined,
-      org_unit_id: filters.org_unit_id ? this.normalizeGuidHex32(filters.org_unit_id) : undefined,
-      org_unit_scope: filters.org_unit_scope,
-      job_family_id: filters.job_family_id,
-      job_level_id: filters.job_level_id,
-      grade_id: filters.grade_id,
-    };
 
     const { rows, total } = await paginateForExport({
       exportOptions: options,
-      fetchPage: (page, pageSize) => entListEnvelope('POSITIONS', {
-        ...basePayload,
-        page,
-        page_size: pageSize,
-      }),
-      getRows: (result) => this.shapeMany(
-        (result.rows ?? []).map((r) => this.mapViewRowForShape(r))
-      )
+      fetchPage: (page, pageSize) => entListEnvelope(
+        'POSITIONS',
+        this.toListPayload(filters, tenantIdNum, { page, pageSize })
+      ),
+      getRows: (result) => this.shapeAndFilterByTenant(result.rows, tenantIdNum)
     });
 
     return { positions: rows, total };
