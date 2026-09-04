@@ -4418,7 +4418,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 294,\n  \"payroll_id\": 13,\n  \"element_id\": 47,\n  \"amount\": 500,\n  \"effective_start_date\": \"2026-08-01\"\n}"
+              "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 294,\n  \"payroll_id\": 13,\n  \"element_id\": 47,\n  \"amount\": 500,\n  \"effective_start_date\": \"2026-08-01\",\n  \"run_type_code\": \"REGULAR\"\n}"
             }
           }
         },

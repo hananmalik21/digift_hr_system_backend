@@ -31,7 +31,15 @@
  *         period_end_date: { type: string, format: date, example: '2026-09-30' }
  *         payment_date: { type: string, format: date, example: '2026-09-30' }
  *         consolidation_group_id: { type: integer, example: 1 }
- *         run_type_code: { type: string, example: REGULAR }
+ *         run_type_code:
+ *           type: string
+ *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *           example: REGULAR
+ *           description: |
+ *             REGULAR: Normal payroll-cycle entries.
+ *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
+ *             RETRO: Retroactive adjustment entries.
+ *             BONUS: Bonus payroll entries.
  *         payroll_group_id: { type: integer, nullable: true, example: null }
  *         process_start_date: { type: string, format: date, example: '2026-09-01' }
  *         process_end_date: { type: string, format: date, example: '2026-09-30' }

@@ -35,6 +35,16 @@
  *         creator_type_code: { type: string, example: USER }
  *         processed_flag: { type: string, enum: [Y, N], example: N }
  *         retroactive_flag: { type: string, enum: [Y, N], example: N }
+ *         run_type_code:
+ *           type: string
+ *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *           description: |
+ *             Optional. Omitted on create lets Oracle apply backward-compatible defaults.
+ *             REGULAR: Normal payroll-cycle entries.
+ *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
+ *             RETRO: Retroactive adjustment entries.
+ *             BONUS: Bonus payroll entries.
+ *           example: REGULAR
  *         automatic_entry_flag: { type: string, enum: [Y, N], example: N }
  *         sequence_number: { type: integer, example: 1 }
  *         reason_text: { type: string, example: Monthly salary }
@@ -76,6 +86,16 @@
  *         sub_classification_code: { type: string, nullable: true }
  *         cost_allocation_keyflex_id: { type: string, example: CC-HR-KWT }
  *         comments: { type: string, example: Updated amount }
+ *         run_type_code:
+ *           type: string
+ *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *           description: |
+ *             Optional. Omitted fields are preserved by Oracle.
+ *             REGULAR: Normal payroll-cycle entries.
+ *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
+ *             RETRO: Retroactive adjustment entries.
+ *             BONUS: Bonus payroll entries.
+ *           example: BONUS
  *         effective_end_date: { type: string, format: date, example: '2026-12-31', nullable: true }
  *     PayElementEntryListItem:
  *       type: object
@@ -106,6 +126,7 @@
  *         element_processing_type_code: { type: string }
  *         processed_flag: { type: string, enum: [Y, N] }
  *         retroactive_flag: { type: string, enum: [Y, N] }
+ *         run_type_code: { type: string, enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS], nullable: true }
  *         automatic_entry_flag: { type: string, enum: [Y, N] }
  *         created_by: { type: string }
  *         creation_date: { type: string, format: date-time }
@@ -261,6 +282,45 @@
  *                 element_id: 3
  *                 effective_as_of_date: '2026-07-15'
  *                 effective_start_date: '2026-07-15'
+ *             regularCreate:
+ *               summary: REGULAR run type
+ *               value:
+ *                 enterprise_id: 1
+ *                 employee_id: 292
+ *                 element_id: 3
+ *                 effective_as_of_date: '2026-07-15'
+ *                 effective_start_date: '2026-07-15'
+ *                 run_type_code: REGULAR
+ *             retroCreate:
+ *               summary: RETRO run type
+ *               value:
+ *                 enterprise_id: 1
+ *                 employee_id: 292
+ *                 element_id: 3
+ *                 effective_as_of_date: '2026-07-15'
+ *                 effective_start_date: '2026-07-15'
+ *                 run_type_code: RETRO
+ *                 retroactive_flag: Y
+ *             bonusCreate:
+ *               summary: BONUS run type
+ *               value:
+ *                 enterprise_id: 1
+ *                 employee_id: 292
+ *                 element_id: 3
+ *                 effective_as_of_date: '2026-07-15'
+ *                 effective_start_date: '2026-07-15'
+ *                 run_type_code: BONUS
+ *                 retroactive_flag: N
+ *             supplementalCreate:
+ *               summary: SUPPLEMENTAL run type
+ *               value:
+ *                 enterprise_id: 1
+ *                 employee_id: 292
+ *                 element_id: 3
+ *                 effective_as_of_date: '2026-07-15'
+ *                 effective_start_date: '2026-07-15'
+ *                 run_type_code: SUPPLEMENTAL
+ *                 retroactive_flag: N
  *             fullCreate:
  *               summary: With optional value/context fields
  *               value:
@@ -275,6 +335,7 @@
  *                 currency_code: KWD
  *                 pay_value: 125.5
  *                 amount: 125.5
+ *                 run_type_code: REGULAR
  *
  * @swagger
  * /api/pay/element-entries/{elementEntryGuid}:
@@ -324,6 +385,10 @@
  *               summary: Change amount only
  *               value:
  *                 amount: 150
+ *             runTypeBonus:
+ *               summary: Change run type only
+ *               value:
+ *                 run_type_code: BONUS
  *             clearOptionalFields:
  *               summary: Clear optional value/context fields
  *               value:

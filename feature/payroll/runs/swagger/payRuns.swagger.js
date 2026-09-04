@@ -98,7 +98,15 @@
  *             properties:
  *               enterprise_id: { type: integer, example: 1 }
  *               payroll_id: { type: integer }
- *               run_type_code: { type: string, example: REGULAR }
+ *               run_type_code:
+ *                 type: string
+ *                 enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *                 example: REGULAR
+ *                 description: |
+ *                   REGULAR: Normal payroll-cycle entries.
+ *                   SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
+ *                   RETRO: Retroactive adjustment entries.
+ *                   BONUS: Bonus payroll entries.
  *               period_start_date: { type: string, format: date, example: '2026-08-01' }
  *               period_end_date: { type: string, format: date, example: '2026-08-31' }
  *               payment_date: { type: string, format: date, example: '2026-08-31' }

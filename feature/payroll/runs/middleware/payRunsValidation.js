@@ -7,16 +7,19 @@
 import { ForbiddenError } from '../../../../utils/errors/index.js';
 import {
   assertEnterpriseAccess,
+  optionalOneOf,
   optionalString,
   parsePaginationQuery,
   requireDate,
+  requireOneOf,
   requirePositiveInt,
   requireString,
   requireYn,
   resolveAuditActor,
   resolveEnterpriseId,
   sendForbiddenError,
-  sendValidationError
+  sendValidationError,
+  PAYROLL_RUN_TYPE_CODES
 } from '../../shared/index.js';
 
 function runValidation(res, next, work) {
@@ -49,7 +52,7 @@ export function validateListRuns(req, res, next) {
       page,
       pageSize,
       payroll_id: req.query.payroll_id ? requirePositiveInt(req.query.payroll_id, 'payroll_id') : null,
-      run_type_code: optionalString(req.query.run_type_code, 'run_type_code', { max: 30 }),
+      run_type_code: optionalOneOf(req.query.run_type_code, 'run_type_code', PAYROLL_RUN_TYPE_CODES),
       status_code: optionalString(req.query.status_code ?? req.query.status, 'status_code', { max: 30 }),
       sortBy: optionalString(req.query.sort_by, 'sort_by', { max: 60 }),
       sortOrder: optionalString(req.query.sort_order, 'sort_order', { max: 4 })
@@ -76,7 +79,7 @@ export function validateInitializeRun(req, res, next) {
     req.validated = {
       enterprise_id: enterpriseId,
       payroll_id: requirePositiveInt(body.payroll_id, 'payroll_id'),
-      run_type_code: requireString(body.run_type_code, 'run_type_code', { max: 30 }),
+      run_type_code: requireOneOf(body.run_type_code, 'run_type_code', PAYROLL_RUN_TYPE_CODES),
       period_start_date: requireDate(body.period_start_date, 'period_start_date'),
       period_end_date: requireDate(body.period_end_date, 'period_end_date'),
       payment_date: requireDate(body.payment_date, 'payment_date'),

@@ -162,6 +162,14 @@ export function pickFilters(query, keys) {
 
 export const PAYROLL_STATUS_VALUES = ['ACTIVE', 'INACTIVE'];
 
+/** Canonical PAY.PAY_ELEMENT_ENTRIES / PAYROLL_RUNS / flow-submission run types. */
+export const PAYROLL_RUN_TYPE_CODES = Object.freeze([
+  'REGULAR',
+  'SUPPLEMENTAL',
+  'RETRO',
+  'BONUS'
+]);
+
 /** Persisted PAY.PAYROLL_RUNS.STATUS_CODE values after PAYROLL_PROCESSING_PKG updates. */
 export const PAYROLL_RUN_STATUS_CODES = Object.freeze([
   'IN_PROGRESS',

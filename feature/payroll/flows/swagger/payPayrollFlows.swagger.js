@@ -15,7 +15,15 @@
  *         flow_name: { type: string, example: Digify Simplified Payroll Cycle KW }
  *         flow_code: { type: string, example: SIMPLIFIED_PAYROLL_KW }
  *         description: { type: string, example: Simplified Kuwait payroll processing cycle }
- *         default_run_type_code: { type: string, example: REGULAR }
+ *         default_run_type_code:
+ *           type: string
+ *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *           example: REGULAR
+ *           description: |
+ *             REGULAR: Normal payroll-cycle entries.
+ *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
+ *             RETRO: Retroactive adjustment entries.
+ *             BONUS: Bonus payroll entries.
  *         default_run_mode_code: { type: string, example: NORMAL }
  *         default_schedule_code: { type: string, example: ASAP }
  *         status: { type: string, enum: [ACTIVE, INACTIVE], example: ACTIVE }

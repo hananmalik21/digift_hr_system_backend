@@ -78,6 +78,66 @@
       }
     },
     {
+      "name": "Create Element Entry (REGULAR)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\",\n  \"run_type_code\": \"REGULAR\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
+      "name": "Create Element Entry (RETRO)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\",\n  \"run_type_code\": \"RETRO\",\n  \"retroactive_flag\": \"Y\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
+      "name": "Create Element Entry (BONUS)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\",\n  \"run_type_code\": \"BONUS\",\n  \"retroactive_flag\": \"N\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
+      "name": "Create Element Entry (SUPPLEMENTAL)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"enterprise_id\": 1,\n  \"employee_id\": 292,\n  \"element_id\": 3,\n  \"effective_as_of_date\": \"2026-07-15\",\n  \"effective_start_date\": \"2026-07-15\",\n  \"run_type_code\": \"SUPPLEMENTAL\",\n  \"retroactive_flag\": \"N\"\n}"
+        },
+        "url": "{{baseUrl}}/api/pay/element-entries"
+      }
+    },
+    {
       "name": "Create Element Entry (with optional fields)",
       "request": {
         "method": "POST",
@@ -102,7 +162,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"amount\": 150\n}"
+          "raw": "{\n  \"amount\": 150,\n  \"run_type_code\": \"BONUS\"\n}"
         },
         "url": "{{baseUrl}}/api/pay/element-entries/{{element_entry_guid}}"
       }

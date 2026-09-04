@@ -38,12 +38,22 @@ const PACKAGE_MESSAGE_MAP = Object.freeze([
   { pattern: /element\s*entry\s*not\s*found/i, message: 'Element entry not found.' }
 ]);
 
+function extractOracleRunTypeMessage(text) {
+  const message = String(text ?? '');
+  if (!/run[_\s-]?type/i.test(message)) return null;
+  const cleaned = message.replace(/^ORA-\d{5}:\s*/i, '').split(/\n/)[0].trim();
+  return cleaned || null;
+}
+
 /**
  * @param {unknown} oracleError
  * @returns {string|null}
  */
 export function resolvePayElementEntriesOracleMessage(oracleError) {
   if (!oracleError) return null;
+
+  const runTypeMessage = extractOracleRunTypeMessage(oracleError.message);
+  if (runTypeMessage) return runTypeMessage;
 
   const errorNum = Number(oracleError.errorNum);
   if (Number.isFinite(errorNum) && PAY_ELEMENT_ENTRIES_ORACLE_ERROR_MAP[errorNum]) {
@@ -99,6 +109,9 @@ export function resolvePayElementEntriesUserMessage(rawMessage, oracleError = nu
 export function mapPackageBusinessMessage(packageMessage) {
   const msg = String(packageMessage ?? '').trim();
   if (!msg) return 'Unable to process element entry.';
+
+  const runTypeMessage = extractOracleRunTypeMessage(msg);
+  if (runTypeMessage) return runTypeMessage;
 
   for (const { pattern, message: friendly } of PACKAGE_MESSAGE_MAP) {
     if (pattern.test(msg)) return friendly;

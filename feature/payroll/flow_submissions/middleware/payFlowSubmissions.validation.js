@@ -5,12 +5,14 @@
 
 import {
   optionalDate,
+  optionalOneOf,
   optionalPositiveInt,
   optionalString,
   requirePositiveInt,
   resolveOptionalActor,
   runPayrollValidation,
-  scopedEnterpriseId
+  scopedEnterpriseId,
+  PAYROLL_RUN_TYPE_CODES
 } from '../../shared/index.js';
 
 function flowSubmissionIdParam(req) {
@@ -28,7 +30,7 @@ function draftFields(body) {
     period_end_date: optionalDate(body.period_end_date, 'period_end_date'),
     payment_date: optionalDate(body.payment_date, 'payment_date'),
     consolidation_group_id: optionalPositiveInt(body.consolidation_group_id, 'consolidation_group_id'),
-    run_type_code: optionalString(body.run_type_code, 'run_type_code', { max: 30 }),
+    run_type_code: optionalOneOf(body.run_type_code, 'run_type_code', PAYROLL_RUN_TYPE_CODES),
     payroll_group_id: optionalPositiveInt(body.payroll_group_id, 'payroll_group_id'),
     process_start_date: optionalDate(body.process_start_date, 'process_start_date'),
     process_end_date: optionalDate(body.process_end_date, 'process_end_date'),

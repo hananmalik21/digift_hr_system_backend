@@ -2,6 +2,7 @@ import { ForbiddenError, ValidationError } from '../../../../utils/errors/index.
 import { parseGuid } from '@digifyhr/common';
 import { getActingEnterpriseId } from '../../../../utils/userContext.js';
 import { parseEnterpriseId } from '../../../../utils/tenantUtils.js';
+import { PAYROLL_RUN_TYPE_CODES } from '../../../payroll/shared/payrollValidation.js';
 
 export const ELEMENT_ENTRIES_LIST_DEFAULT_PAGE = 1;
 export const ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT = 20;
@@ -23,7 +24,8 @@ const OPTIONAL_NULLABLE_STRING_FIELDS = new Set([
   'context_value',
   'sub_classification_code',
   'secondary_classification',
-  'currency_code'
+  'currency_code',
+  'run_type_code'
 ]);
 
 const OPTIONAL_NULLABLE_NUMBER_FIELDS = new Set(['pay_value', 'amount']);
@@ -58,6 +60,7 @@ const ALLOWED_BODY_FIELDS = new Set([
   'processed_flag',
   'retroactive_flag',
   'automatic_entry_flag',
+  'run_type_code',
   'sequence_number',
   'reason_text',
   'source_reference',
@@ -93,7 +96,8 @@ const STRING_FIELDS = new Set([
   'cost_center_code',
   'context_segment_code',
   'context_value',
-  'batch_id'
+  'batch_id',
+  'run_type_code'
 ]);
 
 const VARCHAR_MAX = {
@@ -109,7 +113,8 @@ const VARCHAR_MAX = {
   context_segment_code: 100,
   element_classification_code: 100,
   sub_classification_code: 100,
-  secondary_classification: 100
+  secondary_classification: 100,
+  run_type_code: 30
 };
 
 const ISO_DATE_FIELDS = new Set([
@@ -253,6 +258,8 @@ function validateKnownFieldTypes(errors, body) {
       validateNumericAmount(errors, body, key);
     } else if (key === 'cost_allocation_keyflex_id') {
       validateOptionalString(errors, body, key);
+    } else if (key === 'run_type_code') {
+      validateRunTypeCode(errors, body);
     } else if (STRING_FIELDS.has(key)) {
       validateOptionalString(errors, body, key);
     } else if (ISO_DATE_FIELDS.has(key)) {
@@ -285,6 +292,28 @@ function parseOptionalIsoDate(errors, raw, field) {
 function normalizeYnFlag(raw) {
   if (raw == null || String(raw).trim() === '') return null;
   return String(raw).trim().toUpperCase();
+}
+
+function validateRunTypeCode(errors, body) {
+  if (!hasOwn(body, 'run_type_code')) return;
+  const raw = body.run_type_code;
+  if (raw === null || String(raw).trim() === '') return;
+  if (typeof raw !== 'string' && typeof raw !== 'number') {
+    errors.push('run_type_code must be a string');
+    return;
+  }
+  const code = String(raw).trim().toUpperCase();
+  if (!PAYROLL_RUN_TYPE_CODES.includes(code)) {
+    errors.push(
+      `run_type_code must be one of: ${PAYROLL_RUN_TYPE_CODES.join(', ')}`
+    );
+  }
+}
+
+function normalizeRunTypeCode(raw) {
+  if (raw === null) return null;
+  const s = trimOrNull(raw);
+  return s ? s.toUpperCase() : null;
 }
 
 function trimOrNull(value) {
@@ -342,6 +371,7 @@ function buildCreateElementEntryPayload(body) {
     batch_id: trimOrNull(body.batch_id)
   };
 
+  if (hasOwn(body, 'run_type_code')) payload.run_type_code = normalizeRunTypeCode(body.run_type_code);
   if (hasOwn(body, 'pay_value')) payload.pay_value = numberOrNull(body.pay_value);
   if (hasOwn(body, 'amount')) payload.amount = numberOrNull(body.amount);
   if (hasOwn(body, 'currency_code')) payload.currency_code = trimOrNull(body.currency_code);
@@ -426,6 +456,9 @@ function buildUpdateElementEntryPayload(body) {
   assignFlag('processed_flag');
   assignFlag('retroactive_flag');
   assignFlag('automatic_entry_flag');
+  if (hasOwn(body, 'run_type_code')) {
+    payload.run_type_code = normalizeRunTypeCode(body.run_type_code);
+  }
   assignPositiveInt('sequence_number');
   assignTrim('reason_text');
   assignTrim('source_reference');

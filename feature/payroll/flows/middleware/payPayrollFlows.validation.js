@@ -4,6 +4,7 @@
 
 import {
   PAYROLL_STATUS_VALUES,
+  PAYROLL_RUN_TYPE_CODES,
   optionalOneOf,
   optionalString,
   requireOneOf,
@@ -23,7 +24,11 @@ function flowFields(body) {
     flow_name: requireString(body.flow_name, 'flow_name', { max: 200 }),
     flow_code: requireString(body.flow_code, 'flow_code', { max: 50 }),
     description: optionalString(body.description, 'description', { max: 4000 }),
-    default_run_type_code: optionalString(body.default_run_type_code, 'default_run_type_code', { max: 30 }),
+    default_run_type_code: optionalOneOf(
+      body.default_run_type_code,
+      'default_run_type_code',
+      PAYROLL_RUN_TYPE_CODES
+    ),
     default_run_mode_code: optionalString(body.default_run_mode_code, 'default_run_mode_code', { max: 30 }),
     default_schedule_code: optionalString(body.default_schedule_code, 'default_schedule_code', { max: 30 }),
     status: optionalOneOf(body.status, 'status', PAYROLL_STATUS_VALUES)

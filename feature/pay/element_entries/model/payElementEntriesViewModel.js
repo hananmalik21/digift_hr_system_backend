@@ -22,6 +22,8 @@ const GENERIC_ERROR_MESSAGE = 'Unable to fetch element entries. Please try again
 
 const ROW_OBJECT = { outFormat: oracledb.OUT_FORMAT_OBJECT };
 
+// PAY.V_PAY_ELEMENT_ENTRIES does not yet expose RUN_TYPE_CODE. Read the table
+// column until the view in sql/create_pay_v_pay_element_entries.sql is deployed.
 const VIEW_SELECT_COLUMNS = `
   v.ELEMENT_ENTRY_ID,
   v.ELEMENT_ENTRY_GUID,
@@ -47,6 +49,11 @@ const VIEW_SELECT_COLUMNS = `
   v.ELEMENT_PROCESSING_TYPE_CODE,
   v.PROCESSED_FLAG,
   v.RETROACTIVE_FLAG,
+  (
+    SELECT E.RUN_TYPE_CODE
+      FROM PAY.PAY_ELEMENT_ENTRIES E
+     WHERE E.ELEMENT_ENTRY_ID = v.ELEMENT_ENTRY_ID
+  ) AS RUN_TYPE_CODE,
   v.AUTOMATIC_ENTRY_FLAG,
   v.SEQ,
   v.REASON,
@@ -96,6 +103,7 @@ export async function mapElementEntryViewRow(row) {
     currency_code: currencyCode,
     processed_flag: toStringOrNull(g('PROCESSED_FLAG')),
     retroactive_flag: toStringOrNull(g('RETROACTIVE_FLAG')),
+    run_type_code: toStringOrNull(g('RUN_TYPE_CODE')),
     automatic_entry_flag: toStringOrNull(g('AUTOMATIC_ENTRY_FLAG')),
     sequence_number: toNumberOrNull(g('SEQ')),
     reason_text: toStringOrNull(g('REASON')),
