@@ -37,13 +37,14 @@
  *         retroactive_flag: { type: string, enum: [Y, N], example: N }
  *         run_type_code:
  *           type: string
+ *           nullable: true
  *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
  *           description: |
- *             Optional. Omitted on create lets Oracle apply backward-compatible defaults.
- *             REGULAR: Normal payroll-cycle entries.
- *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
- *             RETRO: Retroactive adjustment entries.
- *             BONUS: Bonus payroll entries.
+ *             Optional. Omit to let Oracle apply backward-compatible defaults.
+ *             REGULAR: Normal scheduled payroll-cycle entry.
+ *             SUPPLEMENTAL: Additional/off-cycle payroll entry.
+ *             RETRO: Retroactive adjustment entry.
+ *             BONUS: Bonus payroll entry.
  *           example: REGULAR
  *         automatic_entry_flag: { type: string, enum: [Y, N], example: N }
  *         sequence_number: { type: integer, example: 1 }
@@ -88,13 +89,14 @@
  *         comments: { type: string, example: Updated amount }
  *         run_type_code:
  *           type: string
+ *           nullable: true
  *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
  *           description: |
- *             Optional. Omitted fields are preserved by Oracle.
- *             REGULAR: Normal payroll-cycle entries.
- *             SUPPLEMENTAL: Supplemental/off-cycle payroll entries.
- *             RETRO: Retroactive adjustment entries.
- *             BONUS: Bonus payroll entries.
+ *             Optional. Omit to preserve the stored value; Oracle owns cross-field consistency.
+ *             REGULAR: Normal scheduled payroll-cycle entry.
+ *             SUPPLEMENTAL: Additional/off-cycle payroll entry.
+ *             RETRO: Retroactive adjustment entry.
+ *             BONUS: Bonus payroll entry.
  *           example: BONUS
  *         effective_end_date: { type: string, format: date, example: '2026-12-31', nullable: true }
  *     PayElementEntryListItem:
@@ -122,11 +124,20 @@
  *         effective_as_of_date: { type: string, format: date }
  *         effective_start_date: { type: string, format: date }
  *         effective_end_date: { type: string, format: date, nullable: true }
- *         entry_type_code: { type: string }
+ *         entry_type_code: { type: string, example: STANDARD, description: Distinct from run_type_code (e.g. STANDARD, ELEMENT_ENTRY) }
+ *         run_type_code:
+ *           type: string
+ *           nullable: true
+ *           enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS]
+ *           description: |
+ *             From PAY.V_PAY_ELEMENT_ENTRIES.RUN_TYPE_CODE. Historical rows may be null.
+ *             REGULAR: Normal scheduled payroll-cycle entry.
+ *             SUPPLEMENTAL: Additional/off-cycle payroll entry.
+ *             RETRO: Retroactive adjustment entry.
+ *             BONUS: Bonus payroll entry.
  *         element_processing_type_code: { type: string }
  *         processed_flag: { type: string, enum: [Y, N] }
  *         retroactive_flag: { type: string, enum: [Y, N] }
- *         run_type_code: { type: string, enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS], nullable: true }
  *         automatic_entry_flag: { type: string, enum: [Y, N] }
  *         created_by: { type: string }
  *         creation_date: { type: string, format: date-time }
@@ -182,6 +193,10 @@
  *         name: status
  *         schema: { type: string }
  *       - in: query
+ *         name: run_type_code
+ *         schema: { type: string, enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS] }
+ *         description: Optional filter against PAY.V_PAY_ELEMENT_ENTRIES.RUN_TYPE_CODE
+ *       - in: query
  *         name: element_id
  *         schema: { type: integer, minimum: 1 }
  *       - in: query
@@ -234,6 +249,10 @@
  *       - in: query
  *         name: approval_status_code
  *         schema: { type: string }
+ *       - in: query
+ *         name: run_type_code
+ *         schema: { type: string, enum: [REGULAR, SUPPLEMENTAL, RETRO, BONUS] }
+ *         description: Optional filter against PAY.V_PAY_ELEMENT_ENTRIES.RUN_TYPE_CODE
  *       - in: query
  *         name: effective_start_date
  *         schema: { type: string, format: date }

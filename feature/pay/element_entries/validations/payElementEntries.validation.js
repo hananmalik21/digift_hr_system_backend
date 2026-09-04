@@ -281,6 +281,16 @@ function parseOptionalPositiveInt(errors, raw, field) {
   return Number(raw);
 }
 
+function parseOptionalRunTypeCode(errors, raw) {
+  if (isBlank(raw)) return null;
+  const code = String(raw).trim().toUpperCase();
+  if (!PAYROLL_RUN_TYPE_CODES.includes(code)) {
+    errors.push(`run_type_code must be one of: ${PAYROLL_RUN_TYPE_CODES.join(', ')}`);
+    return null;
+  }
+  return code;
+}
+
 function parseOptionalIsoDate(errors, raw, field) {
   if (isBlank(raw)) return null;
   const errorsBefore = errors.length;
@@ -543,6 +553,8 @@ function parseElementEntriesSharedFilters(query, errors) {
     ? null
     : String(q.approval_status_code ?? q.status).trim();
 
+  const run_type_code = parseOptionalRunTypeCode(errors, q.run_type_code ?? q.runTypeCode);
+
   const sortByRaw = q.sortBy ?? q.sort_by;
   if (sortByRaw !== undefined && sortByRaw !== null && String(sortByRaw).trim() !== '') {
     if (!ALLOWED_SORT_COLUMNS.has(String(sortByRaw).trim().toLowerCase())) {
@@ -564,6 +576,7 @@ function parseElementEntriesSharedFilters(query, errors) {
     element_id,
     payroll_id,
     approval_status_code,
+    run_type_code,
     effective_start_date,
     effective_end_date,
     sort_by:

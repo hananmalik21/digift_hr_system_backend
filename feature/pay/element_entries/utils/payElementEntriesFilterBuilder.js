@@ -43,6 +43,11 @@ export function buildPayElementEntriesListWhereClause(filters) {
     binds.approval_status_code = filters.approval_status_code;
   }
 
+  if (filters.run_type_code != null) {
+    whereParts.push('v.RUN_TYPE_CODE = :run_type_code');
+    binds.run_type_code = filters.run_type_code;
+  }
+
   if (filters.effective_start_date != null) {
     whereParts.push('v.EFFECTIVE_START_DATE >= TO_DATE(:effective_start_date, \'YYYY-MM-DD\')');
     binds.effective_start_date = filters.effective_start_date;

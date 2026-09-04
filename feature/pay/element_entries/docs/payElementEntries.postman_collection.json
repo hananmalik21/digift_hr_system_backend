@@ -25,6 +25,7 @@
             { "key": "element_id", "value": "1001", "disabled": true },
             { "key": "payroll_id", "value": "4", "disabled": true },
             { "key": "approval_status_code", "value": "DRAFT", "disabled": true },
+            { "key": "run_type_code", "value": "REGULAR", "disabled": true },
             { "key": "sortBy", "value": "creation_date" },
             { "key": "sortOrder", "value": "desc" },
             { "key": "page", "value": "1" },
@@ -48,6 +49,7 @@
             { "key": "element_id", "value": "1001", "disabled": true },
             { "key": "payroll_id", "value": "4", "disabled": true },
             { "key": "approval_status_code", "value": "DRAFT", "disabled": true },
+            { "key": "run_type_code", "value": "REGULAR", "disabled": true },
             { "key": "sortBy", "value": "creation_date", "disabled": true },
             { "key": "sortOrder", "value": "desc", "disabled": true }
           ]

@@ -10,10 +10,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { ValidationError } from '../../../../utils/errors/index.js';
 import {
+  ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT,
+  ELEMENT_ENTRIES_LIST_DEFAULT_PAGE,
   validateCreateElementEntryBody,
+  validateListElementEntriesQuery,
   validateUpdateElementEntryBody
 } from '../validations/payElementEntries.validation.js';
 import { mapElementEntryViewRow } from '../model/payElementEntriesViewModel.js';
+import { buildPayElementEntriesListWhereClause } from '../utils/payElementEntriesFilterBuilder.js';
 import {
   mapPackageBusinessMessage,
   resolvePayElementEntriesOracleMessage
@@ -240,3 +244,98 @@ test('create/update still invoke PAY_ELEMENT_ENTRIES_PKG JSON payloads only', ()
   assert.equal(/\bUPDATE\s+PAY\.PAY_ELEMENT_ENTRIES\b/i.test(modelSrc), false);
   assert.equal(/\bINSERT\s+INTO\s+PAY\.PAY_ELEMENT_ENTRIES\b/i.test(modelSrc), false);
 });
+
+test('GET/LIST SELECT uses view column v.RUN_TYPE_CODE after ENTRY_TYPE_CODE', () => {
+  const viewSrc = readRel('../model/payElementEntriesViewModel.js');
+  assert.ok(viewSrc.includes("const VIEW = 'PAY.V_PAY_ELEMENT_ENTRIES'"));
+  assert.ok(viewSrc.includes('v.ENTRY_TYPE_CODE,\n  v.RUN_TYPE_CODE,'));
+  assert.equal(/SELECT\s+E\.RUN_TYPE_CODE/i.test(viewSrc), false);
+  assert.equal(/FROM\s+PAY\.PAY_ELEMENT_ENTRIES\s+E/i.test(viewSrc), false);
+  assert.ok(!viewSrc.includes('AS RUN_TYPE_CODE'));
+});
+
+test('A/B: GET and LIST mapping expose snake_case run_type_code only', async () => {
+  const mapped = await mapElementEntryViewRow({
+    ELEMENT_ENTRY_ID: 10,
+    ELEMENT_ENTRY_GUID: 'A1B2C3D4E5F6789012345678ABCDEF01',
+    ENTERPRISE_ID: 1,
+    ENTRY_TYPE_CODE: 'STANDARD',
+    RUN_TYPE_CODE: 'REGULAR',
+    RETROACTIVE_FLAG: 'N'
+  });
+  assert.equal(mapped.entry_type_code, 'STANDARD');
+  assert.equal(mapped.run_type_code, 'REGULAR');
+  assert.equal(mapped.retroactive_flag, 'N');
+  assert.equal(Object.hasOwn(mapped, 'RUN_TYPE_CODE'), false);
+});
+
+test('C: historical RUN_TYPE_CODE NULL is returned as null, not REGULAR', async () => {
+  const historical = await mapElementEntryViewRow({
+    ELEMENT_ENTRY_ID: 11,
+    ELEMENT_ENTRY_GUID: 'B1B2C3D4E5F6789012345678ABCDEF01',
+    ENTERPRISE_ID: 1,
+    ENTRY_TYPE_CODE: 'ELEMENT_ENTRY',
+    RUN_TYPE_CODE: null
+  });
+  assert.equal(historical.run_type_code, null);
+  assert.notEqual(historical.run_type_code, 'REGULAR');
+  assert.equal(historical.entry_type_code, 'ELEMENT_ENTRY');
+});
+
+test('I: entry_type_code remains independent of run_type_code', () => {
+  const payload = validateCreateElementEntryBody({
+    ...REQUIRED_CREATE,
+    entry_type_code: 'STANDARD',
+    run_type_code: 'BONUS'
+  });
+  assert.equal(payload.entry_type_code, 'STANDARD');
+  assert.equal(payload.run_type_code, 'BONUS');
+});
+
+test('J: list pagination and existing filters are unchanged when run_type_code is omitted', () => {
+  const parsed = validateListElementEntriesQuery({ enterprise_id: 1 });
+  assert.equal(parsed.page, ELEMENT_ENTRIES_LIST_DEFAULT_PAGE);
+  assert.equal(parsed.limit, ELEMENT_ENTRIES_LIST_DEFAULT_LIMIT);
+  assert.equal(parsed.run_type_code, null);
+  assert.equal(parsed.sort_by, 'creation_date');
+  assert.equal(parsed.sort_order, 'DESC');
+
+  const paged = validateListElementEntriesQuery({
+    enterprise_id: 1,
+    page: 2,
+    limit: 10,
+    employee_id: 292,
+    approval_status_code: 'DRAFT'
+  });
+  assert.equal(paged.page, 2);
+  assert.equal(paged.limit, 10);
+  assert.equal(paged.employee_id, 292);
+  assert.equal(paged.approval_status_code, 'DRAFT');
+  assert.equal(paged.run_type_code, null);
+
+  const unfiltered = buildPayElementEntriesListWhereClause(parsed);
+  assert.equal(unfiltered.whereSql.includes('v.RUN_TYPE_CODE'), false);
+});
+
+test('optional list filter run_type_code is applied against the view column', () => {
+  const parsed = validateListElementEntriesQuery({
+    enterprise_id: 1,
+    run_type_code: 'retro',
+    page: 1,
+    limit: 20
+  });
+  assert.equal(parsed.run_type_code, 'RETRO');
+  assert.equal(parsed.page, 1);
+  assert.equal(parsed.limit, 20);
+
+  const clause = buildPayElementEntriesListWhereClause(parsed);
+  assert.ok(clause.whereSql.includes('v.RUN_TYPE_CODE = :run_type_code'));
+  assert.equal(clause.binds.run_type_code, 'RETRO');
+});
+
+test('invalid list filter run_type_code is rejected', () => {
+  assertValidationRejected(() =>
+    validateListElementEntriesQuery({ enterprise_id: 1, run_type_code: 'OFFCYCLE' })
+  );
+});
+
